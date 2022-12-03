@@ -56,4 +56,4 @@ We welcome contributions to Cortex! Please see our [contributing guidelines](htt
 
 ## License
 
-Cortex is released under the MIT License. See [LICENSE](http://cortex.archipelago.com/license) for more details.
+Cortex is released under the MIT License. See [LICENSE](https://github.com/ALJAZEERAPLUS/cortex/blob/main/LICENSE) for more details.
