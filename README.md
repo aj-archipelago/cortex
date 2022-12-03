@@ -1,4 +1,4 @@
-# Archipelago Cortex
+# Cortex
 
 Cortex is a caching GraphQL API that provides an abstraction layer for interacting with modern natural language AI models. It’s extensible, open-sourced, and model-agnostic and provides a structured interface to the largely unstructured world of AI prompting.
 
@@ -8,30 +8,44 @@ Querying modern NL AI models (e.g. GPT-3) can be costly and cumbersome. Executin
 
 ## Features
 
-- Abstraction of common NL AI tasks from the underlying models
-- Summarization
-- Entity extraction
-- Topic classification
-- Headline generation
-- Translation
-- Rewrites
-- Completion
-- Sentiment analysis
-- Bias analysis
-- Spelling and grammar correction
-- Style guide rule application
-- Easily configurable chunking and prompting strategies per task and per model using a simple prompt definition format
-- Parallelization of chunked requests to the model layer for response acceleration
-- Encapsulation of prompting and parsing for structured return data
-- Generation of lists as proper data structures instead of text blocks
-- Structured return blocks with properties
-- Caching of often-repeated queries to avoid excess model querying
-- Insulation against emerging prompt-specific security concerns
-- Structured analytics and reporting on AI API call frequency, cost, cache hit rate, etc.
+1. Extensible abstraction of common NL AI tasks from the underlying models including:
+   - Summarization
+   - Entity extraction
+   - Topic classification
+   - Headline generation
+   - Translation
+   - Rewrites
+   - Completion
+   - Sentiment analysis
+   - Bias analysis
+   - Spelling and grammar correction
+   - Style guide rule application
+
+2. Definition of structured requests and returns
+   - Easily configurable chunking and prompting strategies per task and per model using a simple prompt template format
+   - Parallelization of chunked requests to the model layer for response acceleration
+   - Encapsulation of prompting and parsing for structured return data (e.g. generation of lists as proper data structures instead of text blocks)
+
+3. Caching of repeated queries to avoid excess requests to the base model in repetitive use cases (chat bots, unit tests, etc.)
+   - Model-specific cache key optimizations to increase hit rate and reduce cache size
+5. Insulation against emerging prompt-specific security concerns
+   - Configurable prompt and return validation and sanitation
+7. Structured analytics and reporting on AI API call frequency, cost, cache hit rate, etc.
 
 ## Getting Started
 
-To use Cortex, simply install the package and initialize a Cortex instance with your desired NL AI model. Then, use the provided GraphQL schema to make queries and receive structured data in return.
+To use Cortex, simply install the package and initialize a Cortex instance with your desired NL AI model.
+
+```
+npm install archipelago-cortex
+```
+
+```
+const Cortex = require('archipelago-cortex');
+const cortex = new Cortex('myNLModel');
+```
+
+Then, use the provided GraphQL schema to make queries and receive structured data in return.
 
 
 For more detailed usage instructions, see the [documentation](http://cortex.archipelago.com/docs).
