@@ -39,3 +39,7 @@ For more detailed usage instructions, see the [documentation](http://cortex.arch
 ## Contributions
 
 We welcome contributions to Cortex! Please see our [contributing guidelines](http://cortex.archipelago.com/contributing) for more information.
+
+## License
+
+Cortex is released under the MIT License. See [LICENSE](http://cortex.archipelago.com/license) for more details.
