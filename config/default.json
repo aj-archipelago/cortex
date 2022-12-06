@@ -8,6 +8,5 @@
             "Content-Type": "application/json"
         }
     },
-    "neurons" : {},
-    "synapses" : {}
+    "endpoints" : {}
 }

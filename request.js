@@ -1,6 +1,6 @@
 const axios = require('axios');
 
-const request = ({ url, params, headers }) => {
+const postRequest = ({ url, params, headers }) => {
     try {
         return axios.post(url, params, { headers });
     } catch (e) {
@@ -8,49 +8,22 @@ const request = ({ url, params, headers }) => {
     }
 }
 
-const openaiRequest = async (params) => {
-    const { deploymentName = 'archipelago-davinci' } = params;
-    // const { prompt } = params;
-    // console.log('openaiRequest for prompt: ', prompt);
-    const headers = {
-        "api-key": OPENAI_APIKEY,
-        "Content-Type": "application/json"
+
+const request = async (params) => {
+    const response = await postRequest(params);
+    const { error, data } = response;
+    if (error) {
+        return error.message || error;
     }
 
-    const postParams = {
-        ...{
-            // prompt,
-            max_tokens: 2048,
-            // model: "text-davinci-002",
-            // "temperature": 1,
-            // "top_p": 1,
-            // "n": 1,
-            // "presence_penalty": 0,
-            // "frequency_penalty": 0,
-            // "best_of": 1,
-        }, ...params
-    };
-
-    try {
-        const url = OPENAI_APIBASEURL + "openai/deployments/" + deploymentName + "/completions?api-version=2022-06-01-preview";
-        const response = await axios.post(url, postParams, { headers });
-        return response;
-    } catch (e) {
-        return { error: e };
+    const { choices } = data;
+    if (!choices || !choices.length) {
+        return; //TODO no choices
     }
-}
-
-const pass = async (params) => {
-    const response = await openaiRequest(params);
-
-    if (response.error) {
-        return response.error.message || response.error
-    }
-    else {
-        return response.data.choices[0].text;
-    }
+    const result = choices.map(({ text }) => text);
+    return result.length > 1 ? result : result[0];
 }
 
 module.exports = {
-    request
+    request, postRequest
 }
