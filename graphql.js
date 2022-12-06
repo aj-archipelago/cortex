@@ -1,5 +1,7 @@
 const { config } = require("./config");
 const { fns } = require("./fn");
+const { ApolloServer } = require('@apollo/server');
+const { startStandaloneServer } = require('@apollo/server/standalone');
 
 //build API
 const endpoints = config.get('endpoints');
@@ -7,8 +9,19 @@ const endpointNames = Object.keys(endpoints);
 
 //typeDefs
 //TODO: check code first approach - codegen
-const typeDefs = `
-    Query {
+const typeDefs = `#graphql
+    enum CacheControlScope {
+        PUBLIC
+        PRIVATE
+    }
+
+    directive @cacheControl(
+        maxAge: Int
+        scope: CacheControlScope
+        inheritMaxAge: Boolean
+    ) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
+
+    type Query {
         ${endpointNames.map(name => `${name}(text: String!): String,`).join('\n\t')}
     }
 `;
@@ -22,25 +35,48 @@ const resolvers = {
 console.log(resolvers);
 
 
-const text = `Featured articles are considered to be some of the best articles Wikipedia has to offer, as determined by Wikipedia's editors. They are used by editors as examples for writing other articles. Before being listed here, articles are reviewed as featured article candidates for accuracy, neutrality, completeness, and style according to our featured article criteria. Many featured articles were previously good articles (which are reviewed with a less restrictive set of criteria). There are 6,176 featured articles out of 6,583,906 articles on the English Wikipedia (about 0.09% or one out of every 1,060. `
-// fn('summary', t).then(console.log);
-// fn('headline', t).then(console.log);
+const plugins = [
+    // ApolloServerPluginLandingPageLocalDefault({ embed: true }), // For local development.   
+    // responseCachePlugin({ cache }),
+    // responseCachePlugin(),
+    // ApolloServerPluginCacheControl({ defaultMaxAge: 3600 * 24 * 30 })
+];
 
-// resolvers.Query.headline(null, { text }).then(console.log);
-// resolvers.Query.summary(null, { text }).then(console.log);
-// resolvers.Query.bias(null, { text }).then(console.log);
-// resolvers.Query.complete(null, { text }).then(console.log);
-resolvers.Query.topics(null, { text }).then(console.log);
 
-//// Schema definition.
-// const typeDefs = gql`
-// `;
+if (config.get('cache')) {
+    const responseCachePlugin = require('@apollo/server-plugin-response-cache').default;
+    const { KeyvAdapter } = require("@apollo/utils.keyvadapter");
+    const Keyv = require("keyv");
+    const cache = new KeyvAdapter(new Keyv(process.env.REDIS_CONNECTION_URL,
+        {
+            password: process.env.REDIS_CONNECTION_KEY,
+            ssl: true,
+            abortConnect: false
+        })
+    );
+    plugins.push(responseCachePlugin({ cache }));
+}
 
-//// Resolver map.
-// const resolvers = {
-// };
+// Create server.
+const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+    csrfPrevention: true,
+    // cache,
+    // cache: "bounded",
+    plugins,
+    // debug: true,
+});
+
+// Start server.
+startStandaloneServer(server).then(({ url }) => {
+    console.log(`🚀 Server ready at ${url}`);
+});
+// const { url } = await startStandaloneServer(server);
+// console.log(`🚀 Server ready at ${url}`);
 
 module.exports = {
     typeDefs,
     resolvers,
+    server,
 };

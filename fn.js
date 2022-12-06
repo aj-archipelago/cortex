@@ -31,14 +31,19 @@ const getParams = (endpointName, text) => {
 
     const promptFn = handlebars.compile(endpoint.prompt);
 
-    return { ...defaultParams, ...{ prompt: promptFn({ text }) } };
+    return { ...defaultParams, ...endpoint, ...{ prompt: promptFn({ text }) } };
 }
 
-const endpointName = 'headline';
-const fn = async(endpointName, text) => {
+const fn = async (endpointName, args, info) => {
+    const { text } = args;
     const url = getUrl(endpointName);
     const params = getParams(endpointName, text);
-    
+
+    const { temperature } = params;
+    if (temperature == 0) {
+        info.cacheControl.setCacheHint({ maxAge: 60 * 60 * 24, scope: 'PUBLIC' });
+    }
+
     const api = config.get('API');
     const headers = {}
     for (const [key, value] of Object.entries(api.headers)) {
@@ -47,14 +52,9 @@ const fn = async(endpointName, text) => {
     return await request({ url, params, headers });
 }
 
-const endpointFn = (endpointName) => {
-    // return (_, { text }) => `endpointName: ${endpointName}, text: ${text}`; // TODO fn 
-    return (_, { text }) => fn(endpointName, text);
-}
-
 const fns = {};
 for (const endpointName of endpointNames) {
-    fns[endpointName] = endpointFn(endpointName);
+    fns[endpointName] = (parent, args, contextValuep, info) => fn(endpointName, args, info);;
 }
 
 module.exports = {

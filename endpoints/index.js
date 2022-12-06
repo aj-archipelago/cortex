@@ -1,4 +1,5 @@
 module.exports = {
+    "pass": require("./pass"),
     "bias": require('./bias'),
     "complete": require('./complete'),
     "entities": require('./entities'),
