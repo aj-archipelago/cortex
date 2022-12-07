@@ -18,3 +18,11 @@
 
 // TODO: current api  implement first! deploy this
 // caching ++
+
+
+///
+// custom input params 
+// optional to pass user context, like a userid, personealized returns to the endpoints
+// e.g. chat endpoint with userid
+
+// chunking, batching, parallelism, !!

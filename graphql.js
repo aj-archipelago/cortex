@@ -2,10 +2,18 @@ const { config } = require("./config");
 const { fns } = require("./fn");
 const { ApolloServer } = require('@apollo/server');
 const { startStandaloneServer } = require('@apollo/server/standalone');
+const { hasListReturn } = require("./util");
 
 //build API
 const endpoints = config.get('endpoints');
 const endpointNames = Object.keys(endpoints);
+
+const typeDef = (endpointName) => {
+    if (hasListReturn(endpoints[endpointName])) {
+        return `${endpointName}(text: String!): [String],`
+    }
+    return `${endpointName}(text: String!): String,`
+}
 
 //typeDefs
 //TODO: check code first approach - codegen
@@ -22,7 +30,7 @@ const typeDefs = `#graphql
     ) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
     type Query {
-        ${endpointNames.map(name => `${name}(text: String!): String,`).join('\n\t')}
+        ${endpointNames.map(endpointName => typeDef(endpointName)).join('\n\t')}
     }
 `;
 console.log(typeDefs);
@@ -54,6 +62,9 @@ if (config.get('cache')) {
             abortConnect: false
         })
     );
+    //caching similar strings, embedding hashing, ... #delta similarity 
+    // TODO: custom cache key:
+    // https://www.apollographql.com/docs/apollo-server/performance/cache-backends#implementing-your-own-cache-backend
     plugins.push(responseCachePlugin({ cache }));
 }
 

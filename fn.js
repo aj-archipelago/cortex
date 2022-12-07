@@ -1,6 +1,8 @@
 const { config } = require("./config");
 const { request } = require("./request");
 const handlebars = require("handlebars");
+const { parser, parseNumberedList } = require("./parser");
+const { hasListReturn } = require("./util");
 
 const endpoints = config.get('endpoints');
 const endpointNames = Object.keys(endpoints);
@@ -16,12 +18,14 @@ const getUrl = (endpointName) => {
 
 const getParams = (endpointName, text) => {
     const endpoint = endpoints[endpointName];
+    const { temperature, prompt } = endpoint;
+    const promptFn = handlebars.compile(endpoint.prompt);
 
-    const defaultParams = {
-        // prompt,
+    const params = {
+        prompt: promptFn({ ...endpoint, text }),
         max_tokens: 2048,
         // model: "text-davinci-002",
-        // "temperature": 1,
+        temperature: temperature ?? 0.7,
         // "top_p": 1,
         // "n": 1,
         // "presence_penalty": 0,
@@ -29,9 +33,8 @@ const getParams = (endpointName, text) => {
         // "best_of": 1,
     }
 
-    const promptFn = handlebars.compile(endpoint.prompt);
-
-    return { ...defaultParams, ...endpoint, ...{ prompt: promptFn({ text }) } };
+    // return { ...defaultParams, ...overrideParams };
+    return params;
 }
 
 const fn = async (endpointName, args, info) => {
@@ -49,12 +52,18 @@ const fn = async (endpointName, args, info) => {
     for (const [key, value] of Object.entries(api.headers)) {
         headers[key] = handlebars.compile(value)({ ...config.getEnv() });
     }
-    return await request({ url, params, headers });
+    //f()
+    const data = await request({ url, params, headers });
+
+    if (hasListReturn(endpoints[endpointName])) {
+        return parseNumberedList(data);
+    }
+    return parser(data);
 }
 
 const fns = {};
 for (const endpointName of endpointNames) {
-    fns[endpointName] = (parent, args, contextValuep, info) => fn(endpointName, args, info);;
+    fns[endpointName] = (parent, args, contextValue, info) => fn(endpointName, args, info);
 }
 
 module.exports = {

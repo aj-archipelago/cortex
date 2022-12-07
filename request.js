@@ -16,12 +16,7 @@ const request = async (params) => {
         return error.message || error;
     }
 
-    const { choices } = data;
-    if (!choices || !choices.length) {
-        return; //TODO no choices
-    }
-    const result = choices.map(({ text }) => text);
-    return result.length > 1 ? result : result[0];
+    return data;
 }
 
 module.exports = {
