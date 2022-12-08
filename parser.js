@@ -1,5 +1,5 @@
 //simples form string single or list return
-const parser = async (data) => {
+const parser = (data) => {
     const { choices } = data;
     if (!choices || !choices.length) {
         return; //TODO no choices case
@@ -8,15 +8,17 @@ const parser = async (data) => {
     return result.length > 1 ? result : result[0];
 }
 
-// return list of strings out from single string split via given regex
-const regexParser = async (data, regex) => {
-    const text = await parser(data);
+//simply trim and parse with given regex
+const parse = (text, regex) => {
     return text.trim().split(regex).map(s => s.trim()).filter(s => s.length);
 }
 
+// return list of strings out from single string split via given regex
+const regexParser = (data, regex) =>  parse(parser(data), regex);
+
 // parse numbered list text format into list
-const parseNumberedList = async (data) => {
-    return await regexParser(data, /\d+\. ?/);
+const parseNumberedList = (data) => {
+    return regexParser(data, /\d+\. ?/);
 }
 
 // parse a numbered object list text format into list of objects

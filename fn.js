@@ -1,25 +1,17 @@
-const { config } = require("./config");
 const { request } = require("./request");
 const handlebars = require("handlebars");
 const { parser, parseNumberedList } = require("./parser");
 const { hasListReturn } = require("./util");
 
-const endpoints = config.get('endpoints');
-const endpointNames = Object.keys(endpoints);
-
-
-const getUrl = (endpointName) => {
-    const endpoint = endpoints[endpointName];
-    // if (config.get('')) // 'AZURE-OAI
-    const api = config.get('API');
+const getUrl = (config) => {
+    const api = config.get('api');
     const urlFn = handlebars.compile(api.url);
     return urlFn({ ...api, ...config.getEnv() });
 }
 
-const getParams = (endpointName, text) => {
-    const endpoint = endpoints[endpointName];
+const getParams = (endpoint, text) => {
     const { temperature, prompt } = endpoint;
-    const promptFn = handlebars.compile(endpoint.prompt);
+    const promptFn = handlebars.compile(prompt);
 
     const params = {
         prompt: promptFn({ ...endpoint, text }),
@@ -37,35 +29,28 @@ const getParams = (endpointName, text) => {
     return params;
 }
 
-const fn = async (endpointName, args, info) => {
+const fn = async ({ config, endpoint, parent, args, contextValue, info }) => {
     const { text } = args;
-    const url = getUrl(endpointName);
-    const params = getParams(endpointName, text);
+    const url = getUrl(config);
+    const params = getParams(endpoint, text);
 
     const { temperature } = params;
     if (temperature == 0) {
         info.cacheControl.setCacheHint({ maxAge: 60 * 60 * 24, scope: 'PUBLIC' });
     }
 
-    const api = config.get('API');
+    const api = config.get('api');
     const headers = {}
     for (const [key, value] of Object.entries(api.headers)) {
         headers[key] = handlebars.compile(value)({ ...config.getEnv() });
     }
-    //f()
     const data = await request({ url, params, headers });
 
-    if (hasListReturn(endpoints[endpointName])) {
-        return parseNumberedList(data);
-    }
-    return parser(data);
-}
+    return endpoint.parser ? endpoint.parser(data) : hasListReturn(endpoint) ? parseNumberedList(data) : parser(data);
+}   
 
-const fns = {};
-for (const endpointName of endpointNames) {
-    fns[endpointName] = (parent, args, contextValue, info) => fn(endpointName, args, info);
-}
+
 
 module.exports = {
-    fns
+    fn
 }

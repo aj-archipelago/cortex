@@ -1,20 +1,24 @@
+const { fn } = require("../fn");
+const { hasListReturn } = require("../util");
+
+const typeDefLabel = (endpoint) => {
+    const { name } = endpoint;
+    if (hasListReturn(endpoint)) {
+        return `${name}(text: String!): [String],`
+    }
+    return `${name}(text: String!): String,`
+}
+
 module.exports = {
     //TODO default all definitions of a single endpoint
-    name: 'default',
-    temperature: 0.7,
+    // temperature: 0.7,
     prompt: `{{text}}`,
     // count: 5,
     // format: ``, 
-    parser: (text) => text,
+    // parser: (text) => text,
     typeDef: {
         type: ``,
-        label: `{{name}}(text: String!): String,`
+        label: typeDefLabel
     },
-    resolver: (parent, args, contextValue, info) => {
-        //TODO default resolver
-        // (parent, args, contextValue, info) => fn(endpointName, args, info);
-    },
-    ctx: {
-        //
-    }
+    resolver: fn
 }

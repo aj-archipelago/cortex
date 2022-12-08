@@ -1,21 +1,17 @@
 var convict = require('convict');
-// const fs = require('fs');
-// const path = require('path');
 
 // TODO: Define a schema possibly with formatters
-const CONFIG_FILES = './config/default.json'
 const config = convict({});
-config.loadFile(CONFIG_FILES);
+config.loadFile(process.env.CONFIG_FILES);
 
 //build endpoints
-const ENDPOINTS_PATH = './endpoints';
-const endpoints = require(ENDPOINTS_PATH);
+const endpointDefs = require(process.env.ENDPOINTS_PATH);
+const defaultEndpoint = require(process.env.DEFAULT_ENDPOINT);
+const endpoints = {};
+for (const [key, def] of Object.entries(endpointDefs)) {
+    endpoints[def.name || key] = endpoints[key] = { ...defaultEndpoint, name: key, ...def };
+}
 config.load({ endpoints })
-// const files = fs.readdirSync(ENDPOINTS_PATH);
-// for (const file of files) {//////////////
-//     const endpoint = { "endpoints": { [path.parse(file).name]: require(`${ENDPOINTS_PATH}/${file}`) } }
-//     config.load(endpoint);
-// }
 console.log(config.get('endpoints')); //print endpoints
 
 // TODO: Perform validation

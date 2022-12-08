@@ -1,19 +1,9 @@
 const { config } = require("./config");
-const { fns } = require("./fn");
 const { ApolloServer } = require('@apollo/server');
-const { startStandaloneServer } = require('@apollo/server/standalone');
-const { hasListReturn } = require("./util");
+const { startStandaloneServer, start } = require('@apollo/server/standalone');
 
-//build API
+//build api
 const endpoints = config.get('endpoints');
-const endpointNames = Object.keys(endpoints);
-
-const typeDef = (endpointName) => {
-    if (hasListReturn(endpoints[endpointName])) {
-        return `${endpointName}(text: String!): [String],`
-    }
-    return `${endpointName}(text: String!): String,`
-}
 
 //typeDefs
 //TODO: check code first approach - codegen
@@ -29,28 +19,32 @@ const typeDefs = `#graphql
         inheritMaxAge: Boolean
     ) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
+    ${Object.values(endpoints).map(e => e.typeDef.type).filter(Boolean).join('\n\t')}
+
     type Query {
-        ${endpointNames.map(endpointName => typeDef(endpointName)).join('\n\t')}
+        ${Object.values(endpoints).map(e => e.typeDef.label(e)).join('\n\t')}
     }
 `;
 console.log(typeDefs);
 
-//resolver fns
 //resolvers
+const fns = {};
+for (const [name, endpoint] of Object.entries(endpoints)) {
+    fns[name] = (parent, args, contextValue, info) => endpoint.resolver({ config, endpoint, parent, args, contextValue, info });
+}
 const resolvers = {
     Query: fns,
 }
 console.log(resolvers);
 
 
+///gql server
+
+//apollo server plugins
 const plugins = [
-    // ApolloServerPluginLandingPageLocalDefault({ embed: true }), // For local development.   
-    // responseCachePlugin({ cache }),
-    // responseCachePlugin(),
-    // ApolloServerPluginCacheControl({ defaultMaxAge: 3600 * 24 * 30 })
 ];
 
-
+//cache
 if (config.get('cache')) {
     const responseCachePlugin = require('@apollo/server-plugin-response-cache').default;
     const { KeyvAdapter } = require("@apollo/utils.keyvadapter");
@@ -80,11 +74,11 @@ const server = new ApolloServer({
 });
 
 // Start server.
-startStandaloneServer(server).then(({ url }) => {
-    console.log(`🚀 Server ready at ${url}`);
-});
-// const { url } = await startStandaloneServer(server);
-// console.log(`🚀 Server ready at ${url}`);
+if (process.env.STANDALONE_SERVER) {
+    startStandaloneServer(server).then(({ url }) => {
+        console.log(`🚀 Server ready at ${url}`);
+    });
+}
 
 module.exports = {
     typeDefs,
