@@ -26,3 +26,5 @@
 // e.g. chat endpoint with userid
 
 // chunking, batching, parallelism, !!
+
+// model param for the endpoint (optional)

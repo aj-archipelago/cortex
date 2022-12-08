@@ -4,7 +4,7 @@ const postRequest = ({ url, params, headers }) => {
     try {
         return axios.post(url, params, { headers });
     } catch (e) {
-        return { error: e };
+        return { error: e }; //retry logic
     }
 }
 
