@@ -9,8 +9,8 @@ const typeDefLabel = (endpoint) => {
     return `${name}(text: String!): String,`
 }
 
+// all default definitions of a single endpoint
 module.exports = {
-    //TODO default all definitions of a single endpoint
     // temperature: 0.7,
     prompt: `{{text}}`,
     // count: 5,
