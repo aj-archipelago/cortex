@@ -47,7 +47,6 @@ const cortex = new Cortex('myNLModel');
 
 Then, use the provided GraphQL schema to make queries and receive structured data in return.
 
-
 For more detailed usage instructions, see the [documentation](http://cortex.archipelago.com/docs).
 
 ## Contributions
@@ -57,3 +56,32 @@ We welcome contributions to Cortex! Please see our [contributing guidelines](htt
 ## License
 
 Cortex is released under the MIT License. See [LICENSE](https://github.com/ALJAZEERAPLUS/cortex/blob/main/LICENSE) for more details.
+
+## Developer Setup
+
+1. Check your NodeJS version. It should be 14 or above.
+
+```
+node -v
+```
+
+2. Install dependencies
+
+```
+npm install
+```
+
+3. Set up any environment variables needed by your config json. The default config is at (config/default.json)
+
+```
+export OPENAI_API_KEY=<insert key>
+export AZURE_OAI_API_KEY=<insert key>
+```
+
+4. Start the dev server
+
+```
+npm start
+```
+
+5. Go to http://localhost:4000 in your browser to access the GraphQL playground.

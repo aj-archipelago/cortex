@@ -1,0 +1,31 @@
+{
+  "name": "cortex",
+  "version": "0.0.1",
+  "description": "Project Cortex",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ALJAZEERAPLUS/cortex.git"
+  },
+  "keywords": [
+    "cortex",
+    "ai"
+  ],
+  "main": "index.js",
+  "scripts": {
+    "start": "node graphql.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "homepage": "https://github.com/ALJAZEERAPLUS/cortex#readme",
+  "dependencies": {
+    "@apollo/server": "^4.2.2",
+    "@apollo/server-plugin-response-cache": "^4.0.3",
+    "@apollo/utils.keyvadapter": "^2.0.0",
+    "@keyv/redis": "^2.5.4",
+    "axios": "^1.2.0",
+    "convict": "^6.2.3",
+    "graphql": "^16.6.0",
+    "handlebars": "^4.7.7",
+    "keyv": "^4.5.2"
+  }
+}
