@@ -1,3 +1,11 @@
-// const Cortex = require('cortex');
+const { config,
+    typeDefs,
+    resolvers,
+    server,
+    startServer } = require('./index');
 
-// const cortex = new Cortex();
+console.log(config);
+console.log(typeDefs);
+console.log(resolvers);
+
+//startServer();

@@ -17,8 +17,6 @@
 // model param for the pathway (optional)
 
 const { config } = require("./config");
-const { ApolloServer } = require('@apollo/server');
-const { startStandaloneServer, start } = require('@apollo/server/standalone');
 
 //build api
 const pathways = config.get('pathways');
@@ -52,15 +50,24 @@ const resolvers = {
     Query: resolverFunctions,
 }
 
+/// Create apollo graphql server
+const { ApolloServer, gql } = require('apollo-server-azure-functions');
+const {
+    ApolloServerPluginLandingPageLocalDefault
+} = require('apollo-server-core');
+const Keyv = require("keyv");
+const { KeyvAdapter } = require("@apollo/utils.keyvadapter");
+const responseCachePlugin = require('apollo-server-plugin-response-cache').default
+
+// server plugins
 const plugins = [
+    ApolloServerPluginLandingPageLocalDefault({ embed: true }), // For local development.   
 ];
 
 //cache
+let cache;
 if (config.get('cache')) {
-    const responseCachePlugin = require('@apollo/server-plugin-response-cache').default;
-    const { KeyvAdapter } = require("@apollo/utils.keyvadapter");
-    const Keyv = require("keyv");
-    const cache = new KeyvAdapter(new Keyv(process.env.REDIS_CONNECTION_URL,
+    cache = new KeyvAdapter(new Keyv(process.env.REDIS_CONNECTION_URL,
         {
             password: process.env.REDIS_CONNECTION_KEY,
             ssl: true,
@@ -78,19 +85,13 @@ const server = new ApolloServer({
     typeDefs,
     resolvers,
     csrfPrevention: true,
-    // cache,
-    // cache: "bounded",
-    plugins,
-    // debug: true,
-});
-
-// Start server.
-startStandaloneServer(server).then(({ url }) => {
-    console.log(`🚀 Server ready at ${url}`);
+    plugins
 });
 
 module.exports = {
     typeDefs,
     resolvers,
     server,
+    cache,
+    plugins
 };

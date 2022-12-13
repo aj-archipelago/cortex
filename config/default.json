@@ -3,7 +3,7 @@
     "models": {
         "td2": {
             "type": "AZURE-OAI",
-            "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-davinci/completions?api-version=2022-06-01-preview",
+            "url": "https://archipelago-openai-eu.openai.azure.com/openai/deployments/archipelago-davinci/completions?api-version=2022-06-01-preview",
             "headers": {
                 "api-key": "{{AZURE_OAI_API_KEY}}",
                 "Content-Type": "application/json"
