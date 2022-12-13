@@ -32,23 +32,6 @@ Querying modern NL AI models (e.g. GPT-3) can be costly and cumbersome. Executin
    - Configurable prompt and return validation and sanitation
 7. Structured analytics and reporting on AI API call frequency, cost, cache hit rate, etc.
 
-## Getting Started
-
-To use Cortex, simply install the package and initialize a Cortex instance with your desired NL AI model.
-
-```
-npm install archipelago-cortex
-```
-
-```
-const Cortex = require('archipelago-cortex');
-const cortex = new Cortex('myNLModel');
-```
-
-Then, use the provided GraphQL schema to make queries and receive structured data in return.
-
-For more detailed usage instructions, see the [documentation](http://cortex.archipelago.com/docs).
-
 ## Contributions
 
 We welcome contributions to Cortex! Please see our [contributing guidelines](http://cortex.archipelago.com/contributing) for more information.
