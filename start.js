@@ -1,0 +1,1 @@
+const cortex = require('./index')();

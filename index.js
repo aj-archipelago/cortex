@@ -1,12 +1,8 @@
 const { config } = require('./config');
-const { typeDefs, resolvers, server, startServer, cache, plugins } = require('./graphql');
+const { build } = require('./graphql');
 
-module.exports = {
-    config,
-    typeDefs,
-    resolvers,
-    server,
-    startServer,
-    cache,
-    plugins
+module.exports = (configParams) => {
+    configParams && config.load(configParams);
+    const { server, azureHandler, cache, plugins, typeDefs, resolvers } = build(config);
+    return { server, azureHandler, cache, plugins, typeDefs, resolvers, build };
 }

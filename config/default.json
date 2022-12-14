@@ -21,6 +21,7 @@
             }
         }
     },
-    "cache": true,
-    "context": {}
+    "cache": false,
+    "context": {},
+    "server" : "standalone"
 }
