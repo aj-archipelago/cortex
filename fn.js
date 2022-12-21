@@ -35,11 +35,7 @@ const getReqParams = (pathway, text, prompt) => {
     return params;
 }
 
-const REQUESTS_PER_SECOND = 10;
-
-const requestsMadeInCurrentSecond = {count: 0};
-
-async function makeRestRequest(params) {
+async function makeRestRequest(params, overrideParams={}) {
     const { config, pathway, text, prompt, info } = params;
     const defaultModel = config.get('default_model')
     const model = config.get('models')[pathway.model || defaultModel];
@@ -57,7 +53,7 @@ async function makeRestRequest(params) {
         headers[key] = handlebars.compile(value)({ ...config.getEnv() });
     }
     const defaultReqParams = model.params || {};
-    const sendingParams = { ...defaultReqParams, ...reqParams }
+    const sendingParams = { ...defaultReqParams, ...reqParams, ...overrideParams }
     console.log(`===\n${sendingParams.prompt}`)
     const data = await request({ url, params: sendingParams, headers });
 
@@ -98,7 +94,7 @@ async function makeRequest(params) {
 }
 
 async function processRequest(params) {
-    const { text, prompt } = params;
+    const { prompt } = params;
     if (Array.isArray(prompt)) {
         return await makeSequentialRequests(params);
     }
@@ -106,14 +102,19 @@ async function processRequest(params) {
 }
 
 const resolver = async (params) => {
-    const { config, pathway, parent, args, contextValue, info } = params;
+    const { pathway, args } = params;
     const { text } = args;
     const { prompt, parser } = pathway;
 
-    const data = await processRequest({ ...params, text, prompt });
+    const executePrompt = async (text, overrideParams = {}) =>
+        await processRequest({ ...params, text, prompt, ...overrideParams })
+
+    const data = await executePrompt(text);
 
     if (parser) {
-        return await parser(data, makeRequest);
+        return await parser(
+            data, 
+            executePrompt);
     }
     if (hasListReturn(pathway)) {
         return parseNumberedList(data)

@@ -5,7 +5,7 @@ module.exports = {
     prompt: `{{text}}\n\nList the top {{count}} entities and their definitions for the above in format {{format}}:`,
     count: 5,
     format: `(number. name: definition)`,
-    parser: async (text) => parseNumberedObjectList(text, ["name", "definition"]),
+    parser: async (response) => parseNumberedObjectList(response, ["name", "definition"]),
     typeDef: {
         type: `    
             type Entity {
