@@ -118,13 +118,12 @@ const build = (config) => {
     const azureHandler = isAzureServer ? server.createHandler() : null;
 
     // if local start server
-    if (isStandAloneServer) {
-        server.listen().then(({ url }) => {
-            console.log(`🚀  Server ready at ${url}`);
-        });
-    }
+    const startServer = isStandAloneServer ? async () => {
+        const { url } = await server.listen();
+        console.log(`🚀 Server ready at ${url}`);
+    } : null;
 
-    return { server, azureHandler, cache, plugins, typeDefs, resolvers }
+    return { server, azureHandler, startServer, cache, plugins, typeDefs, resolvers }
 }
 
 

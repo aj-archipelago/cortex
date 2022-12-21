@@ -1,1 +1,3 @@
-const cortex = require('./index')();
+const { startServer } = require('./index')();
+
+startServer && startServer();
