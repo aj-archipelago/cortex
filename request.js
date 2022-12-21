@@ -1,13 +1,19 @@
 const axios = require('axios');
+const Bottleneck = require("bottleneck/es5");
+
+const REQUESTS_PER_SECOND = 10;
+
+const limiter = new Bottleneck({
+    minTime: 1000/REQUESTS_PER_SECOND,
+})
 
 const postRequest = async ({ url, params, headers }) => {
     try {
-        return await axios.post(url, params, { headers });
+        return await limiter.schedule(() => axios.post(url, params, { headers }));
     } catch (e) {
         return { error: e }; //retry logic
     }
 }
-
 
 const request = async (params) => {
     const response = await postRequest(params);

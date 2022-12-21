@@ -1,5 +1,5 @@
 //simples form string single or list return
-const getStringFromResponse = (data) => {
+const getResponseResult = (data) => {
     const { choices } = data;
     if (!choices || !choices.length) {
         return; //TODO no choices case
@@ -9,16 +9,13 @@ const getStringFromResponse = (data) => {
 }
 
 //simply trim and parse with given regex
-const parse = (text, regex) => {
+const regexParser = (text, regex) => {
     return text.trim().split(regex).map(s => s.trim()).filter(s => s.length);
 }
 
-// return list of strings out from single string split via given regex
-const regexParser = (data, regex) =>  parse(getStringFromResponse(data), regex);
-
 // parse numbered list text format into list
-const parseNumberedList = (data) => {
-    return regexParser(data, /\d+\. ?/);
+const parseNumberedList = (str) => {
+    return regexParser(str, /\d+\. ?/);
 }
 
 // parse a numbered object list text format into list of objects
@@ -28,7 +25,7 @@ const parseNumberedObjectList = (text, fields = ['name', 'definition']) => {
     const result = [];
     for (const value of values) {
         try {
-            const splitted = parse(value, /:(.*)/);
+            const splitted = regexParser(value, /:(.*)/);
             const obj = {};
             for (let i = 0; i < fields.length; i++) {
                 obj[fields[i]] = splitted[i];
@@ -42,7 +39,7 @@ const parseNumberedObjectList = (text, fields = ['name', 'definition']) => {
 }
 
 module.exports = {
-    getStringFromResponse,
+    getResponseResult,
     regexParser,
     parseNumberedList,
     parseNumberedObjectList,

@@ -10,6 +10,7 @@ module.exports = {
     "sentiment": require('./sentiment'),
     "spelling": require('./spelling'),
     "styleguide": require('./styleguide'),
+    "styleguidemulti": require('./styleguidemulti'),
     "summary": require('./summary'),
     "topics": require('./topics'),
 }

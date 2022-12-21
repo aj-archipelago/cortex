@@ -2,17 +2,21 @@
 
 const { request } = require("./request");
 const handlebars = require("handlebars");
-const { getStringFromResponse, parseNumberedList } = require("./parser");
+const { getResponseResult, parseNumberedList } = require("./parser");
 const { hasListReturn } = require("./util");
 const { Exception } = require("handlebars");
+const nlp = require('compromise')
+const plg = require('compromise-paragraphs')
+
+nlp.extend(plg)
 
 const getUrl = (config, model) => {
     const generateUrl = handlebars.compile(model.url);
     return generateUrl({ ...model, ...config.getEnv() });
 }
 
-const getParams = (pathway, text) => {
-    const { temperature, prompt } = pathway;
+const getReqParams = (pathway, text, prompt) => {
+    const { temperature } = pathway;
     const promptFn = handlebars.compile(prompt);
 
     const params = {
@@ -31,47 +35,91 @@ const getParams = (pathway, text) => {
     return params;
 }
 
-const resolver = async ({ config, pathway, parent, args, contextValue, info }) => {
-    const { text } = args;
+const REQUESTS_PER_SECOND = 10;
 
-    async function makeRequest(text) {
-        const defaultModel = config.get('default_model')
-        const model = config.get('models')[pathway.model || defaultModel];
+const requestsMadeInCurrentSecond = {count: 0};
 
-        const url = getUrl(config, model);
-        const params = getParams(pathway, text);
+async function makeRestRequest(params) {
+    const { config, pathway, text, prompt, info } = params;
+    const defaultModel = config.get('default_model')
+    const model = config.get('models')[pathway.model || defaultModel];
 
-        const { temperature } = params;
-        if (temperature == 0) {
-            info.cacheControl.setCacheHint({ maxAge: 60 * 60 * 24, scope: 'PUBLIC' });
-        }
+    const url = getUrl(config, model);
+    const reqParams = getReqParams(pathway, text, prompt);
 
-        const headers = {};
-        for (const [key, value] of Object.entries(model.headers)) {
-            headers[key] = handlebars.compile(value)({ ...config.getEnv() });
-        }
-        const defaultParams = model.params || {};
-        const data = await request({ url, params: {...defaultParams, ...params}, headers });
-        return data;
+    const { temperature } = reqParams;
+    if (temperature == 0) {
+        info.cacheControl.setCacheHint({ maxAge: 60 * 60 * 24, scope: 'PUBLIC' });
     }
 
-    const data = await makeRequest(text);
+    const headers = {};
+    for (const [key, value] of Object.entries(model.headers)) {
+        headers[key] = handlebars.compile(value)({ ...config.getEnv() });
+    }
+    const defaultReqParams = model.params || {};
+    const sendingParams = { ...defaultReqParams, ...reqParams }
+    console.log(`===\n${sendingParams.prompt}`)
+    const data = await request({ url, params: sendingParams, headers });
 
     if (data.error) {
         throw new Exception(`An error was returned from the server: ${data.error}`);
     }
 
-    if (pathway.parser) {
-        return await pathway.parser(data, makeRequest);
-    }
+    return getResponseResult(data);
+}
 
+async function makeParallelRequests(params) {
+    const { text, prompt } = params;
+    const paragraphs = nlp(text).paragraphs().views.map(v => v.text());
+
+    const data = await Promise.all(paragraphs.map(paragraph =>
+        makeRestRequest({ ...params, text: paragraph, prompt })));
+
+    return data.join("\n\n");
+}
+
+async function makeSequentialRequests(params) {
+    const { text, prompt } = params;
+    let ctext = text;
+    for (const p of prompt) {
+        ctext = await makeRequest({ ...params, text: ctext, prompt: p });
+    }
+    return ctext;
+}
+
+async function makeRequest(params) {
+    const { config, pathway, parent, args, contextValue, info } = params;
+    const { chunk } = pathway;
+
+    if (chunk) {
+        return await makeParallelRequests(params)
+    }
+    return await makeRestRequest(params)
+}
+
+async function processRequest(params) {
+    const { text, prompt } = params;
+    if (Array.isArray(prompt)) {
+        return await makeSequentialRequests(params);
+    }
+    return await makeRequest(params);
+}
+
+const resolver = async (params) => {
+    const { config, pathway, parent, args, contextValue, info } = params;
+    const { text } = args;
+    const { prompt, parser } = pathway;
+
+    const data = await processRequest({ ...params, text, prompt });
+
+    if (parser) {
+        return await parser(data, makeRequest);
+    }
     if (hasListReturn(pathway)) {
         return parseNumberedList(data)
-    }  
-    
-    return await getStringFromResponse(data);
-    
-}   
+    }
+    return data;
+}
 
 module.exports = {
     resolver
