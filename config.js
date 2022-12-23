@@ -12,7 +12,7 @@ config.loadFile(configFile);
 
 console.log('Loading pathways from', pathwaysPath)
 const loadedPathways = require(pathwaysPath);
-const basePathway = require(`./basePathway.js`);
+const basePathway = require(`./pathways/basePathway.js`);
 
 const pathways = {};
 for (const [key, def] of Object.entries(loadedPathways)) {

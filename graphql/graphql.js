@@ -66,19 +66,26 @@ const getTypedefs = (pathways) => {
         inheritMaxAge: Boolean
     ) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
-    ${Object.values(pathways).filter(e => e.typeDef).map(e => e.typeDef.type).filter(Boolean).join('\n\t')}
+    ${Object.values(pathways).filter(e => e.typeDef).map(e => e.typeDef.type(e)).filter(Boolean).join('\n\t')}
 
     type Query {
         ${Object.values(pathways).filter(e => e.typeDef).map(e => e.typeDef.label(e)).join('\n\t')}
     }
     `;
+
     return typeDefs;
 }
 
 const getResolvers = (config, pathways) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
-        resolverFunctions[name] = (parent, args, contextValue, info) => pathway.resolver({ config, pathway, parent, args, contextValue, info });
+        resolverFunctions[name] = (parent, args, contextValue, info) => {
+            // add shared state to contextValue
+            contextValue.config = config;
+            contextValue.pathway = pathway;
+
+            return pathway.resolver(parent, args, contextValue, info);
+        }
     }
     const resolvers = {
         Query: resolverFunctions,
@@ -105,7 +112,6 @@ const build = (config) => {
     const isStandAloneServer = config.get('server') === STANDALONE;
 
     const { ApolloServer, gql } = require(isAzureServer ? 'apollo-server-azure-functions' : 'apollo-server');
-
 
     const server = new ApolloServer({
         typeDefs,

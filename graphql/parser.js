@@ -35,6 +35,7 @@ const parseNumberedObjectList = (text, fields = ['name', 'definition']) => {
             console.warn(`Failed to parse value in parseNumberedObjectList, value: ${value}, fields: ${fields}`);
         }
     }
+
     return result;
 }
 
