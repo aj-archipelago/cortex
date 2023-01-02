@@ -13,6 +13,11 @@ class PathwayResolver {
         this.returnType = pathway.returnType?.type ?? 'string';
 
         this.pathwayPrompter = new PathwayPrompter({ config, pathway });
+
+        // Normalize prompts to an array
+        this.prompts = Array.isArray(this.pathwayPrompt) ?
+            this.pathwayPrompt :
+            [this.pathwayPrompt];
     }
 
     async resolve(args) {
@@ -37,21 +42,16 @@ class PathwayResolver {
             nlp(text).paragraphs().views.map(v => v.text()) :
             [text];
 
-        // Normalize prompts to an array
-        let prompts = Array.isArray(this.pathwayPrompt) ?
-            this.pathwayPrompt :
-            [this.pathwayPrompt];
-
         // To each paragraph of text, apply all prompts serially
         const data = await Promise.all(paragraphs.map(paragraph =>
-            this.applyPromptsSerially(paragraph, parameters, prompts)));
+            this.applyPromptsSerially(paragraph, parameters)));
 
         return data.join("\n\n");
     }
 
-    async applyPromptsSerially(text, parameters, prompts) {
+    async applyPromptsSerially(text, parameters) {
         let cumulativeText = text;
-        for (const prompt of prompts) {
+        for (const prompt of this.prompts) {
             cumulativeText = await this.pathwayPrompter.execute(cumulativeText, parameters, prompt);
         }
         return cumulativeText;

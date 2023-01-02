@@ -117,7 +117,8 @@ const build = (config) => {
         typeDefs,
         resolvers,
         csrfPrevention: true,
-        plugins
+        plugins,
+        context: ({ req, res }) => ({ req, res }),
     });
 
     // if azure export handler

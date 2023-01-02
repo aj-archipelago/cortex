@@ -12,6 +12,12 @@ const resolver = async (parent, args, contextValue, info) => {
     }
 
     const pathwayResolver = new PathwayResolver({ config, pathway });
+
+    // Add request parameters back to the response header
+    const requestParameters = pathwayResolver.prompts.map(prompt => pathwayResolver.pathwayPrompter.requestParameters(args.text, args, prompt))
+    const { res } = contextValue;
+    res?.header('cortex-params', JSON.stringify(requestParameters));
+
     return await pathwayResolver.resolve(args);
 }
 
