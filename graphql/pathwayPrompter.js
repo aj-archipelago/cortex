@@ -11,7 +11,12 @@ class PathwayPrompter {
         this.temperature = pathway.temperature;
         this.pathwayPrompt = pathway.prompt;
         this.pathwayName = pathway.name;
-        this.promptParameters = pathway.parameters;
+        this.promptParameters = {}
+        if (pathway.parameters) { //process default params defined in pathway
+            for (const [k, v] of Object.entries(pathway.parameters)) {
+                this.promptParameters[k] = v.default ?? v;
+            }
+        }
         this.requestCount = 1
     }
 
