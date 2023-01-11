@@ -10,4 +10,8 @@ module.exports = {
     // parser: (text) => text,
     typeDef,
     resolver,
+    parameters: {
+        // Add the option of making every call async
+        async: false,
+    }
 }

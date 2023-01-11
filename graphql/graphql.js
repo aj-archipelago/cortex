@@ -16,15 +16,23 @@
 // chunking, batching, parallelism, !!
 // model param for the pathway (optional)
 
+const { createServer } = require('http');
+const {
+    ApolloServerPluginDrainHttpServer,
+    ApolloServerPluginLandingPageLocalDefault,
+} = require("apollo-server-core");
+const { makeExecutableSchema } = require('@graphql-tools/schema');
+const { WebSocketServer } = require('ws');
+const { useServer } = require('graphql-ws/lib/use/ws');
+const express = require('express');
 
 /// Create apollo graphql server
-const {
-    ApolloServerPluginLandingPageLocalDefault
-} = require('apollo-server-core');
 const Keyv = require("keyv");
 const { KeyvAdapter } = require("@apollo/utils.keyvadapter");
 const responseCachePlugin = require('apollo-server-plugin-response-cache').default
 
+const subscriptions = require('./subscriptions');
+const PORT = process.env.CORTEX_PORT || 4000;
 
 const getPlugins = (config) => {
     // server plugins
@@ -71,6 +79,16 @@ const getTypedefs = (pathways) => {
     type Query {
         ${Object.values(pathways).filter(e => e.typeDef).map(e => e.typeDef.label(e)).join('\n\t')}
     }
+    
+    type RequestSubscription {
+        requestId: String
+        progress: Float
+        data: String
+    }
+
+    type Subscription {
+        requestProgress(requestId: String!): RequestSubscription
+    }
     `;
 
     return typeDefs;
@@ -89,13 +107,11 @@ const getResolvers = (config, pathways) => {
     }
     const resolvers = {
         Query: resolverFunctions,
+        Subscription: subscriptions
     }
 
     return resolvers;
 }
-
-const AZURE = 'azure';
-const STANDALONE = 'standalone';
 
 //graphql api build factory method
 const build = (config) => {
@@ -105,32 +121,58 @@ const build = (config) => {
     const typeDefs = getTypedefs(pathways);
     const resolvers = getResolvers(config, pathways);
 
+    const schema = makeExecutableSchema({ typeDefs, resolvers });
+
     const { plugins, cache } = getPlugins(config);
 
-    //build server
-    const isAzureServer = config.get('server') === AZURE;
-    const isStandAloneServer = config.get('server') === STANDALONE;
+    const { ApolloServer, gql } = require('apollo-server-express');
+    const app = express()
+    const httpServer = createServer(app);
 
-    const { ApolloServer, gql } = require(isAzureServer ? 'apollo-server-azure-functions' : 'apollo-server');
+    // Creating the WebSocket server
+    const wsServer = new WebSocketServer({
+        // This is the `httpServer` we created in a previous step.
+        server: httpServer,
+        // Pass a different path here if your ApolloServer serves at
+        // a different path.
+        path: '/graphql',
+    });
+
+    // Hand in the schema we just created and have the
+    // WebSocketServer start listening.
+    const serverCleanup = useServer({ schema }, wsServer);
 
     const server = new ApolloServer({
-        typeDefs,
-        resolvers,
+        schema,
         csrfPrevention: true,
-        plugins,
+        plugins: plugins.concat([// Proper shutdown for the HTTP server.
+            ApolloServerPluginDrainHttpServer({ httpServer }),
+
+            // Proper shutdown for the WebSocket server.
+            {
+                async serverWillStart() {
+                    return {
+                        async drainServer() {
+                            await serverCleanup.dispose();
+                        },
+                    };
+                },
+            }]),
         context: ({ req, res }) => ({ req, res }),
     });
 
-    // if azure export handler
-    const azureHandler = isAzureServer ? server.createHandler() : null;
-
     // if local start server
-    const startServer = isStandAloneServer ? async () => {
-        const { url } = await server.listen();
-        console.log(`🚀 Server ready at ${url}`);
-    } : null;
+    const startServer = async () => {
+        await server.start();
+        server.applyMiddleware({ app });
 
-    return { server, azureHandler, startServer, cache, plugins, typeDefs, resolvers }
+        // Now that our HTTP server is fully set up, we can listen to it.
+        httpServer.listen(PORT, () => {
+            console.log(`🚀 Server is now running at http://localhost:${PORT}${server.graphqlPath}`);
+        });
+    };
+
+    return { server, startServer, cache, plugins, typeDefs, resolvers }
 }
 
 
