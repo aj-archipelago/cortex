@@ -9,19 +9,9 @@ module.exports = {
             return `{{text}} \n\nGenerate {{count}} headlines for the news article above in the format (number. text):`
         }
     },
-    parameters: {
-        // Short-hand definition of a parameter (name: default value)
+    inputParameters: {
         seoOptimized: false,
-        count: {
-            // This is the GraphQL type of the parameter
-            type: "Int",
-            // If a default value is provided, the parameter is optional
-            default: 5,
-        }
+        count: 5,        
     },
-    // Default return type is a string
-    returnType: {
-        name: "String",
-        type: "list",
-    },
+    list: true
 }

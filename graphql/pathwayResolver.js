@@ -1,7 +1,7 @@
 const PathwayPrompter = require('./pathwayPrompter');
 const nlp = require('compromise')
 const plugin = require('compromise-paragraphs');
-const { parseNumberedList } = require("./parser");
+const { parseNumberedList, parseNumberedObjectList } = require('./parser')
 const {
     v4: uuidv4,
 } = require('uuid');
@@ -12,8 +12,27 @@ nlp.extend(plugin);
 // in a multi-server environment
 const requestState = {}
 
+// parse response based on pathway definition
+const parseResponse = (args) => {
+    const { pathway, data } = args;
+    if (pathway.parser) {
+        return pathway.parser(data);
+    }
+
+    if (pathway.list) {
+        if (pathway.format) {
+            return parseNumberedObjectList(data, pathway.format);
+        }
+        return parseNumberedList(data)
+    }
+
+    return data;
+};
+
+
 class PathwayResolver {
     constructor({ config, pathway }) {
+        this.pathway = pathway;
         this.pathwayPrompt = pathway.prompt;
         this.responseParser = pathway.parser;
         this.enableChunking = pathway.chunk;
@@ -28,6 +47,11 @@ class PathwayResolver {
     }
 
     async resolve(args) {
+        const data = await this.processRequest(args);
+        return parseResponse({ pathway: this.pathway, pathwayResolver: this, data })
+    }
+
+    async processRequest({ text, ...parameters }) {
         const requestId = uuidv4();
 
         if (args.async) {
@@ -75,7 +99,7 @@ class PathwayResolver {
 
     async processRequest({ text, ...parameters }, enableChunking, requestId) {
         // Chunk input into paragraphs if needed
-        let paragraphs = enableChunking ?
+        let paragraphs = this.enableChunking ?
             nlp(text).paragraphs().views.map(v => v.text()) :
             [text];
 
@@ -111,4 +135,4 @@ class PathwayResolver {
     }
 }
 
-module.exports = PathwayResolver;
+module.exports = { PathwayResolver };

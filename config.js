@@ -16,7 +16,8 @@ const basePathway = require(`./pathways/basePathway.js`);
 
 const pathways = {};
 for (const [key, def] of Object.entries(loadedPathways)) {
-    pathways[def.name || key] = pathways[key] = { ...basePathway, name: key, ...def };
+    const pathway = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...def };
+    pathways[def.name || key] = pathways[key] = pathway;
 }
 
 // Add pathways to config

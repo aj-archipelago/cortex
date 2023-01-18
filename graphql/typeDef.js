@@ -4,74 +4,42 @@ const GRAPHQL_TYPE_MAP = {
     number: 'Int',
 }
 
-// Default parameters for all pathways
-const DEFAULT_PARAMETERS = {
-    name: "text",
-    type: "String",
-}
 
-const DEFAULT_RETURN_TYPE = 'String';
+const typeDef = (pathway) => {
+    const { name, objName, defaultInputParameters, inputParameters, debugFields, outputFields, list, format } = pathway;
 
-const getLabel = (pathway) => {
-    const { name, parameters = {} } = pathway;
-    let { returnType = DEFAULT_RETURN_TYPE } = pathway;
+    const fields = format ? format.match(/\b(\w+)\b/g) : null;
+    const fieldsStr = !fields ? `` : fields.map(f => `${f}: String`).join('\n    ');
 
-    if (returnType.name) {
-        if (returnType.type === 'list') {
-            returnType = `[${returnType.name}]`;
-        }
-        else {
-            returnType = returnType.name;
-        }
-    }
+    const typeName = fields ? `${objName}Result` : `String`;
+    const type = fields ? `type ${typeName} {
+    ${fieldsStr}
+}` : ``;
 
-    const endpointParameters = [DEFAULT_PARAMETERS]
 
-    for (const [name, value] of Object.entries(parameters)) {
-        // If the parameter is defined as a single value,
-        // expand it to a full definition
-        if (typeof (value) !== 'object') {
-            endpointParameters.push({
-                name,
-                type: GRAPHQL_TYPE_MAP[typeof (value)],
-                default: value
-            })
-        }
-        else {
-            endpointParameters.push({
-                name,
-                ...value
-            })
-        }
-    }
+    const resultStr = pathway.list ? `[${typeName}]` : typeName;
 
-    let inputParameters = [];
+    const responseType = `type ${objName} {
+        debug: String
+        result: ${resultStr}
+}`;
 
-    for (const parameter of endpointParameters) {
-        const requiredBang = (parameter.default === undefined || parameter.default === null) ? '!' : '';
-        inputParameters.push(`${parameter.name}: ${parameter.type}${requiredBang}`)
-    }
 
-    return `${name}(${inputParameters.join(', ')}): ${returnType},`
-}
+    const params = { ...defaultInputParameters, ...inputParameters };
+    const paramsStr = Object.entries(params).map(
+        ([key, value]) => `${key}: ${GRAPHQL_TYPE_MAP[typeof (value)]} = ${typeof (value) == `string` ? `"${value}"` : value}`).join('\n');
 
-const getReturnTypeDef = (pathway) => {
-    const { returnType } = pathway;
-    if (returnType) {
-        const { name, fields } = returnType;
 
-        if (name !== 'String') {
-            return `type ${name} {
-${Object.entries(fields).map(([key, value]) => `        ${key}: ${value}`).join(',\n')}
-    }`;
-        }
-    }
-    return '';
+    return `${type}
+
+${responseType}
+
+extend type Query {
+    ${name}(${paramsStr}): ${objName}
+}  
+`;
 }
 
 module.exports = {
-    typeDef: {
-        type: getReturnTypeDef,
-        label: getLabel,
-    }
+    typeDef,
 }

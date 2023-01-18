@@ -1,8 +1,8 @@
-const PathwayResolver = require("./pathwayResolver");
+const { PathwayResolver } = require("./pathwayResolver");
 
 // This resolver uses standard parameters required by Apollo server:
 // (parent, args, contextValue, info)
-const resolver = async (parent, args, contextValue, info) => {
+const rootResolver = async (parent, args, contextValue, info) => {
     const { config, pathway } = contextValue;
     const { temperature } = pathway;
 
@@ -12,15 +12,19 @@ const resolver = async (parent, args, contextValue, info) => {
     }
 
     const pathwayResolver = new PathwayResolver({ config, pathway });
+    contextValue.pathwayResolver = pathwayResolver;
 
-    // Add request parameters back to the response header
+    // Add request parameters back as debug
     const requestParameters = pathwayResolver.prompts.map(prompt => pathwayResolver.pathwayPrompter.requestParameters(args.text, args, prompt))
-    const { res } = contextValue;
-    res?.header('cortex-params', JSON.stringify(requestParameters));
+    return { debug: JSON.stringify(requestParameters), result: await pathway.resolver(parent, args, contextValue, info) }
+}
 
-    return await pathwayResolver.resolve(args);
+// This resolver is used by the root resolver to process the request
+const resolver = async (parent, args, contextValue, info) => {
+    const { pathwayResolver } = contextValue;
+    return await pathwayResolver.resolve(args)
 }
 
 module.exports = {
-    resolver
+    resolver, rootResolver
 }

@@ -15,33 +15,33 @@ afterAll(() => {
 
 it('validates bias endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query bias($text: String!) { bias(text: $text) }',
+        query: 'query bias($text: String!) { bias(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.bias).toMatch(/(yes|no|bias)/i)
+    expect(response.data?.bias?.result).toMatch(/(yes|no|bias)/i)
 });
 
 it('validates completion endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query complete($text: String!) { complete(text: $text) }',
+        query: 'query complete($text: String!) { complete(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.complete.length).toBeGreaterThan(0);
+    expect(response.data?.complete?.result.length).toBeGreaterThan(0);
 });
 
 it('validates entities endpoint with given num of count return', async () => {
     const response = await testServer.executeOperation({
-        query: 'query entities($text: String!, $count: Int) { entities(text: $text, count: $count){ name, definition} }',
+        query: 'query entities($text: String!, $count: Int) { entities(text: $text, count: $count){ result { name, definition } } }',
         variables: { text: 'hello there my dear world!', count: 3 },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.entities.length).toBe(3);
-    response.data?.entities.forEach((entity) => {
+    expect(response.data?.entities.result.length).toBe(3);
+    response.data?.result?.entities.forEach((entity) => {
         expect(entity.name).toBeDefined();
         expect(entity.definition).toBeDefined();
     });
@@ -49,119 +49,119 @@ it('validates entities endpoint with given num of count return', async () => {
 
 it('validates grammar endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query grammar($text: String!) { grammar(text: $text) }',
+        query: 'query grammar($text: String!) { grammar(text: $text) { result } }',
         variables: { text: 'helo there my dear worldd!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.grammar).toMatch(/hello.*world/i);
+    expect(response.data?.grammar.result).toMatch(/hello.*world/i);
 });
 
 it('validates headline endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query headline($text: String!) { headline(text: $text) }',
+        query: 'query headline($text: String!) { headline(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.headline.length).toBeGreaterThan(0);
-    response.data?.headline.forEach((headline) => {
+    expect(response.data?.headline?.result?.length).toBeGreaterThan(0);
+    response.data?.headline?.result.forEach((headline) => {
         expect(headline).toBeDefined();
     });
 });
 
 it('validates keywords endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query keywords($text: String!) { keywords(text: $text) }',
+        query: 'query keywords($text: String!) { keywords(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.keywords.length).toBeGreaterThan(0);
-    response.data?.keywords.forEach((keyword) => {
+    expect(response.data?.keywords?.result.length).toBeGreaterThan(0);
+    response.data?.keywords.result.forEach((keyword) => {
         expect(keyword).toBeDefined();
     });
 });
 
 it('validates paraphrase endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query paraphrase($text: String!) { paraphrase(text: $text) }',
+        query: 'query paraphrase($text: String!) { paraphrase(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.paraphrase).toBeDefined();
+    expect(response.data?.paraphrase?.result).toBeDefined();
 });
 
 it('validates pass endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query pass($text: String!) { pass(text: $text) }',
+        query: 'query pass($text: String!) { pass(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.pass).toBeDefined();
+    expect(response.data?.pass.result).toBeDefined();
 });
 
 it('validates sentiment endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query sentiment($text: String!) { sentiment(text: $text) }',
+        query: 'query sentiment($text: String!) { sentiment(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.sentiment).toBeDefined();
+    expect(response.data?.sentiment.result).toBeDefined();
 });
 
 it('validates spelling endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query spelling($text: String!) { spelling(text: $text) }',
+        query: 'query spelling($text: String!) { spelling(text: $text) { result } }',
         variables: { text: 'helo there my dear worldd!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.spelling).toMatch(/hello.*world/i);
+    expect(response.data?.spelling.result).toMatch(/hello.*world/i);
 });
 
 it('validates styleguide endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query styleguide($text: String!) { styleguide(text: $text) }',
+        query: 'query styleguide($text: String!) { styleguide(text: $text) { result } }',
         variables: { text: 'helo there my dear worldd!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.styleguide).toMatch(/hello.*world/i);
+    expect(response.data?.styleguide.result).toMatch(/hello.*world/i);
 });
 
 it('validates styleguidemulti endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) }',
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
         variables: { text: 'helo there my dear worldd!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.styleguidemulti).toMatch(/hello.*world/i);
+    expect(response.data?.styleguidemulti.result).toMatch(/hello.*world/i);
 });
 
 it('validates summary endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query summary($text: String!) { summary(text: $text) }',
+        query: 'query summary($text: String!) { summary(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.summary).toBeDefined();
+    expect(response.data?.summary.result).toBeDefined();
 });
 
 it('validates topics endpoint with given num of count return', async () => {
     const response = await testServer.executeOperation({
-        query: 'query topics($text: String!, $count: Int) { topics(text: $text, count: $count) }',
+        query: 'query topics($text: String!, $count: Int) { topics(text: $text, count: $count) { result } }',
         variables: { text: 'hello there my dear world!', count: 3 },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.topics.length).toBe(3);
-    response.data?.topics.forEach((topic) => {
+    expect(response.data?.topics.result.length).toBe(3);
+    response.data?.topics.result.forEach((topic) => {
         expect(topic).toBeDefined();
     });
 });

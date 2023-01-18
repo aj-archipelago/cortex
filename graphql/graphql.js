@@ -1,21 +1,3 @@
-// TODO notes:
-// number of api list, ref 
-// default json hosts multiple apis 
-// nueron can have ref to api name
-// temperature, randomness
-// flexible config for pathways
-// nuerons complex fns
-// json to js, custom code 
-// multi step processing
-// #first call to pull data from api #second call to process data #third ...
-// TODO: current api  implement first! deploy this
-// caching ++
-// custom input params 
-// optional to pass user context, like a userid, personealized returns to the pathways
-// e.g. chat pathway with userid
-// chunking, batching, parallelism, !!
-// model param for the pathway (optional)
-
 const { createServer } = require('http');
 const {
     ApolloServerPluginDrainHttpServer,
@@ -61,8 +43,8 @@ const getPlugins = (config) => {
 
 //typeDefs
 const getTypedefs = (pathways) => {
-    //TODO: check code first approach - codegen
-    const typeDefs = `#graphql
+
+    const defaultTypeDefs = `#graphql
     enum CacheControlScope {
         PUBLIC
         PRIVATE
@@ -74,10 +56,8 @@ const getTypedefs = (pathways) => {
         inheritMaxAge: Boolean
     ) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
-    ${Object.values(pathways).filter(e => e.typeDef).map(e => e.typeDef.type(e)).filter(Boolean).join('\n\t')}
-
     type Query {
-        ${Object.values(pathways).filter(e => e.typeDef).map(e => e.typeDef.label(e)).join('\n\t')}
+        _ : Boolean
     }
     
     type RequestSubscription {
@@ -89,9 +69,10 @@ const getTypedefs = (pathways) => {
     type Subscription {
         requestProgress(requestId: String!): RequestSubscription
     }
-    `;
+`;
 
-    return typeDefs;
+    const typeDefs = [defaultTypeDefs, ...Object.values(pathways).map(p => p.typeDef(p))];
+    return typeDefs.join('\n');
 }
 
 const getResolvers = (config, pathways) => {
@@ -102,7 +83,7 @@ const getResolvers = (config, pathways) => {
             contextValue.config = config;
             contextValue.pathway = pathway;
 
-            return pathway.resolver(parent, args, contextValue, info);
+            return pathway.rootResolver(parent, args, contextValue, info);
         }
     }
     const resolvers = {

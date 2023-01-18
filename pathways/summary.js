@@ -1,16 +1,17 @@
-const PROMPT = `Write a short summary of the following: \n\n{{text}}`;
-const MAX_LENGTH = 120;
+const { PathwayResolver } = require('../graphql/pathwayResolver');
+const MAX_LENGTH = 12;
 
 module.exports = {
-    prompt: PROMPT,
-    parser: async (response, reprompt) => {
-        let summary = response;
+    prompt: `Write a short summary of the following: \n\n{{text}}`,
+    resolver: async (parent, args, contextValue, info) => {
+        const { config, pathway } = contextValue;
+        const pathwayResolver = new PathwayResolver({ config, pathway });
 
-        let i = 0
-
+        let summary = await pathwayResolver.resolve(args);
+        let i = 0;
         // reprompt if summary is too long
         while (summary.length > MAX_LENGTH && i < 3) {
-            summary = await reprompt(summary);
+            summary = await pathwayResolver.resolve({ ...args, text: summary });
             i++
         }
 
@@ -32,7 +33,7 @@ module.exports = {
 
             summary = included.join('. ')
         }
-        
+
         return summary;
     }
 }

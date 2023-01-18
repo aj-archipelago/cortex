@@ -19,13 +19,14 @@ const parseNumberedList = (str) => {
 }
 
 // parse a numbered object list text format into list of objects
-const parseNumberedObjectList = (text, fields = ['name', 'definition']) => {
+const parseNumberedObjectList = (text, format) => {
+    const fields = format.match(/\b(\w+)\b/g);
     const values = parseNumberedList(text);
 
     const result = [];
     for (const value of values) {
         try {
-            const splitted = regexParser(value, /:(.*)/);
+            const splitted = regexParser(value, /[:-](.*)/);
             const obj = {};
             for (let i = 0; i < fields.length; i++) {
                 obj[fields[i]] = splitted[i];
@@ -43,5 +44,5 @@ module.exports = {
     getResponseResult,
     regexParser,
     parseNumberedList,
-    parseNumberedObjectList,
+    parseNumberedObjectList
 };
