@@ -172,6 +172,14 @@ const build = (config) => {
         });
     };
 
+    app.use((req, res, next) => {
+        if (process.env.API_KEY && req.headers.api_key !== process.env.API_KEY && req.query.api_key !== process.env.API_KEY) {
+            res.status(401).send('Unauthorized');
+        }
+        
+        next();
+    })
+
     return { server, startServer, cache, plugins, typeDefs, resolvers }
 }
 
