@@ -70,7 +70,7 @@ class PathwayPrompter {
         console.log(`\x1b[34m> ${getResponseResult(data)}\x1b[0m`)
 
         if (data.error) {
-            throw new Exception(`An error was returned from the server: ${data.error}`);
+            throw new Exception(`An error was returned from the server: ${JSON.stringify(data.error)}`);
         }
 
         return getResponseResult(data);
