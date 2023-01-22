@@ -12,6 +12,8 @@ nlp.extend(plugin);
 // in a multi-server environment
 const requestState = {}
 
+const MAX_CHUNK_LENGTH = 1000;
+
 // parse response based on pathway definition
 const parseResponse = (args) => {
     const { pathway, data } = args;
@@ -97,11 +99,51 @@ class PathwayResolver {
         return data;
     }
 
-    async processRequest({ text, ...parameters }, enableChunking, requestId) {
+    chunkText(text) {
+        if (!this.enableChunking && text.length < MAX_CHUNK_LENGTH) { // no chunking, return as is
+            return [text];
+        } 
+
         // Chunk input into paragraphs if needed
-        let paragraphs = this.enableChunking ?
-            nlp(text).paragraphs().views.map(v => v.text()) :
-            [text];
+        let paragraphChunks = nlp(text).paragraphs().views.map(v => v.text());
+
+        // Chunk paragraphs into sentences if needed
+        const sentenceChunks = [];
+        for (let i = 0; i < paragraphChunks.length; i++) {
+            if (paragraphChunks[i].length > MAX_CHUNK_LENGTH) { // too long paragraph, chunk into sentences
+                sentenceChunks.push(...nlp(paragraphChunks[i]).sentences().json().map(v => v.text));
+            } else {
+                sentenceChunks.push(paragraphChunks[i]);
+            }
+        }
+
+        // Chunk sentences into word chunks if needed
+        const chunks = [];
+        for (let j = 0; j < sentenceChunks.length; j++) {
+            if (sentenceChunks[j].length > MAX_CHUNK_LENGTH) { // too long sentence, chunk into words
+                const words = sentenceChunks[j].split(' ');
+                // merge words into chunks up to MAX_CHUNK_LENGTH
+                let chunk = '';
+                for (let k = 0; k < words.length; k++) {
+                    if (chunk.length + words[k].length > MAX_CHUNK_LENGTH) {
+                        chunks.push(chunk.trim());
+                        chunk = '';
+                    }
+                    chunk += words[k] + ' ';
+                }
+                if (chunk.length > 0) {
+                    chunks.push(chunk.trim());
+                }
+            } else {
+                chunks.push(sentenceChunks[j]);
+            }
+        }
+
+        return chunks;
+    }
+
+    async processRequest({ text, ...parameters }, requestId) {
+        const paragraphs = this.chunkText(text);
 
         const anticipatedRequestCount = paragraphs.length * this.prompts.length;
 
