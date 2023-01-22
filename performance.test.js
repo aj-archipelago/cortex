@@ -16,7 +16,7 @@ afterAll(() => {
 
 it('performance run of styleguidemulti endpoint with huge text', async () => {
     const response = await testServer.executeOperation({
-        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) }',
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
         variables: {
             text: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. In id erat sem. Phasellus ac dapibus purus, in fermentum nunc. Mauris quis rutrum magna. Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc. Aenean sit amet leo est. Nunc ante ex, blandit et felis ut, iaculis lacinia est. Phasellus dictum orci id libero ullamcorper tempor.
 
@@ -60,13 +60,13 @@ Mauris diam dolor, maximus et ultrices sed, semper sed felis.Morbi ac eros tellu
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.styleguidemulti.length).toBeGreaterThan(1000); //check return length huge
+    expect(response.data?.styleguidemulti.result.length).toBeGreaterThan(1000); //check return length huge
 });
 
 
 it('performance run of styleguidemulti endpoint with meduim length text', async () => {
     const response = await testServer.executeOperation({
-        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) }',
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
         variables: {
             text: `Jan 3 (Reuters) - Millions of low-income households in Britain will receive cost-of-living support from the government of up to 900 pounds ($1,084) over the financial year.
             
@@ -86,42 +86,42 @@ The latest support package follows a 1,200 pound cash support programme for low-
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.styleguidemulti.length).toBeGreaterThan(100); //check return length 
+    expect(response.data?.styleguidemulti.result.length).toBeGreaterThan(100); //check return length 
 });
 
 it('performance run of styleguidemulti endpoint with small 4 paragraph text', async () => {
     const response = await testServer.executeOperation({
-        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) }',
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
         variables: { text: 'helo there my dear worldd! \n\n how do you do? \n\n what\'s up \n\n there wer go@' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.styleguidemulti).toMatch(/hello.*world/i);
+    expect(response.data?.styleguidemulti.result).toMatch(/hello.*world/i);
 });
 
 it('performance run of styleguidemulti endpoint with small length text', async () => {
     const response = await testServer.executeOperation({
-        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) }',
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
         variables: { text: 'here is my frst text?\n\n and the seconded txt' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.styleguidemulti).toMatch(/first.*text/i);
+    expect(response.data?.styleguidemulti.result).toMatch(/first.*text/i);
 });
 
 it('performance run of styleguidemulti endpoint with single sentence text', async () => {
     const response = await testServer.executeOperation({
-        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) }',
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result }}',
         variables: { text: 'helo there my dear worldd!!!!!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.styleguidemulti).toMatch(/hello.*world/i);
+    expect(response.data?.styleguidemulti.result).toMatch(/hello.*world/i);
 });
 
 it('performance run of styleguidemulti endpoint with single paraghraph', async () => {
     const response = await testServer.executeOperation({
-        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) }',
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
         variables: {
             text: `Jan 3 (Reuters) - Millions of low-income households in Britain will receive cost-of-living support from the government of up to 900 pounds ($1,084) over the financial year.The country's Department of Work and Pensions said on Tuesday.The money will directly go to claimants' bank accounts in three payments over the financial year, the department said in a statement.The cash support was announced by Chancellor Jeremy Hunt in his Autumn statement along with a string of tax increases and tighter public spending. The government did not give details on the payment schedule at the time.` },
     });
