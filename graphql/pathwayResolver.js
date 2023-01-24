@@ -14,51 +14,49 @@ const requestState = {}
 
 const MAX_CHUNK_LENGTH = 1000;
 
-// parse response based on pathway definition
-const parseResponse = (args) => {
-    const { pathway, data } = args;
-    if (pathway.parser) {
-        return pathway.parser(data);
+class PathwayResponseParser {
+    constructor(pathway) {
+        this.pathway = pathway;
     }
 
-    if (pathway.list) {
-        if (pathway.format) {
-            return parseNumberedObjectList(data, pathway.format);
+    parse(data) {
+        if (this.pathway.parser) {
+            return this.pathway.parser(data);
         }
-        return parseNumberedList(data)
+    
+        if (this.pathway.list) {
+            if (this.pathway.format) {
+                return parseNumberedObjectList(data, this.pathway.format);
+            }
+            return parseNumberedList(data)
+        }
+    
+        return data;
     }
-
-    return data;
-};
-
+}
 
 class PathwayResolver {
     constructor({ config, pathway }) {
         this.pathway = pathway;
-        this.pathwayPrompt = pathway.prompt;
-        this.responseParser = pathway.parser;
         this.enableChunking = pathway.chunk;
-        this.returnType = pathway.returnType?.type ?? 'string';
-
+        this.responseParser = new PathwayResponseParser(pathway);
         this.pathwayPrompter = new PathwayPrompter({ config, pathway });
 
+        const pathwayPrompt = pathway.prompt;
+
         // Normalize prompts to an array
-        this.prompts = Array.isArray(this.pathwayPrompt) ?
-            this.pathwayPrompt :
-            [this.pathwayPrompt];
+        this.prompts = Array.isArray(pathwayPrompt) ?
+            pathwayPrompt :
+            [pathwayPrompt];
     }
 
-    async resolve(args) {
-        const data = await this.processRequest(args);
-        return parseResponse({ pathway: this.pathway, pathwayResolver: this, data })
-    }
-
-    async processRequest({ text, ...parameters }) {
+    async resolve(args, requestState) {
         const requestId = uuidv4();
 
         if (args.async) {
             // Asynchronously process the request
-            this.requestAndParse(args, requestId).then((data) => {
+            this.promptAndParse(args, requestId, requestState).then((data) => {
+                requestState[requestId].data = data;
                 pubsub.publish('REQUEST_PROGRESS', {
                     requestProgress: {
                         requestId,
@@ -71,32 +69,13 @@ class PathwayResolver {
         }
         else {
             // Syncronously process the request
-            return await this.requestAndParse(args, requestId);
+            return await this.promptAndParse(args, requestId, requestState);
         }
     }
 
-    async requestAndParse(args, requestId) {
-        const data = await this.processRequest(args, this.enableChunking, requestId);
-        const reprompt = (params) => this.processRequest(params, this.enableChunking, requestId);
-
-        // If a parser is defined, use it to parse the data
-        if (this.responseParser) {
-            return await this.responseParser(
-                // data returned from the model
-                data,
-                // function to reprompt the model - the parser can prompt the model
-                // again with different parameters
-                reprompt);
-        }
-
-        // If the pathway is configured to return a list, parse the data
-        // using the defautl list parser
-        if (this.returnType === 'list') {
-            return parseNumberedList(data)
-        }
-
-        // Otherwise, return the data as is
-        return data;
+    async promptAndParse(args, requestId, requestState) {
+        const data = await this.processRequest(args, requestId, requestState);
+        return this.responseParser.parse(data);
     }
 
     chunkText(text) {
@@ -139,27 +118,35 @@ class PathwayResolver {
             }
         }
 
-        return chunks;
+        return chunks.map(chunk => '\n\n' + chunk + '\n\n');
     }
 
-    async processRequest({ text, ...parameters }, requestId) {
-        const paragraphs = this.chunkText(text);
+    async processRequest({ text, ...parameters }, requestId, requestState) {
+        const chunks = this.chunkText(text);
 
-        const anticipatedRequestCount = paragraphs.length * this.prompts.length;
+        const anticipatedRequestCount = chunks.length * this.prompts.length;
+
+        if ((requestState[requestId] || {}).canceled) {
+            throw new Error('Request canceled');
+        }
 
         // Store the request state
         requestState[requestId] = { totalCount: anticipatedRequestCount, completedCount: 0 };
 
         // To each paragraph of text, apply all prompts serially
-        const data = await Promise.all(paragraphs.map(paragraph =>
-            this.applyPromptsSerially(paragraph, parameters, requestId)));
+        const data = await Promise.all(chunks.map(paragraph =>
+            this.applyPromptsSerially(paragraph, parameters, requestId, requestState)));
 
         return data.join("\n\n");
     }
 
-    async applyPromptsSerially(text, parameters, requestId) {
+    async applyPromptsSerially(text, parameters, requestId, requestState) {
         let cumulativeText = text;
         for (const prompt of this.prompts) {
+            if (requestState[requestId].canceled) {
+                return;
+            }
+
             cumulativeText = await this.pathwayPrompter.execute(cumulativeText, parameters, prompt);
             requestState[requestId].completedCount++;
 

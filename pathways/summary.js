@@ -4,14 +4,15 @@ const MAX_LENGTH = 12;
 module.exports = {
     prompt: `Write a short summary of the following: \n\n{{text}}`,
     resolver: async (parent, args, contextValue, info) => {
-        const { config, pathway } = contextValue;
+        const { config, pathway, requestState } = contextValue;
+
         const pathwayResolver = new PathwayResolver({ config, pathway });
 
-        let summary = await pathwayResolver.resolve(args);
+        let summary = await pathwayResolver.resolve(args, requestState);
         let i = 0;
         // reprompt if summary is too long
         while (summary.length > MAX_LENGTH && i < 3) {
-            summary = await pathwayResolver.resolve({ ...args, text: summary });
+            summary = await pathwayResolver.resolve({ ...args, text: summary }, requestState);
             i++
         }
 

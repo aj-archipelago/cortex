@@ -14,6 +14,7 @@ const { KeyvAdapter } = require("@apollo/utils.keyvadapter");
 const responseCachePlugin = require('apollo-server-plugin-response-cache').default
 
 const subscriptions = require('./subscriptions');
+const { cancelRequestResolver } = require('./resolver');
 const PORT = process.env.CORTEX_PORT || 4000;
 
 const getPlugins = (config) => {
@@ -59,6 +60,10 @@ const getTypedefs = (pathways) => {
     type Query {
         _ : Boolean
     }
+
+    type Mutation {
+        cancelRequest(requestId: String!): Boolean
+    }
     
     type RequestSubscription {
         requestId: String
@@ -75,20 +80,22 @@ const getTypedefs = (pathways) => {
     return typeDefs.join('\n');
 }
 
+const requestState = {}
+
 const getResolvers = (config, pathways) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
         resolverFunctions[name] = (parent, args, contextValue, info) => {
             // add shared state to contextValue
-            contextValue.config = config;
             contextValue.pathway = pathway;
-
             return pathway.rootResolver(parent, args, contextValue, info);
         }
     }
+
     const resolvers = {
         Query: resolverFunctions,
-        Subscription: subscriptions
+        Mutation: {'cancelRequest': cancelRequestResolver},
+        Subscription: subscriptions,
     }
 
     return resolvers;
@@ -139,7 +146,7 @@ const build = (config) => {
                     };
                 },
             }]),
-        context: ({ req, res }) => ({ req, res }),
+        context: ({ req, res }) => ({ req, res, config, requestState }),
     });
 
     // if local start server

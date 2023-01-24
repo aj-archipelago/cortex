@@ -1,24 +1,17 @@
-const { ApolloServer } = require('apollo-server');
-const { typeDefs, resolvers } = require('./index')();
-
-const { PathwayResolver } = require('./graphql/pathwayResolver');
+const { getTestServer } = require('./index.test');
 
 jest.setTimeout(1800000);
 
-const testServer = new ApolloServer({
-    typeDefs,
-    resolvers,
-});
+const testServer = getTestServer();
 
 afterAll(() => {
     // stop server after all tests
     testServer.stop();
 });
 
-
-it('chunking test of translate endpoint with huge text', async () => {
+it('performance run of styleguidemulti endpoint with huge text', async () => {
     const response = await testServer.executeOperation({
-        query: 'query translate($text: String!) { translate(text: $text) { result } }',
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
         variables: {
             text: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. In id erat sem. Phasellus ac dapibus purus, in fermentum nunc. Mauris quis rutrum magna. Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc. Aenean sit amet leo est. Nunc ante ex, blandit et felis ut, iaculis lacinia est. Phasellus dictum orci id libero ullamcorper tempor.
 
@@ -62,30 +55,73 @@ Mauris diam dolor, maximus et ultrices sed, semper sed felis.Morbi ac eros tellu
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.translate.result.length).toBeGreaterThan(1000); //check return length huge
+    expect(response.data?.styleguidemulti.result.length).toBeGreaterThan(1000); //check return length huge
 });
 
 
-it('chunking test of translate endpoint with single long text sentence', async () => {
+it('performance run of styleguidemulti endpoint with meduim length text', async () => {
     const response = await testServer.executeOperation({
-        query: 'query translate($text: String!) { translate(text: $text) { result } }',
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
         variables: {
-            text: `Lorem ipsum dolor sit amet, consectetur adipiscing elit in id erat sem phasellus ac dapibus purus, in fermentum nunc mauris quis rutrum magna Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc Aenean sit amet leo est Nunc ante ex, blandit et felis ut, iaculis lacinia est Phasellus dictum orci id libero ullamcorper tempor Vivamus id pharetra odioSed consectetur leo sed tortor dictum venenatisDonec gravida libero non accumsan suscipitDonec lectus turpis, ullamcorper eu pulvinar iaculis, ornare ut risusPhasellus aliquam, turpis quis viverra condimentum, risus est pretium metus, in porta ipsum tortor vitae elitPellentesque id finibus eratIn suscipit, sapien non posuere dignissim, augue nisl ultrices tortor, sit amet eleifend nibh elit at risus Donec diam ligula, sagittis ut nisl tincidunt, porta sodales magnaVestibulum ut dui arcuFusce at dolor exAliquam eu justo non libero volutpat pulvinar at id urnaDonec nec purus sed elit bibendum faucibusPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasVivamus iaculis mattis velit, ut lacinia massa lacinia quisPhasellus porttitor gravida ex, id aliquet eros rhoncus quisUt fringilla, lectus a vehicula luctus, diam odio convallis dolor, sodales pharetra nulla ex dictum justoUt faucibus, augue quis dictum iaculis, diam leo maximus sapien, sit amet vulputate eros quam sed semCras malesuada, sapien sit amet iaculis euismod, nunc odio lacinia est, dictum iaculis ante nisi in estFusce vehicula lorem tellusNullam a tempus nisiSed ut lectus nec ligula blandit tempusDonec faucibus turpis id urna vehicula imperdietDuis tempor vitae orci interdum dignissimPhasellus sed efficitur semNullam accumsan, turpis vitae consectetur ullamcorper, lectus purus tincidunt nisi, in pulvinar leo tortor at semDonec at feugiat dui, nec rhoncus nibhNam faucibus ultrices nisl at lobortisMorbi congue, nisl vel fermentum tristique, dui ipsum rhoncus massa, non varius nibh massa in turpisVestibulum vulputate, felis quis lacinia porta, nulla ex volutpat lorem, non rhoncus neque erat quis arcuMorbi massa nisl, hendrerit eget tortor condimentum, lobortis dapibus semAliquam ut dapibus elitSed porta dignissim anteNullam interdum ligula et massa vehicula, vel gravida diam laoreetVivamus et enim eget turpis pellentesque laoreetVivamus pellentesque neque et mauris imperdiet pulvinar Aliquam eget ligula congue, tincidunt magna eu, rutrum urnaSed consequat orci est, vel laoreet magna tincidunt sit ametCurabitur eget condimentum odio, vitae condimentum elitDuis viverra lobortis magnaPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasSed facilisis mi eu scelerisque pharetraCras et massa odioPraesent quis nulla vitae mi blandit egestas ac vitae liberoCras ultricies ex non consequat scelerisqueNulla et est ac sem placerat convallis ac vitae massaPhasellus lobortis mauris vel est vehicula lobortisCurabitur ipsum ipsum, ullamcorper eget placerat sit amet, dapibus iaculis dui Phasellus facilisis rutrum metus nec euismod.`
-        }
+            text: `Jan 3 (Reuters) - Millions of low-income households in Britain will receive cost-of-living support from the government of up to 900 pounds ($1,084) over the financial year.
+            
+The country's Department of Work and Pensions said on Tuesday.
+
+The money will directly go to claimants' bank accounts in three payments over the financial year, the department said in a statement.
+
+The cash support was announced by Chancellor Jeremy Hunt in his Autumn statement along with a string of tax increases and tighter public spending. 
+
+The government did not give details on the payment schedule at the time.
+
+There will also be a separate 150 pounds for more than six million disabled people and 300 pounds for over eight million pensioners, the department said.
+
+The latest support package follows a 1,200 pound cash support programme for low-income households last year as Britain struggles with a cost-of-living crisis amid a challenging economic environment.
+
+($1 = 0.8296 pounds)`}
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.translate.result.length).toBeGreaterThan(500); //check return length huge
+    expect(response.data?.styleguidemulti.result.length).toBeGreaterThan(100); //check return length 
 });
 
-it('chunking test of translate endpoint with two long text sentence', async () => {
+it('performance run of styleguidemulti endpoint with small 4 paragraph text', async () => {
     const response = await testServer.executeOperation({
-        query: 'query translate($text: String!) { translate(text: $text) { result } }',
-        variables: {
-            text: `I love coding. I like coding. Lorem ipsum dolor sit amet, consectetur adipiscing elit in id erat sem phasellus ac dapibus purus, in fermentum nunc mauris quis rutrum magna Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc Aenean sit amet leo est Nunc ante ex, blandit et felis ut, iaculis lacinia est Phasellus dictum orci id libero ullamcorper tempor Vivamus id pharetra odioSed consectetur leo sed tortor dictum venenatisDonec gravida libero non accumsan suscipitDonec lectus turpis, ullamcorper eu pulvinar iaculis, ornare ut risusPhasellus aliquam, turpis quis viverra condimentum, risus est pretium metus, in porta ipsum tortor vitae elitPellentesque id finibus eratIn suscipit, sapien non posuere dignissim, augue nisl ultrices tortor, sit amet eleifend nibh elit at risus Donec diam ligula, sagittis ut nisl tincidunt, porta sodales magnaVestibulum ut dui arcuFusce at dolor exAliquam eu justo non libero volutpat pulvinar at id urnaDonec nec purus sed elit bibendum faucibusPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasVivamus iaculis mattis velit, ut lacinia massa lacinia quisPhasellus porttitor gravida ex, id aliquet eros rhoncus quisUt fringilla, lectus a vehicula luctus, diam odio convallis dolor, sodales pharetra nulla ex dictum justoUt faucibus, augue quis dictum iaculis, diam leo maximus sapien, sit amet vulputate eros quam sed semCras malesuada, sapien sit amet iaculis euismod, nunc odio lacinia est, dictum iaculis ante nisi in estFusce vehicula lorem tellusNullam a tempus nisiSed ut lectus nec ligula blandit tempusDonec faucibus turpis id urna vehicula imperdietDuis tempor vitae orci interdum dignissimPhasellus sed efficitur semNullam accumsan, turpis vitae consectetur ullamcorper, lectus purus tincidunt nisi, in pulvinar leo tortor at semDonec at feugiat dui, nec rhoncus nibhNam faucibus ultrices nisl at lobortisMorbi congue, nisl vel fermentum tristique, dui ipsum rhoncus massa, non varius nibh massa in turpisVestibulum vulputate, felis quis lacinia porta, nulla ex volutpat lorem, non rhoncus neque erat quis arcuMorbi massa nisl, hendrerit eget tortor condimentum, lobortis dapibus semAliquam ut dapibus elitSed porta dignissim anteNullam interdum ligula et massa vehicula, vel gravida diam laoreetVivamus et enim eget turpis pellentesque laoreetVivamus pellentesque neque et mauris imperdiet pulvinar Aliquam eget ligula congue, tincidunt magna eu, rutrum urnaSed consequat orci est, vel laoreet magna tincidunt sit ametCurabitur eget condimentum odio, vitae condimentum elitDuis viverra lobortis magnaPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasSed facilisis mi eu scelerisque pharetraCras et massa odioPraesent quis nulla vitae mi blandit egestas ac vitae liberoCras ultricies ex non consequat scelerisqueNulla et est ac sem placerat convallis ac vitae massaPhasellus lobortis mauris vel est vehicula lobortisCurabitur ipsum ipsum, ullamcorper eget placerat sit amet, dapibus iaculis dui Phasellus facilisis rutrum metus nec euismod.Lorem ipsum dolor sit amet, consectetur adipiscing elit in id erat sem phasellus ac dapibus purus, in fermentum nunc mauris quis rutrum magna Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc Aenean sit amet leo est Nunc ante ex, blandit et felis ut, iaculis lacinia est Phasellus dictum orci id libero ullamcorper tempor Vivamus id pharetra odioSed consectetur leo sed tortor dictum venenatisDonec gravida libero non accumsan suscipitDonec lectus turpis, ullamcorper eu pulvinar iaculis, ornare ut risusPhasellus aliquam, turpis quis viverra condimentum, risus est pretium metus, in porta ipsum tortor vitae elitPellentesque id finibus eratIn suscipit, sapien non posuere dignissim, augue nisl ultrices tortor, sit amet eleifend nibh elit at risus Donec diam ligula, sagittis ut nisl tincidunt, porta sodales magnaVestibulum ut dui arcuFusce at dolor exAliquam eu justo non libero volutpat pulvinar at id urnaDonec nec purus sed elit bibendum faucibusPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasVivamus iaculis mattis velit, ut lacinia massa lacinia quisPhasellus porttitor gravida ex, id aliquet eros rhoncus quisUt fringilla, lectus a vehicula luctus, diam odio convallis dolor, sodales pharetra nulla ex dictum justoUt faucibus, augue quis dictum iaculis, diam leo maximus sapien, sit amet vulputate eros quam sed semCras malesuada, sapien sit amet iaculis euismod, nunc odio lacinia est, dictum iaculis ante nisi in estFusce vehicula lorem tellusNullam a tempus nisiSed ut lectus nec ligula blandit tempusDonec faucibus turpis id urna vehicula imperdietDuis tempor vitae orci interdum dignissimPhasellus sed efficitur semNullam accumsan, turpis vitae consectetur ullamcorper, lectus purus tincidunt nisi, in pulvinar leo tortor at semDonec at feugiat dui, nec rhoncus nibhNam faucibus ultrices nisl at lobortisMorbi congue, nisl vel fermentum tristique, dui ipsum rhoncus massa, non varius nibh massa in turpisVestibulum vulputate, felis quis lacinia porta, nulla ex volutpat lorem, non rhoncus neque erat quis arcuMorbi massa nisl, hendrerit eget tortor condimentum, lobortis dapibus semAliquam ut dapibus elitSed porta dignissim anteNullam interdum ligula et massa vehicula, vel gravida diam laoreetVivamus et enim eget turpis pellentesque laoreetVivamus pellentesque neque et mauris imperdiet pulvinar Aliquam eget ligula congue, tincidunt magna eu, rutrum urnaSed consequat orci est, vel laoreet magna tincidunt sit ametCurabitur eget condimentum odio, vitae condimentum elitDuis viverra lobortis magnaPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasSed facilisis mi eu scelerisque pharetraCras et massa odioPraesent quis nulla vitae mi blandit egestas ac vitae liberoCras ultricies ex non consequat scelerisqueNulla et est ac sem placerat convallis ac vitae massaPhasellus lobortis mauris vel est vehicula lobortisCurabitur ipsum ipsum, ullamcorper eget placerat sit amet, dapibus iaculis dui Phasellus facilisis rutrum metus nec euismod.`
-        }
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
+        variables: { text: 'helo there my dear worldd! \n\n how do you do? \n\n what\'s up \n\n there wer go@' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.translate.result.length).toBeGreaterThan(500); //check return length huge
+    expect(response.data?.styleguidemulti.result).toMatch(/hello.*world/i);
+});
+
+it('performance run of styleguidemulti endpoint with small length text', async () => {
+    const response = await testServer.executeOperation({
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
+        variables: { text: 'here is my frst text?\n\n and the seconded txt' },
+    });
+
+    expect(response.errors).toBeUndefined();
+    expect(response.data?.styleguidemulti.result).toMatch(/first.*text/i);
+});
+
+it('performance run of styleguidemulti endpoint with single sentence text', async () => {
+    const response = await testServer.executeOperation({
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result }}',
+        variables: { text: 'helo there my dear worldd!!!!!' },
+    });
+
+    expect(response.errors).toBeUndefined();
+    expect(response.data?.styleguidemulti.result).toMatch(/hello.*world/i);
+});
+
+it('performance run of styleguidemulti endpoint with single paraghraph', async () => {
+    const response = await testServer.executeOperation({
+        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
+        variables: {
+            text: `Jan 3 (Reuters) - Millions of low-income households in Britain will receive cost-of-living support from the government of up to 900 pounds ($1,084) over the financial year.The country's Department of Work and Pensions said on Tuesday.The money will directly go to claimants' bank accounts in three payments over the financial year, the department said in a statement.The cash support was announced by Chancellor Jeremy Hunt in his Autumn statement along with a string of tax increases and tighter public spending. The government did not give details on the payment schedule at the time.`
+        },
+    });
+
+    expect(response.errors).toBeUndefined();
+    // expect(response.data?.styleguidemulti).toMatch(/hello.*world/i);
 });

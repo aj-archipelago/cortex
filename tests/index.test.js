@@ -1,12 +1,18 @@
 const { ApolloServer } = require('apollo-server');
-const { typeDefs, resolvers } = require('./index')();
+const { config } = require('../config');
+const { typeDefs, resolvers } = require('../index')();
 
 jest.setTimeout(60000);
 
-const testServer = new ApolloServer({
-    typeDefs,
-    resolvers,
-});
+const getTestServer = () => {
+    return new ApolloServer({
+        typeDefs,
+        resolvers,
+        context: () => ({ config, requestState: {} }),
+    });
+}
+
+const testServer = getTestServer();
 
 afterAll(() => {
     // stop server after all tests
@@ -165,3 +171,7 @@ it('validates topics endpoint with given num of count return', async () => {
         expect(topic).toBeDefined();
     });
 });
+
+module.exports = {
+    getTestServer,
+};

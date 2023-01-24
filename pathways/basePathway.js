@@ -7,13 +7,11 @@ module.exports = {
     prompt: `{{text}}`,
     defaultInputParameters: {
         text: ``,
+        // Add the option of making every call async
+        async: false,
     },
     inputParameters: {},
     typeDef,
     rootResolver,
     resolver,
-    parameters: {
-        // Add the option of making every call async
-        async: false,
-    }
 }
