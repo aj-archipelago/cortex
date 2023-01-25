@@ -14,7 +14,9 @@ const { KeyvAdapter } = require("@apollo/utils.keyvadapter");
 const responseCachePlugin = require('apollo-server-plugin-response-cache').default
 
 const subscriptions = require('./subscriptions');
+const { buildLimiters } = require('../request');
 const { cancelRequestResolver } = require('./resolver');
+
 const PORT = process.env.CORTEX_PORT || 4000;
 
 const getPlugins = (config) => {
@@ -103,6 +105,9 @@ const getResolvers = (config, pathways) => {
 
 //graphql api build factory method
 const build = (config) => {
+    // build api limiters 
+    buildLimiters(config);
+    
     //build api
     const pathways = config.get('pathways');
 

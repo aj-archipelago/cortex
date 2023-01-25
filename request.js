@@ -1,14 +1,20 @@
 const axios = require('axios');
 const Bottleneck = require("bottleneck/es5");
 
-const REQUESTS_PER_SECOND = 20;
-const limiter = new Bottleneck({
-    minTime: 1000 / REQUESTS_PER_SECOND,
-    // maxConcurrent: 20,
-})
+const limiters = {};
+
+const buildLimiters = (config) => {
+    console.log('Building limiters...');
+    for (const [name, model] of Object.entries(config.get('models'))) {
+        limiters[name] = new Bottleneck({
+            minTime: 1000 / (model.requestsPerSecond ?? 100),
+            // maxConcurrent: 20,
+        })
+    }
+}
 
 const MAX_RETRY = 5;
-const postRequest = async ({ url, params, headers }) => {
+const postRequest = async ({ url, params, headers }, model) => {
     let retry = 0;
     const errors = []
     for (let i = 0; i < MAX_RETRY; i++) {
@@ -17,7 +23,10 @@ const postRequest = async ({ url, params, headers }) => {
                 console.log(`Retrying request #retry ${i}: ${JSON.stringify(params)}...`);
                 await new Promise(r => setTimeout(r, 200 * Math.pow(2, i))); // exponential backoff
             }
-            return await limiter.schedule(() => axios.post(url, params, { headers }));
+            if (!limiters[model]) {
+                throw new Error(`No limiter for model ${model}!`);
+            }
+            return await limiters[model].schedule(() => axios.post(url, params, { headers }));
         } catch (e) {
             console.error(`Failed request with params ${JSON.stringify(params)}: ${e}`);
             errors.push(e);
@@ -26,8 +35,8 @@ const postRequest = async ({ url, params, headers }) => {
     return { error: errors };
 }
 
-const request = async (params) => {
-    const response = await postRequest(params);
+const request = async (params, model) => {
+    const response = await postRequest(params, model);
     const { error, data } = response;
     if (error && error.length > 0) {
         const lastError = error[error.length - 1];
@@ -38,5 +47,5 @@ const request = async (params) => {
 }
 
 module.exports = {
-    request, postRequest
+    request, postRequest, buildLimiters
 }

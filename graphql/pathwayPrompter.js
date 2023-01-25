@@ -6,7 +6,8 @@ const { Exception } = require("handlebars");
 class PathwayPrompter {
     constructor({ config, pathway }) {
         const defaultModel = config.get('default_model');
-        this.model = config.get('models')[pathway.model || defaultModel];
+        this.modelName = pathway.model || defaultModel;
+        this.model = config.get('models')[this.modelName];
         this.environmentVariables = config.getEnv();
         this.temperature = pathway.temperature;
         this.pathwayPrompt = pathway.prompt;
@@ -64,7 +65,7 @@ class PathwayPrompter {
 
         const url = this.requestUrl(text);
         const params = { ...(this.model.params || {}), ...requestParameters }
-        const data = await request({ url, params, headers });
+        const data = await request({ url, params, headers }, this.modelName);
         console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`)
         console.log(`\x1b[36m${params.prompt}\x1b[0m`)
         console.log(`\x1b[34m> ${getResponseResult(data)}\x1b[0m`)
