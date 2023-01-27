@@ -12,8 +12,6 @@ nlp.extend(plugin);
 // in a multi-server environment
 const requestState = {}
 
-const MAX_CHUNK_LENGTH = 1000;
-
 class PathwayResponseParser {
     constructor(pathway) {
         this.pathway = pathway;
@@ -79,7 +77,9 @@ class PathwayResolver {
     }
 
     chunkText(text) {
-        if (!this.enableChunking && text.length < MAX_CHUNK_LENGTH) { // no chunking, return as is
+        const maxPromptLength = Math.max(...this.prompts.map(p => p.length));
+        const maxChunkLength = (this.pathwayPrompter.model.maxChunkLength ?? 2000) - maxPromptLength;
+        if (!this.enableChunking && text.length < maxChunkLength) { // no chunking, return as is
             return [text];
         } 
 
@@ -89,22 +89,32 @@ class PathwayResolver {
         // Chunk paragraphs into sentences if needed
         const sentenceChunks = [];
         for (let i = 0; i < paragraphChunks.length; i++) {
-            if (paragraphChunks[i].length > MAX_CHUNK_LENGTH) { // too long paragraph, chunk into sentences
+            if (paragraphChunks[i].length > maxChunkLength) { // too long paragraph, chunk into sentences
                 sentenceChunks.push(...nlp(paragraphChunks[i]).sentences().json().map(v => v.text));
             } else {
                 sentenceChunks.push(paragraphChunks[i]);
             }
         }
 
+        // Chunk sentences with newlines if needed
+        const newlineChunks = [];
+        for (let i = 0; i < sentenceChunks.length; i++) {
+            if (sentenceChunks[i].length > maxChunkLength) { // too long, split into lines
+                newlineChunks.push(...sentenceChunks[i].split('\n'));
+            } else {
+                newlineChunks.push(sentenceChunks[i]);
+            }
+        }
+
         // Chunk sentences into word chunks if needed
         const chunks = [];
-        for (let j = 0; j < sentenceChunks.length; j++) {
-            if (sentenceChunks[j].length > MAX_CHUNK_LENGTH) { // too long sentence, chunk into words
-                const words = sentenceChunks[j].split(' ');
-                // merge words into chunks up to MAX_CHUNK_LENGTH
+        for (let j = 0; j < newlineChunks.length; j++) {
+            if (newlineChunks[j].length > maxChunkLength) { // too long sentence, chunk into words
+                const words = newlineChunks[j].split(' ');
+                // merge words into chunks up to maxChunkLength
                 let chunk = '';
                 for (let k = 0; k < words.length; k++) {
-                    if (chunk.length + words[k].length > MAX_CHUNK_LENGTH) {
+                    if (chunk.length + words[k].length > maxChunkLength) {
                         chunks.push(chunk.trim());
                         chunk = '';
                     }
@@ -114,11 +124,11 @@ class PathwayResolver {
                     chunks.push(chunk.trim());
                 }
             } else {
-                chunks.push(sentenceChunks[j]);
+                chunks.push(newlineChunks[j]);
             }
         }
 
-        return chunks.map(chunk => '\n\n' + chunk + '\n\n');
+        return chunks.filter(Boolean).map(chunk => '\n\n' + chunk + '\n\n');
     }
 
     async processRequest({ text, ...parameters }, requestId, requestState) {
@@ -133,9 +143,9 @@ class PathwayResolver {
         // Store the request state
         requestState[requestId] = { totalCount: anticipatedRequestCount, completedCount: 0 };
 
-        // To each paragraph of text, apply all prompts serially
-        const data = await Promise.all(chunks.map(paragraph =>
-            this.applyPromptsSerially(paragraph, parameters, requestId, requestState)));
+        // Paralellize chunks and for each chunk of text apply all prompts serially
+        const data = await Promise.all(chunks.map(chunk =>
+            this.applyPromptsSerially(chunk, parameters, requestId, requestState)));
 
         return data.join("\n\n");
     }

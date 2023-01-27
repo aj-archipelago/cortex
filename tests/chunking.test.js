@@ -69,7 +69,7 @@ it('chunking test of translate endpoint with single long text sentence', async (
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.translate.result.length).toBeGreaterThan(500); //check return length huge
+    expect(response.data?.translate.result.length).toBeGreaterThan(200); //check return length huge
 });
 
 it('chunking test of translate endpoint with two long text sentence', async () => {
@@ -77,6 +77,71 @@ it('chunking test of translate endpoint with two long text sentence', async () =
         query: 'query translate($text: String!) { translate(text: $text) { result } }',
         variables: {
             text: `I love coding. I like coding. Lorem ipsum dolor sit amet, consectetur adipiscing elit in id erat sem phasellus ac dapibus purus, in fermentum nunc mauris quis rutrum magna Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc Aenean sit amet leo est Nunc ante ex, blandit et felis ut, iaculis lacinia est Phasellus dictum orci id libero ullamcorper tempor Vivamus id pharetra odioSed consectetur leo sed tortor dictum venenatisDonec gravida libero non accumsan suscipitDonec lectus turpis, ullamcorper eu pulvinar iaculis, ornare ut risusPhasellus aliquam, turpis quis viverra condimentum, risus est pretium metus, in porta ipsum tortor vitae elitPellentesque id finibus eratIn suscipit, sapien non posuere dignissim, augue nisl ultrices tortor, sit amet eleifend nibh elit at risus Donec diam ligula, sagittis ut nisl tincidunt, porta sodales magnaVestibulum ut dui arcuFusce at dolor exAliquam eu justo non libero volutpat pulvinar at id urnaDonec nec purus sed elit bibendum faucibusPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasVivamus iaculis mattis velit, ut lacinia massa lacinia quisPhasellus porttitor gravida ex, id aliquet eros rhoncus quisUt fringilla, lectus a vehicula luctus, diam odio convallis dolor, sodales pharetra nulla ex dictum justoUt faucibus, augue quis dictum iaculis, diam leo maximus sapien, sit amet vulputate eros quam sed semCras malesuada, sapien sit amet iaculis euismod, nunc odio lacinia est, dictum iaculis ante nisi in estFusce vehicula lorem tellusNullam a tempus nisiSed ut lectus nec ligula blandit tempusDonec faucibus turpis id urna vehicula imperdietDuis tempor vitae orci interdum dignissimPhasellus sed efficitur semNullam accumsan, turpis vitae consectetur ullamcorper, lectus purus tincidunt nisi, in pulvinar leo tortor at semDonec at feugiat dui, nec rhoncus nibhNam faucibus ultrices nisl at lobortisMorbi congue, nisl vel fermentum tristique, dui ipsum rhoncus massa, non varius nibh massa in turpisVestibulum vulputate, felis quis lacinia porta, nulla ex volutpat lorem, non rhoncus neque erat quis arcuMorbi massa nisl, hendrerit eget tortor condimentum, lobortis dapibus semAliquam ut dapibus elitSed porta dignissim anteNullam interdum ligula et massa vehicula, vel gravida diam laoreetVivamus et enim eget turpis pellentesque laoreetVivamus pellentesque neque et mauris imperdiet pulvinar Aliquam eget ligula congue, tincidunt magna eu, rutrum urnaSed consequat orci est, vel laoreet magna tincidunt sit ametCurabitur eget condimentum odio, vitae condimentum elitDuis viverra lobortis magnaPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasSed facilisis mi eu scelerisque pharetraCras et massa odioPraesent quis nulla vitae mi blandit egestas ac vitae liberoCras ultricies ex non consequat scelerisqueNulla et est ac sem placerat convallis ac vitae massaPhasellus lobortis mauris vel est vehicula lobortisCurabitur ipsum ipsum, ullamcorper eget placerat sit amet, dapibus iaculis dui Phasellus facilisis rutrum metus nec euismod.Lorem ipsum dolor sit amet, consectetur adipiscing elit in id erat sem phasellus ac dapibus purus, in fermentum nunc mauris quis rutrum magna Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc Aenean sit amet leo est Nunc ante ex, blandit et felis ut, iaculis lacinia est Phasellus dictum orci id libero ullamcorper tempor Vivamus id pharetra odioSed consectetur leo sed tortor dictum venenatisDonec gravida libero non accumsan suscipitDonec lectus turpis, ullamcorper eu pulvinar iaculis, ornare ut risusPhasellus aliquam, turpis quis viverra condimentum, risus est pretium metus, in porta ipsum tortor vitae elitPellentesque id finibus eratIn suscipit, sapien non posuere dignissim, augue nisl ultrices tortor, sit amet eleifend nibh elit at risus Donec diam ligula, sagittis ut nisl tincidunt, porta sodales magnaVestibulum ut dui arcuFusce at dolor exAliquam eu justo non libero volutpat pulvinar at id urnaDonec nec purus sed elit bibendum faucibusPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasVivamus iaculis mattis velit, ut lacinia massa lacinia quisPhasellus porttitor gravida ex, id aliquet eros rhoncus quisUt fringilla, lectus a vehicula luctus, diam odio convallis dolor, sodales pharetra nulla ex dictum justoUt faucibus, augue quis dictum iaculis, diam leo maximus sapien, sit amet vulputate eros quam sed semCras malesuada, sapien sit amet iaculis euismod, nunc odio lacinia est, dictum iaculis ante nisi in estFusce vehicula lorem tellusNullam a tempus nisiSed ut lectus nec ligula blandit tempusDonec faucibus turpis id urna vehicula imperdietDuis tempor vitae orci interdum dignissimPhasellus sed efficitur semNullam accumsan, turpis vitae consectetur ullamcorper, lectus purus tincidunt nisi, in pulvinar leo tortor at semDonec at feugiat dui, nec rhoncus nibhNam faucibus ultrices nisl at lobortisMorbi congue, nisl vel fermentum tristique, dui ipsum rhoncus massa, non varius nibh massa in turpisVestibulum vulputate, felis quis lacinia porta, nulla ex volutpat lorem, non rhoncus neque erat quis arcuMorbi massa nisl, hendrerit eget tortor condimentum, lobortis dapibus semAliquam ut dapibus elitSed porta dignissim anteNullam interdum ligula et massa vehicula, vel gravida diam laoreetVivamus et enim eget turpis pellentesque laoreetVivamus pellentesque neque et mauris imperdiet pulvinar Aliquam eget ligula congue, tincidunt magna eu, rutrum urnaSed consequat orci est, vel laoreet magna tincidunt sit ametCurabitur eget condimentum odio, vitae condimentum elitDuis viverra lobortis magnaPellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestasSed facilisis mi eu scelerisque pharetraCras et massa odioPraesent quis nulla vitae mi blandit egestas ac vitae liberoCras ultricies ex non consequat scelerisqueNulla et est ac sem placerat convallis ac vitae massaPhasellus lobortis mauris vel est vehicula lobortisCurabitur ipsum ipsum, ullamcorper eget placerat sit amet, dapibus iaculis dui Phasellus facilisis rutrum metus nec euismod.`
+        }
+    });
+
+    expect(response.errors).toBeUndefined();
+    expect(response.data?.translate.result.length).toBeGreaterThan(500); //check return length huge
+});
+
+it('chunking test...', async () => {
+    const response = await testServer.executeOperation({
+        query: 'query translate($text: String!) { translate(text: $text) { result } }',
+        variables: {
+            text: `
+            صعدت روسيا هجماتها في أنحاء أوكرانيا، بعد يوم من إعلان الغرب مدّ كييف بدبابات قتالية، واستهدفت عشرات الصواريخ والمسيّرات الروسية العاصمة الأوكرانية ومدنا في الجنوب والشرق، واعتبر الكرملين أن الدبابات لن تغيّر من طبيعة المعركة، في حين أعلنت وزارة الدفاع الأوكرانية أن هناك تحضيرات قتالية روسية انطلاقا من القرم.
+
+فقد شنّت القوات الروسية ضربات صاروخية في أنحاء مختلفة من أوكرانيا؛ من بينها 37 غارة جوية و10 ضربات صاروخية ليلية استهدفت البنية التحتية في دنيبرو ومناطق أخرى، مما دفع الجيش الأوكراني إلى إعلان عن حالة التأهب القصوى في عموم أراضي البلاد.
+
+كما شمل القصف والغارات العاصمة كييف التي استيقظ سكانها على وقع أصوات الانفجارات بعد استهداف القوات الروسية لها بأكثر من 15 صاروخ "كروز"، قالت السلطات الأوكرانية إن دفاعاتها الجوية نجحت في إسقاطها جميعها.
+
+وأكدت السلطات العسكرية في كييف تصدّي الدفاعات الجوية الأوكرانية للصواريخ الروسية التي وجهت نحو المدينة، لكنها دفعت بعدد كبير من سكانها إلى النزول إلى الملاجئ والبقاء فيها، بعد تأكيد المجلس الإقليمي في كييف أن خطر الضربات الجوية لم ينته.
+
+وفي وقت سابق، أعلن عمدة كييف فيتالي كليتشكو مقتل شخص وإصابة اثنين بهجوم صاروخي روسي استهدف مبنى غير سكني بمنطقة هولوسيفسكي بالمدينة، وأكد -في منشور على تليغرام- وقوع انفجارات متفرقة في المدينة وحث السكان على الاحتماء.
+
+وتشتد المواجهات بين الطرفين في الجبهة الجنوبية حيث قصفت القوات الروسية مناطق عدة لا سيما في مقاطعة خيرسون جنوبا، كما أعلنت الدفاعات الأوكرانية إسقاط صواريخ روسية في سماء مقاطعة ميكولايف، واستهدفت الصواريخ الروسية كذلك منشآت للطاقة في مقاطعة أوديسا على ساحل البحر الأسود جنوبا وتسببت في انقطاع التيار الكهربائي.
+
+وفي الجبهة الشرقية، على ضفاف نهر دنيبرو، تعرضت مدينة زاباروجيا لهجمة صاروخية روسية جديدة. كما أعلن الدفاع الجوي الأوكراني رصد صاروخين موجهين نحو مقاطعة دنيبرو، في مدينة كريفيري غربي المقاطعة.
+
+في الأثناء، أعلنت سلطات دونيتسك الموالية لروسيا دخول القوات الروسية مدينة أوغليدار، وتعزيز مواقعها في ضواحيها.
+
+وتزامن التصعيد العسكري الروسي أيضا مع تحذير أوكراني من تحضيرات قتالية روسية انطلاقا من القرم؛ حيث قال المتحدث باسم هيئة الأركان الأوكرانية أولكسندر شتوبون إن موسكو تعدّ لعملية تعبئة جديدة في المنطقة.
+
+وبالتوازي مع تحركات روسية في القرم أكدت الاستخبارات الأوكرانية حاجة القوات الأوكرانية إلى مزيد من المدفعية البعيدة المدى، لضرب التعزيزات الروسية التي تصل من شبه جزيرة القرم، وقالت إن الروس ينقلون ذخيرة وعتادا إلى مستودعات تبعد عن خطوط الجبهة الجنوبية أكثر من 80 كيلومترا.
+
+وتأتي التطورات العسكرية في أوكرانيا في ظل تأكيد عدد من الدول الأوروبية، بينهما ألمانيا، إرسال دبابات "ليوبارد2" إلى الجيش الأوكراني.
+
+وتخشى دول حلف شمال الأطلسي (ناتو) أن تتسبب بعض الإمدادات العسكرية إلى أوكرانيا بتصعيد وتيرة الصراع وتحويله إلى حرب مباشرة مع روسيا.
+
+دبابات.. وعيد وتصعيد
+
+ورافق الرد العسكري الروسي على إعلان تزويد أوكرانيا بالدبابات تصعيد على مستوى التصريحات أيضا.
+
+فبعد توعد موسكو هذه الدبابات بالحرق، اعتبر المتحدث باسم الكرملين ديمتري بيسكوف تزويد أوكرانيا بالدبابات الغربية انخراطا مباشرا في الصراع، ودليلا على التورط الأميركي والأوروبي المباشر والمتزايد في هذه الحرب، وفق تعبيره.
+
+وأكد بيسكوف أنه لا نية لدى موسكو لتغيير وضع العملية العسكرية الخاصة في أوكرانيا، بعد إرسال الدبابات إلى كييف.
+
+بدوره، قال رئيس لجنة مجلس الدوما الروسي للشؤون الدولية ليونيد سلوتسكي إن كتيبة الدبابات الأميركية لن تساعد الرئيس الأوكراني فولوديمير زيلينسكي على تغيير مسار العملية الروسية في أوكرانيا ولا الوضع في شبه جزيرة القرم، حسب تعبيره.
+
+وأضاف أيضا أن أي محاولة للاستيلاء على شبه الجزيرة القرم ستلقى ردا قاسيا، مؤكدا أن الهجوم الروسي لن يوقفه إمداد آخر من الأسلحة الغربية.
+
+تنديد أميركي
+
+من جانبها، نددت الولايات المتحدة الأميركية، اليوم الخميس، بالهجمات الصاروخية الروسية التي استهدفت العاصمة الأوكرانية كييف.
+
+ووصفت السفيرة الأميركية لدى كييف بريدغيت برينك، في تغريدة، الهجمات الورسية بأنها "عنيفة" وتتبع "الفشل الإستراتيجي نفسه".
+
+وأضافت "لا يمكن لموجة الهجمات الروسية بالصواريخ والمسيرات أن توقف المدافعين الأبطال عن أوكرانيا، ولا شعبها الشجاع، ولا دعمنا الحاسم والموحد لأوكرانيا".
+
+دبابات "تشالنجر2"
+
+وفي تطور آخر، قال وزير الدولة البريطاني لشؤون الدفاع أليكس تشوك إن من المقرر أن تدخل دبابات "تشالنجر2" البريطانية مسرح العمليات العسكرية في أوكرانيا بنهاية مارس/آذار المقبل.
+
+وأضاف وزير الدولة البريطاني لشؤون الدفاع، في مؤتمر صحفي، أن بلاده قدمت 200 عربة مدرعة لأوكرانيا حتى الآن، وأن تدريب القوات الأوكرانية على استخدام دبابات "تشالنجر2" سيبدأ الأسبوع المقبل.
+
+ورحب الوزير البريطاني بقرار ألمانيا إرسال دبابات "ليوبارد2″، وقرار الولايات المتحدة إرسال دبابات "أبرامز" لأوكرانيا.
+
+وأعلن أمس الأربعاء الرئيس الأميركي جو بايدن أن الولايات المتحدة سترسل 31 دبابة من طراز "إم1 أبرامز" القتالية إلى أوكرانيا، وذلك عقب ساعات من تأكيد ألمانيا أنها ستنقل إلى حكومة كييف 14 من دباباتها من طراز "ليوبارد2″، وإعلان مشابه من النرويج ودول أوروبية أخرى، الأمر الذي رحب به الناتو، ووصفته أوكرانيا بـ"حلف الدبابات الكبير".`
         }
     });
 

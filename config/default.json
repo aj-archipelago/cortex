@@ -8,7 +8,8 @@
                 "api-key": "{{AZURE_OAI_API_KEY}}",
                 "Content-Type": "application/json"
             },
-            "requestsPerSecond": 20
+            "requestsPerSecond": 20,
+            "maxChunkLength": 2000
         },
         "td3": {
             "type": "OPENAI",
@@ -20,7 +21,8 @@
             "params": {
                 "model": "text-davinci-003"
             },
-            "requestsPerSecond": 10
+            "requestsPerSecond": 10,
+            "maxChunkLength": 2000
         }
     },
     "cache": false,
