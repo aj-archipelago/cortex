@@ -14,4 +14,5 @@ module.exports = {
     "summary": require('./summary'),
     "topics": require('./topics'),
     "translate": require('./translate'),
+    "translate_td3": require('./translate_td3'),
 }

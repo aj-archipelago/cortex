@@ -8,13 +8,20 @@ class PathwayPrompter {
         const defaultModel = config.get('default_model');
         this.modelName = pathway.model || defaultModel;
         this.model = config.get('models')[this.modelName];
+        if (!this.model) {
+            throw new Exception(`Model ${this.modelName} not found in config`);
+        }
         this.environmentVariables = config.getEnv();
         this.temperature = pathway.temperature;
         this.pathwayPrompt = pathway.prompt;
         this.pathwayName = pathway.name;
         this.promptParameters = {}
-        if (pathway.parameters) { //process default params defined in pathway
-            for (const [k, v] of Object.entries(pathway.parameters)) {
+        // Make all of the parameters defined on the pathway itself available to the prompt
+        for (const [k, v] of Object.entries(pathway)) {
+           this.promptParameters[k] = v.default ?? v;
+        }
+        if (pathway.inputParameters) {
+            for (const [k, v] of Object.entries(pathway.inputParameters)) {
                 this.promptParameters[k] = v.default ?? v;
             }
         }

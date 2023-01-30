@@ -1,17 +1,27 @@
 {
-    "default_model": "td2",
+    "default_model": "azure-td2",
     "models": {
-        "td2": {
+        "azure-td2": {
             "type": "AZURE-OAI",
             "url": "https://archipelago-openai-eu.openai.azure.com/openai/deployments/archipelago-davinci/completions?api-version=2022-06-01-preview",
             "headers": {
-                "api-key": "{{AZURE_OAI_API_KEY}}",
+                "api-key": "{{ARCHIPELAGO_OPENAI_EU_KEY}}",
                 "Content-Type": "application/json"
             },
             "requestsPerSecond": 20,
             "maxChunkLength": 2000
         },
-        "td3": {
+        "azure-td3": {
+            "type": "AZURE-OAI",
+            "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-davinci-003/completions?api-version=2022-06-01-preview",
+            "headers": {
+                "api-key": "{{ARCHIPELAGO_OPENAI_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 20,
+            "maxChunkLength": 2000
+        },
+        "oai-td3": {
             "type": "OPENAI",
             "url": "https://api.openai.com/v1/completions",
             "headers": {
