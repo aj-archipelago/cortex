@@ -128,7 +128,7 @@ class PathwayResolver {
             }
         }
 
-        return chunks.filter(Boolean).map(chunk => '\n\n' + chunk + '\n\n');
+        return chunks.filter(Boolean).map(chunk => '\n' + chunk + '\n');
     }
 
     async processRequest({ text, ...parameters }, requestId, requestState) {
