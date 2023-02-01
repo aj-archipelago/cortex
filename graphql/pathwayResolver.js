@@ -12,6 +12,9 @@ nlp.extend(plugin);
 // in a multi-server environment
 const requestState = {}
 
+const DEFAULT_CHUNK_LENGTH = 1500;
+const MAX_PREVIOUS_CONTEXT_LENGTH = 300;
+
 class PathwayResponseParser {
     constructor(pathway) {
         this.pathway = pathway;
@@ -21,14 +24,14 @@ class PathwayResponseParser {
         if (this.pathway.parser) {
             return this.pathway.parser(data);
         }
-    
+
         if (this.pathway.list) {
             if (this.pathway.format) {
                 return parseNumberedObjectList(data, this.pathway.format);
             }
             return parseNumberedList(data)
         }
-    
+
         return data;
     }
 }
@@ -36,7 +39,7 @@ class PathwayResponseParser {
 class PathwayResolver {
     constructor({ config, pathway }) {
         this.pathway = pathway;
-        this.enableChunking = pathway.chunk;
+        this.useInputChunking = pathway.useInputChunking;
         this.responseParser = new PathwayResponseParser(pathway);
         this.pathwayPrompter = new PathwayPrompter({ config, pathway });
 
@@ -77,11 +80,17 @@ class PathwayResolver {
     }
 
     chunkText(text) {
-        const maxPromptLength = Math.max(...this.prompts.map(p => p.length));
-        const maxChunkLength = (this.pathwayPrompter.model.maxChunkLength ?? 2000) - maxPromptLength;
-        if (!this.enableChunking && text.length < maxChunkLength) { // no chunking, return as is
+        const maxPromptLength = Math.max(...this.prompts.map(p => p.length)) - (this.usePreviousContext ? MAX_PREVIOUS_CONTEXT_LENGTH : 0); // longest prompt
+        const maxChunkLength = (this.pathwayPrompter.model.maxChunkLength ?? this.DEFAULT_CHUNK_LENGTH) - maxPromptLength; 
+        if (maxChunkLength <= 0) { // prompt is too long covering all the input
+            throw new Error(`Your prompt is too long! Split or reduce length of your prompt, long prompt length: ${maxPromptLength}`);
+        }
+        if (!this.useInputChunking) { // no chunking, return as is
+            if (text.length >= maxChunkLength) {
+                console.warn(`Your input is possibly too long! Length: ${text.length}`);
+            }
             return [text];
-        } 
+        }
 
         // Chunk input into paragraphs if needed
         let paragraphChunks = nlp(text).paragraphs().views.map(v => v.text());
@@ -107,7 +116,7 @@ class PathwayResolver {
         }
 
         // Chunk sentences into word chunks if needed
-        const chunks = [];
+        let chunks = [];
         for (let j = 0; j < newlineChunks.length; j++) {
             if (newlineChunks[j].length > maxChunkLength) { // too long sentence, chunk into words
                 const words = newlineChunks[j].split(' ');
@@ -128,7 +137,22 @@ class PathwayResolver {
             }
         }
 
-        return chunks.filter(Boolean).map(chunk => '\n' + chunk + '\n');
+        chunks = chunks.filter(Boolean).map(chunk => '\n' + chunk + '\n'); //filter empty chunks and add newlines
+
+        // Merge chunks into maxChunkLength chunks
+        let mergedChunks = [];
+        let chunk = '';
+        for (let i = 0; i < chunks.length; i++) {
+            if (chunk.length + chunks[i].length > maxChunkLength) {
+                mergedChunks.push(chunk);
+                chunk = '';
+            }
+            chunk += chunks[i];
+        }
+        if (chunk.length > 0) {
+            mergedChunks.push(chunk);
+        }
+        return mergedChunks;
     }
 
     async processRequest({ text, ...parameters }, requestId, requestState) {
@@ -143,6 +167,23 @@ class PathwayResolver {
         // Store the request state
         requestState[requestId] = { totalCount: anticipatedRequestCount, completedCount: 0 };
 
+        // If pre information is needed, apply current prompt with previous prompt info, only parallelize current call
+        if (this.pathway.usePreviousContext) {
+            let previousContext = '';
+            for (let i = 0; i < this.prompts.length; i++) {
+                if (previousContext.length > MAX_PREVIOUS_CONTEXT_LENGTH) {
+                    //slice previous context to avoid max token limit but keep the last n characters up to a \n or space to avoid cutting words
+                    previousContext = previousContext.slice(-MAX_PREVIOUS_CONTEXT_LENGTH);
+                    previousContext = previousContext.slice(previousContext.search(/\s/)+1);
+                }
+
+                previousContext = await Promise.all(chunks.map(chunk =>
+                    this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousContext }, requestId, requestState)));
+                previousContext = previousContext.join("\n\n")
+            }
+            return previousContext;
+        }
+        
         // Paralellize chunks and for each chunk of text apply all prompts serially
         const data = await Promise.all(chunks.map(chunk =>
             this.applyPromptsSerially(chunk, parameters, requestId, requestState)));
@@ -153,24 +194,27 @@ class PathwayResolver {
     async applyPromptsSerially(text, parameters, requestId, requestState) {
         let cumulativeText = text;
         for (const prompt of this.prompts) {
-            if (requestState[requestId].canceled) {
-                return;
-            }
-
-            cumulativeText = await this.pathwayPrompter.execute(cumulativeText, parameters, prompt);
-            requestState[requestId].completedCount++;
-
-            const { completedCount, totalCount } = requestState[requestId];
-
-            pubsub.publish('REQUEST_PROGRESS', {
-                requestProgress: {
-                    requestId,
-                    progress: completedCount / totalCount,
-                }
-            });
-
+            cumulativeText = await this.applyPrompt(prompt, cumulativeText, parameters, requestId, requestState);
         }
         return cumulativeText;
+    }
+
+    async applyPrompt(prompt, text, parameters, requestId, requestState) {
+        if (requestState[requestId].canceled) {
+            return;
+        }
+        const result = await this.pathwayPrompter.execute(text, parameters, prompt);
+        requestState[requestId].completedCount++;
+
+        const { completedCount, totalCount } = requestState[requestId];
+
+        pubsub.publish('REQUEST_PROGRESS', {
+            requestProgress: {
+                requestId,
+                progress: completedCount / totalCount,
+            }
+        });
+        return result;
     }
 }
 

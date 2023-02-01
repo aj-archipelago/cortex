@@ -14,4 +14,5 @@ module.exports = {
     typeDef,
     rootResolver,
     resolver,
+    useInputChunking: true,
 }

@@ -4,6 +4,20 @@ jest.setTimeout(1800000);
 
 const testServer = getTestServer();
 
+it('test translate-pre', async () => {
+    const response = await testServer.executeOperation({
+        query: 'query($text: String!, $to:String) { translate_pre(text: $text, to:$to) { result } }',
+        variables: {
+            to: 'Turkish',
+            text: `besiktas is great.\n\n what about fenerbahce's rival?\n\n yes, galatasaray` },
+    });
+
+    expect(response.errors).toBeUndefined();
+    //check if it contains names like besiktas, fenerbahce, galatasaray
+    expect(response.data?.translate_pre.result).toMatch(/besiktas/i);
+    expect(response.data?.translate_pre.result).toMatch(/fenerbahce/i);
+    expect(response.data?.translate_pre.result).toMatch(/galatasaray/i);
+});
 
 it('test translate endpoint with huge arabic text english translation and check return non-arabic/english', async () => {
     const response = await testServer.executeOperation({

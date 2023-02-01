@@ -10,5 +10,4 @@ module.exports = {
         `Change all words to British English spelling regardless of where they occur. ${input}`,
         `Replace all profanity with asterisks. ${input}`,
     ],
-    chunk: true
 }

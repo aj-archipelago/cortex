@@ -46,10 +46,6 @@ Helo world herre somee exttra stuff!
     });
 
     expect(response.errors).toBeUndefined();
-
-    console.log(response.data?.styleguidemulti.result)
-
     expect(response.data?.styleguidemulti.result.length).toBeGreaterThan(1000); //check return length huge
-
 });
 

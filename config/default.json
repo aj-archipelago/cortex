@@ -9,7 +9,7 @@
                 "Content-Type": "application/json"
             },
             "requestsPerSecond": 20,
-            "maxChunkLength": 2000
+            "maxChunkLength": 1500
         },
         "azure-td3": {
             "type": "AZURE-OAI",
@@ -19,7 +19,7 @@
                 "Content-Type": "application/json"
             },
             "requestsPerSecond": 20,
-            "maxChunkLength": 2000
+            "maxChunkLength": 1500
         },
         "oai-td3": {
             "type": "OPENAI",
@@ -31,8 +31,8 @@
             "params": {
                 "model": "text-davinci-003"
             },
-            "requestsPerSecond": 10,
-            "maxChunkLength": 2000
+            "requestsPerSecond": 20,
+            "maxChunkLength": 1500
         }
     },
     "cache": false,
