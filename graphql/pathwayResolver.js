@@ -13,7 +13,7 @@ nlp.extend(plugin);
 const requestState = {}
 
 const DEFAULT_CHUNK_LENGTH = 1500;
-const MAX_PREVIOUS_CONTEXT_LENGTH = 300;
+const MAX_PREVIOUS_CONTEXT_LENGTH = 500;
 
 class PathwayResponseParser {
     constructor(pathway) {
@@ -177,9 +177,14 @@ class PathwayResolver {
                     previousContext = previousContext.slice(previousContext.search(/\s/)+1);
                 }
 
-                previousContext = await Promise.all(chunks.map(chunk =>
-                    this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousContext }, requestId, requestState)));
-                previousContext = previousContext.join("\n\n")
+                // If the prompt doesn't contain {{text}} then we can skip the chunking
+                if (this.prompts[i].indexOf("{{text}}") == -1) {
+                    previousContext = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousContext }, requestId, requestState);   
+                } else {
+                    previousContext = await Promise.all(chunks.map(chunk =>
+                        this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousContext }, requestId, requestState)));
+                    previousContext = previousContext.join("\n\n")
+                }
             }
             return previousContext;
         }
