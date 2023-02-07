@@ -1,3 +1,4 @@
 module.exports = {
-    prompt: `{{text}}`
+    prompt: `{{text}}`,
+    model: 'azure-td3'
 }
