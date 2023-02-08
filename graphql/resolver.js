@@ -16,7 +16,11 @@ const rootResolver = async (parent, args, contextValue, info) => {
 
     // Add request parameters back as debug
     const requestParameters = pathwayResolver.prompts.map(prompt => pathwayResolver.pathwayPrompter.requestParameters(args.text, args, prompt))
+    if (pathwayResolver.pathway.usePreviousContext) {
+        return { debug: JSON.stringify(requestParameters), result: await pathway.resolver(parent, args, contextValue, info), lastContext: pathwayResolver.lastContext}
+    }
     return { debug: JSON.stringify(requestParameters), result: await pathway.resolver(parent, args, contextValue, info) }
+
 }
 
 // This resolver is used by the root resolver to process the request

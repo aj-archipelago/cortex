@@ -1,5 +1,7 @@
 module.exports = {
     "pass": require("./pass"),
+    "chat_archie": require('./chat_archie'),
+    "chat_context": require('./chat_context'),
     "bias": require('./bias'),
     "complete": require('./complete'),
     "entities": require('./entities'),
@@ -8,6 +10,7 @@ module.exports = {
     "keywords": require('./keywords'),
     "paraphrase": require('./paraphrase'),
     "sentiment": require('./sentiment'),
+    "select_services": require('./select_services'),
     "spelling": require('./spelling'),
     "styleguide": require('./styleguide'),
     "styleguidemulti": require('./styleguidemulti'),
