@@ -2,6 +2,10 @@ const { request } = require("../request");
 const handlebars = require("handlebars");
 const { getResponseResult } = require("./parser");
 const { Exception } = require("handlebars");
+const { encode } = require("gpt-3-encoder");
+
+const DEFAULT_MAX_TOKENS = 4096;
+const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
 class PathwayPrompter {
     constructor({ config, pathway }) {
@@ -18,7 +22,7 @@ class PathwayPrompter {
         this.promptParameters = {}
         // Make all of the parameters defined on the pathway itself available to the prompt
         for (const [k, v] of Object.entries(pathway)) {
-           this.promptParameters[k] = v.default ?? v;
+            this.promptParameters[k] = v.default ?? v;
         }
         if (pathway.inputParameters) {
             for (const [k, v] of Object.entries(pathway.inputParameters)) {
@@ -26,6 +30,14 @@ class PathwayPrompter {
             }
         }
         this.requestCount = 1
+    }
+
+    getModelMaxChunkTokenLength() {
+        return (this.promptParameters.maxTokenLength ?? this.model.maxTokenLength ?? DEFAULT_MAX_TOKENS);
+    }
+
+    getPromptTokenRatio() {
+        return this.promptParameters.inputParameters.tokenRatio ?? this.promptParameters.tokenRatio ?? DEFAULT_PROMPT_TOKEN_RATIO;
     }
 
     requestUrl() {
@@ -45,9 +57,10 @@ class PathwayPrompter {
         const interpolatePrompt = handlebars.compile(promptText);
 
         const combinedParameters = { ...this.promptParameters, ...parameters };
+        const constructedPrompt = interpolatePrompt({ ...combinedParameters, text });
         const params = {
-            prompt: interpolatePrompt({ ...combinedParameters, text }),
-            max_tokens: 2048,
+            prompt: constructedPrompt,
+            max_tokens: this.getModelMaxChunkTokenLength() - encode(constructedPrompt).length,
             // model: "text-davinci-002",
             temperature: this.temperature ?? 0.7,
             // "top_p": 1,
@@ -85,4 +98,6 @@ class PathwayPrompter {
     }
 }
 
-module.exports = PathwayPrompter;
+module.exports = {
+    PathwayPrompter
+}

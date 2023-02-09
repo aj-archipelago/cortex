@@ -1,5 +1,5 @@
+const { semanticTruncate } = require('../graphql/chunker');
 const { PathwayResolver } = require('../graphql/pathwayResolver');
-const { semanticTruncate } = require('../graphql/parser');
 
 module.exports = {
     prompt: `Write a short ({{targetLength}} character) summary of the following:\n\n{{text}}`,

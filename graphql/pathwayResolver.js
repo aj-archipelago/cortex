@@ -1,16 +1,17 @@
-const PathwayPrompter = require('./pathwayPrompter');
-const { parseNumberedList, parseNumberedObjectList, getSemanticChunks } = require('./parser')
+const { PathwayPrompter } = require('./pathwayPrompter');
+const { parseNumberedList, parseNumberedObjectList } = require('./parser')
 const {
     v4: uuidv4,
 } = require('uuid');
 const pubsub = require('./pubsub');
+const { encode } = require('gpt-3-encoder')
+const { chunker, getLastNChar, estimateCharPerToken, getLastNToken, getSemanticChunks } = require('./chunker');
 
 // TODO: Use redis or similar to store state
 // in a multi-server environment
 const requestState = {}
 
-const DEFAULT_CHUNK_LENGTH = 1500;
-const MAX_PREVIOUS_CONTEXT_LENGTH = 500;
+const MAX_PREVIOUS_CONTEXT_TOKEN_LENGTH = 1000;
 
 class PathwayResponseParser {
     constructor(pathway) {
@@ -37,6 +38,7 @@ class PathwayResolver {
     constructor({ config, pathway }) {
         this.pathway = pathway;
         this.useInputChunking = pathway.useInputChunking;
+        this.warnings = [];
         this.responseParser = new PathwayResponseParser(pathway);
         this.pathwayPrompter = new PathwayPrompter({ config, pathway });
         this.lastContext = '';
@@ -85,22 +87,38 @@ class PathwayResolver {
         return this.responseParser.parse(data);
     }
 
-    chunkText(text) {
-        const maxPromptLength = Math.max(...this.prompts.map(p => p.length)) - (this.usePreviousContext ? MAX_PREVIOUS_CONTEXT_LENGTH : 0); // longest prompt
-        const maxChunkLength = (this.pathwayPrompter.model.maxChunkLength ?? this.DEFAULT_CHUNK_LENGTH) - maxPromptLength; 
-        if (maxChunkLength <= 0) { // prompt is too long covering all the input
-            throw new Error(`Your prompt is too long! Split or reduce length of your prompt, long prompt length: ${maxPromptLength}`);
+    getChunkMaxTokenLength() {
+        const maxPromptTokenLength = Math.max(...this.prompts.map(p => encode(String(p)).length)) - (this.usePreviousContext ? MAX_PREVIOUS_CONTEXT_TOKEN_LENGTH : 0);
+        const promptRatio = this.pathwayPrompter.getPromptTokenRatio();
+        const maxChunkToken = promptRatio * this.pathwayPrompter.getModelMaxChunkTokenLength() - maxPromptTokenLength;
+        if (maxChunkToken && maxChunkToken <= 0) { // prompt is too long covering all the input
+            throw new Error(`Your prompt is too long! Split to multiple prompts or reduce length of your prompt, prompt length: ${maxPromptLength}`);
         }
+        return maxChunkToken;
+    }
 
-        if (!this.useInputChunking || text.length <= maxChunkLength) { // no chunking, return as is
-            if (text.length >= maxChunkLength) {
-                console.warn(`Your input is possibly too long! Length: ${text.length}`);
+    chunkText(text) {
+        const chunkMaxChunkTokenLength = this.getChunkMaxTokenLength();
+        const encoded = encode(text);
+        if (!this.useInputChunking || encoded.length <= chunkMaxChunkTokenLength) { // no chunking, return as is
+            if (encoded.length >= chunkMaxChunkTokenLength) {
+                const warnText = `Your input is possibly too long, truncating! Text length: ${text.length}`;
+                this.warnings.push(warnText);
+                console.warn(warnText);
+                text = getLastNToken(text, chunkMaxChunkTokenLength);
             }
             return [text];
         }
 
         // chunk the text and return the chunks with newline separators
-        return getSemanticChunks(text, maxChunkLength).map(chunk => '\n' + chunk + '\n');
+        return getSemanticChunks({ text, maxChunkToken: chunkMaxChunkTokenLength });
+    }
+
+    truncate(str, n) {
+        if (this.pathwayPrompter.promptParameters.truncateFromFront) {
+            return getFirstNToken(str, n);
+        }
+        return getLastNToken(str, n);
     }
 
     async processRequest({ text, ...parameters }, requestId, requestState) {
@@ -121,16 +139,14 @@ class PathwayResolver {
             let result = '';
 
             for (let i = 0; i < this.prompts.length; i++) {
-                if (previousContext.length > MAX_PREVIOUS_CONTEXT_LENGTH) {
-                    //slice previous context to avoid max token limit but keep the last n characters up to a \n or space to avoid cutting words
-                    previousContext = previousContext.slice(-MAX_PREVIOUS_CONTEXT_LENGTH);
-                    previousContext = previousContext.slice(previousContext.search(/\s/)+1);
-                }
-
-                // If the prompt doesn't contain {{text}} then we can skip the chunking
+                // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous context
                 if (this.prompts[i].indexOf("{{text}}") == -1) {
+                    // Limit context to it's N + text's characters
+                    previousContext = this.truncate(previousContext, MAX_PREVIOUS_CONTEXT_TOKEN_LENGTH + this.getChunkMaxTokenLength());
                     result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousContext }, requestId, requestState);   
                 } else {
+                    // Limit context to N characters
+                    previousContext = this.truncate(previousContext, MAX_PREVIOUS_CONTEXT_TOKEN_LENGTH);
                     result = await Promise.all(chunks.map(chunk =>
                         this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousContext }, requestId, requestState)));
                     result = result.join("\n\n")
@@ -145,7 +161,7 @@ class PathwayResolver {
             this.lastContext = previousContext;
             return result;
         }
-        
+
         // Paralellize chunks and for each chunk of text apply all prompts serially
         const data = await Promise.all(chunks.map(chunk =>
             this.applyPromptsSerially(chunk, parameters, requestId, requestState)));

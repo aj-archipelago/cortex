@@ -23,6 +23,7 @@ const typeDef = (pathway) => {
         debug: String
         result: ${resultStr}
         ${usePreviousContext ? 'lastContext: String\n' : ''}
+        warnings: [String]
 }`;
 
 

@@ -13,9 +13,9 @@ module.exports = {
             //`Entities in the document:\n\n{{{previousContext}}}\n\nDocument:\n{{{text}}}\nTranslate the document to {{to}} and rewrite it to sound like a native {{to}} speaker:\n\n`
             `Entities in the document:\n\n{{{previousContext}}}\n\nDocument:\n{{{text}}}\nRewrite the document in {{to}}. If the document is already in {{to}}, copy it exactly below:\n`
         ],
-
-        inputParameters: {
+    inputParameters: {
         to: `Arabic`,
+        tokenRatio: 0.2,
     },
     model: 'azure-td3',
     usePreviousContext: true,
