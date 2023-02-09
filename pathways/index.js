@@ -15,6 +15,7 @@ module.exports = {
     "styleguide": require('./styleguide'),
     "styleguidemulti": require('./styleguidemulti'),
     "summary": require('./summary'),
+    "tags": require('./tags'),
     "topics": require('./topics'),
     "translate": require('./translate'),
     "translate_td3": require('./translate_td3'),
