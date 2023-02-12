@@ -7,6 +7,10 @@ const { encode } = require("gpt-3-encoder");
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
+handlebars.registerHelper('stripHTML', function(value) {
+    return value.replace(/<[^>]*>/g, '');
+  });
+  
 class PathwayPrompter {
     constructor({ config, pathway }) {
         const defaultModel = config.get('default_model');

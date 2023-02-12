@@ -5,7 +5,7 @@ const {
 } = require('uuid');
 const pubsub = require('./pubsub');
 const { encode } = require('gpt-3-encoder')
-const { chunker, getLastNChar, estimateCharPerToken, getLastNToken, getSemanticChunks } = require('./chunker');
+const { chunker, getLastNChar, estimateCharPerToken, getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
 
 // TODO: Use redis or similar to store state
 // in a multi-server environment
@@ -121,6 +121,23 @@ class PathwayResolver {
         return getLastNToken(str, n);
     }
 
+    // function to check if a Handlebars template prompt contains a variable
+    promptContains(variable, prompt) {
+        const regexp = /{{+(.*?)}}+/g;
+        let matches = [];
+        let match;
+
+        while ((match = regexp.exec(prompt)) !== null) {
+            matches.push(match[1]);
+        }
+
+        const variables = matches.filter(function(varName) {
+            return varName.indexOf("#") !== 0 && varName.indexOf("/") !== 0;
+        })
+
+        return variables.includes(variable);
+    }
+
     async processRequest({ text, ...parameters }, requestId, requestState) {
         const chunks = this.chunkText(text);
 
@@ -140,7 +157,7 @@ class PathwayResolver {
 
             for (let i = 0; i < this.prompts.length; i++) {
                 // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous context
-                if (this.prompts[i].indexOf("{{text}}") == -1) {
+                if (!this.promptContains('text', this.prompts[i])) {
                     // Limit context to it's N + text's characters
                     previousContext = this.truncate(previousContext, MAX_PREVIOUS_CONTEXT_TOKEN_LENGTH + this.getChunkMaxTokenLength());
                     result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousContext }, requestId, requestState);   
