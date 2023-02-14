@@ -11,7 +11,7 @@ const { chunker, getLastNChar, estimateCharPerToken, getFirstNToken, getLastNTok
 // in a multi-server environment
 const requestState = {}
 
-const MAX_PREVIOUS_CONTEXT_TOKEN_LENGTH = 1000;
+const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
 class PathwayResponseParser {
     constructor(pathway) {
@@ -88,7 +88,7 @@ class PathwayResolver {
     }
 
     getChunkMaxTokenLength() {
-        const maxPromptTokenLength = Math.max(...this.prompts.map(p => encode(String(p)).length)) - (this.usePreviousContext ? MAX_PREVIOUS_CONTEXT_TOKEN_LENGTH : 0);
+        const maxPromptTokenLength = Math.max(...this.prompts.map(p => encode(String(p)).length)) - (this.usePreviousResult ? MAX_PREVIOUS_RESULT_TOKEN_LENGTH : 0);
         const promptRatio = this.pathwayPrompter.getPromptTokenRatio();
         const maxChunkToken = promptRatio * this.pathwayPrompter.getModelMaxChunkTokenLength() - maxPromptTokenLength;
         if (maxChunkToken && maxChunkToken <= 0) { // prompt is too long covering all the input
@@ -151,31 +151,31 @@ class PathwayResolver {
         requestState[requestId] = { totalCount: anticipatedRequestCount, completedCount: 0 };
 
         // If pre information is needed, apply current prompt with previous prompt info, only parallelize current call
-        if (this.pathway.usePreviousContext) {
-            let previousContext = '';
+        if (this.pathway.usePreviousResult) {
+            let previousResult = '';
             let result = '';
 
             for (let i = 0; i < this.prompts.length; i++) {
                 // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous context
                 if (!this.promptContains('text', this.prompts[i])) {
                     // Limit context to it's N + text's characters
-                    previousContext = this.truncate(previousContext, MAX_PREVIOUS_CONTEXT_TOKEN_LENGTH + this.getChunkMaxTokenLength());
-                    result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousContext }, requestId, requestState);   
+                    previousResult = this.truncate(previousResult, MAX_PREVIOUS_RESULT_TOKEN_LENGTH + this.getChunkMaxTokenLength());
+                    result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousResult }, requestId, requestState);   
                 } else {
                     // Limit context to N characters
-                    previousContext = this.truncate(previousContext, MAX_PREVIOUS_CONTEXT_TOKEN_LENGTH);
+                    previousResult = this.truncate(previousResult, MAX_PREVIOUS_RESULT_TOKEN_LENGTH);
                     result = await Promise.all(chunks.map(chunk =>
-                        this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousContext }, requestId, requestState)));
+                        this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousResult }, requestId, requestState)));
                     result = result.join("\n\n")
                 }
 
                 // If this is any prompt other than the last, use the result as the previous context
                 if (i < this.prompts.length - 1) {
-                    previousContext = result;
+                    previousResult = result;
                 }
             }
             // store the previous context in the PathwayResolver
-            this.lastContext = previousContext;
+            this.lastContext = previousResult;
             return result;
         }
 
