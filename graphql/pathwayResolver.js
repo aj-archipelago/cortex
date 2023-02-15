@@ -1,19 +1,17 @@
-const PathwayPrompter = require('./pathwayPrompter');
-const nlp = require('compromise')
-const plugin = require('compromise-paragraphs');
+const { PathwayPrompter } = require('./pathwayPrompter');
 const { parseNumberedList, parseNumberedObjectList } = require('./parser')
 const {
     v4: uuidv4,
 } = require('uuid');
 const pubsub = require('./pubsub');
-nlp.extend(plugin);
+const { encode } = require('gpt-3-encoder')
+const { chunker, getLastNChar, estimateCharPerToken, getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
 
 // TODO: Use redis or similar to store state
 // in a multi-server environment
 const requestState = {}
 
-const DEFAULT_CHUNK_LENGTH = 1500;
-const MAX_PREVIOUS_CONTEXT_LENGTH = 500;
+const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
 class PathwayResponseParser {
     constructor(pathway) {
@@ -40,15 +38,25 @@ class PathwayResolver {
     constructor({ config, pathway }) {
         this.pathway = pathway;
         this.useInputChunking = pathway.useInputChunking;
+        this.warnings = [];
         this.responseParser = new PathwayResponseParser(pathway);
         this.pathwayPrompter = new PathwayPrompter({ config, pathway });
+        this.lastContext = '';
+        this.prompts = null;
+        this._pathwayPrompt = '';
 
-        const pathwayPrompt = pathway.prompt;
+        Object.defineProperty(this, 'pathwayPrompt', {
+            get() {
+              return this._pathwayPrompt;
+            },
+            set(value) {
+              this._pathwayPrompt = value;
+              this.prompts = Array.isArray(this._pathwayPrompt) ? this._pathwayPrompt : [this._pathwayPrompt];
+            }
+          });
+          
+        this.pathwayPrompt = pathway.prompt;
 
-        // Normalize prompts to an array
-        this.prompts = Array.isArray(pathwayPrompt) ?
-            pathwayPrompt :
-            [pathwayPrompt];
     }
 
     async resolve(args, requestState) {
@@ -79,80 +87,55 @@ class PathwayResolver {
         return this.responseParser.parse(data);
     }
 
-    chunkText(text) {
-        const maxPromptLength = Math.max(...this.prompts.map(p => p.length)) - (this.usePreviousContext ? MAX_PREVIOUS_CONTEXT_LENGTH : 0); // longest prompt
-        const maxChunkLength = (this.pathwayPrompter.model.maxChunkLength ?? this.DEFAULT_CHUNK_LENGTH) - maxPromptLength; 
-        if (maxChunkLength <= 0) { // prompt is too long covering all the input
-            throw new Error(`Your prompt is too long! Split or reduce length of your prompt, long prompt length: ${maxPromptLength}`);
+    getChunkMaxTokenLength() {
+        const maxPromptTokenLength = Math.max(...this.prompts.map(p => encode(String(p)).length)) - (this.usePreviousResult ? MAX_PREVIOUS_RESULT_TOKEN_LENGTH : 0);
+        const promptRatio = this.pathwayPrompter.getPromptTokenRatio();
+        const maxChunkToken = promptRatio * this.pathwayPrompter.getModelMaxChunkTokenLength() - maxPromptTokenLength;
+        if (maxChunkToken && maxChunkToken <= 0) { // prompt is too long covering all the input
+            throw new Error(`Your prompt is too long! Split to multiple prompts or reduce length of your prompt, prompt length: ${maxPromptLength}`);
         }
-        if (!this.useInputChunking) { // no chunking, return as is
-            if (text.length >= maxChunkLength) {
-                console.warn(`Your input is possibly too long! Length: ${text.length}`);
+        return maxChunkToken;
+    }
+
+    chunkText(text) {
+        const chunkMaxChunkTokenLength = this.getChunkMaxTokenLength();
+        const encoded = encode(text);
+        if (!this.useInputChunking || encoded.length <= chunkMaxChunkTokenLength) { // no chunking, return as is
+            if (encoded.length >= chunkMaxChunkTokenLength) {
+                const warnText = `Your input is possibly too long, truncating! Text length: ${text.length}`;
+                this.warnings.push(warnText);
+                console.warn(warnText);
+                text = getLastNToken(text, chunkMaxChunkTokenLength);
             }
             return [text];
         }
 
-        // Chunk input into paragraphs if needed
-        let paragraphChunks = nlp(text).paragraphs().views.map(v => v.text());
+        // chunk the text and return the chunks with newline separators
+        return getSemanticChunks({ text, maxChunkToken: chunkMaxChunkTokenLength });
+    }
 
-        // Chunk paragraphs into sentences if needed
-        const sentenceChunks = [];
-        for (let i = 0; i < paragraphChunks.length; i++) {
-            if (paragraphChunks[i].length > maxChunkLength) { // too long paragraph, chunk into sentences
-                sentenceChunks.push(...nlp(paragraphChunks[i]).sentences().json().map(v => v.text));
-            } else {
-                sentenceChunks.push(paragraphChunks[i]);
-            }
+    truncate(str, n) {
+        if (this.pathwayPrompter.promptParameters.truncateFromFront) {
+            return getFirstNToken(str, n);
+        }
+        return getLastNToken(str, n);
+    }
+
+    // function to check if a Handlebars template prompt contains a variable
+    promptContains(variable, prompt) {
+        const regexp = /{{+(.*?)}}+/g;
+        let matches = [];
+        let match;
+
+        while ((match = regexp.exec(prompt)) !== null) {
+            matches.push(match[1]);
         }
 
-        // Chunk sentences with newlines if needed
-        const newlineChunks = [];
-        for (let i = 0; i < sentenceChunks.length; i++) {
-            if (sentenceChunks[i].length > maxChunkLength) { // too long, split into lines
-                newlineChunks.push(...sentenceChunks[i].split('\n'));
-            } else {
-                newlineChunks.push(sentenceChunks[i]);
-            }
-        }
+        const variables = matches.filter(function(varName) {
+            return varName.indexOf("#") !== 0 && varName.indexOf("/") !== 0;
+        })
 
-        // Chunk sentences into word chunks if needed
-        let chunks = [];
-        for (let j = 0; j < newlineChunks.length; j++) {
-            if (newlineChunks[j].length > maxChunkLength) { // too long sentence, chunk into words
-                const words = newlineChunks[j].split(' ');
-                // merge words into chunks up to maxChunkLength
-                let chunk = '';
-                for (let k = 0; k < words.length; k++) {
-                    if (chunk.length + words[k].length > maxChunkLength) {
-                        chunks.push(chunk.trim());
-                        chunk = '';
-                    }
-                    chunk += words[k] + ' ';
-                }
-                if (chunk.length > 0) {
-                    chunks.push(chunk.trim());
-                }
-            } else {
-                chunks.push(newlineChunks[j]);
-            }
-        }
-
-        chunks = chunks.filter(Boolean).map(chunk => '\n' + chunk + '\n'); //filter empty chunks and add newlines
-
-        // Merge chunks into maxChunkLength chunks
-        let mergedChunks = [];
-        let chunk = '';
-        for (let i = 0; i < chunks.length; i++) {
-            if (chunk.length + chunks[i].length > maxChunkLength) {
-                mergedChunks.push(chunk);
-                chunk = '';
-            }
-            chunk += chunks[i];
-        }
-        if (chunk.length > 0) {
-            mergedChunks.push(chunk);
-        }
-        return mergedChunks;
+        return variables.includes(variable);
     }
 
     async processRequest({ text, ...parameters }, requestId, requestState) {
@@ -168,27 +151,34 @@ class PathwayResolver {
         requestState[requestId] = { totalCount: anticipatedRequestCount, completedCount: 0 };
 
         // If pre information is needed, apply current prompt with previous prompt info, only parallelize current call
-        if (this.pathway.usePreviousContext) {
-            let previousContext = '';
+        if (this.pathway.usePreviousResult) {
+            let previousResult = '';
+            let result = '';
+
             for (let i = 0; i < this.prompts.length; i++) {
-                if (previousContext.length > MAX_PREVIOUS_CONTEXT_LENGTH) {
-                    //slice previous context to avoid max token limit but keep the last n characters up to a \n or space to avoid cutting words
-                    previousContext = previousContext.slice(-MAX_PREVIOUS_CONTEXT_LENGTH);
-                    previousContext = previousContext.slice(previousContext.search(/\s/)+1);
+                // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous context
+                if (!this.promptContains('text', this.prompts[i])) {
+                    // Limit context to it's N + text's characters
+                    previousResult = this.truncate(previousResult, MAX_PREVIOUS_RESULT_TOKEN_LENGTH + this.getChunkMaxTokenLength());
+                    result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousResult }, requestId, requestState);   
+                } else {
+                    // Limit context to N characters
+                    previousResult = this.truncate(previousResult, MAX_PREVIOUS_RESULT_TOKEN_LENGTH);
+                    result = await Promise.all(chunks.map(chunk =>
+                        this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousResult }, requestId, requestState)));
+                    result = result.join("\n\n")
                 }
 
-                // If the prompt doesn't contain {{text}} then we can skip the chunking
-                if (this.prompts[i].indexOf("{{text}}") == -1) {
-                    previousContext = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousContext }, requestId, requestState);   
-                } else {
-                    previousContext = await Promise.all(chunks.map(chunk =>
-                        this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousContext }, requestId, requestState)));
-                    previousContext = previousContext.join("\n\n")
+                // If this is any prompt other than the last, use the result as the previous context
+                if (i < this.prompts.length - 1) {
+                    previousResult = result;
                 }
             }
-            return previousContext;
+            // store the previous context in the PathwayResolver
+            this.lastContext = previousResult;
+            return result;
         }
-        
+
         // Paralellize chunks and for each chunk of text apply all prompts serially
         const data = await Promise.all(chunks.map(chunk =>
             this.applyPromptsSerially(chunk, parameters, requestId, requestState)));

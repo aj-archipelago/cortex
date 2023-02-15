@@ -6,7 +6,7 @@ const GRAPHQL_TYPE_MAP = {
 
 
 const typeDef = (pathway) => {
-    const { name, objName, defaultInputParameters, inputParameters, debugFields, outputFields, list, format } = pathway;
+    const { name, objName, defaultInputParameters, inputParameters, usePreviousResult, debugFields, outputFields, list, format } = pathway;
 
     const fields = format ? format.match(/\b(\w+)\b/g) : null;
     const fieldsStr = !fields ? `` : fields.map(f => `${f}: String`).join('\n    ');
@@ -22,6 +22,8 @@ const typeDef = (pathway) => {
     const responseType = `type ${objName} {
         debug: String
         result: ${resultStr}
+        ${usePreviousResult ? 'lastContext: String\n' : ''}
+        warnings: [String]
 }`;
 
 

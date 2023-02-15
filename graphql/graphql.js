@@ -60,7 +60,7 @@ const getTypedefs = (pathways) => {
     ) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
     type Query {
-        _ : Boolean
+        _test : Boolean
     }
 
     type Mutation {

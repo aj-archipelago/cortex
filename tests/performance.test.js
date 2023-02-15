@@ -1,13 +1,8 @@
-const { getTestServer } = require('./index.test');
+const { getTestServer } = require('./main.test');
 
 jest.setTimeout(1800000);
 
 const testServer = getTestServer();
-
-afterAll(() => {
-    // stop server after all tests
-    testServer.stop();
-});
 
 it('performance run of styleguidemulti endpoint with huge text', async () => {
     const response = await testServer.executeOperation({

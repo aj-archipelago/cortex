@@ -15,4 +15,5 @@ module.exports = {
     rootResolver,
     resolver,
     useInputChunking: true,
+    truncateFromFront: false,
 }

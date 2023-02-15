@@ -1,40 +1,32 @@
+const { semanticTruncate } = require('../graphql/chunker');
 const { PathwayResolver } = require('../graphql/pathwayResolver');
-const MAX_LENGTH = 12;
 
 module.exports = {
-    prompt: `Write a short summary of the following: \n\n{{text}}`,
+    prompt: `{{{text}}}\n\nWrite a short ({{targetLength}} character) summary of all of the text above:\n\n`,
+    inputParameters: {
+        targetLength: 100,        
+    },
     resolver: async (parent, args, contextValue, info) => {
         const { config, pathway, requestState } = contextValue;
 
-        const pathwayResolver = new PathwayResolver({ config, pathway });
+        let pathwayResolver = new PathwayResolver({ config, pathway });
 
         let summary = await pathwayResolver.resolve(args, requestState);
         let i = 0;
+        const MAX_ITERATIONS = 3;
+
         // reprompt if summary is too long
-        while (summary.length > MAX_LENGTH && i < 3) {
-            summary = await pathwayResolver.resolve({ ...args, text: summary }, requestState);
-            i++
-        }
-
-        // truncate summary if still too long
-        if (summary.length > MAX_LENGTH) {
-            const chunks = summary.split('.').map(s => s.trim())
-
-            const included = []
-            let totalLength = 0
-            for (let i = 0; i < chunks.length; i++) {
-                const chunk = chunks[i]
-                included.push(chunk)
-                totalLength += chunk.length
-
-                if (totalLength.length >= MAX_LENGTH) {
-                    break;
-                }
+        while (summary.length > args.targetLength && i < MAX_ITERATIONS) {
+            if (i > 0) {
+                pathwayResolver.pathwayPrompt = `{{{text}}}\n\nWrite a shorter ({{targetLength}} character) summary of all of the text above:\n\n`;
             }
+//            if (i == (MAX_ITERATIONS - 1)) {
+//                pathway.prompt = `Write the shortest possible summary of the following text:\n\n{{text}}\n\n`;
+//            }
+            summary = await pathwayResolver.resolve({ ...args, text: summary }, requestState);
+            i++;
+        }  
 
-            summary = included.join('. ')
-        }
-
-        return summary;
+        return semanticTruncate(summary, args.targetLength);
     }
 }

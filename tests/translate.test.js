@@ -1,12 +1,12 @@
-const { getTestServer } = require('./index.test');
+const { getTestServer } = require('./main.test');
 
 jest.setTimeout(1800000);
 
 const testServer = getTestServer();
 
-it('test translate-pre', async () => {
+it('test translate-context', async () => {
     const response = await testServer.executeOperation({
-        query: 'query($text: String!, $to:String) { translate_pre(text: $text, to:$to) { result } }',
+        query: 'query($text: String!, $to:String) { translate_context(text: $text, to:$to) { result } }',
         variables: {
             to: 'Turkish',
             text: `besiktas is great.\n\n what about fenerbahce's rival?\n\n yes, galatasaray` },
@@ -14,9 +14,9 @@ it('test translate-pre', async () => {
 
     expect(response.errors).toBeUndefined();
     //check if it contains names like besiktas, fenerbahce, galatasaray
-    expect(response.data?.translate_pre.result).toMatch(/besiktas/i);
-    expect(response.data?.translate_pre.result).toMatch(/fenerbahce/i);
-    expect(response.data?.translate_pre.result).toMatch(/galatasaray/i);
+    expect(response.data?.translate_context.result).toMatch(/be.ikta./i);
+    expect(response.data?.translate_context.result).toMatch(/fenerbah.e/i);
+    expect(response.data?.translate_context.result).toMatch(/galatasaray/i);
 });
 
 it('test translate endpoint with huge arabic text english translation and check return non-arabic/english', async () => {

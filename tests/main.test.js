@@ -14,11 +14,6 @@ const getTestServer = () => {
 
 const testServer = getTestServer();
 
-afterAll(() => {
-    // stop server after all tests
-    testServer.stop();
-});
-
 it('validates bias endpoint', async () => {
     const response = await testServer.executeOperation({
         query: 'query bias($text: String!) { bias(text: $text) { result } }',
@@ -169,6 +164,20 @@ it('validates topics endpoint with given num of count return', async () => {
     expect(response.data?.topics.result.length).toBe(3);
     response.data?.topics.result.forEach((topic) => {
         expect(topic).toBeDefined();
+    });
+});
+
+it('validates keywords endpoint with long text', async () => {
+    const text = '\n\nistanbul\n\n'.repeat(1000);
+    const response = await testServer.executeOperation({
+        query: 'query keywords($text: String!) { keywords(text: $text) { result } }',
+        variables: { text },
+    });
+
+    expect(response.errors).toBeUndefined();
+    expect(response.data?.keywords?.result.length).toBeGreaterThan(0);
+    response.data?.keywords.result.forEach((keyword) => {
+        expect(keyword).toBeDefined();
     });
 });
 
