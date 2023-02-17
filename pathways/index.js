@@ -18,6 +18,5 @@ module.exports = {
     "tags": require('./tags'),
     "topics": require('./topics'),
     "translate": require('./translate'),
-    "translate_td3": require('./translate_td3'),
     "translate_context": require('./translate_context'),
 }
