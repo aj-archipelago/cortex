@@ -14,6 +14,17 @@ const getTestServer = () => {
 
 const testServer = getTestServer();
 
+it('validates tags endpoint', async () => {
+    const text = '\n\nistanbul\n\n'.repeat(1000);
+    const response = await testServer.executeOperation({
+        query: 'query ($text: String!) { tags(text: $text) { result } }',
+        variables: { text },
+    });
+
+    expect(response.errors).toBeUndefined();
+    expect(response.data?.tags?.result).toBeDefined();
+});
+
 it('validates bias endpoint', async () => {
     const response = await testServer.executeOperation({
         query: 'query bias($text: String!) { bias(text: $text) { result } }',

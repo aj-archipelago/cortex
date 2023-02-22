@@ -4,4 +4,5 @@ module.exports = {
         count: 5,
     },
     list: true,
+    useInputSummarization: true,
 }

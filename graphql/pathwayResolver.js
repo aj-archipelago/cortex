@@ -13,6 +13,13 @@ const requestState = {}
 
 const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
+
+const callPathway = async (config, pathwayName, { text, ...parameters }) => {
+    const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`) });
+    return await pathwayResolver.resolve({ text, ...parameters }, requestState);
+}
+
+
 class PathwayResponseParser {
     constructor(pathway) {
         this.pathway = pathway;
@@ -36,6 +43,7 @@ class PathwayResponseParser {
 
 class PathwayResolver {
     constructor({ config, pathway }) {
+        this.config = config;
         this.pathway = pathway;
         this.useInputChunking = pathway.useInputChunking;
         this.warnings = [];
@@ -59,7 +67,7 @@ class PathwayResolver {
 
     }
 
-    async resolve(args, requestState) {
+    async resolve(args) {
         const requestId = uuidv4();
 
         if (args.async) {
@@ -138,7 +146,16 @@ class PathwayResolver {
         return variables.includes(variable);
     }
 
+    async summarizeIfEnabled({ text, ...parameters }) {
+        if (this.pathway.useInputSummarization) {
+            return await callPathway(this.config, 'summary', { text, targetLength:1000, ...parameters });
+        }
+        return text;
+    }
+
     async processRequest({ text, ...parameters }, requestId, requestState) {
+        text = await this.summarizeIfEnabled({ text, ...parameters }, requestState); // summarize if flag enabled
+
         const chunks = this.chunkText(text);
 
         const anticipatedRequestCount = chunks.length * this.prompts.length;
@@ -213,4 +230,4 @@ class PathwayResolver {
     }
 }
 
-module.exports = { PathwayResolver };
+module.exports = { PathwayResolver, requestState };
