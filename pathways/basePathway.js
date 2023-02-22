@@ -9,6 +9,7 @@ module.exports = {
         text: ``,
         // Add the option of making every call async
         async: false,
+        contextId : ``, // used to identify the context of the request
     },
     inputParameters: {},
     typeDef,

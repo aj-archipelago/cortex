@@ -1,102 +1,105 @@
 const { PathwayPrompter } = require('./pathwayPrompter');
-const { parseNumberedList, parseNumberedObjectList } = require('./parser')
 const {
     v4: uuidv4,
 } = require('uuid');
 const pubsub = require('./pubsub');
 const { encode } = require('gpt-3-encoder')
 const { chunker, getLastNChar, estimateCharPerToken, getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
-
-// TODO: Use redis or similar to store state
-// in a multi-server environment
-const requestState = {}
+const { getv, setv } = require('../lib/keyvalue');
+const { PathwayResponseParser } = require('./pathwayResponseParser');
+const { Prompt } = require('./prompt');
 
 const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
 
-const callPathway = async (config, pathwayName, { text, ...parameters }) => {
-    const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`) });
-    return await pathwayResolver.resolve({ text, ...parameters }, requestState);
+const callPathway = async (config, pathwayName, requestState, { text, ...parameters }) => {
+    const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`), requestState });
+    return await pathwayResolver.resolve({ text, ...parameters });
 }
 
-
-class PathwayResponseParser {
-    constructor(pathway) {
-        this.pathway = pathway;
-    }
-
-    parse(data) {
-        if (this.pathway.parser) {
-            return this.pathway.parser(data);
-        }
-
-        if (this.pathway.list) {
-            if (this.pathway.format) {
-                return parseNumberedObjectList(data, this.pathway.format);
-            }
-            return parseNumberedList(data)
-        }
-
-        return data;
-    }
-}
 
 class PathwayResolver {
-    constructor({ config, pathway }) {
+    constructor({ config, pathway, requestState }) {
         this.config = config;
+        this.requestState = requestState;
         this.pathway = pathway;
         this.useInputChunking = pathway.useInputChunking;
         this.warnings = [];
+        this.requestId = uuidv4();
         this.responseParser = new PathwayResponseParser(pathway);
         this.pathwayPrompter = new PathwayPrompter({ config, pathway });
         this.lastContext = '';
-        this.prompts = null;
+        this.prompts = [];
         this._pathwayPrompt = '';
 
         Object.defineProperty(this, 'pathwayPrompt', {
             get() {
-              return this._pathwayPrompt;
+                return this._pathwayPrompt;
             },
             set(value) {
-              this._pathwayPrompt = value;
-              this.prompts = Array.isArray(this._pathwayPrompt) ? this._pathwayPrompt : [this._pathwayPrompt];
+                this._pathwayPrompt = value;
+                if (!Array.isArray(this._pathwayPrompt)) {
+                    this._pathwayPrompt = [this._pathwayPrompt];
+                }
+                this.prompts = this._pathwayPrompt.map(p => (p instanceof Prompt) ? p : new Prompt({ prompt:p }));
             }
-          });
-          
-        this.pathwayPrompt = pathway.prompt;
+        });
 
+        this.pathwayPrompt = pathway.prompt;
     }
 
     async resolve(args) {
-        const requestId = uuidv4();
-
         if (args.async) {
             // Asynchronously process the request
-            this.promptAndParse(args, requestId, requestState).then((data) => {
-                requestState[requestId].data = data;
+            this.promptAndParse(args).then((data) => {
+                this.requestState[this.requestId].data = data;
                 pubsub.publish('REQUEST_PROGRESS', {
                     requestProgress: {
-                        requestId,
+                        requestId: this.requestId,
                         data: JSON.stringify(data)
                     }
                 });
             });
 
-            return requestId;
+            return this.requestId;
         }
         else {
             // Syncronously process the request
-            return await this.promptAndParse(args, requestId, requestState);
+            return await this.promptAndParse(args);
         }
     }
 
-    async promptAndParse(args, requestId, requestState) {
-        const data = await this.processRequest(args, requestId, requestState);
+    async promptAndParse(args) {
+        // Get saved context
+        const { contextId } = args;
+        if (contextId) {
+            this.savedContextId = contextId;
+            try { // try to get the savedContext from the store
+                this.savedContext = await getv(contextId);
+            } catch (e) {
+                throw new Error(`Context ${contextId} not found`);
+            }
+        } else {
+            this.savedContextId = uuidv4(); // if contextId is not provided, generate a new one
+            // args.contextId = this.savedContextId; // pass the new contextId to the request
+            this.savedContext = {};
+        }
+        const savedContextStr = JSON.stringify(this.savedContext); //store original state as string
+
+        // Process the request
+        const data = await this.processRequest(args);
+
+        // Update saved context if needed
+        if (savedContextStr !== JSON.stringify(this.savedContext)) {
+            setv(this.savedContextId, this.savedContext);
+        }
+
+        // Return the result
         return this.responseParser.parse(data);
     }
 
     getChunkMaxTokenLength() {
-        const maxPromptTokenLength = Math.max(...this.prompts.map(p => encode(String(p)).length)) - (this.usePreviousResult ? MAX_PREVIOUS_RESULT_TOKEN_LENGTH : 0);
+        const maxPromptTokenLength = Math.max(...this.prompts.map(({ prompt }) => encode(String(prompt)).length)) - (this.usePreviousResult ? MAX_PREVIOUS_RESULT_TOKEN_LENGTH : 0);
         const promptRatio = this.pathwayPrompter.getPromptTokenRatio();
         const maxChunkToken = promptRatio * this.pathwayPrompter.getModelMaxChunkTokenLength() - maxPromptTokenLength;
         if (maxChunkToken && maxChunkToken <= 0) { // prompt is too long covering all the input
@@ -129,43 +132,26 @@ class PathwayResolver {
         return getLastNToken(str, n);
     }
 
-    // function to check if a Handlebars template prompt contains a variable
-    promptContains(variable, prompt) {
-        const regexp = /{{+(.*?)}}+/g;
-        let matches = [];
-        let match;
-
-        while ((match = regexp.exec(prompt)) !== null) {
-            matches.push(match[1]);
-        }
-
-        const variables = matches.filter(function(varName) {
-            return varName.indexOf("#") !== 0 && varName.indexOf("/") !== 0;
-        })
-
-        return variables.includes(variable);
-    }
-
     async summarizeIfEnabled({ text, ...parameters }) {
         if (this.pathway.useInputSummarization) {
-            return await callPathway(this.config, 'summary', { text, targetLength:1000, ...parameters });
+            return await callPathway(this.config, 'summary', this.requestState, { text, targetLength: 1000, ...parameters });
         }
         return text;
     }
 
-    async processRequest({ text, ...parameters }, requestId, requestState) {
-        text = await this.summarizeIfEnabled({ text, ...parameters }, requestState); // summarize if flag enabled
+    async processRequest({ text, ...parameters }) {
+        text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
 
         const chunks = this.chunkText(text);
 
         const anticipatedRequestCount = chunks.length * this.prompts.length;
 
-        if ((requestState[requestId] || {}).canceled) {
+        if ((this.requestState[this.requestId] || {}).canceled) {
             throw new Error('Request canceled');
         }
 
         // Store the request state
-        requestState[requestId] = { totalCount: anticipatedRequestCount, completedCount: 0 };
+        this.requestState[this.requestId] = { totalCount: anticipatedRequestCount, completedCount: 0 };
 
         // If pre information is needed, apply current prompt with previous prompt info, only parallelize current call
         if (this.pathway.usePreviousResult) {
@@ -174,15 +160,15 @@ class PathwayResolver {
 
             for (let i = 0; i < this.prompts.length; i++) {
                 // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous context
-                if (!this.promptContains('text', this.prompts[i])) {
+                if (!this.prompts[i].usesTextInput) {
                     // Limit context to it's N + text's characters
                     previousResult = this.truncate(previousResult, MAX_PREVIOUS_RESULT_TOKEN_LENGTH + this.getChunkMaxTokenLength());
-                    result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousResult }, requestId, requestState);   
+                    result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousResult });
                 } else {
                     // Limit context to N characters
                     previousResult = this.truncate(previousResult, MAX_PREVIOUS_RESULT_TOKEN_LENGTH);
                     result = await Promise.all(chunks.map(chunk =>
-                        this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousResult }, requestId, requestState)));
+                        this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousResult })));
                     result = result.join("\n\n")
                 }
 
@@ -198,36 +184,40 @@ class PathwayResolver {
 
         // Paralellize chunks and for each chunk of text apply all prompts serially
         const data = await Promise.all(chunks.map(chunk =>
-            this.applyPromptsSerially(chunk, parameters, requestId, requestState)));
+            this.applyPromptsSerially(chunk, parameters)));
 
         return data.join("\n\n");
     }
 
-    async applyPromptsSerially(text, parameters, requestId, requestState) {
+    async applyPromptsSerially(text, parameters) {
         let cumulativeText = text;
         for (const prompt of this.prompts) {
-            cumulativeText = await this.applyPrompt(prompt, cumulativeText, parameters, requestId, requestState);
+            cumulativeText = await this.applyPrompt(prompt, cumulativeText, parameters);
         }
         return cumulativeText;
     }
 
-    async applyPrompt(prompt, text, parameters, requestId, requestState) {
-        if (requestState[requestId].canceled) {
+    async applyPrompt(prompt, text, parameters) {
+        if (this.requestState[this.requestId].canceled) {
             return;
         }
-        const result = await this.pathwayPrompter.execute(text, parameters, prompt);
-        requestState[requestId].completedCount++;
+        const result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt.prompt);
+        this.requestState[this.requestId].completedCount++;
 
-        const { completedCount, totalCount } = requestState[requestId];
+        const { completedCount, totalCount } = this.requestState[this.requestId];
 
         pubsub.publish('REQUEST_PROGRESS', {
             requestProgress: {
-                requestId,
+                requestId: this.requestId,
                 progress: completedCount / totalCount,
             }
         });
+
+        if (prompt.saveResultTo) {
+            this.savedContext[prompt.saveResultTo] = result;
+        }
         return result;
     }
 }
 
-module.exports = { PathwayResolver, requestState };
+module.exports = { PathwayResolver };

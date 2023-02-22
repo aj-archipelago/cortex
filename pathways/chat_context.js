@@ -1,7 +1,10 @@
+const { Prompt } = require("../graphql/prompt");
+
 // Description: Have a chat with a bot that uses context to understand the conversation
 module.exports = {
     prompt:
         [
+            // new Prompt({ prompt: `Generate initial chat context with: {{text}}`, saveResultTo: `chatContext` }),
             `{{{chatContext}}}\n\n{{{text}}}\n\nGiven the information above, create a short summary of the conversation to date making sure to include all of the personal details about the user that you encounter:\n\n`,
 
             //`{{{chatContext}}}\n\n{{{text}}}\n\nGiven the information above, create a compact, efficient summary of the conversation including all personal details about the user. Write the string below in the most compact and efficient possible form:\n\n`,

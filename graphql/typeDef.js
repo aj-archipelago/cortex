@@ -24,6 +24,7 @@ const typeDef = (pathway) => {
         result: ${resultStr}
         ${usePreviousResult ? 'lastContext: String\n' : ''}
         warnings: [String]
+        contextId: String
 }`;
 
 

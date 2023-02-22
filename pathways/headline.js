@@ -20,9 +20,9 @@ module.exports = {
             `{{{previousResult}}}\n\nFrom this article summary generate the {{count}} best possible${seoString}news headlines for the article in the fomat (number. text):\n\n` 
         ]
 
-        let pathwayResolver = new PathwayResolver({ config, pathway });
+        let pathwayResolver = new PathwayResolver({ config, pathway, requestState });
 
-        return await pathwayResolver.resolve(args, requestState);
+        return await pathwayResolver.resolve(args);
     }
 
 }

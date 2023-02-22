@@ -19,6 +19,8 @@ const { cancelRequestResolver } = require('./resolver');
 
 const PORT = process.env.CORTEX_PORT || 4000;
 
+const requestState = {}; // Stores the state of each request
+
 const getPlugins = (config) => {
     // server plugins
     const plugins = [
@@ -60,7 +62,7 @@ const getTypedefs = (pathways) => {
     ) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
     type Query {
-        _test : Boolean
+        _ : Boolean
     }
 
     type Mutation {
@@ -81,8 +83,6 @@ const getTypedefs = (pathways) => {
     const typeDefs = [defaultTypeDefs, ...Object.values(pathways).map(p => p.typeDef(p))];
     return typeDefs.join('\n');
 }
-
-const requestState = {}
 
 const getResolvers = (config, pathways) => {
     const resolverFunctions = {};
