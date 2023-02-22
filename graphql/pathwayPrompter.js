@@ -64,7 +64,7 @@ class PathwayPrompter {
         const constructedPrompt = interpolatePrompt({ ...combinedParameters, text });
         const params = {
             prompt: constructedPrompt,
-            max_tokens: this.getModelMaxChunkTokenLength() - encode(constructedPrompt).length,
+            max_tokens: this.getModelMaxChunkTokenLength() - encode(constructedPrompt).length -1,
             // model: "text-davinci-002",
             temperature: this.temperature ?? 0.7,
             // "top_p": 1,

@@ -13,7 +13,7 @@ const buildLimiters = (config) => {
     }
 }
 
-const MAX_RETRY = 5;
+const MAX_RETRY = 10;
 const postRequest = async ({ url, params, headers }, model) => {
     let retry = 0;
     const errors = []
