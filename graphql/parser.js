@@ -16,7 +16,7 @@ const regexParser = (text, regex) => {
 // parse numbered list text format into list
 // this supports most common numbered list returns like "1.", "1)", "1-"
 const parseNumberedList = (str) => {
-    return regexParser(str, /^\s*[\[\{\(]*\d+[\s.=:,;\]\)\}]/gm);
+    return regexParser(str, /^\s*[\[\{\(]*\d+[\s.=\-:,;\]\)\}]/gm);
 }
 
 // parse a numbered object list text format into list of objects
