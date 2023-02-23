@@ -1,3 +1,4 @@
+const { fulfillWithTimeout } = require("../lib/promiser");
 const { PathwayResolver } = require("./pathwayResolver");
 
 // This resolver uses standard parameters required by Apollo server:
@@ -18,7 +19,8 @@ const rootResolver = async (parent, args, contextValue, info) => {
     const requestParameters = pathwayResolver.prompts.map(({ prompt }) => pathwayResolver.pathwayPrompter.requestParameters(args.text, args, prompt));
     const debug = JSON.stringify(requestParameters);
 
-    const result = await pathway.resolver(parent, args, contextValue, info);
+    // Execute the request with timeout
+    const result = await fulfillWithTimeout(pathway.resolver(parent, args, contextValue, info), pathway.timeout);
     const { warnings, lastContext, savedContextId } = pathwayResolver;
     return { debug, result, warnings, lastContext, contextId: savedContextId }
 }

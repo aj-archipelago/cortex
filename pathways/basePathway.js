@@ -17,4 +17,5 @@ module.exports = {
     resolver,
     useInputChunking: true,
     truncateFromFront: false,
+    timeout: 60, // in seconds
 }
