@@ -4,19 +4,16 @@ const {
 } = require('uuid');
 const pubsub = require('./pubsub');
 const { encode } = require('gpt-3-encoder')
-const { chunker, getLastNChar, estimateCharPerToken, getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
-const { getv, setv } = require('../lib/keyvalue');
+const { getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
 const { PathwayResponseParser } = require('./pathwayResponseParser');
 const { Prompt } = require('./prompt');
 
 const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
-
 const callPathway = async (config, pathwayName, requestState, { text, ...parameters }) => {
     const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`), requestState });
     return await pathwayResolver.resolve({ text, ...parameters });
 }
-
 
 class PathwayResolver {
     constructor({ config, pathway, requestState }) {
@@ -32,6 +29,8 @@ class PathwayResolver {
         this.prompts = [];
         this._pathwayPrompt = '';
 
+        this.redisInstance = require('../lib/redisClient')(config);
+
         Object.defineProperty(this, 'pathwayPrompt', {
             get() {
                 return this._pathwayPrompt;
@@ -42,6 +41,7 @@ class PathwayResolver {
                     this._pathwayPrompt = [this._pathwayPrompt];
                 }
                 this.prompts = this._pathwayPrompt.map(p => (p instanceof Prompt) ? p : new Prompt({ prompt:p }));
+                this.usePreviousResult = this.prompts.some(object => object.usesPreviousResult);
             }
         });
 
@@ -75,13 +75,12 @@ class PathwayResolver {
         if (contextId) {
             this.savedContextId = contextId;
             try { // try to get the savedContext from the store
-                this.savedContext = await getv(contextId);
+                this.savedContext = this.redisInstance && await this.redisInstance.getv(contextId) || null;
             } catch (e) {
                 throw new Error(`Context ${contextId} not found`);
             }
         } else {
-            this.savedContextId = uuidv4(); // if contextId is not provided, generate a new one
-            // args.contextId = this.savedContextId; // pass the new contextId to the request
+            this.savedContextId = null;
             this.savedContext = {};
         }
         const savedContextStr = JSON.stringify(this.savedContext); //store original state as string
@@ -89,9 +88,10 @@ class PathwayResolver {
         // Process the request
         const data = await this.processRequest(args);
 
-        // Update saved context if needed
+        // Update saved context if needed, generating a new contextId if necessary
         if (savedContextStr !== JSON.stringify(this.savedContext)) {
-            setv(this.savedContextId, this.savedContext);
+            this.savedContextId = this.savedContextId || uuidv4();
+            this.redisInstance && this.redisInstance.setv(this.savedContextId, this.savedContext);
         }
 
         // Return the result
@@ -108,7 +108,8 @@ class PathwayResolver {
         return maxChunkToken;
     }
 
-    chunkText(text) {
+            // Here we choose how to handle long input - either summarize or chunk
+    processInputText(text) {
         const chunkMaxChunkTokenLength = this.getChunkMaxTokenLength();
         const encoded = encode(text);
         if (!this.useInputChunking || encoded.length <= chunkMaxChunkTokenLength) { // no chunking, return as is
@@ -116,7 +117,7 @@ class PathwayResolver {
                 const warnText = `Your input is possibly too long, truncating! Text length: ${text.length}`;
                 this.warnings.push(warnText);
                 console.warn(warnText);
-                text = getLastNToken(text, chunkMaxChunkTokenLength);
+                text = truncate(text, chunkMaxChunkTokenLength);
             }
             return [text];
         }
@@ -140,9 +141,9 @@ class PathwayResolver {
     }
 
     async processRequest({ text, ...parameters }) {
-        text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
 
-        const chunks = this.chunkText(text);
+        text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
+        const chunks = this.processInputText(text);
 
         const anticipatedRequestCount = chunks.length * this.prompts.length;
 
@@ -159,7 +160,7 @@ class PathwayResolver {
             let result = '';
 
             for (let i = 0; i < this.prompts.length; i++) {
-                // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous context
+                // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous result
                 if (!this.prompts[i].usesTextInput) {
                     // Limit context to it's N + text's characters
                     previousResult = this.truncate(previousResult, MAX_PREVIOUS_RESULT_TOKEN_LENGTH + this.getChunkMaxTokenLength());

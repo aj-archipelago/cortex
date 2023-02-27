@@ -17,8 +17,6 @@ const subscriptions = require('./subscriptions');
 const { buildLimiters } = require('../request');
 const { cancelRequestResolver } = require('./resolver');
 
-const PORT = process.env.CORTEX_PORT || 4000;
-
 const requestState = {}; // Stores the state of each request
 
 const getPlugins = (config) => {
@@ -27,12 +25,12 @@ const getPlugins = (config) => {
         ApolloServerPluginLandingPageLocalDefault({ embed: true }), // For local development.   
     ];
 
-    //cache
+    //if cache is enabled and Redis is available, use it
     let cache;
-    if (config.get('cache')) {
-        cache = new KeyvAdapter(new Keyv(process.env.REDIS_CONNECTION_URL,
+    if (config.get('enableCache') && config.get('redisUrl') && config.get('redisKey')) {
+        cache = new KeyvAdapter(new Keyv(config.get('redisUrl'),
             {
-                password: process.env.REDIS_CONNECTION_KEY,
+                password: config.get('redisKey'),
                 ssl: true,
                 abortConnect: false
             })
@@ -160,8 +158,8 @@ const build = (config) => {
         server.applyMiddleware({ app });
 
         // Now that our HTTP server is fully set up, we can listen to it.
-        httpServer.listen(PORT, () => {
-            console.log(`🚀 Server is now running at http://localhost:${PORT}${server.graphqlPath}`);
+        httpServer.listen(config.get('PORT'), () => {
+            console.log(`🚀 Server is now running at http://localhost:${config.get('PORT')}${server.graphqlPath}`);
         });
     };
 
