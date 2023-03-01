@@ -1,4 +1,4 @@
-const { request } = require("../request");
+const { request } = require("../lib/request");
 const handlebars = require("handlebars");
 const { getResponseResult } = require("./parser");
 const { Exception } = require("handlebars");
@@ -7,15 +7,17 @@ const { encode } = require("gpt-3-encoder");
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
-handlebars.registerHelper('stripHTML', function(value) {
+handlebars.registerHelper('stripHTML', function (value) {
     return value.replace(/<[^>]*>/g, '');
-  });
-  
+});
+
 class PathwayPrompter {
     constructor({ config, pathway }) {
-        const defaultModel = config.get('default_model');
-        this.modelName = pathway.model || defaultModel;
+        // If the pathway specifies a model, use that, otherwise use the default
+        this.modelName = pathway.model || config.get('defaultModelName');
+        // Get the model from the config
         this.model = config.get('models')[this.modelName];
+        // If the model doesn't exist, throw an exception
         if (!this.model) {
             throw new Exception(`Model ${this.modelName} not found in config`);
         }
@@ -46,7 +48,7 @@ class PathwayPrompter {
 
     requestUrl() {
         const generateUrl = handlebars.compile(this.model.url);
-        return generateUrl({ ...this.model, ...this.environmentVariables });
+        return generateUrl({ ...this.model, ...this.environmentVariables, ...this.config });
     }
 
     requestParameters(text, parameters, prompt) {
@@ -64,7 +66,7 @@ class PathwayPrompter {
         const constructedPrompt = interpolatePrompt({ ...combinedParameters, text });
         const params = {
             prompt: constructedPrompt,
-            max_tokens: this.getModelMaxChunkTokenLength() - encode(constructedPrompt).length -1,
+            max_tokens: this.getModelMaxChunkTokenLength() - encode(constructedPrompt).length - 1,
             // model: "text-davinci-002",
             temperature: this.temperature ?? 0.7,
             // "top_p": 1,
@@ -81,14 +83,9 @@ class PathwayPrompter {
     async execute(text, parameters, prompt) {
         const requestParameters = this.requestParameters(text, parameters, prompt);
 
-        // Build headers by compiling handlebars
-        const headers = {};
-        for (const [key, value] of Object.entries(this.model.headers)) {
-            headers[key] = handlebars.compile(value)({ ...this.environmentVariables });
-        }
-
         const url = this.requestUrl(text);
         const params = { ...(this.model.params || {}), ...requestParameters }
+        const headers = this.model.headers || {};
         const data = await request({ url, params, headers }, this.modelName);
         console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`)
         console.log(`\x1b[36m${params.prompt}\x1b[0m`)

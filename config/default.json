@@ -35,9 +35,5 @@
             "maxTokenLength": 4096
         }
     },
-    "enableCache": true,
-    "context": {},
-    "server" : "standalone",
-    "redisUrl": "redis://localhost:32768",
-    "redisKey": "redispw"
+    "enableCache": true
 }

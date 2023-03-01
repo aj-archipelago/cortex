@@ -7,6 +7,7 @@ const { encode } = require('gpt-3-encoder')
 const { getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
 const { PathwayResponseParser } = require('./pathwayResponseParser');
 const { Prompt } = require('./prompt');
+const { getv, setv } = require('../lib/keyValueStorageClient');
 
 const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
@@ -28,8 +29,6 @@ class PathwayResolver {
         this.lastContext = '';
         this.prompts = [];
         this._pathwayPrompt = '';
-
-        this.redisInstance = require('../lib/redisClient')(config);
 
         Object.defineProperty(this, 'pathwayPrompt', {
             get() {
@@ -75,7 +74,7 @@ class PathwayResolver {
         if (contextId) {
             this.savedContextId = contextId;
             try { // try to get the savedContext from the store
-                this.savedContext = this.redisInstance && await this.redisInstance.getv(contextId) || null;
+                this.savedContext = await getv(contextId) || null;
             } catch (e) {
                 throw new Error(`Context ${contextId} not found`);
             }
@@ -91,7 +90,7 @@ class PathwayResolver {
         // Update saved context if needed, generating a new contextId if necessary
         if (savedContextStr !== JSON.stringify(this.savedContext)) {
             this.savedContextId = this.savedContextId || uuidv4();
-            this.redisInstance && this.redisInstance.setv(this.savedContextId, this.savedContext);
+            setv(this.savedContextId, this.savedContext);
         }
 
         // Return the result
