@@ -29,7 +29,10 @@ const getPlugins = (config) => {
     //if cache is enabled and Redis is available, use it
     let cache;
     if (config.get('enableCache') && config.get('storageConnectionString')) {
-        cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString')));
+        cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString'),{
+            ssl: true,
+            abortConnect: false,            
+        }));
         //caching similar strings, embedding hashing, ... #delta similarity 
         // TODO: custom cache key:
         // https://www.apollographql.com/docs/apollo-server/performance/cache-backends#implementing-your-own-cache-backend

@@ -5,7 +5,6 @@ const {
 const pubsub = require('./pubsub');
 const { encode } = require('gpt-3-encoder')
 const { getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
-const { getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
 const { PathwayResponseParser } = require('./pathwayResponseParser');
 const { Prompt } = require('./prompt');
 const { getv, setv } = require('../lib/keyValueStorageClient');
@@ -30,8 +29,6 @@ class PathwayResolver {
         this.previousResult = '';
         this.prompts = [];
         this._pathwayPrompt = '';
-
-        this.redisInstance = require('../lib/redisClient')(config);
 
         Object.defineProperty(this, 'pathwayPrompt', {
             get() {
@@ -76,7 +73,7 @@ class PathwayResolver {
         // Get saved context from contextId or change contextId if needed
         const { contextId } = args;
         this.savedContextId = contextId ? contextId : null;
-        this.savedContext = contextId ? (this.redisInstance && await this.redisInstance.getv(contextId) || {}) : {};
+        this.savedContext = contextId ? (getv && await getv(contextId) || {}) : {};
 
         // Save the context before processing the request
         const savedContextStr = JSON.stringify(this.savedContext);
@@ -87,7 +84,7 @@ class PathwayResolver {
         // Update saved context if it has changed, generating a new contextId if necessary
         if (savedContextStr !== JSON.stringify(this.savedContext)) {
             this.savedContextId = this.savedContextId || uuidv4();
-            this.redisInstance && this.redisInstance.setv(this.savedContextId, this.savedContext);
+            setv && setv(this.savedContextId, this.savedContext);
         }
 
         // Return the result
