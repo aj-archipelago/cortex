@@ -40,7 +40,6 @@ class PathwayResolver {
                     this._pathwayPrompt = [this._pathwayPrompt];
                 }
                 this.prompts = this._pathwayPrompt.map(p => (p instanceof Prompt) ? p : new Prompt({ prompt:p }));
-                this.usePreviousResult = this.prompts.some(object => object.usesPreviousResult);
             }
         });
 
