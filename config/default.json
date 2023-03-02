@@ -9,6 +9,7 @@
                 "Content-Type": "application/json"
             },
             "requestsPerSecond": 2,
+            "requestsPerSecond": 2,
             "maxTokenLength": 4096
         },
         "azure-td3": {
@@ -35,9 +36,5 @@
             "maxTokenLength": 4096
         }
     },
-    "enableCache": true,
-    "context": {},
-    "server" : "standalone",
-    "redisUrl": "redis://localhost:32768",
-    "redisKey": "redispw"
+    "enableCache": true
 }

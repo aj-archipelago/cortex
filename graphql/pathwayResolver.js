@@ -5,8 +5,12 @@ const {
 const pubsub = require('./pubsub');
 const { encode } = require('gpt-3-encoder')
 const { getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
+const { getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
 const { PathwayResponseParser } = require('./pathwayResponseParser');
 const { Prompt } = require('./prompt');
+const { getv, setv } = require('../lib/keyValueStorageClient');
+
+const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
 const callPathway = async (config, pathwayName, requestState, { text, ...parameters }) => {
     const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`), requestState });
@@ -39,6 +43,7 @@ class PathwayResolver {
                     this._pathwayPrompt = [this._pathwayPrompt];
                 }
                 this.prompts = this._pathwayPrompt.map(p => (p instanceof Prompt) ? p : new Prompt({ prompt:p }));
+                this.usePreviousResult = this.prompts.some(object => object.usesPreviousResult);
             }
         });
 
@@ -146,6 +151,7 @@ class PathwayResolver {
 
     // Process the request and return the result        
     async processRequest({ text, ...parameters }) {
+
         text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
         const chunks = this.processInputText(text);
 

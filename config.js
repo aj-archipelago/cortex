@@ -1,9 +1,8 @@
 const path = require('path');
+const convict = require('convict');
+const handlebars = require("handlebars");
 
-var convict = require('convict');
-
-// TODO: Define a schema possibly with formatters
-
+// Schema for config
 var config = convict({
     pathwaysPath: {
         format: String,
@@ -12,19 +11,20 @@ var config = convict({
     },
     corePathwaysPath: {
         format: String,
-        default: path.join(__dirname, 'pathways')
+        default: path.join(__dirname, 'pathways'),
+        env: 'CORTEX_CORE_PATHWAYS_PATH'
     },
-    redisUrl: {
+    basePathwayPath: {
         format: String,
-        default: null,
-        env: 'CORTEX_REDIS_URL'
+        default: path.join(__dirname, 'pathways', 'basePathway.js'),
+        env: 'CORTEX_BASE_PATHWAY_PATH'
     },
-    redisKey: {
-        doc: 'Secret used for access to Redis',
+    storageConnectionString: {
+        doc: 'Connection string used for access to Storage',
         format: '*',
         default: '',
         sensitive: true,
-        env: 'CORTEX_REDIS_KEY'
+        env: 'STORAGE_CONNECTION_STRING'
     },
     PORT: {
         format: 'port',
@@ -35,55 +35,130 @@ var config = convict({
         format: Object,
         default: {}
     },
-  });
+    enableCache: {
+        format: Boolean,
+        default: true,
+        env: 'CORTEX_ENABLE_CACHE'
+    },
+    defaultModelName: {
+        format: String,
+        default: null,
+        env: 'DEFAULT_MODEL_NAME'
+    },
+    models: {
+        format: Object,
+        default: {
+            "oai-td3": {
+                "url": "{{openaiApiUrl}}",
+                "headers": {
+                    "Authorization": "Bearer {{openaiApiKey}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "{{openaiDefaultModel}}"
+                },
+            }
+        },
+        env: 'CORTEX_MODELS'
+    },
+    openaiDefaultModel: {
+        format: String,
+        default: 'text-davinci-003',
+        env: 'OPENAI_DEFAULT_MODEL'
+    },
+    openaiApiKey: {
+        format: String,
+        default: null,
+        env: 'OPENAI_API_KEY',
+        sensitive: true
+    },
+    openaiApiUrl: {
+        format: String,
+        default: 'https://api.openai.com/v1/completions',
+        env: 'OPENAI_API_URL'
+    },
+    cortexConfigFile: {
+        format: String,
+        default: null,
+        env: 'CORTEX_CONFIG_FILE'
+    }
+});
 
 // Read in environment variables and set up service configuration
-const configFile = process.env.CORTEX_CONFIG_FILE || null;
+const configFile = config.get('cortexConfigFile');
 
 // Load config file
 if (configFile) {
     console.log('Loading config from', configFile);
     config.loadFile(configFile);
-  } else {
-    throw 'No config file specified. Please set the CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.'
-}
-
-// Set up local variables
-const { pathwaysPath, corePathwaysPath, redisUrl, redisKey, PORT } = config.getProperties();
-
-// Configure Redis
-if (redisUrl) {
-    console.log('Using Redis at', redisUrl);
-    config.load({ redisUrl, redisKey });
 } else {
-    console.log('No Redis URL specified. Please set the CORTEX_REDIS_URL environment variable to point at the Redis instance for your project if you need caching or stored context.')
+    const openaiApiKey = config.get('openaiApiKey');
+    if (!openaiApiKey) {
+        throw console.log('No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.');
+    }else {
+        console.log(`Using default model with OPENAI_API_KEY environment variable`)
+    }
 }
 
-// Configure port
-config.load({ PORT });
 
-// Load core pathways and the base pathway from the Cortex package
-console.log('Loading core pathways from', corePathwaysPath)
-const loadedPathways = require(corePathwaysPath);
-const basePathway = require(`${corePathwaysPath}/basePathway.js`);
+// Build and load pathways to config
+const buildPathways = (config) => {
+    const { pathwaysPath, corePathwaysPath, basePathwayPath } = config.getProperties();
 
-// Load custom pathways and override core pathways
-if (pathwaysPath) {
-    console.log('Loading custom pathways from', pathwaysPath)
-    const customPathways = require(pathwaysPath);
-    loadedPathways = { ...loadedPathways, ...customPathways };
+    // Load cortex base pathway 
+    const basePathway = require(basePathwayPath);
+
+    // Load core pathways, default from the Cortex package
+    console.log('Loading core pathways from', corePathwaysPath)
+    const loadedPathways = require(corePathwaysPath);
+
+    // Load custom pathways and override core pathways if same
+    if (pathwaysPath) {
+        console.log('Loading custom pathways from', pathwaysPath)
+        const customPathways = require(pathwaysPath);
+        loadedPathways = { ...loadedPathways, ...customPathways };
+    }
+
+    const pathways = {};
+    for (const [key, def] of Object.entries(loadedPathways)) {
+        const pathway = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...def };
+        pathways[def.name || key] = pathways[key] = pathway;
+    }
+
+    // Add pathways to config
+    config.load({ pathways })
+
+    return pathways;
 }
 
-const pathways = {};
-for (const [key, def] of Object.entries(loadedPathways)) {
-    const pathway = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...def };
-    pathways[def.name || key] = pathways[key] = pathway;
-}
+// Build and load models to config
+const buildModels = (config) => {
+    const { models } = config.getProperties();
 
-// Add pathways to config
-config.load({ pathways })
+    for (const [key, model] of Object.entries(models)) {        
+        // Compile handlebars templates for models
+        models[key] = JSON.parse(handlebars.compile(JSON.stringify(model))({ ...config.getEnv(), ...config.getProperties() }))
+    }
+
+    // Add constructed models to config
+    config.load({ models });
+
+
+    // Check that models are specified, Cortex cannot run without a model
+    if (Object.keys(config.get('models')).length <= 0) {
+        throw console.log('No models specified! Please set the models in your config file or via CORTEX_MODELS environment variable to point at the models for your project.');
+    }
+
+    // Set default model name to the first model in the config in case no default is specified
+    if (!config.get('defaultModelName')) {
+        console.log('No default model specified, using first model as default.');
+        config.load({ defaultModelName: Object.keys(config.get('models'))[0] }); 
+    } 
+
+    return models;
+}
 
 // TODO: Perform validation
 // config.validate({ allowed: 'strict' });
 
-module.exports = { config };
+module.exports = { config, buildPathways, buildModels };
