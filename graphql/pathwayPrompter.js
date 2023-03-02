@@ -69,16 +69,26 @@ class PathwayPrompter {
 
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const constructedPrompt = interpolatePrompt({ ...combinedParameters, text });
-        const params = {
-            prompt: constructedPrompt,
-            max_tokens: this.getModelMaxTokenLength() - encode(constructedPrompt).length - 1,
-            // model: "text-davinci-002",
-            temperature: this.temperature ?? 0.7,
-            // "top_p": 1,
-            // "n": 1,
-            // "presence_penalty": 0,
-            // "frequency_penalty": 0,
-            // "best_of": 1,
+        let params = {};
+
+        if (this.model.type === 'OPENAI_CHAT') {
+            params = {
+                messages: [ {"role": "user", "content": constructedPrompt} ],
+                max_tokens: this.getModelMaxTokenLength() - encode(constructedPrompt).length - 1,
+                temperature: this.temperature ?? 0.7,
+            }
+        } else {
+            params = {
+                prompt: constructedPrompt,
+                max_tokens: this.getModelMaxTokenLength() - encode(constructedPrompt).length - 1,
+                // model: "text-davinci-002",
+                temperature: this.temperature ?? 0.7,
+                // "top_p": 1,
+                // "n": 1,
+                // "presence_penalty": 0,
+                // "frequency_penalty": 0,
+                // "best_of": 1,
+            }
         }
 
         // return { ...defaultParams, ...overrideParams };

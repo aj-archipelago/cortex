@@ -8,6 +8,6 @@ module.exports = {
     inputParameters: {
         chatContext: `User: Starting conversation.`,
     },
-    model: 'azure-td3',
+    model: 'oai-gpturbo',
     useInputChunking: false,
 }
