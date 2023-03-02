@@ -16,6 +16,8 @@ module.exports = {
     rootResolver,
     resolver,
     useInputChunking: true,
+    useParallelChunkProcessing: false,
+    useInputSummarization: false,    
     truncateFromFront: false,
     timeout: 60, // in seconds
 }

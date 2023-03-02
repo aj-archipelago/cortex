@@ -7,10 +7,15 @@ const { encode } = require("gpt-3-encoder");
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
+// register functions that can be called directly in the prompt markdown
 handlebars.registerHelper('stripHTML', function(value) {
     return value.replace(/<[^>]*>/g, '');
-  });
-  
+    });
+
+handlebars.registerHelper('now', function() {
+    return new Date().toISOString();
+    });
+    
 class PathwayPrompter {
     constructor({ config, pathway }) {
         const defaultModel = config.get('default_model');
@@ -36,7 +41,7 @@ class PathwayPrompter {
         this.requestCount = 1
     }
 
-    getModelMaxChunkTokenLength() {
+    getModelMaxTokenLength() {
         return (this.promptParameters.maxTokenLength ?? this.model.maxTokenLength ?? DEFAULT_MAX_TOKENS);
     }
 
@@ -64,7 +69,7 @@ class PathwayPrompter {
         const constructedPrompt = interpolatePrompt({ ...combinedParameters, text });
         const params = {
             prompt: constructedPrompt,
-            max_tokens: this.getModelMaxChunkTokenLength() - encode(constructedPrompt).length -1,
+            max_tokens: this.getModelMaxTokenLength() - encode(constructedPrompt).length - 1,
             // model: "text-davinci-002",
             temperature: this.temperature ?? 0.7,
             // "top_p": 1,

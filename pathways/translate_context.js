@@ -18,5 +18,4 @@ module.exports = {
         tokenRatio: 0.2,
     },
     model: 'azure-td3',
-    usePreviousResult: true,
 }
