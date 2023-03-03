@@ -119,9 +119,9 @@ const buildPathways = (config) => {
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
 
-    const pathways = {};
+    const pathways = config.get('pathways');
     for (const [key, def] of Object.entries(loadedPathways)) {
-        const pathway = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...def };
+        const pathway = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...def, ...pathways[key] };
         pathways[def.name || key] = pathways[key] = pathway;
     }
 

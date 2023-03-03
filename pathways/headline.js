@@ -7,7 +7,6 @@ module.exports = {
         count: 5,        
     },
     list: true,
-    model: 'azure-td3',
     resolver: async (parent, args, contextValue, info) => {
         const { config, pathway, requestState } = contextValue;
         const seoString = args.seoOptimized ? ' SEO-optimized ': ' '

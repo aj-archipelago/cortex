@@ -8,6 +8,5 @@ module.exports = {
     inputParameters: {
         chatContext: `User: Starting conversation.`,
     },
-    model: 'azure-td3',
     useInputChunking: false,
 }

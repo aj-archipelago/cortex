@@ -17,5 +17,4 @@ module.exports = {
         to: `Arabic`,
         tokenRatio: 0.2,
     },
-    model: 'azure-td3',
 }

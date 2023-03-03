@@ -12,5 +12,4 @@ module.exports = {
     inputParameters: {
         to: `Arabic`,
     },
-    model: 'azure-td3',
 }

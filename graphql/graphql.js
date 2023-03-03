@@ -76,13 +76,14 @@ const getTypedefs = (pathways) => {
     }
 `;
 
-    const typeDefs = [defaultTypeDefs, ...Object.values(pathways).map(p => p.typeDef(p))];
+    const typeDefs = [defaultTypeDefs, ...Object.values(pathways).filter(p=>!p.disabled).map(p => p.typeDef(p))];
     return typeDefs.join('\n');
 }
 
 const getResolvers = (config, pathways) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
+        if (pathway.disabled) continue; //skip disabled pathways
         resolverFunctions[name] = (parent, args, contextValue, info) => {
             // add shared state to contextValue
             contextValue.pathway = pathway;

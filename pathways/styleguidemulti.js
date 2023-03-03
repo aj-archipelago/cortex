@@ -10,5 +10,4 @@ module.exports = {
     ],
     useInputChunking: true,
     useParallelChunkProcessing: true,
-    model: 'azure-td2'
 }
