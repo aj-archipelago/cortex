@@ -14,5 +14,6 @@ module.exports = {
     inputParameters: {
         contextId: ``,
     },
+    model: 'azure-td3',
     useInputChunking: false,
 }
