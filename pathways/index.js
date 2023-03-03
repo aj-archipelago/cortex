@@ -1,7 +1,7 @@
 module.exports = {
     "pass": require("./pass"),
-    "chat_archie": require('./chat_archie'),
     "chat_context": require('./chat_context'),
+    "chat_persist": require('./chat_persist'),
     "chat_code": require('./chat_code'),
     "bias": require('./bias'),
     "complete": require('./complete'),

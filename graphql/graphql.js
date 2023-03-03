@@ -14,10 +14,9 @@ const { KeyvAdapter } = require("@apollo/utils.keyvadapter");
 const responseCachePlugin = require('apollo-server-plugin-response-cache').default
 
 const subscriptions = require('./subscriptions');
-const { buildLimiters } = require('../request');
+const { buildLimiters } = require('../lib/request');
 const { cancelRequestResolver } = require('./resolver');
-
-const PORT = process.env.CORTEX_PORT || 4000;
+const { buildPathways, buildModels } = require('../config');
 
 const requestState = {}; // Stores the state of each request
 
@@ -27,16 +26,13 @@ const getPlugins = (config) => {
         ApolloServerPluginLandingPageLocalDefault({ embed: true }), // For local development.   
     ];
 
-    //cache
+    //if cache is enabled and Redis is available, use it
     let cache;
-    if (config.get('cache')) {
-        cache = new KeyvAdapter(new Keyv(process.env.REDIS_CONNECTION_URL,
-            {
-                password: process.env.REDIS_CONNECTION_KEY,
-                ssl: true,
-                abortConnect: false
-            })
-        );
+    if (config.get('enableCache') && config.get('storageConnectionString')) {
+        cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString'),{
+            ssl: true,
+            abortConnect: false,            
+        }));
         //caching similar strings, embedding hashing, ... #delta similarity 
         // TODO: custom cache key:
         // https://www.apollographql.com/docs/apollo-server/performance/cache-backends#implementing-your-own-cache-backend
@@ -96,7 +92,7 @@ const getResolvers = (config, pathways) => {
 
     const resolvers = {
         Query: resolverFunctions,
-        Mutation: {'cancelRequest': cancelRequestResolver},
+        Mutation: { 'cancelRequest': cancelRequestResolver },
         Subscription: subscriptions,
     }
 
@@ -105,9 +101,13 @@ const getResolvers = (config, pathways) => {
 
 //graphql api build factory method
 const build = (config) => {
+    // First perform config build
+    buildPathways(config);
+    buildModels(config);
+
     // build api limiters 
     buildLimiters(config);
-    
+
     //build api
     const pathways = config.get('pathways');
 
@@ -160,8 +160,8 @@ const build = (config) => {
         server.applyMiddleware({ app });
 
         // Now that our HTTP server is fully set up, we can listen to it.
-        httpServer.listen(PORT, () => {
-            console.log(`🚀 Server is now running at http://localhost:${PORT}${server.graphqlPath}`);
+        httpServer.listen(config.get('PORT'), () => {
+            console.log(`🚀 Server is now running at http://localhost:${config.get('PORT')}${server.graphqlPath}`);
         });
     };
 
@@ -169,7 +169,7 @@ const build = (config) => {
         if (process.env.API_KEY && req.headers.api_key !== process.env.API_KEY && req.query.api_key !== process.env.API_KEY) {
             res.status(401).send('Unauthorized');
         }
-        
+
         next();
     })
 

@@ -10,6 +10,7 @@ class Prompt {
         }
 
         this.usesTextInput = promptContains('text', this.prompt);
+        this.usesPreviousResult = promptContains('previousResult', this.prompt);
     }
 }
 

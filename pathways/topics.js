@@ -6,5 +6,4 @@ module.exports = {
         count: 5,
     },
     list: true,
-    usePreviousResult: true
 }

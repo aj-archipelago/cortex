@@ -7,7 +7,6 @@ module.exports = {
         count: 5,        
     },
     list: true,
-    usePreviousResult: true,
     model: 'azure-td3',
     resolver: async (parent, args, contextValue, info) => {
         const { config, pathway, requestState } = contextValue;

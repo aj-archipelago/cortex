@@ -1,5 +1,5 @@
 {
-    "default_model": "azure-td2",
+    "defaultModelName": "azure-td2",
     "models": {
         "azure-td2": {
             "type": "AZURE-OAI",
@@ -8,7 +8,7 @@
                 "api-key": "{{ARCHIPELAGO_OPENAI_EU_KEY}}",
                 "Content-Type": "application/json"
             },
-            "requestsPerSecond": 20,
+            "requestsPerSecond": 2,
             "maxTokenLength": 4096
         },
         "azure-td3": {
@@ -18,7 +18,7 @@
                 "api-key": "{{ARCHIPELAGO_OPENAI_EU_KEY}}",
                 "Content-Type": "application/json"
             },
-            "requestsPerSecond": 20,
+            "requestsPerSecond": 2,
             "maxTokenLength": 4096
         },
         "oai-td3": {
@@ -35,7 +35,5 @@
             "maxTokenLength": 4096
         }
     },
-    "cache": false,
-    "context": {},
-    "server" : "standalone"
+    "enableCache": true
 }
