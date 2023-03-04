@@ -74,7 +74,6 @@ class PathwayPrompter {
         if (this.model.type === 'OPENAI_CHAT') {
             params = {
                 messages: [ {"role": "user", "content": constructedPrompt} ],
-                max_tokens: this.getModelMaxTokenLength() - encode(constructedPrompt).length - 1,
                 temperature: this.temperature ?? 0.7,
             }
         } else {
@@ -102,8 +101,9 @@ class PathwayPrompter {
         const params = { ...(this.model.params || {}), ...requestParameters }
         const headers = this.model.headers || {};
         const data = await request({ url, params, headers }, this.modelName);
+        const modelInput = params.prompt || params.messages[0].content;
         console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`)
-        console.log(`\x1b[36m${params.prompt}\x1b[0m`)
+        console.log(`\x1b[36m${modelInput}\x1b[0m`)
         console.log(`\x1b[34m> ${getResponseResult(data)}\x1b[0m`)
 
         if (data.error) {

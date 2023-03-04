@@ -4,8 +4,10 @@ const getResponseResult = (data) => {
     if (!choices || !choices.length) {
         return; //TODO no choices case
     }
-    const result = choices.map(({ text }) => text.trim());
-    return result.length > 1 ? result : result[0];
+    const textResult = choices.map(({ text }) => text && text.trim());
+    const messageResult = choices.map(({ message }) => message && message.content && message.content.trim());
+
+    return messageResult[0] || textResult[0] || null;
 }
 
 //simply trim and parse with given regex
