@@ -33,6 +33,19 @@
             },
             "requestsPerSecond": 20,
             "maxTokenLength": 4096
+        },
+        "oai-gpturbo": {
+            "type": "OPENAI_CHAT",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-3.5-turbo"
+            },
+            "requestsPerSecond": 20,
+            "maxTokenLength": 4096
         }
     },
     "enableCache": true,
