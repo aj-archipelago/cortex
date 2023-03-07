@@ -1,5 +1,5 @@
 {
-    "defaultModelName": "azure-td2",
+    "defaultModelName": "azure-td3",
     "models": {
         "azure-td2": {
             "type": "AZURE-OAI",
@@ -35,5 +35,13 @@
             "maxTokenLength": 4096
         }
     },
-    "enableCache": true
+    "enableCache": true,
+    "pathways": {
+        "bias" : {
+            "disabled" : false
+        },
+        "styleguidemulti": {
+            "model": "azure-td2"
+        }
+    }
 }
