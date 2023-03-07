@@ -1,5 +1,3 @@
-const { Prompt } = require("../graphql/prompt");
-
 // Description: Have a chat with a bot that uses context to understand the conversation
 module.exports = {
     prompt:

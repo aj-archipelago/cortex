@@ -1,5 +1,7 @@
 module.exports = {
     "pass": require("./pass"),
+    "edit": require('./edit'),
+    "chat": require('./chat'),
     "chat_context": require('./chat_context'),
     "chat_persist": require('./chat_persist'),
     "chat_code": require('./chat_code'),
