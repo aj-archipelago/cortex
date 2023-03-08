@@ -28,7 +28,7 @@ const getPlugins = (config) => {
 
     //if cache is enabled and Redis is available, use it
     let cache;
-    if (config.get('enableCache') && config.get('storageConnectionString')) {
+    if (config.get('enableGraphqlCache') && config.get('storageConnectionString')) {
         cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString'),{
             ssl: true,
             abortConnect: false,            

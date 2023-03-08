@@ -7,8 +7,7 @@ module.exports = {
     prompt: `{{text}}`,
     defaultInputParameters: {
         text: ``,
-        // Add the option of making every call async
-        async: false,
+        asyncRequestId: ``, // used to identify the async request
         contextId : ``, // used to identify the context of the request
     },
     inputParameters: {},

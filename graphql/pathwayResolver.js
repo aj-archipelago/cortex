@@ -23,7 +23,7 @@ class PathwayResolver {
         this.pathway = pathway;
         this.useInputChunking = pathway.useInputChunking;
         this.warnings = [];
-        this.requestId = uuidv4();
+        this.requestId = ``;
         this.responseParser = new PathwayResponseParser(pathway);
         this.pathwayPrompter = new PathwayPrompter({ config, pathway });
         this.previousResult = '';
@@ -47,14 +47,18 @@ class PathwayResolver {
     }
 
     async resolve(args) {
-        if (args.async) {
+        if (args.asyncRequestId) {
+            // If the request is asyncronous, save the request id
+            this.requestId = args.asyncRequestId;
             // Asynchronously process the request
-            this.promptAndParse(args).then((data) => {
+            this.promptAndParse(args).then(async (data) => {
+                const { completedCount, totalCount } = this.requestState[this.requestId];
                 this.requestState[this.requestId].data = data;
                 pubsub.publish('REQUEST_PROGRESS', {
                     requestProgress: {
                         requestId: this.requestId,
-                        data: JSON.stringify(data)
+                        progress: completedCount / totalCount,
+                        data: JSON.stringify(data),
                     }
                 });
             });
@@ -220,12 +224,14 @@ class PathwayResolver {
 
         const { completedCount, totalCount } = this.requestState[this.requestId];
 
-        pubsub.publish('REQUEST_PROGRESS', {
-            requestProgress: {
-                requestId: this.requestId,
-                progress: completedCount / totalCount,
-            }
-        });
+        if (completedCount < totalCount) {
+            pubsub.publish('REQUEST_PROGRESS', {
+                requestProgress: {
+                    requestId: this.requestId,
+                    progress: completedCount / totalCount,
+                }
+            });
+        }
 
         if (prompt.saveResultTo) {
             this.savedContext[prompt.saveResultTo] = result;
