@@ -4,6 +4,11 @@ jest.setTimeout(1800000);
 
 const testServer = getTestServer();
 
+//stop server after all tests
+afterAll(async () => {
+    await testServer.stop();
+});
+
 it('chunking test of translate endpoint with huge text', async () => {
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!) { translate(text: $text) { result } }',

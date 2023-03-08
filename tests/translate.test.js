@@ -4,6 +4,11 @@ jest.setTimeout(1800000);
 
 const testServer = getTestServer();
 
+//stop server after all tests
+afterAll(async () => {
+    await testServer.stop();
+});
+
 it('test translate-context', async () => {
     const response = await testServer.executeOperation({
         query: 'query($text: String!, $to:String) { translate_context(text: $text, to:$to) { result } }',

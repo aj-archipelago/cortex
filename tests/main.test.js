@@ -14,6 +14,11 @@ const getTestServer = () => {
 
 const testServer = getTestServer();
 
+//stop server after all tests
+afterAll(async () => {
+    await testServer.stop();
+});
+
 it('validates tags endpoint', async () => {
     const text = '\n\nistanbul\n\n'.repeat(1000);
     const response = await testServer.executeOperation({
@@ -128,11 +133,11 @@ it('validates sentiment endpoint', async () => {
 it('validates spelling endpoint', async () => {
     const response = await testServer.executeOperation({
         query: 'query spelling($text: String!) { spelling(text: $text) { result } }',
-        variables: { text: 'helo there my dear worldd!' },
+        variables: { text: 'color me with a nice flavor then apologize!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.spelling.result).toMatch(/hello.*world/i);
+    expect(response.data?.spelling.result).toMatch(/colour me with a nice flavour then apologise!/i);
 });
 
 it('validates styleguide endpoint', async () => {

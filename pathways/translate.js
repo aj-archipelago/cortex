@@ -7,4 +7,5 @@ module.exports = {
         to: `Arabic`,
     },
     model: 'azure-td3',
+    timeout: 300, // in seconds
 }

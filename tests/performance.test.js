@@ -4,6 +4,12 @@ jest.setTimeout(1800000);
 
 const testServer = getTestServer();
 
+//stop server after all tests
+afterAll(async () => {
+    await testServer.stop();
+});
+
+
 it('performance run of styleguidemulti endpoint with huge text', async () => {
     const response = await testServer.executeOperation({
         query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
