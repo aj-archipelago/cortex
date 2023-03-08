@@ -9,6 +9,7 @@ module.exports = {
     `Mask any profanity with the first letter of the word followed by asterisks in the input text below.\n\nInput:\n{{{previousResult}}}\n\nCorrected:\n`
     ],
     useInputChunking: true,
+    inputChunkSize: 200,
     useParallelChunkProcessing: true,
     model: 'azure-td2'
 }
