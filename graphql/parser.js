@@ -4,10 +4,17 @@ const getResponseResult = (data) => {
     if (!choices || !choices.length) {
         return; //TODO no choices case
     }
-    const textResult = choices.map(({ text }) => text && text.trim());
-    const messageResult = choices.map(({ message }) => message && message.content && message.content.trim());
 
-    return messageResult[0] || textResult[0] || null;
+    // if we got a choices array back with more than one choice, return the whole array
+    if (choices.length > 1) {
+        return choices;
+    }
+
+    // otherwise, return the first choice
+    const textResult = choices[0].text && choices[0].text.trim();
+    const messageResult = choices[0].message && choices[0].message.content && choices[0].message.content.trim();
+
+    return messageResult || textResult || null;
 }
 
 //simply trim and parse with given regex

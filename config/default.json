@@ -3,22 +3,22 @@
     "models": {
         "azure-td2": {
             "type": "AZURE-OAI",
-            "url": "https://archipelago-openai-eu.openai.azure.com/openai/deployments/archipelago-davinci/completions?api-version=2022-06-01-preview",
+            "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-davinci/completions?api-version=2022-06-01-preview",
             "headers": {
-                "api-key": "{{ARCHIPELAGO_OPENAI_EU_KEY}}",
+                "api-key": "{{ARCHIPELAGO_OPENAI_KEY}}",
                 "Content-Type": "application/json"
             },
-            "requestsPerSecond": 2,
+            "requestsPerSecond": 20,
             "maxTokenLength": 4096
         },
         "azure-td3": {
             "type": "AZURE-OAI",
-            "url": "https://archipelago-openai-eu.openai.azure.com/openai/deployments/archipelago-davinci-003/completions?api-version=2022-06-01-preview",
+            "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-davinci-003/completions?api-version=2022-06-01-preview",
             "headers": {
-                "api-key": "{{ARCHIPELAGO_OPENAI_EU_KEY}}",
+                "api-key": "{{ARCHIPELAGO_OPENAI_KEY}}",
                 "Content-Type": "application/json"
             },
-            "requestsPerSecond": 2,
+            "requestsPerSecond": 20,
             "maxTokenLength": 4096
         },
         "oai-td3": {
@@ -48,7 +48,7 @@
             "maxTokenLength": 4096
         }
     },
-    "enableCache": true,
+    "enableCache": false,
     "pathways": {
         "bias" : {
             "disabled" : false
