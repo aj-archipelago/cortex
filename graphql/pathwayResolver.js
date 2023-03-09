@@ -24,7 +24,7 @@ class PathwayResolver {
         this.useInputChunking = pathway.useInputChunking;
         this.chunkMaxTokenLength = 0;
         this.warnings = [];
-        this.requestId = ``;
+        this.requestId = uuidv4();
         this.responseParser = new PathwayResponseParser(pathway);
         this.pathwayPrompter = new PathwayPrompter({ config, pathway });
         this.previousResult = '';
@@ -48,23 +48,26 @@ class PathwayResolver {
         this.pathwayPrompt = pathway.prompt;
     }
 
-    async resolve(args) {
-        if (args.asyncRequestId) {
-            // If the request is asyncronous, save the request id
-            this.requestId = args.asyncRequestId;
-            // Asynchronously process the request
-            this.promptAndParse(args).then(async (data) => {
-                const { completedCount, totalCount } = this.requestState[this.requestId];
-                this.requestState[this.requestId].data = data;
-                pubsub.publish('REQUEST_PROGRESS', {
-                    requestProgress: {
-                        requestId: this.requestId,
-                        progress: completedCount / totalCount,
-                        data: JSON.stringify(data),
-                    }
-                });
-            });
+    async asyncResolve(args) {
+        // Wait with a sleep promise for the race condition to resolve
+        const results = await Promise.all([this.promptAndParse(args), await new Promise(resolve => setTimeout(resolve, 250))]);
+        // Process the results
+        const data = results[0];
+        const { completedCount, totalCount } = this.requestState[this.requestId];
+        this.requestState[this.requestId].data = data;
+        pubsub.publish('REQUEST_PROGRESS', {
+            requestProgress: {
+                requestId: this.requestId,
+                progress: completedCount / totalCount,
+                data: JSON.stringify(data),
+            }
+        });
+    }
 
+    async resolve(args) {
+        if (args.async) {
+            // Asyncronously process the request
+            this.asyncResolve(args); 
             return this.requestId;
         }
         else {
@@ -74,7 +77,6 @@ class PathwayResolver {
     }
 
     async promptAndParse(args) {
-
         // Get saved context from contextId or change contextId if needed
         const { contextId } = args;
         this.savedContextId = contextId ? contextId : null;
