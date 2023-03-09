@@ -1,10 +1,10 @@
 {
-  "name": "cortex",
-  "version": "0.0.1",
+  "name": "@aj-archipelago/cortex",
+  "version": "0.0.4",
   "description": "Project Cortex",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ALJAZEERAPLUS/cortex.git"
+    "url": "git+https://github.com/aj-archipelago/cortex.git"
   },
   "keywords": [
     "cortex",
@@ -17,7 +17,7 @@
   },
   "author": "",
   "license": "MIT",
-  "homepage": "https://github.com/ALJAZEERAPLUS/cortex#readme",
+  "homepage": "https://github.com/aj-archipelago/cortex#readme",
   "dependencies": {
     "@apollo/utils.keyvadapter": "^1.1.2",
     "@graphql-tools/schema": "^9.0.12",
@@ -42,5 +42,8 @@
   "devDependencies": {
     "dotenv": "^16.0.3",
     "jest": "^29.3.1"
+  },
+  "publishConfig": {
+    "access": "private"
   }
 }
