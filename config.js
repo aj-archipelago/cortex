@@ -1,12 +1,13 @@
 const path = require('path');
 const convict = require('convict');
 const handlebars = require("handlebars");
+const fs = require('fs');
 
 // Schema for config
 var config = convict({
     pathwaysPath: {
         format: String,
-        default: null,
+        default: path.join(process.cwd(), '/pathways'),
         env: 'CORTEX_PATHWAYS_PATH'
     },
     corePathwaysPath: {
@@ -93,7 +94,7 @@ var config = convict({
 const configFile = config.get('cortexConfigFile');
 
 // Load config file
-if (configFile) {
+if (configFile && fs.existsSync(configFile)) {
     console.log('Loading config from', configFile);
     config.loadFile(configFile);
 } else {
@@ -115,15 +116,18 @@ const buildPathways = (config) => {
 
     // Load core pathways, default from the Cortex package
     console.log('Loading core pathways from', corePathwaysPath)
-    const loadedPathways = require(corePathwaysPath);
+    let loadedPathways = require(corePathwaysPath);
 
     // Load custom pathways and override core pathways if same
-    if (pathwaysPath) {
+    if (pathwaysPath && fs.existsSync(pathwaysPath)) {
         console.log('Loading custom pathways from', pathwaysPath)
         const customPathways = require(pathwaysPath);
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
 
+    // This is where we integrate pathway overrides from the config
+    // file. This can run into a partial definition issue if the
+    // config file contains pathways that no longer exist.
     const pathways = config.get('pathways');
     for (const [key, def] of Object.entries(loadedPathways)) {
         const pathway = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...def, ...pathways[key] };

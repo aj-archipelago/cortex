@@ -58,18 +58,45 @@ class PathwayPrompter {
     }
 
     requestParameters(text, parameters, prompt) {
+        // the prompt object will either have a messages property or a prompt propery
+        // or it could be a function that returns prompt text
+
+        const combinedParameters = { ...this.promptParameters, ...parameters };
+
+        // if it's a messages prompt, compile the messages and send them directly
+        // to the API - a messages prompt automatically means its a chat-style
+        // conversation
+        if (prompt.messages)
+        {
+            const compiledMessages = prompt.messages.map((message) => {
+                const compileText = handlebars.compile(message.content);
+                return { role: message.role,
+                content: compileText({...combinedParameters, text})
+                }
+            })
+
+            return {
+                messages: compiledMessages,
+                temperature: this.temperature ?? 0.7,
+            }
+        }
+
+        // otherwise, we need to get the prompt text
         let promptText;
+
         if (typeof (prompt) === 'function') {
             promptText = prompt(parameters);
         }
         else {
-            promptText = prompt;
+            promptText = prompt.prompt;
         }
 
         const interpolatePrompt = handlebars.compile(promptText);
-
-        const combinedParameters = { ...this.promptParameters, ...parameters };
         const constructedPrompt = interpolatePrompt({ ...combinedParameters, text });
+        
+        // this prompt could be for either a chat-style conversation or a completion-style
+        // conversation. They require different parameters.
+        
         let params = {};
 
         if (this.model.type === 'OPENAI_CHAT') {
@@ -91,7 +118,6 @@ class PathwayPrompter {
             }
         }
 
-        // return { ...defaultParams, ...overrideParams };
         return params;
     }
 

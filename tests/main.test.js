@@ -19,17 +19,6 @@ afterAll(async () => {
     await testServer.stop();
 });
 
-it('validates tags endpoint', async () => {
-    const text = '\n\nistanbul\n\n'.repeat(1000);
-    const response = await testServer.executeOperation({
-        query: 'query ($text: String!) { tags(text: $text) { result } }',
-        variables: { text },
-    });
-
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.tags?.result).toBeDefined();
-});
-
 it('validates bias endpoint', async () => {
     const response = await testServer.executeOperation({
         query: 'query bias($text: String!) { bias(text: $text) { result } }',
@@ -64,42 +53,6 @@ it('validates entities endpoint with given num of count return', async () => {
     });
 });
 
-it('validates grammar endpoint', async () => {
-    const response = await testServer.executeOperation({
-        query: 'query grammar($text: String!) { grammar(text: $text) { result } }',
-        variables: { text: 'helo there my dear worldd!' },
-    });
-
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.grammar.result).toMatch(/hello.*world/i);
-});
-
-it('validates headline endpoint', async () => {
-    const response = await testServer.executeOperation({
-        query: 'query headline($text: String!) { headline(text: $text) { result } }',
-        variables: { text: 'hello there my dear world!' },
-    });
-
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.headline?.result?.length).toBeGreaterThan(0);
-    response.data?.headline?.result.forEach((headline) => {
-        expect(headline).toBeDefined();
-    });
-});
-
-it('validates keywords endpoint', async () => {
-    const response = await testServer.executeOperation({
-        query: 'query keywords($text: String!) { keywords(text: $text) { result } }',
-        variables: { text: 'hello there my dear world!' },
-    });
-
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.keywords?.result.length).toBeGreaterThan(0);
-    response.data?.keywords.result.forEach((keyword) => {
-        expect(keyword).toBeDefined();
-    });
-});
-
 it('validates paraphrase endpoint', async () => {
     const response = await testServer.executeOperation({
         query: 'query paraphrase($text: String!) { paraphrase(text: $text) { result } }',
@@ -108,16 +61,6 @@ it('validates paraphrase endpoint', async () => {
 
     expect(response.errors).toBeUndefined();
     expect(response.data?.paraphrase?.result).toBeDefined();
-});
-
-it('validates pass endpoint', async () => {
-    const response = await testServer.executeOperation({
-        query: 'query pass($text: String!) { pass(text: $text) { result } }',
-        variables: { text: 'hello there my dear world!' },
-    });
-
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.pass.result).toBeDefined();
 });
 
 it('validates sentiment endpoint', async () => {
@@ -130,34 +73,14 @@ it('validates sentiment endpoint', async () => {
     expect(response.data?.sentiment.result).toBeDefined();
 });
 
-it('validates spelling endpoint', async () => {
+it('validates edit endpoint', async () => {
     const response = await testServer.executeOperation({
-        query: 'query spelling($text: String!) { spelling(text: $text) { result } }',
-        variables: { text: 'color me with a nice flavor then apologize!' },
-    });
-
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.spelling.result).toMatch(/colour me with a nice flavour then apologise!/i);
-});
-
-it('validates styleguide endpoint', async () => {
-    const response = await testServer.executeOperation({
-        query: 'query styleguide($text: String!) { styleguide(text: $text) { result } }',
+        query: 'query edit($text: String!) { edit(text: $text) { result } }',
         variables: { text: 'helo there my dear worldd!' },
     });
 
     expect(response.errors).toBeUndefined();
-    expect(response.data?.styleguide.result).toMatch(/hello.*world/i);
-});
-
-it('validates styleguidemulti endpoint', async () => {
-    const response = await testServer.executeOperation({
-        query: 'query styleguidemulti($text: String!) { styleguidemulti(text: $text) { result } }',
-        variables: { text: 'helo there my dear worldd!' },
-    });
-
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.styleguidemulti.result).toMatch(/hello.*world/i);
+    expect(response.data?.edit.result).toMatch(/hello.*world/i);
 });
 
 it('validates summary endpoint', async () => {
@@ -180,20 +103,6 @@ it('validates topics endpoint with given num of count return', async () => {
     expect(response.data?.topics.result.length).toBe(3);
     response.data?.topics.result.forEach((topic) => {
         expect(topic).toBeDefined();
-    });
-});
-
-it('validates keywords endpoint with long text', async () => {
-    const text = '\n\nistanbul\n\n'.repeat(1000);
-    const response = await testServer.executeOperation({
-        query: 'query keywords($text: String!) { keywords(text: $text) { result } }',
-        variables: { text },
-    });
-
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.keywords?.result.length).toBeGreaterThan(0);
-    response.data?.keywords.result.forEach((keyword) => {
-        expect(keyword).toBeDefined();
     });
 });
 

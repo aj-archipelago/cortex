@@ -22,6 +22,7 @@ class PathwayResolver {
         this.requestState = requestState;
         this.pathway = pathway;
         this.useInputChunking = pathway.useInputChunking;
+        this.chunkMaxTokenLength = 0;
         this.warnings = [];
         this.requestId = ``;
         this.responseParser = new PathwayResponseParser(pathway);
@@ -40,6 +41,7 @@ class PathwayResolver {
                     this._pathwayPrompt = [this._pathwayPrompt];
                 }
                 this.prompts = this._pathwayPrompt.map(p => (p instanceof Prompt) ? p : new Prompt({ prompt:p }));
+                this.chunkMaxTokenLength = this.getChunkMaxTokenLength();
             }
         });
 
@@ -96,7 +98,12 @@ class PathwayResolver {
 
     // Here we choose how to handle long input - either summarize or chunk
     processInputText(text) {
-        const chunkMaxChunkTokenLength = this.getChunkMaxTokenLength();
+        let chunkMaxChunkTokenLength = 0;
+        if (this.pathway.inputChunkSize) {
+            chunkMaxChunkTokenLength = Math.min(this.pathway.inputChunkSize, this.chunkMaxTokenLength);
+        } else {
+             chunkMaxChunkTokenLength = this.chunkMaxTokenLength;
+        }
         const encoded = encode(text);
         if (!this.useInputChunking || encoded.length <= chunkMaxChunkTokenLength) { // no chunking, return as is
             if (encoded.length >= chunkMaxChunkTokenLength) {
@@ -129,14 +136,20 @@ class PathwayResolver {
     // Calculate the maximum token length for a chunk
     getChunkMaxTokenLength() {
         // find the longest prompt
-        const maxPromptTokenLength = Math.max(...this.prompts.map(({ prompt }) => encode(String(prompt)).length));
+        const maxPromptTokenLength = Math.max(...this.prompts.map(({ prompt }) => prompt ? encode(String(prompt)).length : 0));
+        const maxMessagesTokenLength = Math.max(...this.prompts.map(({ messages }) => messages ? messages.reduce((acc, {role, content}) => {
+            return acc + encode(role).length + encode(content).length;
+        }, 0) : 0));
+
+        const maxTokenLength = Math.max(maxPromptTokenLength, maxMessagesTokenLength);
+
         // find out if any prompts use both text input and previous result
         const hasBothProperties = this.prompts.some(prompt => prompt.usesInputText && prompt.usesPreviousResult);
         
         // the token ratio is the ratio of the total prompt to the result text - both have to be included
         // in computing the max token length
         const promptRatio = this.pathwayPrompter.getPromptTokenRatio();
-        let maxChunkToken = promptRatio * this.pathwayPrompter.getModelMaxTokenLength() - maxPromptTokenLength;
+        let maxChunkToken = promptRatio * this.pathwayPrompter.getModelMaxTokenLength() - maxTokenLength;
 
         // if we have to deal with prompts that have both text input
         // and previous result, we need to split the maxChunkToken in half
@@ -183,11 +196,11 @@ class PathwayResolver {
                 // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous result
                 if (!this.prompts[i].usesTextInput) {
                     // Limit context to it's N + text's characters
-                    previousResult = this.truncate(previousResult, 2 * this.getChunkMaxTokenLength());
+                    previousResult = this.truncate(previousResult, 2 * this.chunkMaxTokenLength);
                     result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousResult });
                 } else {
                     // Limit context to N characters
-                    previousResult = this.truncate(previousResult, this.getChunkMaxTokenLength());
+                    previousResult = this.truncate(previousResult, this.chunkMaxTokenLength);
                     result = await Promise.all(chunks.map(chunk =>
                         this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousResult })));
                     result = result.join("\n\n")
@@ -219,7 +232,7 @@ class PathwayResolver {
         if (this.requestState[this.requestId].canceled) {
             return;
         }
-        const result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt.prompt);
+        const result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt);
         this.requestState[this.requestId].completedCount++;
 
         const { completedCount, totalCount } = this.requestState[this.requestId];

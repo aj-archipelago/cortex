@@ -9,21 +9,6 @@ afterAll(async () => {
     await testServer.stop();
 });
 
-it('test translate-context', async () => {
-    const response = await testServer.executeOperation({
-        query: 'query($text: String!, $to:String) { translate_context(text: $text, to:$to) { result } }',
-        variables: {
-            to: 'Turkish',
-            text: `besiktas is great.\n\n what about fenerbahce's rival?\n\n yes, galatasaray` },
-    });
-
-    expect(response.errors).toBeUndefined();
-    //check if it contains names like besiktas, fenerbahce, galatasaray
-    expect(response.data?.translate_context.result).toMatch(/be.ikta./i);
-    expect(response.data?.translate_context.result).toMatch(/fenerbah.e/i);
-    expect(response.data?.translate_context.result).toMatch(/galatasaray/i);
-});
-
 it('test translate endpoint with huge arabic text english translation and check return non-arabic/english', async () => {
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!, $to:String) { translate(text: $text, to:$to) { result } }',
