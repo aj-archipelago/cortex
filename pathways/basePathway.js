@@ -8,7 +8,8 @@ module.exports = {
     defaultInputParameters: {
         text: ``,
         async: false, // switch to enable async mode
-        contextId : ``, // used to identify the context of the request
+        contextId: ``, // used to identify the context of the request,
+        stream: false, // switch to enable stream mode
     },
     inputParameters: {},
     typeDef,

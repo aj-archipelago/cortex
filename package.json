@@ -22,7 +22,7 @@
     "@apollo/utils.keyvadapter": "^1.1.2",
     "@graphql-tools/schema": "^9.0.12",
     "@keyv/redis": "^2.5.4",
-    "apollo-server": "^3.11.1",
+    "apollo-server": "^3.12.0",
     "apollo-server-core": "^3.11.1",
     "apollo-server-express": "^3.11.1",
     "apollo-server-plugin-response-cache": "^3.8.1",

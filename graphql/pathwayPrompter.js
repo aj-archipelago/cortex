@@ -3,6 +3,7 @@ const handlebars = require("handlebars");
 const { getResponseResult } = require("./parser");
 const { Exception } = require("handlebars");
 const { encode } = require("gpt-3-encoder");
+const pubsub = require("./pubsub");
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
@@ -27,6 +28,7 @@ class PathwayPrompter {
             throw new Exception(`Model ${this.modelName} not found in config`);
         }
         this.environmentVariables = config.getEnv();
+        this.pathway = pathway;
         this.temperature = pathway.temperature;
         this.pathwayPrompt = pathway.prompt;
         this.pathwayName = pathway.name;
@@ -98,11 +100,13 @@ class PathwayPrompter {
         // conversation. They require different parameters.
         
         let params = {};
+        const stream = combinedParameters.stream ?? false;
 
         if (this.model.type === 'OPENAI_CHAT') {
             params = {
                 messages: [ {"role": "user", "content": constructedPrompt} ],
                 temperature: this.temperature ?? 0.7,
+                stream
             }
         } else {
             params = {
@@ -115,6 +119,7 @@ class PathwayPrompter {
                 // "presence_penalty": 0,
                 // "frequency_penalty": 0,
                 // "best_of": 1,
+                stream
             }
         }
 
@@ -128,6 +133,7 @@ class PathwayPrompter {
         const params = { ...(this.model.params || {}), ...requestParameters }
         const headers = this.model.headers || {};
         const data = await request({ url, params, headers, cache:this.shouldCache }, this.modelName);
+
         const modelInput = params.prompt || params.messages[0].content;
         const responseResult = getResponseResult(data);
         

@@ -2,7 +2,7 @@
 const getResponseResult = (data) => {
     const { choices } = data;
     if (!choices || !choices.length) {
-        return; //TODO no choices case
+        return data; //TODO no choices case
     }
 
     // if we got a choices array back with more than one choice, return the whole array
@@ -14,7 +14,7 @@ const getResponseResult = (data) => {
     const textResult = choices[0].text && choices[0].text.trim();
     const messageResult = choices[0].message && choices[0].message.content && choices[0].message.content.trim();
 
-    return messageResult || textResult || null;
+    return messageResult || textResult || data || null;
 }
 
 //simply trim and parse with given regex

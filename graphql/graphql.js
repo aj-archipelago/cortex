@@ -17,8 +17,7 @@ const subscriptions = require('./subscriptions');
 const { buildLimiters } = require('../lib/request');
 const { cancelRequestResolver } = require('./resolver');
 const { buildPathways, buildModels } = require('../config');
-
-const requestState = {}; // Stores the state of each request
+const { requestState } = require('./requestState');
 
 const getPlugins = (config) => {
     // server plugins
@@ -72,7 +71,7 @@ const getTypedefs = (pathways) => {
     }
 
     type Subscription {
-        requestProgress(requestId: String!): RequestSubscription
+        requestProgress(requestIds: [String!]): RequestSubscription
     }
 `;
 

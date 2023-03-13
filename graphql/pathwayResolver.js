@@ -8,6 +8,8 @@ const { getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker'
 const { PathwayResponseParser } = require('./pathwayResponseParser');
 const { Prompt } = require('./prompt');
 const { getv, setv } = require('../lib/keyValueStorageClient');
+const { requestState } = require('./requestState');
+const { getResponseResult } = require('./parser');
 
 const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
@@ -17,9 +19,8 @@ const callPathway = async (config, pathwayName, requestState, { text, ...paramet
 }
 
 class PathwayResolver {
-    constructor({ config, pathway, requestState }) {
+    constructor({ config, pathway }) {
         this.config = config;
-        this.requestState = requestState;
         this.pathway = pathway;
         this.useInputChunking = pathway.useInputChunking;
         this.chunkMaxTokenLength = 0;
@@ -50,24 +51,62 @@ class PathwayResolver {
 
     async asyncResolve(args) {
         // Wait with a sleep promise for the race condition to resolve
-        const results = await Promise.all([this.promptAndParse(args), await new Promise(resolve => setTimeout(resolve, 250))]);
-        // Process the results
-        const data = results[0];
-        const { completedCount, totalCount } = this.requestState[this.requestId];
-        this.requestState[this.requestId].data = data;
-        pubsub.publish('REQUEST_PROGRESS', {
-            requestProgress: {
-                requestId: this.requestId,
-                progress: completedCount / totalCount,
-                data: JSON.stringify(data),
+        // const results = await Promise.all([this.promptAndParse(args), await new Promise(resolve => setTimeout(resolve, 250))]);
+        const data = await this.promptAndParse(args);
+        // Process the results for async
+        if(args.async){
+            const { completedCount, totalCount } = requestState[this.requestId];
+            requestState[this.requestId].data = data;
+            pubsub.publish('REQUEST_PROGRESS', {
+                requestProgress: {
+                    requestId: this.requestId,
+                    progress: completedCount / totalCount,
+                    data: JSON.stringify(data),
+                }
+            });
+        } else { //stream
+            for (const handle of data) {
+                handle.on('data', data => {
+                    console.log(data.toString());
+                    const lines = data.toString().split('\n').filter(line => line.trim() !== '');
+                    for (const line of lines) {
+                        const message = line.replace(/^data: /, '');
+                        if (message === '[DONE]') {
+                            return; // Stream finished
+                        }
+                        try {
+                            const parsed = JSON.parse(message);
+                            const result = getResponseResult(parsed);
+                            console.log(parsed.choices[0].text);
+
+                            pubsub.publish('REQUEST_PROGRESS', {
+                                requestProgress: {
+                                    requestId: this.requestId,
+                                    data: JSON.stringify(result)
+                                }
+                            });
+                        } catch (error) {
+                            console.error('Could not JSON parse stream message', message, error);
+                        }
+                    }
+                });
+
+                // data.on('end', () => {
+                //     console.log("stream done");
+                // });
             }
-        });
+            
+        }
     }
 
     async resolve(args) {
-        if (args.async) {
+        if (args.async || args.stream) {
             // Asyncronously process the request
-            this.asyncResolve(args); 
+            // this.asyncResolve(args);
+            if (!requestState[this.requestId]) {
+                requestState[this.requestId] = {}
+            }
+            requestState[this.requestId] = { ...requestState[this.requestId], args, resolver: this.asyncResolve.bind(this) };
             return this.requestId;
         }
         else {
@@ -104,7 +143,7 @@ class PathwayResolver {
         if (this.pathway.inputChunkSize) {
             chunkMaxChunkTokenLength = Math.min(this.pathway.inputChunkSize, this.chunkMaxTokenLength);
         } else {
-             chunkMaxChunkTokenLength = this.chunkMaxTokenLength;
+            chunkMaxChunkTokenLength = this.chunkMaxTokenLength;
         }
         const encoded = encode(text);
         if (!this.useInputChunking || encoded.length <= chunkMaxChunkTokenLength) { // no chunking, return as is
@@ -130,7 +169,7 @@ class PathwayResolver {
 
     async summarizeIfEnabled({ text, ...parameters }) {
         if (this.pathway.useInputSummarization) {
-            return await callPathway(this.config, 'summary', this.requestState, { text, targetLength: 1000, ...parameters });
+            return await callPathway(this.config, 'summary', requestState, { text, targetLength: 1000, ...parameters });
         }
         return text;
     }
@@ -166,18 +205,17 @@ class PathwayResolver {
 
     // Process the request and return the result        
     async processRequest({ text, ...parameters }) {
-
         text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
         const chunks = this.processInputText(text);
 
         const anticipatedRequestCount = chunks.length * this.prompts.length;
 
-        if ((this.requestState[this.requestId] || {}).canceled) {
+        if ((requestState[this.requestId] || {}).canceled) {
             throw new Error('Request canceled');
         }
 
         // Store the request state
-        this.requestState[this.requestId] = { totalCount: anticipatedRequestCount, completedCount: 0 };
+        requestState[this.requestId] = { ...requestState[this.requestId], totalCount: anticipatedRequestCount, completedCount: 0 };
 
         // If pre information is needed, apply current prompt with previous prompt info, only parallelize current call
         if (this.pathway.useParallelChunkProcessing) {
@@ -205,7 +243,9 @@ class PathwayResolver {
                     previousResult = this.truncate(previousResult, this.chunkMaxTokenLength);
                     result = await Promise.all(chunks.map(chunk =>
                         this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousResult })));
-                    result = result.join("\n\n")
+                    if (!parameters.stream) {
+                        result = result.join("\n\n")
+                    }
                 }
 
                 // If this is any prompt other than the last, use the result as the previous context
@@ -231,13 +271,13 @@ class PathwayResolver {
     }
 
     async applyPrompt(prompt, text, parameters) {
-        if (this.requestState[this.requestId].canceled) {
+        if (requestState[this.requestId].canceled) {
             return;
         }
         const result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt);
-        this.requestState[this.requestId].completedCount++;
+        requestState[this.requestId].completedCount++;
 
-        const { completedCount, totalCount } = this.requestState[this.requestId];
+        const { completedCount, totalCount } = requestState[this.requestId];
 
         if (completedCount < totalCount) {
             pubsub.publish('REQUEST_PROGRESS', {
