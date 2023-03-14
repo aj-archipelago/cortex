@@ -12,10 +12,11 @@ const typeDef = (pathway) => {
     const fieldsStr = !fields ? `` : fields.map(f => `${f}: String`).join('\n    ');
 
     const typeName = fields ? `${objName}Result` : `String`;
+    const messageType = `input Message { role: String, content: String }`;
+
     const type = fields ? `type ${typeName} {
     ${fieldsStr}
-}` : ``;
-
+    }` : ``;
 
     const resultStr = pathway.list ? `[${typeName}]` : typeName;
 
@@ -29,18 +30,21 @@ const typeDef = (pathway) => {
 
 
     const params = { ...defaultInputParameters, ...inputParameters };
+
     const paramsStr = Object.entries(params).map(
-        ([key, value]) => `${key}: ${GRAPHQL_TYPE_MAP[typeof (value)]} = ${typeof (value) == `string` ? `"${value}"` : value}`).join('\n');
+        ([key, value]) => {
+            if (typeof value === 'object' && Array.isArray(value)) {
+                return `${key}: [Message] = []`;
+            } else {
+                return `${key}: ${GRAPHQL_TYPE_MAP[typeof (value)]} = ${typeof (value) === 'string' ? `"${value}"` : value}`;
+            }
+        }
+        ).join('\n');
+          
 
-
-    return `${type}
-
-${responseType}
-
-extend type Query {
-    ${name}(${paramsStr}): ${objName}
-}  
-`;
+    const definition = `${messageType}\n\n${type}\n\n${responseType}\n\nextend type Query {${name}(${paramsStr}): ${objName}}`;
+    //console.log(definition);
+    return definition;
 }
 
 module.exports = {

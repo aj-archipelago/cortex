@@ -17,6 +17,19 @@ const getResponseResult = (data) => {
     return messageResult || textResult || null;
 }
 
+//convert a messages array to a simple chatML format
+const messagesToChatML = (messages) => {
+    let output = "";
+    for (let message of messages) {
+        output += (message.role && message.content) ? `<|im_start|>${message.role}\n${message.content}\n<|im_end|>\n` : `${message}\n`;
+    }
+    // you always want the assistant to respond next so add a
+    // directive for that
+    output += "<|im_start|>assistant\n";
+    
+    return output;
+}
+
 //simply trim and parse with given regex
 const regexParser = (text, regex) => {
     return text.trim().split(regex).map(s => s.trim()).filter(s => s.length);
@@ -54,5 +67,6 @@ module.exports = {
     getResponseResult,
     regexParser,
     parseNumberedList,
-    parseNumberedObjectList
+    parseNumberedObjectList,
+    messagesToChatML,
 };
