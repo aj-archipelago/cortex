@@ -25,7 +25,7 @@ function promptContains(variable, prompt) {
     // if it's an array, it's the messages format
     if (Array.isArray(prompt)) {
       prompt.forEach(p => {
-        while ((match = p.content && regexp.exec(p.content)) !== null) {
+        while (match = p.content && regexp.exec(p.content)) {
           matches.push(match[1]);
         }
       });

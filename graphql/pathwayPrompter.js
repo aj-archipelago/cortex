@@ -1,6 +1,6 @@
 const { request } = require("../lib/request");
 const handlebars = require("handlebars");
-const { getResponseResult } = require("./parser");
+const { getResponseResult, messagesToChatML } = require("./parser");
 const { Exception } = require("handlebars");
 const { encode } = require("gpt-3-encoder");
 const pubsub = require("./pubsub");
@@ -9,14 +9,14 @@ const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
 // register functions that can be called directly in the prompt markdown
-handlebars.registerHelper('stripHTML', function(value) {
+handlebars.registerHelper('stripHTML', function (value) {
     return value.replace(/<[^>]*>/g, '');
-    });
+});
 
-handlebars.registerHelper('now', function() {
+handlebars.registerHelper('now', function () {
     return new Date().toISOString();
-    });
-    
+});
+
 class PathwayPrompter {
     constructor({ config, pathway }) {
         // If the pathway specifies a model, use that, otherwise use the default
@@ -60,70 +60,93 @@ class PathwayPrompter {
     }
 
     requestParameters(text, parameters, prompt) {
-        // the prompt object will either have a messages property or a prompt propery
-        // or it could be a function that returns prompt text
-
-        const combinedParameters = { ...this.promptParameters, ...parameters };
-
-        // if it's a messages prompt, compile the messages and send them directly
-        // to the API - a messages prompt automatically means its a chat-style
-        // conversation
-        if (prompt.messages)
-        {
-            const compiledMessages = prompt.messages.map((message) => {
-                const compileText = handlebars.compile(message.content);
-                return { role: message.role,
-                content: compileText({...combinedParameters, text})
-                }
-            })
-
-            return {
-                messages: compiledMessages,
-                temperature: this.temperature ?? 0.7,
-            }
-        }
-
-        // otherwise, we need to get the prompt text
-        let promptText;
+        // the prompt object is polymorphic, so we need to sort it out here
+        // it can be a function that returns a prompt object or it can be a prompt object
+        let modelPrompt;
 
         if (typeof (prompt) === 'function') {
-            promptText = prompt(parameters);
-        }
-        else {
-            promptText = prompt.prompt;
+            modelPrompt = prompt(parameters);
+        } else {
+            modelPrompt = prompt;
         }
 
-        const interpolatePrompt = handlebars.compile(promptText);
-        const constructedPrompt = interpolatePrompt({ ...combinedParameters, text });
-        
-        // this prompt could be for either a chat-style conversation or a completion-style
-        // conversation. They require different parameters.
-        
-        let params = {};
+        const combinedParameters = { ...this.promptParameters, ...parameters };
         const stream = combinedParameters.stream ?? false;
+        // now, the resulting model prompt can either have prompt or messages
+        // properties depending on the API of the model for this pathway
+
+
+        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+
+        let modelPromptMessages, modelPromptMessagesML;
+
+        if (modelPrompt.messages) {
+            // we support a markdown-like syntax for messages in which the author
+            // can use a Handlebars-like syntax to insert parameters into the array
+            // first we need to expand those directives in the messages array
+            const expandedMessages = modelPrompt.messages.flatMap((message) => {
+                if (typeof message === 'string') {
+                    const match = message.match(/{{(.+?)}}/);
+                    const placeholder = match ? match[1] : null;
+                    if (placeholder === null) {
+                        return message
+                    } else {
+                        return combinedParameters[placeholder] || [];
+                    }
+                } else {
+                    return [message];
+                }
+            });
+
+            modelPromptMessages =
+                expandedMessages.map((message) => {
+                    if (message.content) {
+                        const compileText = handlebars.compile(message.content);
+                        return {
+                            role: message.role,
+                            content: compileText({ ...combinedParameters, text })
+                        }
+                    } else {
+                        const compileText = handlebars.compile(message);
+                        return compileText({ ...combinedParameters, text });
+                    }
+                });
+
+            modelPromptMessagesML = messagesToChatML(modelPromptMessages);
+        };
 
         if (this.model.type === 'OPENAI_CHAT') {
-            params = {
-                messages: [ {"role": "user", "content": constructedPrompt} ],
+            // if it's a chat-style API, we always try to use the messages array
+            // first if possible, otherwise we shoe-horn the prompt into the messages
+            return {
+                messages: modelPromptMessages || [{ "role": "user", "content": modelPromptText }],
                 temperature: this.temperature ?? 0.7,
                 stream
             }
+
         } else {
-            params = {
-                prompt: constructedPrompt,
-                max_tokens: this.getModelMaxTokenLength() - encode(constructedPrompt).length - 1,
-                // model: "text-davinci-002",
-                temperature: this.temperature ?? 0.7,
-                // "top_p": 1,
-                // "n": 1,
-                // "presence_penalty": 0,
-                // "frequency_penalty": 0,
-                // "best_of": 1,
-                stream
+            // even if it's a completion style prompt, if the user specified a messages
+            // array, that wins.  We just need to use the chatML version.
+            if (modelPromptMessagesML) {
+                return {
+                    prompt: modelPromptMessagesML,
+                    max_tokens: this.getModelMaxTokenLength() - encode(modelPromptMessagesML).length - 1,
+                    temperature: this.temperature ?? 0.7,
+                    top_p: 0.95,
+                    frequency_penalty: 0,
+                    presence_penalty: 0,
+                    stop: ["<|im_end|>"],
+                    stream
+                }
+            } else {
+                return {
+                    prompt: modelPromptText,
+                    max_tokens: this.getModelMaxTokenLength() - encode(modelPromptText).length - 1,
+                    temperature: this.temperature ?? 0.7,
+                    stream
+                }
             }
         }
-
-        return params;
     }
 
     async execute(text, parameters, prompt) {
@@ -132,11 +155,11 @@ class PathwayPrompter {
         const url = this.requestUrl(text);
         const params = { ...(this.model.params || {}), ...requestParameters }
         const headers = this.model.headers || {};
-        const data = await request({ url, params, headers, cache:this.shouldCache }, this.modelName);
+        const data = await request({ url, params, headers, cache: this.shouldCache }, this.modelName);
 
         const modelInput = params.prompt || params.messages[0].content;
         const responseResult = getResponseResult(data);
-        
+
         console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`)
         console.log(`\x1b[36m${modelInput}\x1b[0m`)
         console.log(`\x1b[34m> ${responseResult}\x1b[0m`)

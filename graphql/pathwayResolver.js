@@ -187,7 +187,7 @@ class PathwayResolver {
         // find the longest prompt
         const maxPromptTokenLength = Math.max(...this.prompts.map(({ prompt }) => prompt ? encode(String(prompt)).length : 0));
         const maxMessagesTokenLength = Math.max(...this.prompts.map(({ messages }) => messages ? messages.reduce((acc, {role, content}) => {
-            return acc + encode(role).length + encode(content).length;
+            return (role && content) ? acc + encode(role).length + encode(content).length : acc;
         }, 0) : 0));
 
         const maxTokenLength = Math.max(maxPromptTokenLength, maxMessagesTokenLength);
