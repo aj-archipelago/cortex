@@ -54,7 +54,7 @@ class PathwayResolver {
         // const results = await Promise.all([this.promptAndParse(args), await new Promise(resolve => setTimeout(resolve, 250))]);
         const data = await this.promptAndParse(args);
         // Process the results for async
-        if(args.async){
+        if(args.async || typeof data === 'string') { // if async flag set or processed async and got string response
             const { completedCount, totalCount } = requestState[this.requestId];
             requestState[this.requestId].data = data;
             pubsub.publish('REQUEST_PROGRESS', {
@@ -72,6 +72,14 @@ class PathwayResolver {
                     for (const line of lines) {
                         const message = line.replace(/^data: /, '');
                         if (message === '[DONE]') {
+                            // Send stream finished message
+                            pubsub.publish('REQUEST_PROGRESS', {
+                                requestProgress: {
+                                    requestId: this.requestId,
+                                    data: null,
+                                    progress: 1,
+                                }
+                            });
                             return; // Stream finished
                         }
                         try {
@@ -151,7 +159,7 @@ class PathwayResolver {
                 const warnText = `Your input is possibly too long, truncating! Text length: ${text.length}`;
                 this.warnings.push(warnText);
                 console.warn(warnText);
-                text = truncate(text, chunkMaxChunkTokenLength);
+                text = this.truncate(text, chunkMaxChunkTokenLength);
             }
             return [text];
         }
@@ -217,6 +225,14 @@ class PathwayResolver {
         // Store the request state
         requestState[this.requestId] = { ...requestState[this.requestId], totalCount: anticipatedRequestCount, completedCount: 0 };
 
+        if (chunks.length > 1) { 
+            // stream behaves as async if there are multiple chunks
+            if (parameters.stream) {
+                parameters.async = true;
+                parameters.stream = false;
+            }
+        }
+
         // If pre information is needed, apply current prompt with previous prompt info, only parallelize current call
         if (this.pathway.useParallelChunkProcessing) {
             // Apply each prompt across all chunks in parallel
@@ -233,17 +249,29 @@ class PathwayResolver {
             let result = '';
 
             for (let i = 0; i < this.prompts.length; i++) {
+                const currentParameters = { ...parameters, previousResult };
+
+                if (currentParameters.stream) { // stream special flow
+                    if (i < this.prompts.length - 1) { 
+                        currentParameters.stream = false; // if not the last prompt then don't stream
+                    }
+                    else {
+                        // use the stream parameter if not async
+                        currentParameters.stream = currentParameters.async ? false : currentParameters.stream;
+                    }
+                }
+
                 // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous result
                 if (!this.prompts[i].usesTextInput) {
                     // Limit context to it's N + text's characters
                     previousResult = this.truncate(previousResult, 2 * this.chunkMaxTokenLength);
-                    result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousResult });
+                    result = await this.applyPrompt(this.prompts[i], null, currentParameters);
                 } else {
                     // Limit context to N characters
                     previousResult = this.truncate(previousResult, this.chunkMaxTokenLength);
                     result = await Promise.all(chunks.map(chunk =>
-                        this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousResult })));
-                    if (!parameters.stream) {
+                        this.applyPrompt(this.prompts[i], chunk, currentParameters)));
+                    if (!currentParameters.stream) {
                         result = result.join("\n\n")
                     }
                 }
