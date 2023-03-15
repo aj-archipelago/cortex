@@ -116,7 +116,7 @@ class PathwayResolver {
     }
 
     truncate(str, n) {
-        if (this.pathwayPrompter.promptParameters.truncateFromFront) {
+        if (this.pathwayPrompter.plugin.promptParameters.truncateFromFront) {
             return getFirstNToken(str, n);
         }
         return getLastNToken(str, n);
@@ -144,8 +144,8 @@ class PathwayResolver {
         
         // the token ratio is the ratio of the total prompt to the result text - both have to be included
         // in computing the max token length
-        const promptRatio = this.pathwayPrompter.getPromptTokenRatio();
-        let maxChunkToken = promptRatio * this.pathwayPrompter.getModelMaxTokenLength() - maxTokenLength;
+        const promptRatio = this.pathwayPrompter.plugin.getPromptTokenRatio();
+        let maxChunkToken = promptRatio * this.pathwayPrompter.plugin.getModelMaxTokenLength() - maxTokenLength;
 
         // if we have to deal with prompts that have both text input
         // and previous result, we need to split the maxChunkToken in half
