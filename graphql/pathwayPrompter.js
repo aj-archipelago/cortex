@@ -7,12 +7,17 @@ const { Exception } = require("handlebars");
 
 // register functions that can be called directly in the prompt markdown
 handlebars.registerHelper('stripHTML', function (value) {
-  return value.replace(/<[^>]*>/g, '');
+    return value.replace(/<[^>]*>/g, '');
 });
 
 handlebars.registerHelper('now', function () {
-  return new Date().toISOString();
+    return new Date().toISOString();
 });
+
+handlebars.registerHelper('toJSON', function(object) {
+    return JSON.stringify(object);
+});
+  
 
 class PathwayPrompter {
     constructor({ config, pathway }) {
