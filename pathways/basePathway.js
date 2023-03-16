@@ -19,5 +19,5 @@ module.exports = {
     useParallelChunkProcessing: false,
     useInputSummarization: false,    
     truncateFromFront: false,
-    timeout: 60, // in seconds
+    timeout: 120, // in seconds
 }
