@@ -106,7 +106,7 @@ class PathwayResolver {
                 const warnText = `Your input is possibly too long, truncating! Text length: ${text.length}`;
                 this.warnings.push(warnText);
                 console.warn(warnText);
-                text = truncate(text, chunkMaxChunkTokenLength);
+                text = this.truncate(text, chunkMaxChunkTokenLength);
             }
             return [text];
         }
