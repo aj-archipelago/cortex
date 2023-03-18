@@ -60,32 +60,35 @@ class ModelPlugin {
             return null;
         }
 
-        const expandedMessages = modelPrompt.messages.flatMap((message) => {
+        // First run handlebars compile on the pathway messages
+        const compiledMessages = modelPrompt.messages.map((message) => {
+            if (message.content) {
+                const compileText = handlebars.compile(message.content);
+                return {
+                    role: message.role,
+                    content: compileText({ ...combinedParameters, text }),
+                };
+            } else {
+                return message;
+            }
+        });
+
+        // Next add in any parameters that are referenced by name in the array
+        const expandedMessages = compiledMessages.flatMap((message) => {
             if (typeof message === 'string') {
                 const match = message.match(/{{(.+?)}}/);
                 const placeholder = match ? match[1] : null;
                 if (placeholder === null) {
-                return message;
+                    return message;
                 } else {
-                return combinedParameters[placeholder] || [];
+                    return combinedParameters[placeholder] || [];
                 }
             } else {
                 return [message];
             }
         });
 
-        return expandedMessages.map((message) => {
-            if (message.content) {
-                const compileText = handlebars.compile(message.content);
-                return {
-                role: message.role,
-                content: compileText({ ...combinedParameters, text })
-                };
-            } else {
-                const compileText = handlebars.compile(message);
-                return compileText({ ...combinedParameters, text });
-            }
-        });
+        return expandedMessages;
     }
 
     requestUrl() {
