@@ -16,7 +16,7 @@ const rootResolver = async (parent, args, contextValue, info) => {
     contextValue.pathwayResolver = pathwayResolver;
 
     // Add request parameters back as debug
-    const requestParameters = pathwayResolver.prompts.map((prompt) => pathwayResolver.pathwayPrompter.requestParameters(args.text, args, prompt));
+    const requestParameters = pathwayResolver.prompts.map((prompt) => pathwayResolver.pathwayPrompter.plugin.requestParameters(args.text, args, prompt));
     const debug = JSON.stringify(requestParameters);
 
     // Execute the request with timeout

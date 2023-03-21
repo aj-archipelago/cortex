@@ -1,4 +1,3 @@
-const { parseResponse } = require("../graphql/parser");
 const { rootResolver, resolver } = require("../graphql/resolver");
 const { typeDef } = require('../graphql/typeDef')
 
@@ -19,5 +18,5 @@ module.exports = {
     useParallelChunkProcessing: false,
     useInputSummarization: false,    
     truncateFromFront: false,
-    timeout: 60, // in seconds
+    timeout: 120, // in seconds
 }

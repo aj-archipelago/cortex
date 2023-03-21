@@ -55,6 +55,7 @@ var config = convict({
         format: Object,
         default: {
             "oai-td3": {
+                "type": "OPENAI-COMPLETION",
                 "url": "{{openaiApiUrl}}",
                 "headers": {
                     "Authorization": "Bearer {{openaiApiKey}}",

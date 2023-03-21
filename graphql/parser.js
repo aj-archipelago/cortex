@@ -1,35 +1,3 @@
-//simples form string single or list return
-const getResponseResult = (data) => {
-    const { choices } = data;
-    if (!choices || !choices.length) {
-        return data; //TODO no choices case
-    }
-
-    // if we got a choices array back with more than one choice, return the whole array
-    if (choices.length > 1) {
-        return choices;
-    }
-
-    // otherwise, return the first choice
-    const textResult = choices[0].text && choices[0].text.trim();
-    const messageResult = choices[0].message && choices[0].message.content && choices[0].message.content.trim();
-
-    return messageResult || textResult || data || null;
-}
-
-//convert a messages array to a simple chatML format
-const messagesToChatML = (messages) => {
-    let output = "";
-    for (let message of messages) {
-        output += (message.role && message.content) ? `<|im_start|>${message.role}\n${message.content}\n<|im_end|>\n` : `${message}\n`;
-    }
-    // you always want the assistant to respond next so add a
-    // directive for that
-    output += "<|im_start|>assistant\n";
-    
-    return output;
-}
-
 //simply trim and parse with given regex
 const regexParser = (text, regex) => {
     return text.trim().split(regex).map(s => s.trim()).filter(s => s.length);
@@ -64,9 +32,7 @@ const parseNumberedObjectList = (text, format) => {
 }
 
 module.exports = {
-    getResponseResult,
     regexParser,
     parseNumberedList,
     parseNumberedObjectList,
-    messagesToChatML,
 };
