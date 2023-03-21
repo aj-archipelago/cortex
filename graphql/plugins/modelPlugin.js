@@ -102,6 +102,8 @@ class ModelPlugin {
         if (!choices || !choices.length) {
             if (Array.isArray(data) && data.length > 0 && data[0].translations) {
                 return data[0].translations[0].text.trim();
+            }else if(typeof data === 'string'){
+                return data;
             }
         }
 
@@ -119,7 +121,7 @@ class ModelPlugin {
 
     async executeRequest(url, data, params, headers) {
         const responseData = await request({ url, data, params, headers }, this.modelName);
-        const modelInput = data.prompt || (data.messages && data.messages[0].content) || data[0].Text || null;
+        const modelInput = data.prompt || (data.messages && data.messages[0].content) || data.length>0 && data[0].Text || null;
         console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`)
         console.log(`\x1b[36m${modelInput}\x1b[0m`)
         console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);

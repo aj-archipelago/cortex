@@ -2,6 +2,7 @@
 const OpenAIChatPlugin = require('./plugins/openAIChatPlugin');
 const OpenAICompletionPlugin = require('./plugins/openAICompletionPlugin');
 const AzureTranslatePlugin = require('./plugins/azureTranslatePlugin');
+const OpenAIWhisperPlugin = require('./plugins/openAiWhisperPlugin');
 const handlebars = require("handlebars");
 const { Exception } = require("handlebars");
 
@@ -14,10 +15,10 @@ handlebars.registerHelper('now', function () {
     return new Date().toISOString();
 });
 
-handlebars.registerHelper('toJSON', function(object) {
+handlebars.registerHelper('toJSON', function (object) {
     return JSON.stringify(object);
 });
-  
+
 
 class PathwayPrompter {
     constructor({ config, pathway }) {
@@ -26,7 +27,7 @@ class PathwayPrompter {
         const model = config.get('models')[modelName];
 
         if (!model) {
-        throw new Exception(`Model ${modelName} not found in config`);
+            throw new Exception(`Model ${modelName} not found in config`);
         }
 
         let plugin;
@@ -41,6 +42,9 @@ class PathwayPrompter {
             case 'OPENAI-COMPLETION':
                 plugin = new OpenAICompletionPlugin(config, pathway);
                 break;
+            case 'OPENAI_WHISPER':
+                plugin = new OpenAIWhisperPlugin(config, pathway);
+                break;
             default:
                 throw new Exception(`Unsupported model type: ${model.type}`);
         }
@@ -54,5 +58,5 @@ class PathwayPrompter {
 }
 
 module.exports = {
-  PathwayPrompter
+    PathwayPrompter
 };
