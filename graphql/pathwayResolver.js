@@ -8,6 +8,7 @@ const { getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker'
 const { PathwayResponseParser } = require('./pathwayResponseParser');
 const { Prompt } = require('./prompt');
 const { getv, setv } = require('../lib/keyValueStorageClient');
+const { requestState } = require('./requestState');
 
 const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
@@ -17,9 +18,8 @@ const callPathway = async (config, pathwayName, requestState, { text, ...paramet
 }
 
 class PathwayResolver {
-    constructor({ config, pathway, requestState }) {
+    constructor({ config, pathway }) {
         this.config = config;
-        this.requestState = requestState;
         this.pathway = pathway;
         this.useInputChunking = pathway.useInputChunking;
         this.chunkMaxTokenLength = 0;
@@ -48,19 +48,71 @@ class PathwayResolver {
         this.pathwayPrompt = pathway.prompt;
     }
 
-    async resolve(args) {
-        if (args.async) {
-            // Asynchronously process the request
-            this.promptAndParse(args).then((data) => {
-                this.requestState[this.requestId].data = data;
-                pubsub.publish('REQUEST_PROGRESS', {
-                    requestProgress: {
-                        requestId: this.requestId,
-                        data: JSON.stringify(data)
+    async asyncResolve(args) {
+        // Wait with a sleep promise for the race condition to resolve
+        // const results = await Promise.all([this.promptAndParse(args), await new Promise(resolve => setTimeout(resolve, 250))]);
+        const data = await this.promptAndParse(args);
+        // Process the results for async
+        if(args.async || typeof data === 'string') { // if async flag set or processed async and got string response
+            const { completedCount, totalCount } = requestState[this.requestId];
+            requestState[this.requestId].data = data;
+            pubsub.publish('REQUEST_PROGRESS', {
+                requestProgress: {
+                    requestId: this.requestId,
+                    progress: completedCount / totalCount,
+                    data: JSON.stringify(data),
+                }
+            });
+        } else { //stream
+            for (const handle of data) {
+                handle.on('data', data => {
+                    console.log(data.toString());
+                    const lines = data.toString().split('\n').filter(line => line.trim() !== '');
+                    for (const line of lines) {
+                        const message = line.replace(/^data: /, '');
+                        if (message === '[DONE]') {
+                            // Send stream finished message
+                            pubsub.publish('REQUEST_PROGRESS', {
+                                requestProgress: {
+                                    requestId: this.requestId,
+                                    data: null,
+                                    progress: 1,
+                                }
+                            });
+                            return; // Stream finished
+                        }
+                        try {
+                            const parsed = JSON.parse(message);
+                            const result = this.pathwayPrompter.plugin.parseResponse(parsed)
+
+                            pubsub.publish('REQUEST_PROGRESS', {
+                                requestProgress: {
+                                    requestId: this.requestId,
+                                    data: JSON.stringify(result)
+                                }
+                            });
+                        } catch (error) {
+                            console.error('Could not JSON parse stream message', message, error);
+                        }
                     }
                 });
-            });
 
+                // data.on('end', () => {
+                //     console.log("stream done");
+                // });
+            }
+            
+        }
+    }
+
+    async resolve(args) {
+        if (args.async || args.stream) {
+            // Asyncronously process the request
+            // this.asyncResolve(args);
+            if (!requestState[this.requestId]) {
+                requestState[this.requestId] = {}
+            }
+            requestState[this.requestId] = { ...requestState[this.requestId], args, resolver: this.asyncResolve.bind(this) };
             return this.requestId;
         }
         else {
@@ -70,7 +122,6 @@ class PathwayResolver {
     }
 
     async promptAndParse(args) {
-
         // Get saved context from contextId or change contextId if needed
         const { contextId } = args;
         this.savedContextId = contextId ? contextId : null;
@@ -98,7 +149,7 @@ class PathwayResolver {
         if (this.pathway.inputChunkSize) {
             chunkMaxChunkTokenLength = Math.min(this.pathway.inputChunkSize, this.chunkMaxTokenLength);
         } else {
-             chunkMaxChunkTokenLength = this.chunkMaxTokenLength;
+            chunkMaxChunkTokenLength = this.chunkMaxTokenLength;
         }
         const encoded = encode(text);
         if (!this.useInputChunking || encoded.length <= chunkMaxChunkTokenLength) { // no chunking, return as is
@@ -124,7 +175,7 @@ class PathwayResolver {
 
     async summarizeIfEnabled({ text, ...parameters }) {
         if (this.pathway.useInputSummarization) {
-            return await callPathway(this.config, 'summary', this.requestState, { text, targetLength: 1000, ...parameters });
+            return await callPathway(this.config, 'summary', requestState, { text, targetLength: 1000, ...parameters });
         }
         return text;
     }
@@ -160,18 +211,25 @@ class PathwayResolver {
 
     // Process the request and return the result        
     async processRequest({ text, ...parameters }) {
-
         text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
         const chunks = this.processInputText(text);
 
         const anticipatedRequestCount = chunks.length * this.prompts.length;
 
-        if ((this.requestState[this.requestId] || {}).canceled) {
+        if ((requestState[this.requestId] || {}).canceled) {
             throw new Error('Request canceled');
         }
 
         // Store the request state
-        this.requestState[this.requestId] = { totalCount: anticipatedRequestCount, completedCount: 0 };
+        requestState[this.requestId] = { ...requestState[this.requestId], totalCount: anticipatedRequestCount, completedCount: 0 };
+
+        if (chunks.length > 1) { 
+            // stream behaves as async if there are multiple chunks
+            if (parameters.stream) {
+                parameters.async = true;
+                parameters.stream = false;
+            }
+        }
 
         // If pre information is needed, apply current prompt with previous prompt info, only parallelize current call
         if (this.pathway.useParallelChunkProcessing) {
@@ -189,17 +247,31 @@ class PathwayResolver {
             let result = '';
 
             for (let i = 0; i < this.prompts.length; i++) {
+                const currentParameters = { ...parameters, previousResult };
+
+                if (currentParameters.stream) { // stream special flow
+                    if (i < this.prompts.length - 1) { 
+                        currentParameters.stream = false; // if not the last prompt then don't stream
+                    }
+                    else {
+                        // use the stream parameter if not async
+                        currentParameters.stream = currentParameters.async ? false : currentParameters.stream;
+                    }
+                }
+
                 // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous result
                 if (!this.prompts[i].usesTextInput) {
                     // Limit context to it's N + text's characters
                     previousResult = this.truncate(previousResult, 2 * this.chunkMaxTokenLength);
-                    result = await this.applyPrompt(this.prompts[i], null, { ...parameters, previousResult });
+                    result = await this.applyPrompt(this.prompts[i], null, currentParameters);
                 } else {
                     // Limit context to N characters
                     previousResult = this.truncate(previousResult, this.chunkMaxTokenLength);
                     result = await Promise.all(chunks.map(chunk =>
-                        this.applyPrompt(this.prompts[i], chunk, { ...parameters, previousResult })));
-                    result = result.join("\n\n")
+                        this.applyPrompt(this.prompts[i], chunk, currentParameters)));
+                    if (!currentParameters.stream) {
+                        result = result.join("\n\n")
+                    }
                 }
 
                 // If this is any prompt other than the last, use the result as the previous context
@@ -225,20 +297,22 @@ class PathwayResolver {
     }
 
     async applyPrompt(prompt, text, parameters) {
-        if (this.requestState[this.requestId].canceled) {
+        if (requestState[this.requestId].canceled) {
             return;
         }
         const result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt);
-        this.requestState[this.requestId].completedCount++;
+        requestState[this.requestId].completedCount++;
 
-        const { completedCount, totalCount } = this.requestState[this.requestId];
+        const { completedCount, totalCount } = requestState[this.requestId];
 
-        pubsub.publish('REQUEST_PROGRESS', {
-            requestProgress: {
-                requestId: this.requestId,
-                progress: completedCount / totalCount,
-            }
-        });
+        if (completedCount < totalCount) {
+            pubsub.publish('REQUEST_PROGRESS', {
+                requestProgress: {
+                    requestId: this.requestId,
+                    progress: completedCount / totalCount,
+                }
+            });
+        }
 
         if (prompt.saveResultTo) {
             this.savedContext[prompt.saveResultTo] = result;

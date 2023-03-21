@@ -41,6 +41,11 @@ var config = convict({
         default: true,
         env: 'CORTEX_ENABLE_CACHE'
     },
+    enableGraphqlCache: {
+        format: Boolean,
+        default: false,
+        env: 'CORTEX_ENABLE_GRAPHQL_CACHE'
+    },
     defaultModelName: {
         format: String,
         default: null,

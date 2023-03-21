@@ -30,6 +30,8 @@ class OpenAICompletionPlugin extends ModelPlugin {
         const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
         const modelPromptMessagesML = messagesToChatML(modelPromptMessages);
 
+        const { stream } = parameters;
+
         if (modelPromptMessagesML) {
         return {
             prompt: modelPromptMessagesML,
@@ -38,13 +40,15 @@ class OpenAICompletionPlugin extends ModelPlugin {
             top_p: 0.95,
             frequency_penalty: 0,
             presence_penalty: 0,
-            stop: ["<|im_end|>"]
+            stop: ["<|im_end|>"],
+            stream
         };
         } else {
         return {
             prompt: modelPromptText,
             max_tokens: this.getModelMaxTokenLength() - encode(modelPromptText).length - 1,
             temperature: this.temperature ?? 0.7,
+            stream
         };
         }
     }

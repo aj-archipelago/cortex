@@ -5,10 +5,10 @@ const { PathwayResolver } = require("./pathwayResolver");
 // (parent, args, contextValue, info)
 const rootResolver = async (parent, args, contextValue, info) => {
     const { config, pathway, requestState } = contextValue;
-    const { temperature } = pathway;
+    const { temperature, enableGraphqlCache } = pathway;
 
-    // Turn off caching if temperature is 0
-    if (temperature == 0) {
+    // Turn on graphql caching if enableGraphqlCache true and temperature is 0
+    if (enableGraphqlCache && temperature == 0) { // || 
         info.cacheControl.setCacheHint({ maxAge: 60 * 60 * 24, scope: 'PUBLIC' });
     }
 
