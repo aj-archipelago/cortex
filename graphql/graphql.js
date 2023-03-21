@@ -17,8 +17,7 @@ const subscriptions = require('./subscriptions');
 const { buildLimiters } = require('../lib/request');
 const { cancelRequestResolver } = require('./resolver');
 const { buildPathways, buildModels } = require('../config');
-
-const requestState = {}; // Stores the state of each request
+const { requestState } = require('./requestState');
 
 const getPlugins = (config) => {
     // server plugins
@@ -28,7 +27,7 @@ const getPlugins = (config) => {
 
     //if cache is enabled and Redis is available, use it
     let cache;
-    if (config.get('enableCache') && config.get('storageConnectionString')) {
+    if (config.get('enableGraphqlCache') && config.get('storageConnectionString')) {
         cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString'),{
             ssl: true,
             abortConnect: false,            
@@ -72,7 +71,7 @@ const getTypedefs = (pathways) => {
     }
 
     type Subscription {
-        requestProgress(requestId: String!): RequestSubscription
+        requestProgress(requestIds: [String!]): RequestSubscription
     }
 `;
 

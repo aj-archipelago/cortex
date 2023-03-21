@@ -6,4 +6,5 @@ module.exports = {
     inputParameters: {
         to: `Arabic`,
     },
+    timeout: 300, // in seconds
 }

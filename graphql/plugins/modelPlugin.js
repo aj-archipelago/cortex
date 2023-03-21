@@ -1,7 +1,6 @@
 // ModelPlugin.js
 const handlebars = require('handlebars');
 const { request } = require("../../lib/request");
-const { getResponseResult } = require("../parser");
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
@@ -35,6 +34,7 @@ class ModelPlugin {
         }
 
         this.requestCount = 1;
+        this.shouldCache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
     }
 
     getModelMaxTokenLength() {
@@ -102,6 +102,8 @@ class ModelPlugin {
         if (!choices || !choices.length) {
             if (Array.isArray(data) && data.length > 0 && data[0].translations) {
                 return data[0].translations[0].text.trim();
+            } else {
+                return data;
             }
         }
 
@@ -114,11 +116,11 @@ class ModelPlugin {
         const textResult = choices[0].text && choices[0].text.trim();
         const messageResult = choices[0].message && choices[0].message.content && choices[0].message.content.trim();
 
-        return messageResult || textResult || null;
+        return messageResult ?? textResult ?? null;
     }
 
     async executeRequest(url, data, params, headers) {
-        const responseData = await request({ url, data, params, headers }, this.modelName);
+        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName);
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || data[0].Text || null;
         console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`)
         console.log(`\x1b[36m${modelInput}\x1b[0m`)
