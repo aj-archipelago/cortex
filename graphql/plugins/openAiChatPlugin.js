@@ -14,9 +14,12 @@ class OpenAIChatPlugin extends ModelPlugin {
         const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
         const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
 
+        const { stream } = parameters;
+
         return {
             messages: modelPromptMessages || [{ "role": "user", "content": modelPromptText }],
             temperature: this.temperature ?? 0.7,
+            stream
         };
     }
 

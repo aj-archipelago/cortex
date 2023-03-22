@@ -14,6 +14,11 @@ const getTestServer = () => {
 
 const testServer = getTestServer();
 
+//stop server after all tests
+afterAll(async () => {
+    await testServer.stop();
+});
+
 it('validates bias endpoint', async () => {
     const response = await testServer.executeOperation({
         query: 'query bias($text: String!) { bias(text: $text) { result } }',

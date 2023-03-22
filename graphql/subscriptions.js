@@ -4,14 +4,27 @@
 
 const pubsub = require("./pubsub");
 const { withFilter } = require("graphql-subscriptions");
+const { requestState } = require("./requestState");
 
 const subscriptions = {
     requestProgress: {
         subscribe: withFilter(
-            () => pubsub.asyncIterator(['REQUEST_PROGRESS']),
+            (_, args, __, info) => {
+                const { requestIds } = args;
+                for (const requestId of requestIds) {
+                    if (!requestState[requestId]) {
+                        console.log(`requestProgress, requestId: ${requestId} not found`);
+                    } else {
+                        console.log(`starting async requestProgress, requestId: ${requestId}`);
+                        const { resolver, args } = requestState[requestId];
+                        resolver(args);
+                    }
+                }
+                return pubsub.asyncIterator(['REQUEST_PROGRESS'])
+            },
             (payload, variables) => {
                 return (
-                    payload.requestProgress.requestId === variables.requestId
+                    variables.requestIds.includes(payload.requestProgress.requestId)
                 );
             },
         ),

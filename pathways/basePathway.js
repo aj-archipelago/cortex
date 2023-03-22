@@ -1,4 +1,3 @@
-const { parseResponse } = require("../graphql/parser");
 const { rootResolver, resolver } = require("../graphql/resolver");
 const { typeDef } = require('../graphql/typeDef')
 
@@ -7,9 +6,9 @@ module.exports = {
     prompt: `{{text}}`,
     defaultInputParameters: {
         text: ``,
-        // Add the option of making every call async
-        async: false,
-        contextId : ``, // used to identify the context of the request
+        async: false, // switch to enable async mode
+        contextId: ``, // used to identify the context of the request,
+        stream: false, // switch to enable stream mode
     },
     inputParameters: {},
     typeDef,
