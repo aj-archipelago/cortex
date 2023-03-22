@@ -2,8 +2,9 @@
 const ModelPlugin = require('./modelPlugin');
 const handlebars = require("handlebars");
 const { encode } = require("gpt-3-encoder");
-const FormData = require('form-data'); 
+const FormData = require('form-data');
 const fs = require('fs');
+const { splitMediaFile, deleteTempFolder } = require('../../lib/fileChunker');
 
 class OpenAIWhisperPlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -33,19 +34,27 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         const data = { ...(this.model.params || {}), ...requestParameters };
         // data.file = fs.createReadStream(data.file);
 
-        try{
-            const form = new FormData();
-            // for (const key in data) {
-            //     form.append(key, data[key]);
-            // }
-            form.append('file', fs.createReadStream(parameters.file));
-            form.append('model', this.model.params.model);
-            form.append('response_format', 'text');
+        const processChunk = async (chunk) => {
+            try {
+                const formData = new FormData();
+                // for (const key in data) {
+                //     formData.append(key, data[key]);
+                // }
 
-            return this.executeRequest(url, form, params, { ...this.model.headers, ...form.getHeaders() });
-        } catch (err) {
-            console.log(err);
+                formData.append('file', fs.createReadStream(chunk));//fs.createReadStream(parameters.file)
+                formData.append('model', this.model.params.model);
+                formData.append('response_format', 'text');
+
+                return this.executeRequest(url, formData, params, { ...this.model.headers, ...formData.getHeaders() });
+            } catch (err) {
+                console.log(err);
+            }
         }
+
+        const { chunks, folder } = await splitMediaFile(parameters.file);
+        const result = await Promise.all(chunks.map(processChunk));
+        await deleteTempFolder(folder);
+        return result.join('');
     }
 }
 

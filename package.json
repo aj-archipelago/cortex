@@ -32,6 +32,7 @@
     "compromise": "^14.8.1",
     "compromise-paragraphs": "^0.1.0",
     "convict": "^6.2.3",
+    "fluent-ffmpeg": "^2.1.2",
     "form-data": "^4.0.0",
     "gpt-3-encoder": "^1.1.4",
     "graphql": "^16.6.0",
