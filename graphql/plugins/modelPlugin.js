@@ -1,6 +1,7 @@
 // ModelPlugin.js
 const handlebars = require('handlebars');
 const { request } = require("../../lib/request");
+const { encode } = require("gpt-3-encoder");
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
@@ -119,17 +120,40 @@ class ModelPlugin {
         return messageResult ?? textResult ?? null;
     }
 
+    logMessagePreview(messages) {
+        messages.forEach((message, index) => {
+            const words = message.content.split(" ");
+            const tokenCount = encode(message.content).length;
+            let preview;
+    
+            if (index === 0) {
+                preview = message.content;
+            } else {
+                preview = words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
+            }
+    
+            console.log(`Message ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"`);
+        });
+    }
+    
     async executeRequest(url, data, params, headers) {
         const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName);
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || data[0].Text || null;
-        console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`)
-        console.log(`\x1b[36m${modelInput}\x1b[0m`)
+        
+        console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`);
+        
+        if (data.messages && data.messages.length > 1) {
+            this.logMessagePreview(data.messages);
+        } else {
+            console.log(`\x1b[36m${modelInput}\x1b[0m`);
+        }
+        
         console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
-
+    
         if (responseData.error) {
             throw new Exception(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
         }
-
+    
         return this.parseResponse(responseData);
     }
 
