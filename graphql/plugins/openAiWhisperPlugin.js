@@ -4,7 +4,7 @@ const handlebars = require("handlebars");
 const { encode } = require("gpt-3-encoder");
 const FormData = require('form-data');
 const fs = require('fs');
-const { splitMediaFile, deleteTempFolder } = require('../../lib/fileChunker');
+const { splitMediaFile, deleteTempFolder, isValidYoutubeUrl, processYoutubeUrl } = require('../../lib/fileChunker');
 
 class OpenAIWhisperPlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -51,9 +51,20 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             }
         }
 
-        const { chunks, folder } = await splitMediaFile(parameters.file);
+        let { file } = parameters;
+        const isYoutubeUrl = isValidYoutubeUrl(file);
+        if (isYoutubeUrl) {
+            file = await processYoutubeUrl(file);
+        }
+
+        const { chunks, folder } = await splitMediaFile(file);
         const result = await Promise.all(chunks.map(processChunk));
+
+
         await deleteTempFolder(folder);
+        if (isYoutubeUrl) {
+            await deleteTempFolder(file);
+        }
         return result.join('');
     }
 }

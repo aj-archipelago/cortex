@@ -4,4 +4,5 @@ module.exports = {
     inputParameters: {
         file: ``,
     },
+    timeout: 600, // in seconds
 }

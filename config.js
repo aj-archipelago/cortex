@@ -64,6 +64,16 @@ var config = convict({
                 "params": {
                     "model": "{{openaiDefaultModel}}"
                 },
+            },
+            "oai-whisper": {
+                "type": "OPENAI_WHISPER",
+                "url": "https://api.openai.com/v1/audio/transcriptions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}"
+                },
+                "params": {
+                    "model": "whisper-1"
+                },
             }
         },
         env: 'CORTEX_MODELS'
