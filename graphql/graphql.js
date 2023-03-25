@@ -41,6 +41,40 @@ const getPlugins = (config) => {
     return { plugins, cache };
 }
 
+const buildRestEndpoints = (pathways, app, server, config) => {
+  for (const [name, pathway] of Object.entries(pathways)) {
+    // Only expose endpoints for enabled pathways that explicitly want to expose a REST endpoint
+    if (pathway.disabled || !config.get('enableRestEndpoints')) continue;
+
+    const fieldVariableDefs = pathway.typeDef(pathway).restDefinition || [];
+
+    app.post(`/rest/${name}`, async (req, res) => {
+      const variables = fieldVariableDefs.reduce((acc, variableDef) => {
+        if (req.body.hasOwnProperty(variableDef.name)) {
+          acc[variableDef.name] = req.body[variableDef.name];
+        }
+        return acc;
+      }, {});
+
+      const variableParams = fieldVariableDefs.map(({ name, type }) => `$${name}: ${type}`).join(', ');
+      const queryArgs = fieldVariableDefs.map(({ name }) => `${name}: $${name}`).join(', ');
+
+      const query = `
+                query ${name}(${variableParams}) {
+                    ${name}(${queryArgs}) {
+                        contextId
+                        previousResult
+                        result
+                    }
+                }
+            `;
+
+      const result = await server.executeOperation({ query, variables });
+      res.json(result.data[name]);
+    });
+  }
+};
+
 //typeDefs
 const getTypedefs = (pathways) => {
 
@@ -75,7 +109,7 @@ const getTypedefs = (pathways) => {
     }
 `;
 
-    const typeDefs = [defaultTypeDefs, ...Object.values(pathways).filter(p=>!p.disabled).map(p => p.typeDef(p))];
+    const typeDefs = [defaultTypeDefs, ...Object.values(pathways).filter(p=>!p.disabled).map(p => p.typeDef(p).gqlDefinition)];
     return typeDefs.join('\n');
 }
 
@@ -120,6 +154,7 @@ const build = (config) => {
 
     const { ApolloServer, gql } = require('apollo-server-express');
     const app = express()
+
     const httpServer = createServer(app);
 
     // Creating the WebSocket server
@@ -154,6 +189,23 @@ const build = (config) => {
         context: ({ req, res }) => ({ req, res, config, requestState }),
     });
 
+    // If CORTEX_API_KEY is set, we roll our own auth middleware - usually not used if you're being fronted by a proxy
+    const cortexApiKey = config.get('cortexApiKey');
+
+    app.use((req, res, next) => {
+        if (cortexApiKey && req.headers.cortexApiKey !== cortexApiKey && req.query.cortexApiKey !== cortexApiKey) {
+            res.status(401).send('Unauthorized');
+        } else {
+            next();
+        }
+    });
+    
+    // Use the JSON body parser middleware for REST endpoints
+    app.use(express.json());
+        
+    // add the REST endpoints
+    buildRestEndpoints(pathways, app, server, config);
+
     // if local start server
     const startServer = async () => {
         await server.start();
@@ -164,14 +216,6 @@ const build = (config) => {
             console.log(`🚀 Server is now running at http://localhost:${config.get('PORT')}${server.graphqlPath}`);
         });
     };
-
-    app.use((req, res, next) => {
-        if (process.env.API_KEY && req.headers.api_key !== process.env.API_KEY && req.query.api_key !== process.env.API_KEY) {
-            res.status(401).send('Unauthorized');
-        }
-
-        next();
-    })
 
     return { server, startServer, cache, plugins, typeDefs, resolvers }
 }

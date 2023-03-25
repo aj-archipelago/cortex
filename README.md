@@ -6,7 +6,7 @@ Using modern NL AI models can be complex and costly. Most models require precise
 
 ## Features
 
-* Simple architecture to build functional endpoints (called `pathways`), that implement common NL AI tasks. Included core pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, topic classification, sentiment analysis, and bias analysis.
+* Simple architecture to build functional endpoints (called `pathways`), that implement common NL AI tasks. Included core pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, sentiment analysis, and bias analysis.
 * Allows for building multi-model, multi-vendor, and model-agnostic pathways (choose the right model or combination of models for the job, implement redundancy)
 * Easy, templatized prompt definition with flexible support for most prompt engineering techniques and strategies ranging from simple, single prompts to complex prompt chains with context continuity.
 * Integrated context persistence: have your pathways "remember" whatever you want and use it on the next request to the model
@@ -62,7 +62,6 @@ Below are the default pathways provided with Cortex. These can be used as is, ov
 - `paraphrase`: Suggests alternative phrasing for text
 - `sentiment`: Analyzes and identifies the overall sentiment or mood of a text
 - `summary`: Condenses long texts or articles into shorter summaries
-- `topics`: Analyzes and identifies the main topic or subject of a text
 - `translate`: Translates text from one language to another
 ## Extensibility
 Cortex is designed to be highly extensible. This allows you to customize the API to fit your needs. You can add new features, modify existing features, and even add integrations with other APIs and models.
@@ -73,7 +72,10 @@ Configuration of Cortex is done via a [convict](https://github.com/mozilla/node-
 - `corePathwaysPath`: The path to the core pathways for Cortex. Default is path.join(__dirname, 'pathways').
 - `cortexConfigFile`: The path to a JSON configuration file for the project. Default is null. The value can be set using the `CORTEX_CONFIG_FILE` environment variable.
 - `defaultModelName`: The default model name for the project. Default is null. The value can be set using the `DEFAULT_MODEL_NAME` environment variable.
-- `enableCache`: A boolean flag indicating whether to enable caching. Default is true. The value can be set using the `CORTEX_ENABLE_CACHE` environment variable.
+- `enableCache`: A boolean flag indicating whether to enable Axios-level request caching. Default is true. The value can be set using the `CORTEX_ENABLE_CACHE` environment variable.
+- `enableGraphqlCache`: A boolean flag indicating whether to enable GraphQL query caching. Default is false. The value can be set using the `CORTEX_ENABLE_GRAPHQL_CACHE` environment variable.
+- `enableRestEndpoints`: A boolean flag indicating whether create REST endpoints for pathways as well as GraphQL queries. Default is false. The value can be set using the `CORTEX_ENABLE_REST` environment variable.
+- `cortexApiKey`: A string containing an API key that the client must pass to Cortex for authorization. Default is null in which case Cortex is unprotected. The value can be set using the `CORTEX_API_KEY` environment variable
 - `models`: An object containing the different models used by the project. The value can be set using the `CORTEX_MODELS` environment variable. Cortex is model and vendor agnostic - you can use this config to set up models of any type from any vendor.
 - `openaiApiKey`: The API key used for accessing the OpenAI API. This is sensitive information and has no default value. The value can be set using the `OPENAI_API_KEY` environment variable.
 - `openaiApiUrl`: The URL used for accessing the OpenAI API. Default is https://api.openai.com/v1/completions. The value can be set using the `OPENAI_API_URL` environment variable.
