@@ -67,7 +67,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             const { requestId } = pathwayResolver;
             pubsub.publish('REQUEST_PROGRESS', {
                 requestProgress: {
-                    requestId: this.requestId,
+                    requestId,
                     progress: 0.5,
                     data: null,
                 }
