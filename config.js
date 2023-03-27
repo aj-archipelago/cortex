@@ -46,6 +46,16 @@ var config = convict({
         default: false,
         env: 'CORTEX_ENABLE_GRAPHQL_CACHE'
     },
+    enableRestEndpoints: {
+        format: Boolean,
+        default: false,
+        env: 'CORTEX_ENABLE_REST'
+    },
+    cortexApiKey: {
+        format: String,
+        default: null,
+        env: 'CORTEX_API_KEY'
+    },
     defaultModelName: {
         format: String,
         default: null,
