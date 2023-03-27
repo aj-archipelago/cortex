@@ -7,5 +7,6 @@ module.exports = {
     "paraphrase": require('./paraphrase'),
     "sentiment": require('./sentiment'),
     "summary": require('./summary'),
+    "transcribe": require('./transcribe'),
     "translate": require('./translate'),
 }

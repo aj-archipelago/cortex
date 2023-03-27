@@ -291,7 +291,7 @@ class PathwayResolver {
         if (requestState[this.requestId].canceled) {
             return;
         }
-        const result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt);
+        const result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt, this);
         requestState[this.requestId].completedCount++;
 
         const { completedCount, totalCount } = requestState[this.requestId];

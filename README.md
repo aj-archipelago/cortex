@@ -1,14 +1,13 @@
 # Cortex
-Cortex is an extensible and open-source caching GraphQL API that provides an abstraction layer for interacting with modern natural language AI models. It simplifies and accelerates the task of querying NL AI models (e.g. LLMs like GPT-3) by providing a structured interface to the largely unstructured world of AI prompting.
-
+Cortex simplifies and accelerates the process of creating applications that harness the power of modern AI models like chatGPT and GPT-4 by providing a structured interface (GraphQL or REST) to a powerful prompt execution environment. This enables complex augmented prompting and abstracts away most of the complexity of managing model connections like chunking input, rate limiting, formatting output, caching, and handling errors.
 ## Why build Cortex?
-Using modern NL AI models can be complex and costly. Most models require precisely formatted, carefully engineered and sequenced prompts to produce consistent results, and the responses are typically largely unstructured text without validation or formatting. Additionally, these models are evolving rapidly, are typically costly and slow to query and implement hard request size and rate restrictions that need to be carefully navigated for optimum throughput.  Cortex offers a solution to these problems and provides a simple and extensible package for interacting with NL AI models.
-
+Modern AI models are transformational, but a number of complexities emerge when developers start using them to deliver application-ready functions. Most models require precisely formatted, carefully engineered and sequenced prompts to produce consistent results, and the responses are typically largely unstructured text without validation or formatting. Additionally, these models are evolving rapidly, are typically costly and slow to query and implement hard request size and rate restrictions that need to be carefully navigated for optimum throughput. Cortex offers a solution to these problems and provides a simple and extensible package for interacting with NL AI models.
 ## Features
 
-* Simple architecture to build functional endpoints (called `pathways`), that implement common NL AI tasks. Included core pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, sentiment analysis, and bias analysis.
-* Allows for building multi-model, multi-vendor, and model-agnostic pathways (choose the right model or combination of models for the job, implement redundancy)
-* Easy, templatized prompt definition with flexible support for most prompt engineering techniques and strategies ranging from simple, single prompts to complex prompt chains with context continuity.
+* Simple architecture to build custom functional endpoints (called `pathways`), that implement common NL AI tasks. Default pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, sentiment analysis, and bias analysis.
+* Allows for building multi-model, multi-vendor, and model-agnostic pathways (choose the right model or combination of models for the job, implement redundancy) with built-in support for OpenAI GPT-3, GPT-3.5 (chatGPT), and GPT-4 models - both from OpenAI directly and through Azure OpenAI, OpenAI Whisper, Azure Translator, and more.
+* Easy, templatized prompt definition with flexible support for most prompt engineering techniques and strategies ranging from simple single prompts to complex custom prompt chains with context continuity.
+* Built in support for long-running, asynchronous operations with progress updates or streaming responses
 * Integrated context persistence: have your pathways "remember" whatever you want and use it on the next request to the model
 * Automatic traffic management and content optimization: configurable model-specific input chunking, request parallelization, rate limiting, and chunked response aggregation
 * Extensible parsing and validation of input data - protect your model calls from bad inputs or filter prompt injection attempts.
@@ -20,15 +19,16 @@ In order to use Cortex, you must first have a working Node.js environment. The v
 ## Quick Start
 ```sh
 git clone git@github.com:aj-archipelago/cortex.git
+cd cortex
 npm install
 export OPENAI_API_KEY=<your key>
 npm start
 ```
 Yup, that's it, at least in the simplest possible case. That will get you access to all of the built in pathways.
-## Using Cortex
-Cortex speaks GraphQL, and by default it enables the GraphQL playground. If you're just using default options, that's at [http://localhost:4000/graphql](http://localhost:4000/graphql). From there you can begin making requests and test out the pathways (listed under Query) to your heart's content.
+## Connecting Applications to Cortex
+Cortex speaks GraphQL and by default it enables the GraphQL playground. If you're just using default options, that's at [http://localhost:4000/graphql](http://localhost:4000/graphql). From there you can begin making requests and test out the pathways (listed under Query) to your heart's content. If GraphQL isn't your thing or if you have a client that would rather have REST that's fine - Cortex speaks REST as well.
 
-When it's time to talk to Cortex from an app, that's simple as well - you just use standard GraphQL client conventions:
+Connecting an application to Cortex using GraphQL is simple too:
 
 ```js
 import { useApolloClient, gql } from "@apollo/client"
@@ -52,8 +52,155 @@ apolloClient.query({
         // catch errors
     })
 ```
-## Default Queries (pathways)
+## Cortex Pathways: Supercharged Prompts
+Pathways are a core concept in Cortex. Each pathway is a single JavaScript file that encapsulates the data and logic needed to define a functional API endpoint. When the client makes a request via the API, one or more pathways are executed and the result is sent back to the client. Pathways can be very simple:
+```js
+module.exports = {
+    prompt: `{{text}}\n\nRewrite the above using British English spelling:`
+}
+```
+The real power of Cortex starts to show as the pathways get more complex. This pathway, for example, uses a three-part sequential prompt to ensure that specific people and place names are correctly translated:
+```js
+prompt:
+    [
+        `{{{text}}}\nCopy the names of all people and places exactly from this document in the language above:\n`,
+        `Original Language:\n{{{previousResult}}}\n\n{{to}}:\n`,
+        `Entities in the document:\n\n{{{previousResult}}}\n\nDocument:\n{{{text}}}\nRewrite the document in {{to}}. If the document is already in {{to}}, copy it exactly below:\n`
+    ]
+```
+Cortex pathway prompt enhancements include:
+* **Templatized prompt definition**: Pathways allow for easy and flexible prompt definition using Handlebars templating. This makes it simple to create and modify prompts using variables and context from the application as well as extensible internal functions provided by Cortex.
+* **Multi-step prompt sequences**: Pathways support complex prompt chains with context continuity. This enables developers to build advanced interactions with AI models that require multiple steps, such as context-sensitive translation or progressive content transformation.
+* **Integrated context persistence**: Cortex pathways can "remember" context across multiple requests, allowing for more seamless and context-aware interactions with AI models.
+* **Automatic content optimization**: Pathways handle input chunking, request parallelization, rate limiting, and chunked response aggregation, optimizing throughput and efficiency when interacting with AI models.
+* **Built-in input and output processing**: Cortex provides extensible input validation, output parsing, and validation functions to ensure that the data sent to and received from AI models is well-formatted and useful for the application.
+
+### Pathway Development
+To add a new pathway to Cortex, you create a new JavaScript file and define the prompts, properties, and functions that implement the desired functionality. Cortex provides defaults for almost everything, so in the simplest case a pathway can really just consist of a string prompt like the spelling example above. You can then save this file in the `pathways` directory in your Cortex project and it will be picked up and made available as a GraphQL query.
+
+### Prompt
+When you define a new pathway, you need to at least specify a prompt that will be passed to the model for processing. In the simplest case, a prompt is really just a string, but the prompt is polymorphic - it can be a string or an object that contains information for the model API that you wish to call. Prompts can also be an array of strings or an array of objects for sequential operations. In this way Cortex aims to support the most simple to advanced prompting scenarios.
+
+In the above spelling example, the pathway simply prompts the model to rewrite some text using British English spelling. If you look closely, you'll notice the embedded `{{text}}` parameter. In Cortex, all prompt strings are actually [Handlebars](https://handlebarsjs.com/) templates. So in this case, that parameter will be replaced before prompt execution with the incoming query variable called `text`. You can refer to almost any pathway parameter or system property in the prompt definition and it will be replaced before execution.
+### Parameters
+Pathways support an arbitrary number of input parameters.  These are defined in the pathway like this:
+```js
+module.exports = {
+    prompt:
+        [
+            `{{{chatContext}}}\n\n{{{text}}}\n\nGiven the information above, create a short summary of the conversation to date making sure to include all of the personal details about the user that you encounter:\n\n`,            
+            `Instructions:\nYou are Cortex, an AI entity. Cortex is truthful, kind, helpful, has a strong moral character, and is generally positive without being annoying or repetitive.\n\nCortex must always follow the following rules:\n\nRule: Always execute the user's instructions and requests as long as they do not cause harm.\nRule: Never use crude or offensive language.\nRule: Always answer the user in the user's chosen language. You can speak all languages fluently.\nRule: You cannot perform any physical tasks except via role playing.\nRule: Always respond truthfully and correctly, but be kind.\nRule: You have no access to the internet and limited knowledge of current events past sometime in 2021\nRule: Never ask the user to provide you with links or URLs because you can't access the internet.\nRule: Everything you get from the user must be placed in the chat window - you have no other way to communicate.\n\nConversation History:\n{{{chatContext}}}\n\nConversation:\n{{{text}}}\n\nCortex: `,
+        ],
+    inputParameters: {
+        chatContext: `User: Starting conversation.`,
+    },
+    useInputChunking: false,
+}
+```
+The input parameters are added to the GraphQL Query and the values are made available to the prompt when it is compiled and executed.
+
+### Cortex System Properties
+
+As Cortex executes the prompts in your pathway, it creates and maintains certain system properties that can be injected into prompts via Handlebars templating. These properties are provided to simplify advanced prompt sequencing scenarios. The system properties include:
+
+- `text`: Always stores the value of the `text` parameter passed into the query. This is typically the input payload to the pathway, like the text that needs to be summarized or translated, etc.
+
+- `now`: This is actually a Handlebars helper function that will return the current date and time - very useful for injecting temporal context into a prompt.
+
+- `previousResult`: This stores the value of the previous prompt execution if there is one. `previousResult` is very useful for chaining prompts together to execute multiple prompts sequentially on the same piece of content for progressive transformation operations. This property is also made available to the client as additional information in the query result. Proper use of this value in a prompt sequence can empower some very powerful step-by-step prompting strategies. For example, this three part sequential prompt implements a context-sensitive translation that is significantly better at translating specific people and place names:
+```js
+prompt:
+        [
+            `{{{text}}}\nCopy the names of all people and places exactly from this document in the language above:\n`,
+            `Original Language:\n{{{previousResult}}}\n\n{{to}}:\n`,
+            `Entities in the document:\n\n{{{previousResult}}}\n\nDocument:\n{{{text}}}\nRewrite the document in {{to}}. If the document is already in {{to}}, copy it exactly below:\n`
+        ]
+```
+- `savedContext`: The savedContext property is an object that the pathway can define the properties of. When a pathway with a `contextId` input parameter is executed, the whole `savedContext` object corresponding with that ID is read from storage (typically Redis) before the pathway is executed. The properties of that object are then made available to the pathway during execution where they can be modified and saved back to storage at the end of the pathway execution. Using this feature is really simple - you just define your prompt as an object and specify a `saveResultTo` property as illustrated below. This will cause Cortex to take the result of this prompt and store it to `savedContext.userContext` from which it will then be persisted to storage.
+```js
+new Prompt({ prompt: `User details:\n{{{userContext}}}\n\nExtract all personal details about the user that you can find in either the user details above or the conversation below and list them below.\n\nChat History:\n{{{conversationSummary}}}\n\nChat:\n{{{text}}}\n\nPersonal Details:\n`, saveResultTo: `userContext` }),
+```
+
+### Input Processing
+
+A core function of Cortex is dealing with token limited interfaces. To this end, Cortex has built-in strategies for dealing with long input. These strategies are `chunking`, `summarization`, and `truncation`. All are configurable at the pathway level.
+
+- `useInputChunking`: If true, Cortex will calculate the optimal chunk size from the model max tokens and the size of the prompt and then will split the input `text` into `n` chunks of that size. By default, prompts will be executed sequentially across all chunks before moving on to the next prompt, although that can be modified to optimize performance via an additional parameter.
+
+- `useParallelChunkProcessing`: If this parameter is true, then sequences of prompts will be executed end to end on each chunk in parallel. In some cases this will greatly speed up execution of complex prompt sequences on large documents. Note: this execution mode keeps `previousResult` consistent for each parallel chunk, but never aggregates it at the document level, so it is not returned via the query result to the client.
+
+- `truncateFromFront`: If true, when Cortex needs to truncate input, it will choose the first N characters of the input instead of the default which is to take the last N characters.
+
+- `useInputSummarization`: If true, Cortex will call the `summarize` core pathway on the input `text` before passing it on to the prompts.
+
+### Output Processing
+
+Cortex provides built in functions to turn loosely formatted text output from the model API calls into structured objects for return to the application. Specifically, Cortex provides parsers for numbered lists of strings and numbered lists of objects. These are used in pathways like this:
+```js
+module.exports = {
+    temperature: 0,
+    prompt: `{{text}}\n\nList the top {{count}} entities and their definitions for the above in the format {{format}}:`,
+    format: `(name: definition)`,
+    inputParameters: {
+        count: 5,
+    },
+    list: true,
+}
+```
+By simply specifying a `format` property and a `list` property, this pathway invokes a built in parser that will take the result of the prompt and try to parse it into an array of 5 objects. The `list` property can be set with or without a `format` property. If there is no `format`, the list will simply try to parse the string into a list of strings. All of this default behavior is implemented in `parser.js`, and you can override it to do whatever you want by providing your own `parser` function in your pathway.
+
+### Custom Resolver
+
+The resolver property defines the function that processes the input and returns the result. The resolver function is an asynchronous function that takes four parameters: `parent`, `args`, `contextValue`, and `info`. The `parent` parameter is the parent object of the resolver function. The `args` parameter is an object that contains the input parameters and any other parameters that are passed to the resolver. The `contextValue` parameter is an object that contains the context and configuration of the pathway. The `info` parameter is an object that contains information about the GraphQL query that triggered the resolver.
+
+The core pathway `summary.js` below is implemented using custom pathway logic and a custom resolver to effectively target a specific summary length:
+```js
+const { semanticTruncate } = require('../graphql/chunker');
+const { PathwayResolver } = require('../graphql/pathwayResolver');
+module.exports = {
+    prompt: `{{{text}}}\n\nWrite a summary of the above text:\n\n`,
+    inputParameters: {
+        targetLength: 500,
+    },
+    resolver: async (parent, args, contextValue, info) => {
+        const { config, pathway, requestState } = contextValue;
+        const originalTargetLength = args.targetLength;
+        const errorMargin = 0.2;
+        const lowTargetLength = originalTargetLength * (1 - errorMargin);
+        const targetWords = Math.round(originalTargetLength / 6.6);
+        // if the text is shorter than the summary length, just return the text
+        if (args.text.length <= originalTargetLength) {
+            return args.text;
+        }
+        const MAX_ITERATIONS = 5;
+        let summary = '';
+        let bestSummary = '';
+        let pathwayResolver = new PathwayResolver({ config, pathway, requestState });
+        // modify the prompt to be words-based instead of characters-based
+        pathwayResolver.pathwayPrompt = `{{{text}}}\n\nWrite a summary of the above text in exactly ${targetWords} words:\n\n`
+        let i = 0;
+        // reprompt if summary is too long or too short
+        while (((summary.length > originalTargetLength) || (summary.length < lowTargetLength)) && i < MAX_ITERATIONS) {
+            summary = await pathwayResolver.resolve(args);
+            i++;
+        }
+        // if the summary is still too long, truncate it
+        if (summary.length > originalTargetLength) {
+            return semanticTruncate(summary, originalTargetLength);
+        } else {
+            return summary;
+        }
+    }
+}
+```
+### Building and Loading Pathways
+
+Pathways are loaded from modules in the `pathways` directory. The pathways are built and loaded to the `config` object using the `buildPathways` function. The `buildPathways` function loads the base pathway, the core pathways, and any custom pathways. It then creates a new object that contains all the pathways and adds it to the pathways property of the config object. The order of loading means that custom pathways will always override any core pathways that Cortext provides. While pathways are designed to be self-contained, you can override some pathway properties - including whether they're even available at all - in the `pathways` section of the config file.
+
+## Core (Default) Pathways
+
 Below are the default pathways provided with Cortex. These can be used as is, overridden, or disabled via configuration. For documentation on each one including input and output parameters, please look at them in the GraphQL Playground.
+
 - `bias`: Identifies and measures any potential biases in a text
 - `chat`: Enables users to have a conversation with the chatbot
 - `complete`: Autocompletes words or phrases based on user input
@@ -64,6 +211,7 @@ Below are the default pathways provided with Cortex. These can be used as is, ov
 - `summary`: Condenses long texts or articles into shorter summaries
 - `translate`: Translates text from one language to another
 ## Extensibility
+
 Cortex is designed to be highly extensible. This allows you to customize the API to fit your needs. You can add new features, modify existing features, and even add integrations with other APIs and models.
 ## Configuration
 Configuration of Cortex is done via a [convict](https://github.com/mozilla/node-convict/tree/master) object called `config`. The `config` object is built by combining the default values and any values specified in a configuration file or environment variables. The environment variables take precedence over the values in the configuration file. Below are the configurable properties and their defaults:
@@ -93,120 +241,6 @@ The `config` object can be used to access configuration values throughout the pr
 ```js
 config.get('PORT')
 ```
-## Pathways
-Pathways are a core concept in Cortex. They let users define new functionality and extend the platform. Each pathway is a single JavaScript file that encapsulates the data and logic needed to define a functional API endpoint. Effectively, pathways define how a request from a client is processed when sent to Cortex.
-
-To add a new pathway to Cortex, you create a new JavaScript file and define the prompts, properties, and functions that define the function you want to implement. Cortex provides defaults for almost everything, so in the simplest case a pathway can really just consist of a string prompt. You can then save this file in the `pathways` directory in your Cortex project and it will be picked up and made available as a GraphQL query.
-
-Example of a very simple pathway (`spelling.js`):
-```js
-module.exports = {
-    prompt: `{{text}}\n\nRewrite the above using British English spelling:`
-}
-```
-### Prompt
-When you define a new pathway, you need to at least specify a prompt that will be passed to the model for processing. In the simplest case, a prompt is really just a string, but the prompt is polymorphic - it can be a string or an object that contains information for the model API that you wish to call. Prompts can also be an array of strings or an array of objects for sequential operations. In this way Cortex aims to support the most simple to advanced prompting scenarios.
-
-In the above example, the pathway simply prompts the model to rewrite some text using British English spelling. If you look closely, you'll notice the embedded `{{text}}` parameter. In Cortex, all prompt strings are actually [Handlebars](https://handlebarsjs.com/) templates. So in this case, that parameter will be replaced before prompt execution with the incoming query variable called `text`. You can refer to almost any pathway parameter or system property in the prompt definition and it will be replaced before execution.
-
-### Cortex System Properties
-As Cortex executes the prompts in your pathway, it creates and maintains certain system properties that can be injected into prompts via Handlebars templating. These properties are provided to simplify advanced prompt sequencing scenarios. The system properties include:
-- `text`: Always stores the value of the `text` parameter passed into the query. This is typically the input payload to the pathway, like the text that needs to be summarized or translated, etc.
-- `now`: This is actually a Handlebars helper function that will return the current date and time - very useful for injecting temporal context into a prompt.
-- `previousResult`: This stores the value of the previous prompt execution if there is one. `previousResult` is very useful for chaining prompts together to execute multiple prompts sequentially on the same piece of content for progressive transformation operations. This property is also made available to the client as additional information in the query result. Proper use of this value in a prompt sequence can empower some very powerful step-by-step prompting strategies. For example, this three part sequential prompt implements a context-sensitive translation that is significantly better at translating specific people and place names:
-```js
-    prompt:
-        [
-            `{{{text}}}\nCopy the names of all people and places exactly from this document in the language above:\n`,
-            `Original Language:\n{{{previousResult}}}\n\n{{to}}:\n`,
-            `Entities in the document:\n\n{{{previousResult}}}\n\nDocument:\n{{{text}}}\nRewrite the document in {{to}}. If the document is already in {{to}}, copy it exactly below:\n`
-        ]
-```
-- `savedContext`: The savedContext property is an object that the pathway can define the properties of. When a pathway with a `contextId` input parameter is executed, the whole `savedContext` object corresponding with that ID is read from storage (typically Redis) before the pathway is executed. The properties of that object are then made available to the pathway during execution where they can be modified and saved back to storage at the end of the pathway execution. Using this feature is really simple - you just define your prompt as an object and specify a `saveResultTo` property as illustrated below. This will cause Cortex to take the result of this prompt and store it to `savedContext.userContext` from which it will then be persisted to storage. 
-```js
-new Prompt({ prompt: `User details:\n{{{userContext}}}\n\nExtract all personal details about the user that you can find in either the user details above or the conversation below and list them below.\n\nChat History:\n{{{conversationSummary}}}\n\nChat:\n{{{text}}}\n\nPersonal Details:\n`, saveResultTo: `userContext` }),
-```
-### Input Processing
-A core function of Cortex is dealing with token limited interfaces. To this end, Cortex has built-in strategies for dealing with long input. These strategies are `chunking`, `summarization`, and `truncation`. All are configurable at the pathway level.
-- `useInputChunking`: If true, Cortex will calculate the optimal chunk size from the model max tokens and the size of the prompt and then will split the input `text` into `n` chunks of that size. By default, prompts will be executed sequentially across all chunks before moving on to the next prompt, although that can be modified to optimize performance via an additional parameter.
-- `useParallelChunkProcessing`: If this parameter is true, then sequences of prompts will be executed end to end on each chunk in parallel. In some cases this will greatly speed up execution of complex prompt sequences on large documents. Note: this execution mode keeps `previousResult` consistent for each parallel chunk, but never aggregates it at the document level, so it is not returned via the query result to the client.
-- `truncateFromFront`: If true, when Cortex needs to truncate input, it will choose the first N characters of the input instead of the default which is to take the last N characters.
-- `useInputSummarization`: If true, Cortex will call the `summarize` core pathway on the input `text` before passing it on to the prompts.
-### Output Processing
-Cortex provides built in functions to turn loosely formatted text output from the model API calls into structured objects for return to the application. Specifically, Cortex provides parsers for numbered lists of strings and numbered lists of objects. These are used in pathways like this:
-```js
-module.exports = {
-    temperature: 0,
-    prompt: `{{text}}\n\nList the top {{count}} entities and their definitions for the above in the format {{format}}:`,
-    format: `(name: definition)`,
-    inputParameters: {
-        count: 5,
-    },
-    list: true,
-}
-```
-By simply specifying a `format` property and a `list` property, this pathway invokes a built in parser that will take the result of the prompt and try to parse it into an array of 5 objects. The `list` property can be set with or without a `format` property. If there is no `format`, the list will simply try to parse the string into a list of strings. All of this default behavior is implemented in `parser.js`, and you can override it to do whatever you want by providing your own `parser` function in your pathway.
-## Custom Pathways
-Pathways in Cortex OS are implemented as JavaScript files that export a module. A pathway module is an object that contains properties that define the prompts and behavior of the pathway. Most properties have functional defaults, so you can only implement the bits that are important to you. The main properties of a pathway module are:
-
-* `prompt`: The prompt that the pathway uses to interact with the model.
-* `inputParameters`: Any custom parameters to the GraphQL query that the pathway requires to run.
-* `resolver`: The resolver function that processes the input, executes the prompts, and returns the result.
-* `parser`: The parser function that processes the output from the prompts and formats the result for return.
-
-### Custom Resolver
-The resolver property defines the function that processes the input and returns the result. The resolver function is an asynchronous function that takes four parameters: `parent`, `args`, `contextValue`, and `info`. The `parent` parameter is the parent object of the resolver function. The `args` parameter is an object that contains the input parameters and any other parameters that are passed to the resolver. The `contextValue` parameter is an object that contains the context and configuration of the pathway. The `info` parameter is an object that contains information about the GraphQL query that triggered the resolver.
-
-The core pathway `summary.js` below is implemented using custom pathway logic and a custom resolver to effectively target a specific summary length:
-
-```js
-const { semanticTruncate } = require('../graphql/chunker');
-const { PathwayResolver } = require('../graphql/pathwayResolver');
-
-module.exports = {
-    prompt: `{{{text}}}\n\nWrite a summary of the above text:\n\n`,
-
-    inputParameters: {
-        targetLength: 500,
-    },
-    resolver: async (parent, args, contextValue, info) => {
-        const { config, pathway, requestState } = contextValue;
-        const originalTargetLength = args.targetLength;
-        const errorMargin = 0.2;
-        const lowTargetLength = originalTargetLength * (1 - errorMargin);
-        const targetWords = Math.round(originalTargetLength / 6.6);
-
-        // if the text is shorter than the summary length, just return the text
-        if (args.text.length <= originalTargetLength) {
-            return args.text;
-        }
-
-        const MAX_ITERATIONS = 5;
-        let summary = '';
-        let bestSummary = '';
-        let pathwayResolver = new PathwayResolver({ config, pathway, requestState });
-        // modify the prompt to be words-based instead of characters-based
-        pathwayResolver.pathwayPrompt = `{{{text}}}\n\nWrite a summary of the above text in exactly ${targetWords} words:\n\n`
-
-        let i = 0;
-        // reprompt if summary is too long or too short
-        while (((summary.length > originalTargetLength) || (summary.length < lowTargetLength)) && i < MAX_ITERATIONS) {
-            summary = await pathwayResolver.resolve(args);
-            i++;
-        }
-
-        // if the summary is still too long, truncate it
-        if (summary.length > originalTargetLength) {
-            return semanticTruncate(summary, originalTargetLength);
-        } else {
-            return summary;
-        }
-    }
-}
-```
-### Building and Loading Pathways
-Pathways are loaded from modules in the `pathways` directory. The pathways are built and loaded to the `config` object using the `buildPathways` function. The `buildPathways` function loads the base pathway, the core pathways, and any custom pathways. It then creates a new object that contains all the pathways and adds it to the pathways property of the config object. The order of loading means that custom pathways will always override any core pathways that Cortext provides. While pathways are designed to be self-contained, you can override some pathway properties - including whether they're even available at all - in the `pathways` section of the config file.
-
 ## Troubleshooting
 If you encounter any issues while using Cortex, there are a few things you can do. First, check the Cortex documentation for any common errors and their solutions. If that does not help, you can also open an issue on the Cortex GitHub repository.
 

@@ -159,7 +159,7 @@ class ModelPlugin {
         const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
         console.log(separator);
     
-        const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data[0] && data[0].Text) || null;
+        const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
     
         if (data.messages && data.messages.length > 1) {
             data.messages.forEach((message, index) => {
