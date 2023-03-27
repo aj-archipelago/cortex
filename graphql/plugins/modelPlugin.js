@@ -138,7 +138,7 @@ class ModelPlugin {
     
     async executeRequest(url, data, params, headers) {
         const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName);
-        const modelInput = data.prompt || (data.messages && data.messages[0].content) || data[0].Text || null;
+        const modelInput = data.prompt || (data.messages && data.messages[0].content) || data.length > 0 && data[0].Text || null;
         
         console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`);
         
