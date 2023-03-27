@@ -20,34 +20,16 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         return { modelPromptText, tokenLength: encode(modelPromptText).length };
     }
 
-    // Set up parameters specific to the OpenAI Whisper API
-    getRequestParameters(text, parameters, prompt) {
-        const combinedParameters = { ...this.promptParameters, ...parameters };
-        const { file, model } = combinedParameters;
-
-        return {
-            file,
-            model
-        };
-    }
-
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
-        const requestParameters = this.requestParameters(text, parameters, prompt);
         const params = {};
-
-        const data = { ...(this.model.params || {}), ...requestParameters };
-        // data.file = fs.createReadStream(data.file);
-
-        const combinedParameters = { ...this.promptParameters, ...parameters };
-        const modelPrompt = this.getModelPrompt(prompt, parameters);
-        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+        const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
 
         const processChunk = async (chunk) => {
             try {
                 const formData = new FormData();
-                formData.append('file', fs.createReadStream(chunk));//fs.createReadStream(parameters.file)
+                formData.append('file', fs.createReadStream(chunk));
                 formData.append('model', this.model.params.model);
                 formData.append('response_format', 'text');
                 // formData.append('language', 'tr');
