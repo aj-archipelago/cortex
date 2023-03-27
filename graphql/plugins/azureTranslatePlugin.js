@@ -18,6 +18,7 @@ class AzureTranslatePlugin extends ModelPlugin {
     
     // Set up parameters specific to the Azure Translate API
     getRequestParameters(text, parameters, prompt) {
+        const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
         const requestParameters = {
             data: [
