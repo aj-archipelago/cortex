@@ -12,15 +12,16 @@ const { requestState } = require('./requestState');
 
 const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
-const callPathway = async (config, pathwayName, requestState, { text, ...parameters }) => {
-    const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`), requestState });
+const callPathway = async (config, pathwayName, args, requestState, { text, ...parameters }) => {
+    const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`), args, requestState });
     return await pathwayResolver.resolve({ text, ...parameters });
 }
 
 class PathwayResolver {
-    constructor({ config, pathway }) {
+    constructor({ config, pathway, args }) {
         this.config = config;
         this.pathway = pathway;
+        this.args = args;
         this.useInputChunking = pathway.useInputChunking;
         this.chunkMaxTokenLength = 0;
         this.warnings = [];
@@ -29,22 +30,21 @@ class PathwayResolver {
         this.pathwayPrompter = new PathwayPrompter({ config, pathway });
         this.previousResult = '';
         this.prompts = [];
-        this._pathwayPrompt = '';
 
         Object.defineProperty(this, 'pathwayPrompt', {
             get() {
-                return this._pathwayPrompt;
+                return this.prompts
             },
             set(value) {
-                this._pathwayPrompt = value;
-                if (!Array.isArray(this._pathwayPrompt)) {
-                    this._pathwayPrompt = [this._pathwayPrompt];
+                if (!Array.isArray(value)) {
+                    value = [value];
                 }
-                this.prompts = this._pathwayPrompt.map(p => (p instanceof Prompt) ? p : new Prompt({ prompt:p }));
+                this.prompts = value.map(p => (p instanceof Prompt) ? p : new Prompt({ prompt:p }));
                 this.chunkMaxTokenLength = this.getChunkMaxTokenLength();
             }
         });
 
+        // set up initial prompt
         this.pathwayPrompt = pathway.prompt;
     }
 
@@ -145,25 +145,25 @@ class PathwayResolver {
 
     // Here we choose how to handle long input - either summarize or chunk
     processInputText(text) {
-        let chunkMaxChunkTokenLength = 0;
+        let chunkTokenLength = 0;
         if (this.pathway.inputChunkSize) {
-            chunkMaxChunkTokenLength = Math.min(this.pathway.inputChunkSize, this.chunkMaxTokenLength);
+            chunkTokenLength = Math.min(this.pathway.inputChunkSize, this.chunkMaxTokenLength);
         } else {
-            chunkMaxChunkTokenLength = this.chunkMaxTokenLength;
+            chunkTokenLength = this.chunkMaxTokenLength;
         }
         const encoded = encode(text);
-        if (!this.useInputChunking || encoded.length <= chunkMaxChunkTokenLength) { // no chunking, return as is
-            if (encoded.length >= chunkMaxChunkTokenLength) {
-                const warnText = `Your input is possibly too long, truncating! Text length: ${text.length}`;
+        if (!this.useInputChunking || encoded.length <= chunkTokenLength) { // no chunking, return as is
+            if (encoded.length >= chunkTokenLength) {
+                const warnText = `Truncating long input text. Text length: ${text.length}`;
                 this.warnings.push(warnText);
                 console.warn(warnText);
-                text = this.truncate(text, chunkMaxChunkTokenLength);
+                text = this.truncate(text, chunkTokenLength);
             }
             return [text];
         }
 
         // chunk the text and return the chunks with newline separators
-        return getSemanticChunks({ text, maxChunkToken: chunkMaxChunkTokenLength });
+        return getSemanticChunks({ text, maxChunkToken: chunkTokenLength });
     }
 
     truncate(str, n) {
@@ -175,7 +175,7 @@ class PathwayResolver {
 
     async summarizeIfEnabled({ text, ...parameters }) {
         if (this.pathway.useInputSummarization) {
-            return await callPathway(this.config, 'summary', requestState, { text, targetLength: 1000, ...parameters });
+            return await callPathway(this.config, 'summary', this.args, requestState, { text, targetLength: 1000, ...parameters });
         }
         return text;
     }
@@ -183,30 +183,21 @@ class PathwayResolver {
     // Calculate the maximum token length for a chunk
     getChunkMaxTokenLength() {
         // find the longest prompt
-        const maxPromptTokenLength = Math.max(...this.prompts.map(({ prompt }) => prompt ? encode(String(prompt)).length : 0));
-        const maxMessagesTokenLength = Math.max(...this.prompts.map(({ messages }) => messages ? messages.reduce((acc, {role, content}) => {
-            return (role && content) ? acc + encode(role).length + encode(content).length : acc;
-        }, 0) : 0));
-
-        const maxTokenLength = Math.max(maxPromptTokenLength, maxMessagesTokenLength);
-
+        const maxPromptTokenLength = Math.max(...this.prompts.map((promptData) => this.pathwayPrompter.plugin.getCompiledPrompt('', this.args, promptData).tokenLength));
+        
         // find out if any prompts use both text input and previous result
-        const hasBothProperties = this.prompts.some(prompt => prompt.usesInputText && prompt.usesPreviousResult);
+        const hasBothProperties = this.prompts.some(prompt => prompt.usesTextInput && prompt.usesPreviousResult);
         
         // the token ratio is the ratio of the total prompt to the result text - both have to be included
         // in computing the max token length
         const promptRatio = this.pathwayPrompter.plugin.getPromptTokenRatio();
-        let maxChunkToken = promptRatio * this.pathwayPrompter.plugin.getModelMaxTokenLength() - maxTokenLength;
-
+        let chunkMaxTokenLength = promptRatio * this.pathwayPrompter.plugin.getModelMaxTokenLength() - maxPromptTokenLength;
+        
         // if we have to deal with prompts that have both text input
         // and previous result, we need to split the maxChunkToken in half
-        maxChunkToken = hasBothProperties ? maxChunkToken / 2 : maxChunkToken;
-
-        // detect if the longest prompt might be too long to allow any chunk size
-        if (maxChunkToken && maxChunkToken <= 0) {
-            throw new Error(`Your prompt is too long! Split to multiple prompts or reduce length of your prompt, prompt length: ${maxPromptLength}`);
-        }
-        return maxChunkToken;
+        chunkMaxTokenLength = hasBothProperties ? chunkMaxTokenLength / 2 : chunkMaxTokenLength;
+        
+        return chunkMaxTokenLength;
     }
 
     // Process the request and return the result        

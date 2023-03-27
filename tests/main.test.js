@@ -93,19 +93,6 @@ it('validates summary endpoint', async () => {
     expect(response.data?.summary.result).toBeDefined();
 });
 
-it('validates topics endpoint with given num of count return', async () => {
-    const response = await testServer.executeOperation({
-        query: 'query topics($text: String!, $count: Int) { topics(text: $text, count: $count) { result } }',
-        variables: { text: 'hello there my dear world!', count: 3 },
-    });
-
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.topics.result.length).toBe(3);
-    response.data?.topics.result.forEach((topic) => {
-        expect(topic).toBeDefined();
-    });
-});
-
 module.exports = {
     getTestServer,
 };

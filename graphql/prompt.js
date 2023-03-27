@@ -12,6 +12,7 @@ class Prompt {
 
         this.usesTextInput = promptContains('text', this.prompt ? this.prompt : this.messages);
         this.usesPreviousResult = promptContains('previousResult', this.prompt ? this.prompt : this.messages);
+        this.debugInfo = '';
     }
 }
 
