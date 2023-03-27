@@ -1,5 +1,5 @@
 module.exports = {
-    prompt: ``,
+    prompt: `{{text}}`,
     model: `oai-whisper`,
     inputParameters: {
         file: ``,

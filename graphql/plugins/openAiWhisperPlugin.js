@@ -35,16 +35,18 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         const data = { ...(this.model.params || {}), ...requestParameters };
         // data.file = fs.createReadStream(data.file);
 
+        const combinedParameters = { ...this.promptParameters, ...parameters };
+        const modelPrompt = this.getModelPrompt(prompt, parameters);
+        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+
         const processChunk = async (chunk) => {
             try {
                 const formData = new FormData();
-                // for (const key in data) {
-                //     formData.append(key, data[key]);
-                // }
-
                 formData.append('file', fs.createReadStream(chunk));//fs.createReadStream(parameters.file)
                 formData.append('model', this.model.params.model);
                 formData.append('response_format', 'text');
+                // formData.append('language', 'tr');
+                modelPromptText && formData.append('prompt', modelPromptText);
 
                 return this.executeRequest(url, formData, params, { ...this.model.headers, ...formData.getHeaders() });
             } catch (err) {
