@@ -12,37 +12,24 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         super(config, pathway);
     }
 
-    // Set up parameters specific to the OpenAI Whisper API
-    requestParameters(text, parameters, prompt) {
+    getCompiledPrompt(text, parameters, prompt) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const modelPrompt = this.getModelPrompt(prompt, parameters);
         const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
-
-        const { file, model } = combinedParameters;
-
-        return {
-            file,
-            model
-        };
+    
+        return { modelPromptText, tokenLength: encode(modelPromptText).length };
     }
 
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
-        const requestParameters = this.requestParameters(text, parameters, prompt);
         const params = {};
-
-        const data = { ...(this.model.params || {}), ...requestParameters };
-        // data.file = fs.createReadStream(data.file);
-
-        const combinedParameters = { ...this.promptParameters, ...parameters };
-        const modelPrompt = this.getModelPrompt(prompt, parameters);
-        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+        const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
 
         const processChunk = async (chunk) => {
             try {
                 const formData = new FormData();
-                formData.append('file', fs.createReadStream(chunk));//fs.createReadStream(parameters.file)
+                formData.append('file', fs.createReadStream(chunk));
                 formData.append('model', this.model.params.model);
                 formData.append('response_format', 'text');
                 // formData.append('language', 'tr');

@@ -38,6 +38,41 @@ class ModelPlugin {
         this.shouldCache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
     }
 
+    // Function to remove non-system messages until token length is less than target
+    removeMessagesUntilTarget = (messages, targetTokenLength) => {
+        let chatML = this.messagesToChatML(messages);
+        let tokenLength = encode(chatML).length;
+    
+        while (tokenLength > targetTokenLength) {
+            for (let i = 0; i < messages.length; i++) {
+                if (messages[i].role !== 'system') {
+                    messages.splice(i, 1);
+                    chatML = this.messagesToChatML(messages);
+                    tokenLength = encode(chatML).length;
+                    break;
+                }
+            }
+            if (messages.every(message => message.role === 'system')) {
+                break; // All remaining messages are 'system', stop removing messages
+            }
+        }
+        return messages;
+    }
+
+    //convert a messages array to a simple chatML format
+    messagesToChatML = (messages) => {
+        let output = "";
+        if (messages && messages.length) {
+            for (let message of messages) {
+                output += (message.role && message.content) ? `<|im_start|>${message.role}\n${message.content}\n<|im_end|>\n` : `${message}\n`;
+            }
+            // you always want the assistant to respond next so add a
+            // directive for that
+            output += "<|im_start|>assistant\n";
+        }
+        return output;
+    }
+
     getModelMaxTokenLength() {
         return (this.promptParameters.maxTokenLength ?? this.model.maxTokenLength ?? DEFAULT_MAX_TOKENS);
     }
@@ -120,40 +155,37 @@ class ModelPlugin {
         return messageResult ?? textResult ?? null;
     }
 
-    logMessagePreview(messages) {
-        messages.forEach((message, index) => {
-            const words = message.content.split(" ");
-            const tokenCount = encode(message.content).length;
-            let preview;
+    logRequestData(data, responseData, prompt) {
+        const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
+        console.log(separator);
     
-            if (index === 0) {
-                preview = message.content;
-            } else {
-                preview = words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
-            }
+        const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
     
-            console.log(`Message ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"`);
-        });
-    }
-    
-    async executeRequest(url, data, params, headers) {
-        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName);
-        const modelInput = data.prompt || (data.messages && data.messages[0].content) || data.length > 0 && data[0].Text || null;
-        
-        console.log(`=== ${this.pathwayName}.${this.requestCount++} ===`);
-        
         if (data.messages && data.messages.length > 1) {
-            this.logMessagePreview(data.messages);
+            data.messages.forEach((message, index) => {
+                const words = message.content.split(" ");
+                const tokenCount = encode(message.content).length;
+                const preview = words.length < 41 ? message.content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
+    
+                console.log(`\x1b[36mMessage ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"\x1b[0m`);
+            });
         } else {
             console.log(`\x1b[36m${modelInput}\x1b[0m`);
         }
-        
+    
         console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
     
+        prompt.debugInfo += `${separator}${JSON.stringify(data)}`;
+    }
+    
+    async executeRequest(url, data, params, headers, prompt) {
+        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName);
+        
         if (responseData.error) {
             throw new Exception(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
         }
     
+        this.logRequestData(data, responseData, prompt);
         return this.parseResponse(responseData);
     }
 

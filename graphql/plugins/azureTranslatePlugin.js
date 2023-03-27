@@ -1,19 +1,26 @@
 // AzureTranslatePlugin.js
 const ModelPlugin = require('./modelPlugin');
 const handlebars = require("handlebars");
+const { encode } = require("gpt-3-encoder");
 
 class AzureTranslatePlugin extends ModelPlugin {
-    constructor(config, modelName, pathway) {
-        super(config, modelName, pathway);
+    constructor(config, pathway) {
+        super(config, pathway);
     }
 
-    // Set up parameters specific to the Azure Translate API
-    requestParameters(text, parameters, prompt) {
+    getCompiledPrompt(text, parameters, prompt) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const modelPrompt = this.getModelPrompt(prompt, parameters);
         const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
-
-        return {
+    
+        return { modelPromptText, tokenLength: encode(modelPromptText).length };
+    }
+    
+    // Set up parameters specific to the Azure Translate API
+    getRequestParameters(text, parameters, prompt) {
+        const combinedParameters = { ...this.promptParameters, ...parameters };
+        const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
+        const requestParameters = {
             data: [
                 {
                 Text: modelPromptText,
@@ -23,11 +30,12 @@ class AzureTranslatePlugin extends ModelPlugin {
                 to: combinedParameters.to
             }
         };
+        return requestParameters;
     }
 
     // Execute the request to the Azure Translate API
     async execute(text, parameters, prompt) {
-        const requestParameters = this.requestParameters(text, parameters, prompt);
+        const requestParameters = this.getRequestParameters(text, parameters, prompt);
 
         const url = this.requestUrl(text);
 
@@ -35,7 +43,7 @@ class AzureTranslatePlugin extends ModelPlugin {
         const params = requestParameters.params;
         const headers = this.model.headers || {};
 
-        return this.executeRequest(url, data, params, headers);
+        return this.executeRequest(url, data, params, headers, prompt);
     }
 }
 

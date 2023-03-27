@@ -12,16 +12,16 @@ const rootResolver = async (parent, args, contextValue, info) => {
         info.cacheControl.setCacheHint({ maxAge: 60 * 60 * 24, scope: 'PUBLIC' });
     }
 
-    const pathwayResolver = new PathwayResolver({ config, pathway, requestState });
+    const pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
     contextValue.pathwayResolver = pathwayResolver;
-
-    // Add request parameters back as debug
-    const requestParameters = pathwayResolver.prompts.map((prompt) => pathwayResolver.pathwayPrompter.plugin.requestParameters(args.text, args, prompt));
-    const debug = JSON.stringify(requestParameters);
 
     // Execute the request with timeout
     const result = await fulfillWithTimeout(pathway.resolver(parent, args, contextValue, info), pathway.timeout);
     const { warnings, previousResult, savedContextId } = pathwayResolver;
+    
+    // Add request parameters back as debug
+    const debug = pathwayResolver.prompts.map(prompt => prompt.debugInfo || '').join('\n').trim();
+    
     return { debug, result, warnings, previousResult, contextId: savedContextId }
 }
 

@@ -22,7 +22,7 @@ module.exports = {
 
         // If targetLength is not provided, execute the prompt once and return the result.
         if (originalTargetLength === 0) {
-            let pathwayResolver = new PathwayResolver({ config, pathway, requestState });
+            let pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
             return await pathwayResolver.resolve(args);
         }
 
@@ -37,7 +37,7 @@ module.exports = {
 
         const MAX_ITERATIONS = 5;
         let summary = '';
-        let pathwayResolver = new PathwayResolver({ config, pathway, requestState });
+        let pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
 
         
         // Modify the prompt to be words-based instead of characters-based.
