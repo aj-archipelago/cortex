@@ -4,7 +4,8 @@ const handlebars = require("handlebars");
 const { encode } = require("gpt-3-encoder");
 const FormData = require('form-data');
 const fs = require('fs');
-const { splitMediaFile, deleteTempFolder, isValidYoutubeUrl, processYoutubeUrl } = require('../../lib/fileChunker');
+const { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } = require('../../lib/fileChunker');
+const pubsub = require('../pubsub');
 
 class OpenAIWhisperPlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -26,7 +27,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
     }
 
     // Execute the request to the OpenAI Whisper API
-    async execute(text, parameters, prompt) {
+    async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
         const requestParameters = this.requestParameters(text, parameters, prompt);
         const params = {};
@@ -51,19 +52,35 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             }
         }
 
+        let result;
         let { file } = parameters;
+        let folder;
         const isYoutubeUrl = isValidYoutubeUrl(file);
-        if (isYoutubeUrl) {
-            file = await processYoutubeUrl(file);
-        }
 
-        const { chunks, folder } = await splitMediaFile(file);
-        const result = await Promise.all(chunks.map(processChunk));
+        try {
+            if (isYoutubeUrl) {
+                file = await processYoutubeUrl(file);
+            }
 
+            const mediaSplit = await splitMediaFile(file);
 
-        await deleteTempFolder(folder);
-        if (isYoutubeUrl) {
-            await deleteTempFolder(file);
+            const { requestId } = pathwayResolver;
+            pubsub.publish('REQUEST_PROGRESS', {
+                requestProgress: {
+                    requestId: this.requestId,
+                    progress: 0.5,
+                    data: null,
+                }
+            });
+
+            folder = mediaSplit.folder;
+            result = await Promise.all(mediaSplit.chunks.map(processChunk));
+
+        } catch (error) {
+            console.error("An error occurred:", error);
+        } finally {
+            isYoutubeUrl && (await deleteTempPath(file));
+            folder && (await deleteTempPath(folder));
         }
         return result.join('');
     }

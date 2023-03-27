@@ -52,8 +52,8 @@ class PathwayPrompter {
         this.plugin = plugin;
     }
 
-    async execute(text, parameters, prompt) {
-        return await this.plugin.execute(text, parameters, prompt);
+    async execute(text, parameters, prompt, pathwayResolver) {
+        return await this.plugin.execute(text, parameters, prompt, pathwayResolver);
     }
 }
 
