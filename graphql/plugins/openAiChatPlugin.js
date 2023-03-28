@@ -8,20 +8,6 @@ class OpenAIChatPlugin extends ModelPlugin {
         super(config, pathway);
     }
 
-    getCompiledPrompt(text, parameters, prompt) {
-        const combinedParameters = { ...this.promptParameters, ...parameters };
-        const modelPrompt = this.getModelPrompt(prompt, parameters);
-        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
-        const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
-        const modelPromptMessagesML = this.messagesToChatML(modelPromptMessages);
-
-        if (modelPromptMessagesML) {
-            return { modelPromptMessages, tokenLength: encode(modelPromptMessagesML).length };
-        } else {
-            return { modelPromptText, tokenLength: encode(modelPromptText).length };
-        }
-    }
-
     // Set up parameters specific to the OpenAI Chat API
     getRequestParameters(text, parameters, prompt) {
         const { modelPromptText, modelPromptMessages, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);

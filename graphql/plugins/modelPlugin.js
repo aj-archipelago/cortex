@@ -73,6 +73,20 @@ class ModelPlugin {
         return output;
     }
 
+    getCompiledPrompt(text, parameters, prompt) {
+        const combinedParameters = { ...this.promptParameters, ...parameters };
+        const modelPrompt = this.getModelPrompt(prompt, parameters);
+        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+        const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
+        const modelPromptMessagesML = this.messagesToChatML(modelPromptMessages);
+
+        if (modelPromptMessagesML) {
+            return { modelPromptMessages, tokenLength: encode(modelPromptMessagesML).length };
+        } else {
+            return { modelPromptText, tokenLength: encode(modelPromptText).length };
+        }
+    }
+
     getModelMaxTokenLength() {
         return (this.promptParameters.maxTokenLength ?? this.model.maxTokenLength ?? DEFAULT_MAX_TOKENS);
     }
@@ -161,7 +175,7 @@ class ModelPlugin {
     
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
     
-        if (data.messages && data.messages.length > 1) {
+        if (data && data.messages && data.messages.length > 1) {
             data.messages.forEach((message, index) => {
                 const words = message.content.split(" ");
                 const tokenCount = encode(message.content).length;
@@ -175,7 +189,7 @@ class ModelPlugin {
     
         console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
     
-        prompt.debugInfo += `${separator}${JSON.stringify(data)}`;
+        prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
     }
     
     async executeRequest(url, data, params, headers, prompt) {

@@ -12,14 +12,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         super(config, pathway);
     }
 
-    getCompiledPrompt(text, parameters, prompt) {
-        const combinedParameters = { ...this.promptParameters, ...parameters };
-        const modelPrompt = this.getModelPrompt(prompt, parameters);
-        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
-    
-        return { modelPromptText, tokenLength: encode(modelPromptText).length };
-    }
-
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
