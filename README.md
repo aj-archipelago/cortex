@@ -81,7 +81,31 @@ To add a new pathway to Cortex, you create a new JavaScript file and define the 
 ### Prompt
 When you define a new pathway, you need to at least specify a prompt that will be passed to the model for processing. In the simplest case, a prompt is really just a string, but the prompt is polymorphic - it can be a string or an object that contains information for the model API that you wish to call. Prompts can also be an array of strings or an array of objects for sequential operations. In this way Cortex aims to support the most simple to advanced prompting scenarios.
 
-In the above spelling example, the pathway simply prompts the model to rewrite some text using British English spelling. If you look closely, you'll notice the embedded `{{text}}` parameter. In Cortex, all prompt strings are actually [Handlebars](https://handlebarsjs.com/) templates. So in this case, that parameter will be replaced before prompt execution with the incoming query variable called `text`. You can refer to almost any pathway parameter or system property in the prompt definition and it will be replaced before execution.
+```js
+// a prompt can be a string
+prompt: `{{{text}}}\nCopy the names of all people and places exactly from this document in the language above:\n`
+
+// or an array of strings
+prompt: [
+    `{{{text}}}\nCopy the names of all people and places exactly from this document in the language above:\n`,
+    `Original Language:\n{{{previousResult}}}\n\n{{to}}:\n`,
+    `Entities in the document:\n\n{{{previousResult}}}\n\nDocument:\n{{{text}}}\nRewrite the document in {{to}}. If the document is already in {{to}}, copy it exactly below:\n`
+]
+
+// or an array of one or more Prompt objects
+// as you can see below a Prompt object can also have a messages array, which is how you can
+// express your prompts for chat-style interfaces
+prompt: [
+    new Prompt({ messages: [
+        {"role": "system", "content": "Assistant is a highly skilled multilingual translator for a prestigious news agency. When the user posts any text in any language, assistant will create a translation of that text in {{to}}. Assistant will produce only the translation and no additional notes or commentary."},
+        {"role": "user", "content": "{{{text}}}"}
+    ]}),
+]
+```
+
+If a prompt is an array, the individual prompts in the array will be executed sequentially by the Cortex prompt execution engine. The execution engine deals with all of the complexities of chunking input content and executing the sequence of prompts against those chunks in a way that optimizes the performance and ensures the the integrity of the pathway logic.
+
+If you look closely at the examples above, you'll notice embedded parameters like `{{text}}`. In Cortex, all prompt strings are actually [Handlebars](https://handlebarsjs.com/) templates. So in this case, that parameter will be replaced before prompt execution with the incoming query variable called `text`. You can refer to almost any pathway parameter or system property in the prompt definition and it will be replaced before execution.
 ### Parameters
 Pathways support an arbitrary number of input parameters.  These are defined in the pathway like this:
 ```js
