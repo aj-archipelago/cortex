@@ -1,7 +1,5 @@
 // OpenAICompletionPlugin.js
 const ModelPlugin = require('./modelPlugin');
-const handlebars = require("handlebars");
-const { encode } = require("gpt-3-encoder");
 const FormData = require('form-data');
 const fs = require('fs');
 const { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } = require('../../lib/fileChunker');

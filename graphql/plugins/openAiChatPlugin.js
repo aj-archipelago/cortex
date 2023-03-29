@@ -1,7 +1,5 @@
 // OpenAIChatPlugin.js
 const ModelPlugin = require('./modelPlugin');
-const handlebars = require("handlebars");
-const { encode } = require("gpt-3-encoder");
 
 class OpenAIChatPlugin extends ModelPlugin {
     constructor(config, pathway) {
