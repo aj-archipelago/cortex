@@ -1,7 +1,5 @@
 // OpenAICompletionPlugin.js
 const ModelPlugin = require('./modelPlugin');
-const handlebars = require("handlebars");
-const { encode } = require("gpt-3-encoder");
 const FormData = require('form-data');
 const fs = require('fs');
 const { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } = require('../../lib/fileChunker');
@@ -10,14 +8,6 @@ const pubsub = require('../pubsub');
 class OpenAIWhisperPlugin extends ModelPlugin {
     constructor(config, pathway) {
         super(config, pathway);
-    }
-
-    getCompiledPrompt(text, parameters, prompt) {
-        const combinedParameters = { ...this.promptParameters, ...parameters };
-        const modelPrompt = this.getModelPrompt(prompt, parameters);
-        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
-    
-        return { modelPromptText, tokenLength: encode(modelPromptText).length };
     }
 
     // Execute the request to the OpenAI Whisper API

@@ -1,19 +1,9 @@
 // AzureTranslatePlugin.js
 const ModelPlugin = require('./modelPlugin');
-const handlebars = require("handlebars");
-const { encode } = require("gpt-3-encoder");
 
 class AzureTranslatePlugin extends ModelPlugin {
     constructor(config, pathway) {
         super(config, pathway);
-    }
-
-    getCompiledPrompt(text, parameters, prompt) {
-        const combinedParameters = { ...this.promptParameters, ...parameters };
-        const modelPrompt = this.getModelPrompt(prompt, parameters);
-        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
-    
-        return { modelPromptText, tokenLength: encode(modelPromptText).length };
     }
     
     // Set up parameters specific to the Azure Translate API
