@@ -28,6 +28,7 @@
   "homepage": "https://github.com/aj-archipelago/cortex#readme",
   "dependencies": {
     "@apollo/utils.keyvadapter": "^1.1.2",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@graphql-tools/schema": "^9.0.12",
     "@keyv/redis": "^2.5.4",
     "apollo-server": "^3.12.0",
