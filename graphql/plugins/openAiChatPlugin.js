@@ -19,7 +19,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         // Check if the token length exceeds the model's max token length
         if (tokenLength > modelMaxTokenLength) {
             // Remove older messages until the token length is within the model's limit
-            requestMessages = this.removeMessagesUntilTarget(requestMessages, modelMaxTokenLength);
+            requestMessages = this.truncateMessagesToTargetLength(requestMessages, modelMaxTokenLength);
         }
     
         const requestParameters = {
