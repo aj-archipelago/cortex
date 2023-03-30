@@ -21,6 +21,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node start.js",
+    "azure:start": "./startup.sh",
     "test": "jest --setupFiles dotenv/config"
   },
   "author": "",
