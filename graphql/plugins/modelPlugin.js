@@ -58,6 +58,14 @@ class ModelPlugin {
         // Remove and/or truncate messages until the target token length is reached
         let index = 0;
         while (totalTokenLength > targetTokenLength) {
+            const message = tokenLengths[index].message;
+
+            // Skip system messages
+            if (message.role === 'system') {
+                index++;
+                continue;
+            }
+
             const currentTokenLength = tokenLengths[index].tokenLength;
             
             if (totalTokenLength - currentTokenLength >= targetTokenLength) {
@@ -66,7 +74,6 @@ class ModelPlugin {
                 tokenLengths.splice(index, 1);
             } else {
                 // Truncate the message to fit the remaining target token length
-                const message = tokenLengths[index].message;
                 const emptyContentLength = encode(this.messagesToChatML([{ ...message, content: '' }], false)).length;
                 const otherMessageTokens = totalTokenLength - currentTokenLength;
                 const tokensToKeep = targetTokenLength - (otherMessageTokens + emptyContentLength);
