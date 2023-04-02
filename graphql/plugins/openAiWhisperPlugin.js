@@ -31,29 +31,51 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             }
         }
 
-        let result;
+        let result = ``;
         let { file } = parameters;
         let folder;
         const isYoutubeUrl = isValidYoutubeUrl(file);
+        let totalCount = 0;
+        let completedCount = 0;
+        const { requestId } = pathwayResolver;
 
-        try {
-            if (isYoutubeUrl) {
-                file = await processYoutubeUrl(file);
-            }
-
-            const mediaSplit = await splitMediaFile(file);
-
-            const { requestId } = pathwayResolver;
+        const sendProgress = () => {
+            completedCount++;
             pubsub.publish('REQUEST_PROGRESS', {
                 requestProgress: {
                     requestId,
-                    progress: 0.5,
+                    progress: completedCount / totalCount,
                     data: null,
                 }
             });
+        }
 
-            folder = mediaSplit.folder;
-            result = await Promise.all(mediaSplit.chunks.map(processChunk));
+        try {
+            if (isYoutubeUrl) {
+                // totalCount += 1; // extra 1 step for youtube download
+                file = await processYoutubeUrl(file);
+            }
+
+            const { chunkPromises, uniqueOutputPath } = await splitMediaFile(file);
+            folder = uniqueOutputPath;
+            totalCount += chunkPromises.length * 2; // 2 steps for each chunk (download and upload)
+            // isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
+
+            // sequential download of chunks
+            const chunks = [];
+            for (const chunkPromise of chunkPromises) {
+                sendProgress();
+                chunks.push(await chunkPromise);
+            }
+
+            // sequential processing of chunks
+            for (const chunk of chunks) {
+                result += await processChunk(chunk);
+                sendProgress();
+            }
+
+            // parallel processing, dropped 
+            // result = await Promise.all(mediaSplit.chunks.map(processChunk));
 
         } catch (error) {
             console.error("An error occurred:", error);
@@ -61,7 +83,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             isYoutubeUrl && (await deleteTempPath(file));
             folder && (await deleteTempPath(folder));
         }
-        return result.join('');
+        return result;
     }
 }
 

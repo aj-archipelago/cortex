@@ -1,6 +1,6 @@
 {
   "name": "@aj-archipelago/cortex",
-  "version": "0.0.7",
+  "version": "0.0.9",
   "description": "Cortex is a GraphQL API for AI. It provides a simple, extensible interface for using AI services from OpenAI, Azure and others.",
   "repository": {
     "type": "git",
@@ -28,6 +28,7 @@
   "homepage": "https://github.com/aj-archipelago/cortex#readme",
   "dependencies": {
     "@apollo/utils.keyvadapter": "^1.1.2",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@graphql-tools/schema": "^9.0.12",
     "@keyv/redis": "^2.5.4",
     "apollo-server": "^3.12.0",
