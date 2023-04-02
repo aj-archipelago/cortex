@@ -8,7 +8,7 @@ const { PathwayResolver } = require('../graphql/pathwayResolver');
 
 module.exports = {
     // The main prompt function that takes the input text and asks to generate a summary.
-    prompt: `{{{text}}}\n\nWrite a summary of the above text:\n\n`,
+    prompt: `{{{text}}}\n\nWrite a summary of the above text. If the text is in a language other than english, make sure the summary is written in the same language:\n\n`,
 
     // Define input parameters for the prompt, such as the target length of the summary.
     inputParameters: {
@@ -26,7 +26,7 @@ module.exports = {
             return await pathwayResolver.resolve(args);
         }
 
-        const errorMargin = 0.2;
+        const errorMargin = 0.1;
         const lowTargetLength = originalTargetLength * (1 - errorMargin);
         const targetWords = Math.round(originalTargetLength / 6.6);
 
@@ -39,15 +39,30 @@ module.exports = {
         let summary = '';
         let pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
 
-        
         // Modify the prompt to be words-based instead of characters-based.
-        pathwayResolver.pathwayPrompt = `{{{text}}}\n\nWrite a summary of the above text in exactly ${targetWords} words:\n\n`
+        pathwayResolver.pathwayPrompt = `Write a summary of all of the text below. If the text is in a language other than english, make sure the summary is written in the same language. Your summary should be ${targetWords} words in length.\n\nText:\n\n{{{text}}}\n\nSummary:\n\n`
 
         let i = 0;
-        // Reprompt if summary is too long or too short.
-        while (((summary.length > originalTargetLength) || (summary.length < lowTargetLength)) && i < MAX_ITERATIONS) {
+        // Make sure it's long enough to start
+        while ((summary.length < lowTargetLength) && i < MAX_ITERATIONS) {
             summary = await pathwayResolver.resolve(args);
             i++;
+        }
+
+        // If it's too long, it could be because the input text was chunked
+        // and now we have all the chunks together. We can summarize that
+        // to get a comprehensive summary.
+        if (summary.length > originalTargetLength) {
+            pathwayResolver.pathwayPrompt = `Write a summary of all of the text below. If the text is in a language other than english, make sure the summary is written in the same language. Your summary should be ${targetWords} words in length.\n\nText:\n\n${summary}\n\nSummary:\n\n`
+            summary = await pathwayResolver.resolve(args);
+            i++;
+
+            // Now make sure it's not too long
+            while ((summary.length > originalTargetLength) && i < MAX_ITERATIONS) {
+                pathwayResolver.pathwayPrompt = `${summary}\n\nIs that less than ${targetWords} words long? If not, try again using a length of no more than ${targetWords} words.\n\n`;
+                summary = await pathwayResolver.resolve(args);
+                i++;
+            }
         }
 
         // If the summary is still too long, truncate it.

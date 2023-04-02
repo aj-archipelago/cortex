@@ -1,22 +1,5 @@
 const { encode, decode } = require('gpt-3-encoder')
 
-const estimateCharPerToken = (text) => {
-    // check text only contains asciish characters
-    if (/^[ -~\t\n\r]+$/.test(text)) {
-        return 4;
-    }
-    return 1;
-}
-
-const getLastNChar = (text, maxLen) => {
-    if (text.length > maxLen) {
-        //slice text to avoid maxLen limit but keep the last n characters up to a \n or space to avoid cutting words
-        text = text.slice(-maxLen);
-        text = text.slice(text.search(/\s/) + 1);
-    }
-    return text;
-}
-
 const getLastNToken = (text, maxTokenLen) => { 
     const encoded = encode(text);
     if (encoded.length > maxTokenLen) {
@@ -35,113 +18,120 @@ const getFirstNToken = (text, maxTokenLen) => {
     return text;
 }
 
-const isBigChunk = ({ text, maxChunkLength, maxChunkToken }) => {
-    if (maxChunkLength && text.length > maxChunkLength) {
-        return true;
-    }
-    if (maxChunkToken && encode(text).length > maxChunkToken) {
-        return true;
-    }
-    return false;
-}
+const getSemanticChunks = (text, chunkSize) => {
 
-const getSemanticChunks = ({ text, maxChunkLength, maxChunkToken,
-    enableParagraphChunks = true, enableSentenceChunks = true, enableLineChunks = true,
-    enableWordChunks = true, finallyMergeChunks = true }) => {
-
-    if (maxChunkLength && maxChunkLength <= 0) {
-        throw new Error(`Invalid maxChunkLength: ${maxChunkLength}`);
+  const breakByRegex = (str, regex, preserveWhitespace = false) => {
+    const result = [];
+    let match;
+  
+    while ((match = regex.exec(str)) !== null) {
+      const value = str.slice(0, match.index);
+      result.push(value);
+  
+      if (preserveWhitespace || /\S/.test(match[0])) {
+        result.push(match[0]);
+      }
+  
+      str = str.slice(match.index + match[0].length);
     }
-    if (maxChunkToken && maxChunkToken <= 0) {
-        throw new Error(`Invalid maxChunkToken: ${maxChunkToken}`);
+  
+    if (str) {
+      result.push(str);
     }
+  
+    return result.filter(Boolean);
+  };
 
-    const isBig = (text) => {
-        return isBigChunk({ text, maxChunkLength, maxChunkToken });
-    }
+  const breakByParagraphs = (str) => breakByRegex(str, /[\r\n]+/, true);
+  const breakBySentences = (str) => breakByRegex(str, /(?<=[.。؟！\?!\n])\s+/, true);
+  const breakByWords = (str) => breakByRegex(str, /(\s,;:.+)/);
 
-    // split into paragraphs
-    let paragraphChunks = enableParagraphChunks ? text.split('\n\n') : [text];
-
-    // Chunk paragraphs into sentences if needed
-    const sentenceChunks = enableSentenceChunks ? [] : paragraphChunks;
-    for (let i = 0; enableSentenceChunks && i < paragraphChunks.length; i++) {
-        if (isBig(paragraphChunks[i])) { // too long paragraph, chunk into sentences
-            sentenceChunks.push(...paragraphChunks[i].split('.\n')); // split into sentences
-        } else {
-            sentenceChunks.push(paragraphChunks[i]);
+  const createChunks = (tokens) => {
+    let chunks = [];
+    let currentChunk = '';
+  
+    for (const token of tokens) {
+      const currentTokenLength = encode(currentChunk + token).length;
+      if (currentTokenLength <= chunkSize) {
+        currentChunk += token;
+      } else {
+        if (currentChunk) {
+          chunks.push(currentChunk);
         }
+        currentChunk = token;
+      }
     }
-
-    // Chunk sentences with newlines if needed
-    const newlineChunks = enableLineChunks ? [] : sentenceChunks;
-    for (let i = 0; enableLineChunks && i < sentenceChunks.length; i++) {
-        if (isBig(sentenceChunks[i])) { // too long, split into lines
-            newlineChunks.push(...sentenceChunks[i].split('\n'));
-        } else {
-            newlineChunks.push(sentenceChunks[i]);
-        }
+  
+    if (currentChunk) {
+      chunks.push(currentChunk);
     }
+  
+    return chunks;
+  };
 
-    // Chunk sentences into word chunks if needed
-    let chunks = enableWordChunks ? [] : newlineChunks;
-    for (let j = 0; enableWordChunks && j < newlineChunks.length; j++) {
-        if (isBig(newlineChunks[j])) { // too long sentence, chunk into words
-            const words = newlineChunks[j].split(' ');
-            // merge words into chunks up to max
-            let chunk = '';
-            for (let k = 0; k < words.length; k++) {
-                if (isBig( chunk + ' ' + words[k]) ) {
-                    chunks.push(chunk.trim());
-                    chunk = '';
-                }
-                chunk += words[k] + ' ';
-            }
-            if (chunk.length > 0) {
-                chunks.push(chunk.trim());
-            }
-        } else {
-            chunks.push(newlineChunks[j]);
-        }
-    }
-
-    chunks = chunks.filter(Boolean).map(chunk => '\n' + chunk + '\n'); //filter empty chunks and add newlines
-
-    return finallyMergeChunks ? mergeChunks({ chunks, maxChunkLength, maxChunkToken }) : chunks;
-}
-
-const mergeChunks = ({ chunks, maxChunkLength, maxChunkToken }) => {
-    const isBig = (text) => {
-        return isBigChunk({ text, maxChunkLength, maxChunkToken });
-    }
-
-    // Merge chunks into maxChunkLength chunks
-    let mergedChunks = [];
-    let chunk = '';
+  const combineChunks = (chunks) => {
+    let optimizedChunks = [];
+  
     for (let i = 0; i < chunks.length; i++) {
-        if (isBig(chunk + ' ' + chunks[i])) {
-            mergedChunks.push(chunk);
-            chunk = '';
+      if (i < chunks.length - 1) {
+        const combinedChunk = chunks[i] + chunks[i + 1];
+        const combinedLen = encode(combinedChunk).length;
+  
+        if (combinedLen <= chunkSize) {
+          optimizedChunks.push(combinedChunk);
+          i += 1;
+        } else {
+          optimizedChunks.push(chunks[i]);
         }
-        chunk += chunks[i];
+      } else {
+        optimizedChunks.push(chunks[i]);
+      }
     }
-    if (chunk.length > 0) {
-        mergedChunks.push(chunk);
+  
+    return optimizedChunks;
+  };
+
+  const breakText = (str) => {
+    const tokenLength = encode(str).length;
+
+    if (tokenLength <= chunkSize) {
+      return [str];
     }
-    return mergedChunks;
+
+    const breakers = [breakByParagraphs, breakBySentences, breakByWords];
+
+    for (let i = 0; i < breakers.length; i++) {
+      const tokens = breakers[i](str);
+      if (tokens.length > 1) {
+        let chunks = createChunks(tokens);
+        chunks = combineChunks(chunks);
+        const brokenChunks = chunks.flatMap(breakText);
+        if (brokenChunks.every(chunk => encode(chunk).length <= chunkSize)) {
+          return brokenChunks;
+        }
+      }
+    }
+
+    return createChunks([...str]); // Split by characters
+  };
+
+  return breakText(text);
 }
 
 
 const semanticTruncate = (text, maxLength) => {
-    if (text.length > maxLength) {
-        text = getSemanticChunks({ text, maxChunkLength: maxLength })[0].slice(0, maxLength - 3).trim() + "...";
-    }
+  if (text.length <= maxLength) {
     return text;
-}
+  }
 
+  const truncatedText = text.slice(0, maxLength - 3).trim();
+  const lastSpaceIndex = truncatedText.lastIndexOf(" ");
 
+  return (lastSpaceIndex !== -1)
+    ? truncatedText.slice(0, lastSpaceIndex) + "..."
+    : truncatedText + "...";
+};
 
 module.exports = {
-    getSemanticChunks, semanticTruncate, mergeChunks,
-    getLastNChar, getLastNToken, getFirstNToken, estimateCharPerToken
+    getSemanticChunks, semanticTruncate, getLastNToken, getFirstNToken
 }

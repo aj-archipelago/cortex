@@ -16,7 +16,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
         let requestParameters = {};
     
         if (modelPromptMessages) {
-            const requestMessages = this.removeMessagesUntilTarget(modelPromptMessages, modelMaxTokenLength - 1);
+            const requestMessages = this.truncateMessagesToTargetLength(modelPromptMessages, modelMaxTokenLength - 1);
             modelPromptMessagesML = this.messagesToChatML(requestMessages);
             tokenLength = encode(modelPromptMessagesML).length;
         

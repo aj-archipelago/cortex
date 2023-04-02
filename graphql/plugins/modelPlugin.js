@@ -2,6 +2,7 @@
 const handlebars = require('handlebars');
 const { request } = require("../../lib/request");
 const { encode } = require("gpt-3-encoder");
+const { getFirstNToken } = require("../chunker");
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
@@ -38,37 +39,77 @@ class ModelPlugin {
         this.shouldCache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
     }
 
-    // Function to remove non-system messages until token length is less than target
-    removeMessagesUntilTarget = (messages, targetTokenLength) => {
-        let chatML = this.messagesToChatML(messages);
-        let tokenLength = encode(chatML).length;
+    truncateMessagesToTargetLength = (messages, targetTokenLength) => {
+        // Calculate the token length of each message
+        const tokenLengths = messages.map((message) => ({
+            message,
+            tokenLength: encode(this.messagesToChatML([message], false)).length,
+        }));
     
-        while (tokenLength > targetTokenLength) {
-            for (let i = 0; i < messages.length; i++) {
-                if (messages[i].role !== 'system') {
-                    messages.splice(i, 1);
-                    chatML = this.messagesToChatML(messages);
-                    tokenLength = encode(chatML).length;
-                    break;
-                }
+        // Calculate the total token length of all messages
+        let totalTokenLength = tokenLengths.reduce(
+            (sum, { tokenLength }) => sum + tokenLength,
+            0
+        );
+    
+        // If we're already under the target token length, just bail
+        if (totalTokenLength <= targetTokenLength) return messages;
+    
+        // Remove and/or truncate messages until the target token length is reached
+        let index = 0;
+        while (totalTokenLength > targetTokenLength) {
+            const message = tokenLengths[index].message;
+
+            // Skip system messages
+            if (message.role === 'system') {
+                index++;
+                continue;
             }
-            if (messages.every(message => message.role === 'system')) {
-                break; // All remaining messages are 'system', stop removing messages
+
+            const currentTokenLength = tokenLengths[index].tokenLength;
+            
+            if (totalTokenLength - currentTokenLength >= targetTokenLength) {
+                // Remove the message entirely if doing so won't go below the target token length
+                totalTokenLength -= currentTokenLength;
+                tokenLengths.splice(index, 1);
+            } else {
+                // Truncate the message to fit the remaining target token length
+                const emptyContentLength = encode(this.messagesToChatML([{ ...message, content: '' }], false)).length;
+                const otherMessageTokens = totalTokenLength - currentTokenLength;
+                const tokensToKeep = targetTokenLength - (otherMessageTokens + emptyContentLength);
+
+                const truncatedContent = getFirstNToken(message.content, tokensToKeep);
+                const truncatedMessage = { ...message, content: truncatedContent };
+            
+                tokenLengths[index] = {
+                    message: truncatedMessage,
+                    tokenLength: encode(this.messagesToChatML([ truncatedMessage ], false)).length
+                }
+
+                // calculate the length again to keep us honest
+                totalTokenLength = tokenLengths.reduce(
+                    (sum, { tokenLength }) => sum + tokenLength,
+                    0
+                );
             }
         }
-        return messages;
-    }
-
+    
+        // Return the modified messages array
+        return tokenLengths.map(({ message }) => message);
+    };
+    
     //convert a messages array to a simple chatML format
-    messagesToChatML = (messages) => {
+    messagesToChatML(messages, addAssistant = true) {
         let output = "";
         if (messages && messages.length) {
             for (let message of messages) {
-                output += (message.role && message.content) ? `<|im_start|>${message.role}\n${message.content}\n<|im_end|>\n` : `${message}\n`;
+                output += (message.role && (message.content || message.content === '')) ? `<|im_start|>${message.role}\n${message.content}\n<|im_end|>\n` : `${message}\n`;
             }
             // you always want the assistant to respond next so add a
             // directive for that
-            output += "<|im_start|>assistant\n";
+            if (addAssistant) {
+                output += "<|im_start|>assistant\n";
+            }
         }
         return output;
     }

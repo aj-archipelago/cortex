@@ -163,7 +163,7 @@ class PathwayResolver {
         }
 
         // chunk the text and return the chunks with newline separators
-        return getSemanticChunks({ text, maxChunkToken: chunkTokenLength });
+        return getSemanticChunks(text, chunkTokenLength);
     }
 
     truncate(str, n) {
