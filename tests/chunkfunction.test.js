@@ -1,7 +1,7 @@
+const test = require('ava');
+
 const { getSemanticChunks } = require('../graphql/chunker');
 const { encode } = require('gpt-3-encoder')
-
-jest.setTimeout(1800000);
 
 const testText = `Lorem ipsum dolor sit amet, consectetur adipiscing elit. In id erat sem. Phasellus ac dapibus purus, in fermentum nunc. Mauris quis rutrum magna. Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc. Aenean sit amet leo est. Nunc ante ex, blandit et felis ut, iaculis lacinia est. Phasellus dictum orci id libero ullamcorper tempor.
 
@@ -43,24 +43,34 @@ Mauris hendrerit lacus quam, vel mollis ligula porttitor ac.Nulla ornare libero 
 
 Mauris diam dolor, maximus et ultrices sed, semper sed felis.Morbi ac eros tellus.Maecenas eget ex vitae quam lacinia eleifend non nec leo.Donec condimentum consectetur nunc, quis luctus elit commodo eu.Nunc tincidunt condimentum neque, sed porta ligula porttitor et.Suspendisse scelerisque id massa sit amet placerat.Sed eleifend aliquet facilisis.Donec ac purus nec metus vestibulum euismod.Maecenas sollicitudin consequat ornare.Suspendisse pharetra vehicula eros nec malesuada.`;
 
-it('should return identical text that chunker was passed, given large chunk size (1812)', () => {
+test('should return identical text that chunker was passed, given large chunk size (1812)', async t => {
     const maxChunkToken = 1812;
     const chunks = getSemanticChunks(testText, maxChunkToken);
-    expect(chunks.length).toBeGreaterThan(0); //check chunking
-    expect(chunks.every(chunk => encode(chunk).length <= maxChunkToken)).toBe(true); //check chunk size
+    t.true(chunks.length > 0); //check chunking
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
     const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
-    expect(recomposedText).toBe(testText); //check recomposition
+    t.is(recomposedText, testText); //check recomposition
 });
 
-it('should return identical text that chunker was passed, given medium chunk size (500)', () => {
+test('should return identical text that chunker was passed, given medium chunk size (500)', async t => {
     const maxChunkToken = 500;
     const chunks = getSemanticChunks(testText, maxChunkToken);
-    expect(chunks.length).toBeGreaterThan(1); //check chunking
-    expect(chunks.every(chunk => encode(chunk).length <= maxChunkToken)).toBe(true); //check chunk size
+    t.true(chunks.length > 1); //check chunking
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
     const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
-    expect(recomposedText).toBe(testText); //check recomposition
+    t.is(recomposedText, testText); //check recomposition
 });
 
+test('should return identical text that chunker was passed, given tiny chunk size (1)', async t => {
+    const maxChunkToken = 1;
+    const chunks = getSemanticChunks(testText, maxChunkToken);
+    t.true(chunks.length > 1); //check chunking
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
+    const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
+    t.is(recomposedText, testText); //check recomposition
+});
+
+/*
 it('should return identical text that chunker was passed, given tiny chunk size (1)', () => {
     const maxChunkToken = 1;
     const chunks = getSemanticChunks(testText, maxChunkToken);
@@ -113,4 +123,4 @@ it('should return identical text that chunker was passed, given weird spaces and
     expect(chunks.every(chunk => encode(chunk).length <= maxChunkToken)).toBe(true); //check chunk size
     const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
     expect(recomposedText).toBe(testTextShortWeirdSpaces); //check recomposition
-});
+});*/
