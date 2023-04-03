@@ -1,15 +1,14 @@
+const test = require('ava');
 const { getTestServer } = require('./main.test');
-
-jest.setTimeout(1800000);
 
 const testServer = getTestServer();
 
-//stop server after all tests
-afterAll(async () => {
+test.after.always(async () => {
     await testServer.stop();
 });
 
-it('chunking test of translate endpoint with huge text', async () => {
+test('chunking test of translate endpoint with huge text', async t => {
+    t.timeout(180000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!) { translate(text: $text) { result } }',
         variables: {
@@ -54,12 +53,12 @@ Mauris hendrerit lacus quam, vel mollis ligula porttitor ac.Nulla ornare libero 
 Mauris diam dolor, maximus et ultrices sed, semper sed felis.Morbi ac eros tellus.Maecenas eget ex vitae quam lacinia eleifend non nec leo.Donec condimentum consectetur nunc, quis luctus elit commodo eu.Nunc tincidunt condimentum neque, sed porta ligula porttitor et.Suspendisse scelerisque id massa sit amet placerat.Sed eleifend aliquet facilisis.Donec ac purus nec metus vestibulum euismod.Maecenas sollicitudin consequat ornare.Suspendisse pharetra vehicula eros nec malesuada.` },
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.translate.result.length).toBeGreaterThan(1000); //check return length huge
+    t.is(response.errors, undefined);
+    t.true(response.data?.translate.result.length > 1000);
 });
 
-
-it('chunking test of translate endpoint with single long text sentence', async () => {
+test('chunking test of translate endpoint with single long text sentence', async t => {
+    t.timeout(180000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!) { translate(text: $text) { result } }',
         variables: {
@@ -67,11 +66,12 @@ it('chunking test of translate endpoint with single long text sentence', async (
         }
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.translate.result.length).toBeGreaterThan(200); //check return length huge
+    t.is(response.errors, undefined);
+    t.true(response.data?.translate.result.length > 200);
 });
 
-it('chunking test of translate endpoint with two long text sentence', async () => {
+test('chunking test of translate endpoint with two long text sentence', async t => {
+    t.timeout(180000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!) { translate(text: $text) { result } }',
         variables: {
@@ -79,11 +79,12 @@ it('chunking test of translate endpoint with two long text sentence', async () =
         }
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.translate.result.length).toBeGreaterThan(500); //check return length huge
+    t.is(response.errors, undefined);
+    t.true(response.data?.translate.result.length > 500);
 });
 
-it('chunking test...', async () => {
+test('chunking test...', async t => {
+    t.timeout(180000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!) { translate(text: $text) { result } }',
         variables: {
@@ -144,6 +145,6 @@ it('chunking test...', async () => {
         }
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.translate.result.length).toBeGreaterThan(500); //check return length huge
+    t.is(response.errors, undefined);
+    t.true(response.data?.translate.result.length > 500);
 });

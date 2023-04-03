@@ -1,8 +1,8 @@
+const test = require('ava');
+
 const { ApolloServer } = require('apollo-server');
 const { config } = require('../config');
 const { typeDefs, resolvers } = require('../index')();
-
-jest.setTimeout(60000);
 
 const getTestServer = () => {
     return new ApolloServer({
@@ -15,82 +15,82 @@ const getTestServer = () => {
 const testServer = getTestServer();
 
 //stop server after all tests
-afterAll(async () => {
+test.after.always('cleanup', async () => {
     await testServer.stop();
 });
 
-it('validates bias endpoint', async () => {
+test('validates bias endpoint', async (t) => {
     const response = await testServer.executeOperation({
         query: 'query bias($text: String!) { bias(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.bias?.result).toMatch(/(yes|no|bias)/i)
+    t.is(response.errors, undefined);
+    t.regex(response.data?.bias?.result, /(yes|no|bias)/i);
 });
 
-it('validates completion endpoint', async () => {
+test('validates completion endpoint', async (t) => {
     const response = await testServer.executeOperation({
         query: 'query complete($text: String!) { complete(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.complete?.result.length).toBeGreaterThan(0);
+    t.is(response.errors, undefined);
+    t.true(response.data?.complete?.result.length > 0);
 });
 
-it('validates entities endpoint with given num of count return', async () => {
+test('validates entities endpoint with given num of count return', async (t) => {
     const response = await testServer.executeOperation({
         query: 'query entities($text: String!, $count: Int) { entities(text: $text, count: $count){ result { name, definition } } }',
         variables: { text: 'hello there my dear world!', count: 3 },
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.entities.result.length).toBe(3);
+    t.is(response.errors, undefined);
+    t.is(response.data?.entities.result.length, 3);
     response.data?.result?.entities.forEach((entity) => {
-        expect(entity.name).toBeDefined();
-        expect(entity.definition).toBeDefined();
+        t.truthy(entity.name);
+        t.truthy(entity.definition);
     });
 });
 
-it('validates paraphrase endpoint', async () => {
+test('validates paraphrase endpoint', async (t) => {
     const response = await testServer.executeOperation({
         query: 'query paraphrase($text: String!) { paraphrase(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.paraphrase?.result).toBeDefined();
+    t.is(response.errors, undefined);
+    t.truthy(response.data?.paraphrase?.result);
 });
 
-it('validates sentiment endpoint', async () => {
+test('validates sentiment endpoint', async (t) => {
     const response = await testServer.executeOperation({
         query: 'query sentiment($text: String!) { sentiment(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.sentiment.result).toBeDefined();
+    t.is(response.errors, undefined);
+    t.truthy(response.data?.sentiment.result);
 });
 
-it('validates edit endpoint', async () => {
+test('validates edit endpoint', async (t) => {
     const response = await testServer.executeOperation({
         query: 'query edit($text: String!) { edit(text: $text) { result } }',
         variables: { text: 'helo there my dear worldd!' },
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.edit.result).toMatch(/hello.*world/i);
+    t.is(response.errors, undefined);
+    t.regex(response.data?.edit.result, /hello.*world/i);
 });
 
-it('validates summary endpoint', async () => {
+test('validates summary endpoint', async (t) => {
     const response = await testServer.executeOperation({
         query: 'query summary($text: String!) { summary(text: $text) { result } }',
         variables: { text: 'hello there my dear world!' },
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.summary.result).toBeDefined();
+    t.is(response.errors, undefined);
+    t.truthy(response.data?.summary.result);
 });
 
 module.exports = {
