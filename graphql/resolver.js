@@ -1,5 +1,5 @@
-const { fulfillWithTimeout } = require("../lib/promiser");
-const { PathwayResolver } = require("./pathwayResolver");
+import { fulfillWithTimeout } from '../lib/promiser.js';
+import { PathwayResolver } from './pathwayResolver.js';
 
 // This resolver uses standard parameters required by Apollo server:
 // (parent, args, contextValue, info)
@@ -38,6 +38,6 @@ const cancelRequestResolver = (parent, args, contextValue, info) => {
     return true
 }
 
-module.exports = {
+export {
     resolver, rootResolver, cancelRequestResolver
-}
+};

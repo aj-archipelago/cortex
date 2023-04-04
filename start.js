@@ -1,3 +1,6 @@
-const { startServer } = require('./index')();
+import startServerFactory from './index.js';
 
-startServer && startServer();
+(async () => {
+  const { startServer } = await startServerFactory();
+  startServer && startServer();
+})();

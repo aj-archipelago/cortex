@@ -1,6 +1,7 @@
 // OpenAICompletionPlugin.js
-const ModelPlugin = require('./modelPlugin');
-const { encode } = require("gpt-3-encoder");
+import ModelPlugin from './modelPlugin.js';
+
+import { encode } from 'gpt-3-encoder';
 
 class OpenAICompletionPlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -66,5 +67,5 @@ class OpenAICompletionPlugin extends ModelPlugin {
     }
 }
 
-module.exports = OpenAICompletionPlugin;
+export default OpenAICompletionPlugin;
 

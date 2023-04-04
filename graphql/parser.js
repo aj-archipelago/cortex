@@ -31,7 +31,7 @@ const parseNumberedObjectList = (text, format) => {
     return result;
 }
 
-module.exports = {
+export {
     regexParser,
     parseNumberedList,
     parseNumberedObjectList,

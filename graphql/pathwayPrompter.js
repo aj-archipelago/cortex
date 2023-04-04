@@ -1,10 +1,9 @@
 // PathwayPrompter.js
-const OpenAIChatPlugin = require('./plugins/openAIChatPlugin');
-const OpenAICompletionPlugin = require('./plugins/openAICompletionPlugin');
-const AzureTranslatePlugin = require('./plugins/azureTranslatePlugin');
-const OpenAIWhisperPlugin = require('./plugins/openAiWhisperPlugin');
-const handlebars = require("handlebars");
-const { Exception } = require("handlebars");
+import OpenAIChatPlugin from './plugins/openAIChatPlugin.js';
+import OpenAICompletionPlugin from './plugins/openAICompletionPlugin.js';
+import AzureTranslatePlugin from './plugins/azureTranslatePlugin.js';
+import OpenAIWhisperPlugin from './plugins/openAiWhisperPlugin.js';
+import handlebars from 'handlebars';
 
 // register functions that can be called directly in the prompt markdown
 handlebars.registerHelper('stripHTML', function (value) {
@@ -27,7 +26,7 @@ class PathwayPrompter {
         const model = config.get('models')[modelName];
 
         if (!model) {
-            throw new Exception(`Model ${modelName} not found in config`);
+            throw new handlebars.Exception(`Model ${modelName} not found in config`);
         }
 
         let plugin;
@@ -46,7 +45,7 @@ class PathwayPrompter {
                 plugin = new OpenAIWhisperPlugin(config, pathway);
                 break;
             default:
-                throw new Exception(`Unsupported model type: ${model.type}`);
+                throw new handlebars.Exception(`Unsupported model type: ${model.type}`);
         }
 
         this.plugin = plugin;
@@ -57,6 +56,6 @@ class PathwayPrompter {
     }
 }
 
-module.exports = {
+export {
     PathwayPrompter
 };
