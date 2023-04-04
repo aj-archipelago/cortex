@@ -108,7 +108,12 @@ var config = convict({
         format: String,
         default: null,
         env: 'CORTEX_CONFIG_FILE'
-    }
+    },
+    whisperMediaApiUrl: {
+        format: String,
+        default: 'null',
+        env: 'WHISPER_MEDIA_API_URL'
+    },
 });
 
 // Read in environment variables and set up service configuration

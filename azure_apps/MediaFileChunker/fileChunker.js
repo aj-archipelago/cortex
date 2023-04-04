@@ -1,8 +1,9 @@
 const fs = require('fs');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const path = require('path');
+// const ffmpegPath = path.join(process.env.HOME, 'site/wwwroot/bin/ffmpeg');
 const ffmpeg = require('fluent-ffmpeg');
 ffmpeg.setFfmpegPath(ffmpegPath);
-const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const os = require('os');
 const util = require('util');

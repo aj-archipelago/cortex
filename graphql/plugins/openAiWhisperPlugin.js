@@ -1,13 +1,91 @@
 // OpenAICompletionPlugin.js
 const ModelPlugin = require('./modelPlugin');
 const FormData = require('form-data');
-const fs = require('fs');
-const { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } = require('../../lib/fileChunker');
+const { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } = require('../../azure_apps/MediaFileChunker/fileChunker');
 const pubsub = require('../pubsub');
+const { axios } = require('../../lib/request');
+const https = require('https');
+const stream = require('stream');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const { PassThrough } = require('stream');
+const { config } = require('../../config');
+
+const API_URL = config.get('whisperMediaApiUrl');
+
+function generateUniqueFilename(extension) {
+    return `${uuidv4()}.${extension}`;
+}
+
+function downloadFile(uri) {
+    return new Promise((resolve, reject) => {
+        https.get(uri, (res) => {
+            const fileExtension = path.extname(uri).slice(1);
+            const uniqueFilename = generateUniqueFilename(fileExtension);
+            const tempDir = os.tmpdir();
+            const localFilePath = `${tempDir}/${uniqueFilename}`;
+
+            const writeStream = fs.createWriteStream(localFilePath);
+            res.pipe(writeStream);
+
+            writeStream.on('finish', () => {
+                console.log(`Finished downloading file to ${localFilePath}`);
+                resolve(localFilePath);
+            });
+
+            writeStream.on('error', (err) => {
+                console.error(`Error occurred while downloading file:`, err);
+                reject(err);
+            });
+        }).on('error', (err) => {
+            reject(err);
+        });
+    });
+}
+
+
+
+function getPassThroughStreamFromRemoteFile(remoteUrl) {
+    return new Promise((resolve, reject) => {
+        // Obtain the remote file as a readable stream
+        https.get(remoteUrl, (fileStream) => {
+            // Initialize a PassThrough stream to pipe the file data
+            const passThroughStream = new PassThrough();
+
+            // Pipe the remote file stream to the PassThrough stream
+            fileStream.pipe(passThroughStream);
+
+            // Wait for the stream to finish piping before resolving the Promise
+            finished(passThroughStream, (err) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(passThroughStream);
+                }
+            });
+        }).on('error', (err) => {
+            reject(err);
+        });
+    });
+}
+
 
 class OpenAIWhisperPlugin extends ModelPlugin {
     constructor(config, pathway) {
         super(config, pathway);
+    }
+
+    async getMediaChunks(file) {
+        if (API_URL) {
+            //call helper api and get list of file uris
+            const res = await axios.get(API_URL, { params: { uri: file } });
+            return res.data;
+        } else {
+            console.log(`No API_URL set, returning file as chunk`);
+            return [file];
+        }
     }
 
     // Execute the request to the OpenAI Whisper API
@@ -50,23 +128,27 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             });
         }
 
+        let chunks = []; // array of local file paths
         try {
-            if (isYoutubeUrl) {
-                // totalCount += 1; // extra 1 step for youtube download
-                file = await processYoutubeUrl(file);
-            }
+            // if (isYoutubeUrl) {
+            //     // totalCount += 1; // extra 1 step for youtube download
+            //     file = await processYoutubeUrl(file);
+            // }
 
-            const { chunkPromises, uniqueOutputPath } = await splitMediaFile(file);
-            folder = uniqueOutputPath;
-            totalCount += chunkPromises.length * 2; // 2 steps for each chunk (download and upload)
-            // isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
+            // const { chunkPromises, uniqueOutputPath } = await splitMediaFile(file);
+            // folder = uniqueOutputPath;
+            // totalCount += chunkPromises.length * 2; // 2 steps for each chunk (download and upload)
+            // // isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
+
+
+            const uris = await this.getMediaChunks(file); // array of remote file uris
 
             // sequential download of chunks
-            const chunks = [];
-            for (const chunkPromise of chunkPromises) {
+            for (const uri of uris) {
                 sendProgress();
-                chunks.push(await chunkPromise);
+                chunks.push(await downloadFile(uri));
             }
+
 
             // sequential processing of chunks
             for (const chunk of chunks) {
@@ -79,9 +161,13 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         } catch (error) {
             console.error("An error occurred:", error);
-        } finally {
-            isYoutubeUrl && (await deleteTempPath(file));
-            folder && (await deleteTempPath(folder));
+        }
+        finally {
+            // isYoutubeUrl && (await deleteTempPath(file));
+            // folder && (await deleteTempPath(folder));
+            for(const chunk of chunks) {
+                await deleteTempPath(chunk);
+            }
         }
         return result;
     }
