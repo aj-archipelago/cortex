@@ -3,10 +3,10 @@
 // This module exports a prompt that takes an input text and generates a summary using a custom resolver.
 
 // Import required modules
-const { semanticTruncate } = require('../graphql/chunker');
-const { PathwayResolver } = require('../graphql/pathwayResolver');
+import { semanticTruncate } from '../graphql/chunker.js';
+import { PathwayResolver } from '../graphql/pathwayResolver.js';
 
-module.exports = {
+const summary = {
     // The main prompt function that takes the input text and asks to generate a summary.
     prompt: `{{{text}}}\n\nWrite a summary of the above text. If the text is in a language other than english, make sure the summary is written in the same language:\n\n`,
 
@@ -72,4 +72,6 @@ module.exports = {
             return summary;
         }
     }
-}
+};
+
+export default summary;

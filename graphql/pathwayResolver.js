@@ -1,14 +1,12 @@
-const { PathwayPrompter } = require('./pathwayPrompter');
-const {
-    v4: uuidv4,
-} = require('uuid');
-const pubsub = require('./pubsub');
-const { encode } = require('gpt-3-encoder')
-const { getFirstNToken, getLastNToken, getSemanticChunks } = require('./chunker');
-const { PathwayResponseParser } = require('./pathwayResponseParser');
-const { Prompt } = require('./prompt');
-const { getv, setv } = require('../lib/keyValueStorageClient');
-const { requestState } = require('./requestState');
+import { PathwayPrompter } from './pathwayPrompter.js';
+import { v4 as uuidv4 } from 'uuid';
+import pubsub from './pubsub.js';
+import { encode } from 'gpt-3-encoder';
+import { getFirstNToken, getLastNToken, getSemanticChunks } from './chunker.js';
+import { PathwayResponseParser } from './pathwayResponseParser.js';
+import { Prompt } from './prompt.js';
+import { getv, setv } from '../lib/keyValueStorageClient.js';
+import { requestState } from './requestState.js';
 
 const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
 
@@ -125,7 +123,7 @@ class PathwayResolver {
         // Get saved context from contextId or change contextId if needed
         const { contextId } = args;
         this.savedContextId = contextId ? contextId : null;
-        this.savedContext = contextId ? (getv && await getv(contextId) || {}) : {};
+        this.savedContext = contextId ? (getv && (await getv(contextId)) || {}) : {};
 
         // Save the context before processing the request
         const savedContextStr = JSON.stringify(this.savedContext);
@@ -312,4 +310,4 @@ class PathwayResolver {
     }
 }
 
-module.exports = { PathwayResolver };
+export { PathwayResolver };

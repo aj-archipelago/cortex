@@ -1,7 +1,7 @@
-const { config } = require('./config');
-const { build } = require('./graphql/graphql');
+import { config } from './config.js';
+import { build } from './graphql/graphql.js';
 
-module.exports = (configParams) => {
+export default async (configParams) => {
     configParams && config.load(configParams);
-    return build(config);
-}
+    return await build(config);
+};

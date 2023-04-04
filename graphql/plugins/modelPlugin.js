@@ -1,8 +1,9 @@
 // ModelPlugin.js
-const handlebars = require('handlebars');
-const { request } = require("../../lib/request");
-const { encode } = require("gpt-3-encoder");
-const { getFirstNToken } = require("../chunker");
+import handlebars from 'handlebars';
+
+import { request } from '../../lib/request.js';
+import { encode } from 'gpt-3-encoder';
+import { getFirstNToken } from '../chunker.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
@@ -237,7 +238,7 @@ class ModelPlugin {
         const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName);
         
         if (responseData.error) {
-            throw new Exception(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
+            throw new Error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
         }
     
         this.logRequestData(data, responseData, prompt);
@@ -246,6 +247,6 @@ class ModelPlugin {
 
 }
 
-module.exports = ModelPlugin;
+export default ModelPlugin;
 
   

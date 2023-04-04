@@ -1,22 +1,35 @@
-const test = require('ava');
+import test from 'ava';
+import { ApolloServer } from 'apollo-server';
+import { config } from '../config.js';
+import typeDefsresolversFactory from '../index.js';
 
-const { ApolloServer } = require('apollo-server');
-const { config } = require('../config');
-const { typeDefs, resolvers } = require('../index')();
+let typeDefs;
+let resolvers;
+
+const initTypeDefsResolvers = async () => {
+  const result = await typeDefsresolversFactory();
+  typeDefs = result.typeDefs;
+  resolvers = result.resolvers;
+};
 
 const getTestServer = () => {
-    return new ApolloServer({
-        typeDefs,
-        resolvers,
-        context: () => ({ config, requestState: {} }),
-    });
-}
+  return new ApolloServer({
+    typeDefs,
+    resolvers,
+    context: () => ({ config, requestState: {} }),
+  });
+};
 
-const testServer = getTestServer();
+let testServer;
+
+test.before(async () => {
+  await initTypeDefsResolvers();
+  testServer = getTestServer();
+});
 
 //stop server after all tests
 test.after.always('cleanup', async () => {
-    await testServer.stop();
+  await testServer.stop();
 });
 
 test('validates bias endpoint', async (t) => {
@@ -93,6 +106,7 @@ test('validates summary endpoint', async (t) => {
     t.truthy(response.data?.summary.result);
 });
 
-module.exports = {
+export {
+    initTypeDefsResolvers,
     getTestServer,
 };

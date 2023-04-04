@@ -1,7 +1,8 @@
-const path = require('path');
-const convict = require('convict');
-const handlebars = require("handlebars");
-const fs = require('fs');
+import path from 'path';
+const __dirname = path.dirname(new URL(import.meta.url).pathname);
+import convict from 'convict';
+import handlebars from 'handlebars';
+import fs from 'fs';
 
 // Schema for config
 var config = convict({
@@ -108,7 +109,13 @@ var config = convict({
         format: String,
         default: null,
         env: 'CORTEX_CONFIG_FILE'
-    }
+    },
+    serpApiKey: {
+        format: String,
+        default: null,
+        env: 'SERPAPI_API_KEY',
+        sensitive: true
+    },
 });
 
 // Read in environment variables and set up service configuration
@@ -127,22 +134,21 @@ if (configFile && fs.existsSync(configFile)) {
     }
 }
 
-
 // Build and load pathways to config
-const buildPathways = (config) => {
+const buildPathways = async (config) => {
     const { pathwaysPath, corePathwaysPath, basePathwayPath } = config.getProperties();
 
     // Load cortex base pathway 
-    const basePathway = require(basePathwayPath);
+    const basePathway = await import(basePathwayPath).then(module => module.default);
 
     // Load core pathways, default from the Cortex package
     console.log('Loading core pathways from', corePathwaysPath)
-    let loadedPathways = require(corePathwaysPath);
+    let loadedPathways = await import(`${corePathwaysPath}/index.js`).then(module => module);
 
     // Load custom pathways and override core pathways if same
     if (pathwaysPath && fs.existsSync(pathwaysPath)) {
         console.log('Loading custom pathways from', pathwaysPath)
-        const customPathways = require(pathwaysPath);
+        const customPathways = await import(`${pathwaysPath}/index.js`).then(module => module);
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
 
@@ -191,4 +197,4 @@ const buildModels = (config) => {
 // TODO: Perform validation
 // config.validate({ allowed: 'strict' });
 
-module.exports = { config, buildPathways, buildModels };
+export { config, buildPathways, buildModels };

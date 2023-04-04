@@ -1,23 +1,21 @@
-const { createServer } = require('http');
-const {
+import { createServer } from 'http';
+import {
     ApolloServerPluginDrainHttpServer,
     ApolloServerPluginLandingPageLocalDefault,
-} = require("apollo-server-core");
-const { makeExecutableSchema } = require('@graphql-tools/schema');
-const { WebSocketServer } = require('ws');
-const { useServer } = require('graphql-ws/lib/use/ws');
-const express = require('express');
-
-/// Create apollo graphql server
-const Keyv = require("keyv");
-const { KeyvAdapter } = require("@apollo/utils.keyvadapter");
-const responseCachePlugin = require('apollo-server-plugin-response-cache').default
-
-const subscriptions = require('./subscriptions');
-const { buildLimiters } = require('../lib/request');
-const { cancelRequestResolver } = require('./resolver');
-const { buildPathways, buildModels } = require('../config');
-const { requestState } = require('./requestState');
+} from 'apollo-server-core';
+import { makeExecutableSchema } from '@graphql-tools/schema';
+import { WebSocketServer } from 'ws';
+import { useServer } from 'graphql-ws/lib/use/ws';
+import express from 'express';
+import { ApolloServer } from 'apollo-server-express';
+import Keyv from 'keyv';
+import { KeyvAdapter } from '@apollo/utils.keyvadapter';
+import responseCachePlugin from 'apollo-server-plugin-response-cache';
+import subscriptions from './subscriptions.js';
+import { buildLimiters } from '../lib/request.js';
+import { cancelRequestResolver } from './resolver.js';
+import { buildPathways, buildModels } from '../config.js';
+import { requestState } from './requestState.js';
 
 const getPlugins = (config) => {
     // server plugins
@@ -134,9 +132,9 @@ const getResolvers = (config, pathways) => {
 }
 
 //graphql api build factory method
-const build = (config) => {
+const build = async (config) => {
     // First perform config build
-    buildPathways(config);
+    await buildPathways(config);
     buildModels(config);
 
     // build api limiters 
@@ -152,7 +150,6 @@ const build = (config) => {
 
     const { plugins, cache } = getPlugins(config);
 
-    const { ApolloServer, gql } = require('apollo-server-express');
     const app = express()
 
     const httpServer = createServer(app);
@@ -221,6 +218,6 @@ const build = (config) => {
 }
 
 
-module.exports = {
+export {
     build
 };

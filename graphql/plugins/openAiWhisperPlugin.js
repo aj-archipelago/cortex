@@ -1,9 +1,10 @@
 // OpenAICompletionPlugin.js
-const ModelPlugin = require('./modelPlugin');
-const FormData = require('form-data');
-const fs = require('fs');
-const { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } = require('../../lib/fileChunker');
-const pubsub = require('../pubsub');
+import ModelPlugin from './modelPlugin.js';
+
+import FormData from 'form-data';
+import fs from 'fs';
+import { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } from '../../lib/fileChunker.js';
+import pubsub from '../pubsub.js';
 
 class OpenAIWhisperPlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -87,5 +88,5 @@ class OpenAIWhisperPlugin extends ModelPlugin {
     }
 }
 
-module.exports = OpenAIWhisperPlugin;
+export default OpenAIWhisperPlugin;
 

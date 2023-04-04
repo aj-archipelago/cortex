@@ -1,9 +1,13 @@
-const test = require('ava');
-const { getTestServer } = require('./main.test');
+import test from 'ava';
+import { getTestServer, initTypeDefsResolvers } from './main.test.js';
 
-const testServer = getTestServer();
+let testServer;
 
-// stop server after all tests
+test.before(async () => {
+  await initTypeDefsResolvers();
+  testServer = getTestServer();
+});
+
 test.after.always(async () => {
     await testServer.stop();
 });

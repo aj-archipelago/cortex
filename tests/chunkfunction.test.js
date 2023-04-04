@@ -1,7 +1,6 @@
-const test = require('ava');
-
-const { getSemanticChunks } = require('../graphql/chunker');
-const { encode } = require('gpt-3-encoder')
+import test from 'ava';
+import { getSemanticChunks } from '../graphql/chunker.js';
+import { encode } from 'gpt-3-encoder';
 
 const testText = `Lorem ipsum dolor sit amet, consectetur adipiscing elit. In id erat sem. Phasellus ac dapibus purus, in fermentum nunc. Mauris quis rutrum magna. Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc. Aenean sit amet leo est. Nunc ante ex, blandit et felis ut, iaculis lacinia est. Phasellus dictum orci id libero ullamcorper tempor.
 

@@ -1,5 +1,5 @@
 // OpenAIChatPlugin.js
-const ModelPlugin = require('./modelPlugin');
+import ModelPlugin from './modelPlugin.js';
 
 class OpenAIChatPlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -43,4 +43,4 @@ class OpenAIChatPlugin extends ModelPlugin {
     }
 }
 
-module.exports = OpenAIChatPlugin;
+export default OpenAIChatPlugin;
