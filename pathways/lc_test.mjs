@@ -9,7 +9,7 @@ import { initializeAgentExecutor } from "langchain/agents";
 import { SerpAPI, Calculator } from "langchain/tools";
 import { BufferMemory } from "langchain/memory";
 
-const lc_test = {
+export default {
 
     // Agent test case
     resolver: async (parent, args, contextValue, info) => {
@@ -96,4 +96,4 @@ const lc_test = {
     */
 };
 
-export default lc_test;
+

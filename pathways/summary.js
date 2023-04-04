@@ -6,7 +6,7 @@
 import { semanticTruncate } from '../graphql/chunker.js';
 import { PathwayResolver } from '../graphql/pathwayResolver.js';
 
-const summary = {
+export default {
     // The main prompt function that takes the input text and asks to generate a summary.
     prompt: `{{{text}}}\n\nWrite a summary of the above text. If the text is in a language other than english, make sure the summary is written in the same language:\n\n`,
 
@@ -74,4 +74,4 @@ const summary = {
     }
 };
 
-export default summary;
+

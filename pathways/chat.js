@@ -2,7 +2,7 @@
 // Simple context-aware chat bot
 // This is a two prompt implementation of a context aware chat bot. The first prompt generates content that will be stored in the previousResult variable and will be returned to the client. In the optimum implementation, the client will then update their chatContext variable for the next call. The second prompt actually responds to the user. The second prompt *could* use previousResult instead of chatContext, but in this situation previousResult will also include the current turn of the conversation to which it is responding. That can get a little confusing as it tends to overemphasize the current turn in the response.
 
-const chat = {
+export default {
     prompt:
         [
             `{{{chatContext}}}\n\n{{{text}}}\n\nGiven the information above, create a short summary of the conversation to date making sure to include all of the personal details about the user that you encounter:\n\n`,            
@@ -14,4 +14,3 @@ const chat = {
     useInputChunking: false,
 };
 
-export default chat;

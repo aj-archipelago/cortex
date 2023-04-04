@@ -1,4 +1,4 @@
-const transcribe = {
+export default {
     prompt: `{{text}}`,
     model: `oai-whisper`,
     inputParameters: {
@@ -7,4 +7,4 @@ const transcribe = {
     timeout: 600, // in seconds
 };
 
-export default transcribe;
+

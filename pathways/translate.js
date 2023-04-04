@@ -2,7 +2,7 @@
 // Translation module
 // This module exports a prompt that takes an input text and translates it from one language to another.
 
-const translate = {
+export default {
     // Set the temperature to 0 to favor more deterministic output when generating translations.
     temperature: 0,
 
@@ -17,4 +17,3 @@ const translate = {
     timeout: 300,
 };
 
-export default translate;

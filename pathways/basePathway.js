@@ -2,7 +2,7 @@ import { rootResolver, resolver } from '../graphql/resolver.js';
 import { typeDef } from '../graphql/typeDef.js';
 
 // all default definitions of a single pathway
-const basePathway = {
+export default {
     prompt: `{{text}}`,
     defaultInputParameters: {
         text: ``,
@@ -21,4 +21,3 @@ const basePathway = {
     timeout: 120, // in seconds
 };
 
-export default basePathway;
