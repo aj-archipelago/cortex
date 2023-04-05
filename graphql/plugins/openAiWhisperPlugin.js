@@ -77,14 +77,27 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         super(config, pathway);
     }
 
-    async getMediaChunks(file) {
+    async getMediaChunks(file, requestId) {
+        try {
+            if (API_URL) {
+                //call helper api and get list of file uris
+                const res = await axios.post(API_URL, { params: { uri: file, requestId } });
+                return res.data;
+            } else {
+                console.log(`No API_URL set, returning file as chunk`);
+                return [file];
+            }
+        } catch (err) {
+            console.log(`Error getting media chunks list from api:`, err);
+        }
+    }
+
+    async markCompletedForCleanUp(requestId) {
         if (API_URL) {
-            //call helper api and get list of file uris
-            const res = await axios.get(API_URL, { params: { uri: file } });
+            //call helper api to mark processing as completed
+            const res = await axios.delete(API_URL, { params: { requestId } });
+            console.log(`Marked request ${requestId} as completed:`, res.data);
             return res.data;
-        } else {
-            console.log(`No API_URL set, returning file as chunk`);
-            return [file];
         }
     }
 
@@ -141,7 +154,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             // // isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
 
 
-            const uris = await this.getMediaChunks(file); // array of remote file uris
+            const uris = await this.getMediaChunks(file, requestId); // array of remote file uris
 
             // sequential download of chunks
             for (const uri of uris) {
@@ -165,8 +178,14 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         finally {
             // isYoutubeUrl && (await deleteTempPath(file));
             // folder && (await deleteTempPath(folder));
-            for(const chunk of chunks) {
-                await deleteTempPath(chunk);
+            try {
+                for (const chunk of chunks) {
+                    await deleteTempPath(chunk);
+                }
+
+                await this.markCompletedForCleanUp(requestId);
+            } catch (error) {
+                console.error("An error occurred while deleting:", error);
             }
         }
         return result;

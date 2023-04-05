@@ -1,9 +1,13 @@
 const fs = require('fs');
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+const ffprobePath = require('@ffprobe-installer/ffprobe').path;
 const path = require('path');
 // const ffmpegPath = path.join(process.env.HOME, 'site/wwwroot/bin/ffmpeg');
 const ffmpeg = require('fluent-ffmpeg');
+console.log(`ffmpegPath: ${ffmpegPath}`);
+console.log(`ffprobePath: ${ffprobePath}`);
 ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobePath);
 const { v4: uuidv4 } = require('uuid');
 const os = require('os');
 const util = require('util');
@@ -84,7 +88,14 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 600) {
 
 async function deleteTempPath(path) {
     try {
-        if (!path) return;
+        if (!path) {
+            console.log('Temporary path is not defined.');
+            return;
+        }
+        if (!fs.existsSync(path)) {
+            console.log(`Temporary path ${path} does not exist.`);
+            return;
+        }
         const stats = fs.statSync(path);
         if (stats.isFile()) {
             fs.unlinkSync(path);
