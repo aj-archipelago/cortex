@@ -55,16 +55,20 @@ apolloClient.query({
 ## Cortex Pathways: Supercharged Prompts
 Pathways are a core concept in Cortex. Each pathway is a single JavaScript file that encapsulates the data and logic needed to define a functional API endpoint. When the client makes a request via the API, one or more pathways are executed and the result is sent back to the client. Pathways can be very simple:
 ```js
-prompt: `{{text}}\n\nRewrite the above using British English spelling:`
+export default {
+  prompt: `{{text}}\n\nRewrite the above using British English spelling:`
+}
 ```
 The real power of Cortex starts to show as the pathways get more complex. This pathway, for example, uses a three-part sequential prompt to ensure that specific people and place names are correctly translated:
 ```js
-prompt:
-    [
-        `{{{text}}}\nCopy the names of all people and places exactly from this document in the language above:\n`,
-        `Original Language:\n{{{previousResult}}}\n\n{{to}}:\n`,
-        `Entities in the document:\n\n{{{previousResult}}}\n\nDocument:\n{{{text}}}\nRewrite the document in {{to}}. If the document is already in {{to}}, copy it exactly below:\n`
-    ]
+export default {
+  prompt:
+      [
+          `{{{text}}}\nCopy the names of all people and places exactly from this document in the language above:\n`,
+          `Original Language:\n{{{previousResult}}}\n\n{{to}}:\n`,
+          `Entities in the document:\n\n{{{previousResult}}}\n\nDocument:\n{{{text}}}\nRewrite the document in {{to}}. If the document is already in {{to}}, copy it exactly below:\n`
+      ]
+}
 ```
 Cortex pathway prompt enhancements include:
 * **Templatized prompt definition**: Pathways allow for easy and flexible prompt definition using Handlebars templating. This makes it simple to create and modify prompts using variables and context from the application as well as extensible internal functions provided by Cortex.
