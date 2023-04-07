@@ -5,7 +5,7 @@ Modern AI models are transformational, but a number of complexities emerge when 
 ## Features
 
 * Simple architecture to build custom functional endpoints (called `pathways`), that implement common NL AI tasks. Default pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, sentiment analysis, and bias analysis.
-* Allows for building multi-model, multi-vendor, and model-agnostic pathways (choose the right model or combination of models for the job, implement redundancy) with built-in support for OpenAI GPT-3, GPT-3.5 (chatGPT), and GPT-4 models - both from OpenAI directly and through Azure OpenAI, OpenAI Whisper, Azure Translator, and more.
+* Allows for building multi-model, multi-tool, multi-vendor, and model-agnostic pathways (choose the right model or combination of models and tools for the job, implement redundancy) with built-in support for OpenAI GPT-3, GPT-3.5 (chatGPT), and GPT-4 models - both from OpenAI directly and through Azure OpenAI, OpenAI Whisper, Azure Translator, LangChain.js and more.
 * Easy, templatized prompt definition with flexible support for most prompt engineering techniques and strategies ranging from simple single prompts to complex custom prompt chains with context continuity.
 * Built in support for long-running, asynchronous operations with progress updates or streaming responses
 * Integrated context persistence: have your pathways "remember" whatever you want and use it on the next request to the model
@@ -15,7 +15,7 @@ Modern AI models are transformational, but a number of complexities emerge when 
 * Caching of repeated queries to provide instant results and avoid excess requests to the underlying model in repetitive use cases (chat bots, unit tests, etc.)
 
 ## Installation
-In order to use Cortex, you must first have a working Node.js environment. The version of Node.js should be at least 14 or higher. After verifying that you have the correct version of Node.js installed, you can get the simplest form up and running with a couple of commands.
+In order to use Cortex, you must first have a working Node.js environment. The version of Node.js should be 18 or higher (lower versions supported with some reduction in features). After verifying that you have the correct version of Node.js installed, you can get the simplest form up and running with a couple of commands.
 ## Quick Start
 ```sh
 git clone git@github.com:aj-archipelago/cortex.git
@@ -55,9 +55,7 @@ apolloClient.query({
 ## Cortex Pathways: Supercharged Prompts
 Pathways are a core concept in Cortex. Each pathway is a single JavaScript file that encapsulates the data and logic needed to define a functional API endpoint. When the client makes a request via the API, one or more pathways are executed and the result is sent back to the client. Pathways can be very simple:
 ```js
-module.exports = {
-    prompt: `{{text}}\n\nRewrite the above using British English spelling:`
-}
+prompt: `{{text}}\n\nRewrite the above using British English spelling:`
 ```
 The real power of Cortex starts to show as the pathways get more complex. This pathway, for example, uses a three-part sequential prompt to ensure that specific people and place names are correctly translated:
 ```js
@@ -109,7 +107,7 @@ If you look closely at the examples above, you'll notice embedded parameters lik
 ### Parameters
 Pathways support an arbitrary number of input parameters.  These are defined in the pathway like this:
 ```js
-module.exports = {
+export default {
     prompt:
         [
             `{{{chatContext}}}\n\n{{{text}}}\n\nGiven the information above, create a short summary of the conversation to date making sure to include all of the personal details about the user that you encounter:\n\n`,            
@@ -161,7 +159,7 @@ A core function of Cortex is dealing with token limited interfaces. To this end,
 
 Cortex provides built in functions to turn loosely formatted text output from the model API calls into structured objects for return to the application. Specifically, Cortex provides parsers for numbered lists of strings and numbered lists of objects. These are used in pathways like this:
 ```js
-module.exports = {
+export default {
     temperature: 0,
     prompt: `{{text}}\n\nList the top {{count}} entities and their definitions for the above in the format {{format}}:`,
     format: `(name: definition)`,
@@ -179,44 +177,128 @@ The resolver property defines the function that processes the input and returns 
 
 The core pathway `summary.js` below is implemented using custom pathway logic and a custom resolver to effectively target a specific summary length:
 ```js
-const { semanticTruncate } = require('../graphql/chunker');
-const { PathwayResolver } = require('../graphql/pathwayResolver');
-module.exports = {
-    prompt: `{{{text}}}\n\nWrite a summary of the above text:\n\n`,
+// summary.js
+// Text summarization module with custom resolver
+// This module exports a prompt that takes an input text and generates a summary using a custom resolver.
+
+// Import required modules
+import { semanticTruncate } from '../graphql/chunker.js';
+import { PathwayResolver } from '../graphql/pathwayResolver.js';
+
+export default {
+    // The main prompt function that takes the input text and asks to generate a summary.
+    prompt: `{{{text}}}\n\nWrite a summary of the above text. If the text is in a language other than english, make sure the summary is written in the same language:\n\n`,
+
+    // Define input parameters for the prompt, such as the target length of the summary.
     inputParameters: {
-        targetLength: 500,
+        targetLength: 0,
     },
+
+    // Custom resolver to generate summaries by reprompting if they are too long or too short.
     resolver: async (parent, args, contextValue, info) => {
         const { config, pathway, requestState } = contextValue;
         const originalTargetLength = args.targetLength;
-        const errorMargin = 0.2;
+
+        // If targetLength is not provided, execute the prompt once and return the result.
+        if (originalTargetLength === 0) {
+            let pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
+            return await pathwayResolver.resolve(args);
+        }
+
+        const errorMargin = 0.1;
         const lowTargetLength = originalTargetLength * (1 - errorMargin);
         const targetWords = Math.round(originalTargetLength / 6.6);
-        // if the text is shorter than the summary length, just return the text
+
+        // If the text is shorter than the summary length, just return the text.
         if (args.text.length <= originalTargetLength) {
             return args.text;
         }
+
         const MAX_ITERATIONS = 5;
         let summary = '';
-        let bestSummary = '';
-        let pathwayResolver = new PathwayResolver({ config, pathway, requestState });
-        // modify the prompt to be words-based instead of characters-based
-        pathwayResolver.pathwayPrompt = `{{{text}}}\n\nWrite a summary of the above text in exactly ${targetWords} words:\n\n`
+        let pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
+
+        // Modify the prompt to be words-based instead of characters-based.
+        pathwayResolver.pathwayPrompt = `Write a summary of all of the text below. If the text is in a language other than english, make sure the summary is written in the same language. Your summary should be ${targetWords} words in length.\n\nText:\n\n{{{text}}}\n\nSummary:\n\n`
+
         let i = 0;
-        // reprompt if summary is too long or too short
-        while (((summary.length > originalTargetLength) || (summary.length < lowTargetLength)) && i < MAX_ITERATIONS) {
+        // Make sure it's long enough to start
+        while ((summary.length < lowTargetLength) && i < MAX_ITERATIONS) {
             summary = await pathwayResolver.resolve(args);
             i++;
         }
-        // if the summary is still too long, truncate it
+
+        // If it's too long, it could be because the input text was chunked
+        // and now we have all the chunks together. We can summarize that
+        // to get a comprehensive summary.
+        if (summary.length > originalTargetLength) {
+            pathwayResolver.pathwayPrompt = `Write a summary of all of the text below. If the text is in a language other than english, make sure the summary is written in the same language. Your summary should be ${targetWords} words in length.\n\nText:\n\n${summary}\n\nSummary:\n\n`
+            summary = await pathwayResolver.resolve(args);
+            i++;
+
+            // Now make sure it's not too long
+            while ((summary.length > originalTargetLength) && i < MAX_ITERATIONS) {
+                pathwayResolver.pathwayPrompt = `${summary}\n\nIs that less than ${targetWords} words long? If not, try again using a length of no more than ${targetWords} words.\n\n`;
+                summary = await pathwayResolver.resolve(args);
+                i++;
+            }
+        }
+
+        // If the summary is still too long, truncate it.
         if (summary.length > originalTargetLength) {
             return semanticTruncate(summary, originalTargetLength);
         } else {
             return summary;
         }
     }
-}
+};
 ```
+### LangChain.js Support
+The ability to define a custom resolver function in Cortex pathways gives Cortex the flexibility to be able to cleanly incorporate alternate pipelines and technology stacks into the execution of a pathway.  LangChain JS (https://github.com/hwchase17/langchainjs) is a very popular and well supported mechanism for wiring together models, tools, and logic to achieve some amazing results.  We have developed specific functionality to support LangChain in the Cortex prompt execution framework and will continue to build features to fully integrate it with Cortex prompt execution contexts.
+
+Below is an example pathway integrating with one of the example agents from the LangChain docs.  You can see the seamless integration of Cortex's configuration and graphQL / REST interface logic.
+```js
+// lc_test.js
+// LangChain Cortex integration test
+
+// Import required modules
+import { OpenAI } from "langchain/llms";
+import { initializeAgentExecutor } from "langchain/agents";
+import { SerpAPI, Calculator } from "langchain/tools";
+
+export default {
+
+    // Implement custom logic and interaction with Cortex
+    // in custom resolver.
+    
+    resolver: async (parent, args, contextValue, info) => {
+
+        const { config } = contextValue;
+        const openAIApiKey = config.get('openaiApiKey');
+        const serpApiKey = config.get('serpApiKey');
+
+        const model = new OpenAI({ openAIApiKey: openAIApiKey, temperature: 0 });
+        const tools = [new SerpAPI( serpApiKey ), new Calculator()];
+
+        const executor = await initializeAgentExecutor(
+            tools,
+            model,
+            "zero-shot-react-description"
+            );
+
+        console.log(`====================`);
+        console.log("Loaded langchain agent.");
+        const input = args.text;
+        console.log(`Executing with input "${input}"...`);
+        const result = await executor.call({ input });
+        console.log(`Got output ${result.output}`);
+        console.log(`====================`);
+
+        return result?.output;
+    },
+};
+```
+
 ### Building and Loading Pathways
 
 Pathways are loaded from modules in the `pathways` directory. The pathways are built and loaded to the `config` object using the `buildPathways` function. The `buildPathways` function loads the base pathway, the core pathways, and any custom pathways. It then creates a new object that contains all the pathways and adds it to the pathways property of the config object. The order of loading means that custom pathways will always override any core pathways that Cortext provides. While pathways are designed to be self-contained, you can override some pathway properties - including whether they're even available at all - in the `pathways` section of the config file.
@@ -236,7 +318,84 @@ Below are the default pathways provided with Cortex. These can be used as is, ov
 - `translate`: Translates text from one language to another
 ## Extensibility
 
-Cortex is designed to be highly extensible. This allows you to customize the API to fit your needs. You can add new features, modify existing features, and even add integrations with other APIs and models.
+Cortex is designed to be highly extensible. This allows you to customize the API to fit your needs. You can add new features, modify existing features, and even add integrations with other APIs and models.  Here's an example of what an extended project might look like:
+
+### Cortex Internal Implementation
+
+- **config**
+  - default.json
+- package-lock.json
+- package.json
+- **pathways**
+  - chat_code.js
+  - chat_context.js
+  - chat_persist.js
+  - expand_story.js
+  - ...whole bunch of custom pathways
+  - translate_gpt4.js
+  - translate_turbo.js
+- start.js
+
+Where `default.json` holds all of your specific configuration:
+```js
+{
+    "defaultModelName": "oai-gpturbo",
+    "models": {
+        "oai-td3": {
+            "type": "OPENAI-COMPLETION",
+            "url": "https://api.openai.com/v1/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "text-davinci-003"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 4096
+        },
+        "oai-gpturbo": {
+            "type": "OPENAI-CHAT",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-3.5-turbo"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 8192
+        },
+        "oai-gpt4": {
+            "type": "OPENAI-CHAT",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-4"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 8192
+        }
+    },
+    "enableCache": false,
+    "enableRestEndpoints": false
+}
+```
+
+...and `start.js` is really simple:
+```js
+import cortex from '@aj-archipelago/cortex';
+
+(async () => {
+  const { startServer } = await cortex();
+  startServer && startServer();
+})();
+```
+
 ## Configuration
 Configuration of Cortex is done via a [convict](https://github.com/mozilla/node-convict/tree/master) object called `config`. The `config` object is built by combining the default values and any values specified in a configuration file or environment variables. The environment variables take precedence over the values in the configuration file. Below are the configurable properties and their defaults:
 
@@ -280,5 +439,6 @@ Detailed documentation on Cortex's API can be found in the /graphql endpoint of 
 ## Roadmap
 Cortex is a constantly evolving project, and the following features are coming soon:
 
+* Prompt execution context preservation between calls (to enable interactive, multi-call integrations with LangChain and other technologies)
 * Model-specific cache key optimizations to increase hit rate and reduce cache size
 * Structured analytics and reporting on AI API call frequency, cost, cache hit rate, etc.
