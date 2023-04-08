@@ -435,7 +435,7 @@ If you encounter any issues while using Cortex, there are a few things you can d
 If you would like to contribute to Cortex, there are two ways to do so. You can submit issues to the Cortex GitHub repository or submit pull requests with your proposed changes.
 
 ## License
-Cortex is released under the MIT License. See [LICENSE](https://github.com/ALJAZEERAPLUS/cortex/blob/main/LICENSE) for more details.
+Cortex is released under the MIT License. See [LICENSE](https://github.com/aj-archipelago/cortex/blob/main/LICENSE) for more details.
 
 ## API Reference
 Detailed documentation on Cortex's API can be found in the /graphql endpoint of your project. Examples of queries and responses can also be found in the Cortex documentation, along with tips for getting the most out of Cortex.
