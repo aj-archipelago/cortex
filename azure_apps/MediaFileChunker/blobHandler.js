@@ -55,6 +55,40 @@ async function deleteBlob(requestId) {
     return result
 }
 
+async function uploadBlob(context, req) {
+    try {
+        const form = new multiparty.Form();
+
+        form.parse(req.rawBody, async (error, fields, files) => {
+            if (error) {
+                context.log.error('Error parsing form data:', error);
+                context.res = {
+                    status: 500,
+                    body: 'Error parsing form data.',
+                };
+            } else {
+                const file = files.file[0];
+                const { containerClient } = getBlobClient();
+                const blockBlobClient = containerClient.getBlockBlobClient(file.originalFilename);
+                await blockBlobClient.uploadFile(file.path);
+
+                context.res = {
+                    status: 200,
+                    body: {
+                        message: `File '${file.originalFilename}' uploaded successfully.`,
+                    },
+                };
+            }
+        });
+    } catch (error) {
+        context.log.error('Error processing file upload:', error);
+        context.res = {
+            status: 500,
+            body: 'Error processing file upload.',
+        };
+    }
+}
+
 module.exports = {
-    saveFileToBlob, deleteBlob
+    saveFileToBlob, deleteBlob, uploadBlob
 }

@@ -118,8 +118,9 @@ function isValidYoutubeUrl(url) {
 function convertYoutubeToMp3Stream(video) {
     // Configure ffmpeg to convert the video to mp3
     const mp3Stream = ffmpeg(video)
-        .withAudioCodec('libmp3lame')
-        .toFormat('mp3')
+        // .withAudioCodec('libmp3lame')
+        // .toFormat('mp3')
+        .audioBitrate(128)
         .on('error', (err) => {
             console.error(`An error occurred during conversion: ${err.message}`);
         });
@@ -136,22 +137,69 @@ async function pipeStreamToFile(stream, filePath) {
     }
 }
 
+const saveYoutubeUrl = async (url, filename) => {
+    let stream = ytdl(url, {
+        quality: 'highestaudio',
+    });
+
+    return new Promise((resolve, reject) => {
+        ffmpeg(stream)
+            .audioBitrate(128)
+            .save(filename)
+            .on('progress', p => {
+                readline.cursorTo(process.stdout, 0);
+                process.stdout.write(`${p.targetSize}kb downloaded`);
+            })
+            .on('error', (err) => {
+                console.log('an error happened: ' + err.message);
+                reject(err);
+            })
+            .on('end', () => {
+                console.log(`\ndone, thanks - ${(Date.now() - start) / 1000}s`);
+                resolve(filename);
+            });
+    });
+}
+
+const ytdlDownload = async (url, filename) => {
+    return new Promise((resolve, reject) => {
+        ytdl(url, { quality: 'highestaudio' })
+            .on('error', (error) => {
+                reject(error);
+            })
+            .pipe(fs.createWriteStream(filename))
+            .on('finish', () => {
+                resolve();
+            })
+            .on('error', (error) => {
+                reject(error);
+            });
+    });
+};
 
 const processYoutubeUrl = async (url) => {
-    const info = await ytdl.getInfo(url);
-    const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
-
-    if (!audioFormat) {
-        throw new Error('No suitable audio format found');
+    try {
+        const outputFileName = path.join(os.tmpdir(), `${uuidv4()}.mp3`);
+        await ytdlDownload(url, outputFileName);
+        return outputFileName;
+    } catch (e) {
+        console.log(e);
+        throw e;
     }
 
-    const stream = ytdl.downloadFromInfo(info, { format: audioFormat });
-    // const stream = ytdl(url, { filter: 'audioonly' })
+    // const info = await ytdl.getInfo(url);
+    // const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
 
-    const mp3Stream = convertYoutubeToMp3Stream(stream);
-    const outputFileName = path.join(os.tmpdir(), `${uuidv4()}.mp3`);
-    await pipeStreamToFile(mp3Stream, outputFileName); // You can also pipe the stream to a file
-    return outputFileName;
+    // if (!audioFormat) {
+    //     throw new Error('No suitable audio format found');
+    // }
+
+    // const stream = ytdl.downloadFromInfo(info, { format: audioFormat });
+    // // const stream = ytdl(url, { filter: 'audioonly' })
+
+    // const mp3Stream = convertYoutubeToMp3Stream(stream);
+    // await pipeStreamToFile(mp3Stream, outputFileName); // You can also pipe the stream to a file
+    // return outputFileName;
 }
 
 function deleteFile(filePath) {
@@ -164,5 +212,5 @@ function deleteFile(filePath) {
 }
 
 module.exports = {
-    splitMediaFile, deleteTempPath, processYoutubeUrl, isValidYoutubeUrl
+    splitMediaFile, deleteTempPath, processYoutubeUrl, isValidYoutubeUrl, saveYoutubeUrl
 };

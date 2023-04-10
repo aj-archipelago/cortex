@@ -18,6 +18,7 @@ const { buildLimiters } = require('../lib/request');
 const { cancelRequestResolver } = require('./resolver');
 const { buildPathways, buildModels } = require('../config');
 const { requestState } = require('./requestState');
+const { subscriptionClient } = require('../lib/redisSubscription');
 
 const getPlugins = (config) => {
     // server plugins
