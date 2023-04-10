@@ -2,6 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const { BlobServiceClient } = require('@azure/storage-blob');
 const { v4: uuidv4 } = require('uuid');
+const Busboy = require('busboy');
+const { PassThrough } = require('stream');
 
 
 const getBlobClient = () => {
@@ -56,37 +58,60 @@ async function deleteBlob(requestId) {
 }
 
 async function uploadBlob(context, req) {
-    try {
-        const form = new multiparty.Form();
+    return new Promise((resolve, reject) => {
+        try {
+            const busboy = Busboy({ headers: req.headers });
+            let requestId = '';
 
-        form.parse(req.rawBody, async (error, fields, files) => {
-            if (error) {
-                context.log.error('Error parsing form data:', error);
-                context.res = {
-                    status: 500,
-                    body: 'Error parsing form data.',
-                };
-            } else {
-                const file = files.file[0];
+            busboy.on('field', (fieldname, value) => {
+                if (fieldname === 'requestId') {
+                    requestId = value;
+                }
+            });
+
+            busboy.on('file', async (fieldname, file, info) => {
                 const { containerClient } = getBlobClient();
-                const blockBlobClient = containerClient.getBlockBlobClient(file.originalFilename);
-                await blockBlobClient.uploadFile(file.path);
+                const filename = `${requestId}/${uuidv4()}_${info.filename}`;
+
+                const blockBlobClient = containerClient.getBlockBlobClient(filename);
+
+                const passThroughStream = new PassThrough();
+                file.pipe(passThroughStream);
+
+                await blockBlobClient.uploadStream(passThroughStream);
+
+                const message = `File '${filename}' uploaded successfully.`;
+                const url = blockBlobClient.url;
+                context.log(message);
+                const body = { message, url };
 
                 context.res = {
                     status: 200,
-                    body: {
-                        message: `File '${file.originalFilename}' uploaded successfully.`,
-                    },
+                    body,
                 };
-            }
-        });
-    } catch (error) {
-        context.log.error('Error processing file upload:', error);
-        context.res = {
-            status: 500,
-            body: 'Error processing file upload.',
-        };
-    }
+
+                resolve(body); // Resolve the promise
+            });
+
+            busboy.on('error', (error) => {
+                context.log.error('Error processing file upload:', error);
+                context.res = {
+                    status: 500,
+                    body: 'Error processing file upload.',
+                };
+                reject(error); // Reject the promise
+            });
+
+            req.pipe(busboy);
+        } catch (error) {
+            context.log.error('Error processing file upload:', error);
+            context.res = {
+                status: 500,
+                body: 'Error processing file upload.',
+            };
+            reject(error); // Reject the promise
+        }
+    });
 }
 
 module.exports = {

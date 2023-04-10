@@ -11,10 +11,10 @@
     "@azure/storage-blob": "^12.13.0",
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.0.0",
+    "busboy": "^1.6.0",
     "fluent-ffmpeg": "^2.1.2",
     "ioredis": "^5.3.1",
     "uuid": "^9.0.0",
     "ytdl-core": "^4.10.0"
-  },
-  "devDependencies": {}
+  }
 }

@@ -81,7 +81,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         try {
             if (API_URL) {
                 //call helper api and get list of file uris
-                const res = await axios.post(API_URL, { params: { uri: file, requestId } });
+                const res = await axios.get(API_URL, { params: { uri: file, requestId } });
                 return res.data;
             } else {
                 console.log(`No API_URL set, returning file as chunk`);
@@ -132,6 +132,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         const sendProgress = () => {
             completedCount++;
+            if(completedCount >= totalCount) return;
             pubsub.publish('REQUEST_PROGRESS', {
                 requestProgress: {
                     requestId,
@@ -155,11 +156,13 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
 
             const uris = await this.getMediaChunks(file, requestId); // array of remote file uris
+            totalCount = uris.length * 4; // 4 steps for each chunk (download and upload)
+            API_URL && (completedCount = uris.length); // api progress is already calculated
 
             // sequential download of chunks
             for (const uri of uris) {
-                sendProgress();
                 chunks.push(await downloadFile(uri));
+                sendProgress();
             }
 
 

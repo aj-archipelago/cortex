@@ -101,7 +101,7 @@ async function deleteTempPath(path) {
             fs.unlinkSync(path);
             console.log(`Temporary file ${path} deleted successfully.`);
         } else if (stats.isDirectory()) {
-            fs.rmdirSync(path, { recursive: true });
+            fs.rmSync(path, { recursive: true });
             console.log(`Temporary folder ${path} and its contents deleted successfully.`);
         }
     } catch (err) {

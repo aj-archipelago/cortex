@@ -16,13 +16,11 @@ async function main(context, req) {
         return;
     }
 
-    // if (req.method.toLowerCase() === `post`) {
-    //     const result = await uploadBlob(context, req);
-    //     context.res = {
-    //         body: result
-    //     };
-    //     return;
-    // }
+    if (req.method.toLowerCase() === `post`) {
+        const { message, url } = await uploadBlob(context, req);
+        context.log(`File url: ${url}`);
+        return
+    }
 
     const { uri, requestId } = req.body?.params || req.query;
     if (!uri || !requestId) {
@@ -51,7 +49,7 @@ async function main(context, req) {
 
     try {
         if (isYoutubeUrl) {
-            totalCount += 1; // extra 1 step for youtube download
+            // totalCount += 1; // extra 1 step for youtube download
             file = await processYoutubeUrl(file);
         }
 
@@ -59,8 +57,8 @@ async function main(context, req) {
         folder = uniqueOutputPath;
 
         numberOfChunks = chunkPromises.length; // for progress reporting
-        totalCount += chunkPromises.length * 2; // 2 steps for each chunk (download and upload)
-        isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
+        totalCount += chunkPromises.length * 4; // 4 steps for each chunk (download and upload)
+        // isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
 
         // sequential download of chunks
         const chunks = [];
