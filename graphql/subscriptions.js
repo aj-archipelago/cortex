@@ -2,9 +2,10 @@
 //       multi-server instance
 // See https://www.apollographql.com/docs/apollo-server/v3/data/subscriptions/#resolving-a-subscription
 
-const pubsub = require("./pubsub");
-const { withFilter } = require("graphql-subscriptions");
-const { requestState } = require("./requestState");
+import pubsub from './pubsub.js';
+
+import { withFilter } from 'graphql-subscriptions';
+import { requestState } from './requestState.js';
 
 const subscriptions = {
     requestProgress: {
@@ -31,4 +32,4 @@ const subscriptions = {
     },
 };
 
-module.exports = subscriptions;
+export default subscriptions;

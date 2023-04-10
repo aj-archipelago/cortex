@@ -1,15 +1,18 @@
-const { getTestServer } = require('./main.test');
+import test from 'ava';
+import { getTestServer, initTypeDefsResolvers } from './main.test.js';
 
-jest.setTimeout(1800000);
+let testServer;
 
-const testServer = getTestServer();
+test.before(async () => {
+  await initTypeDefsResolvers();
+  testServer = getTestServer();
+});
 
-//stop server after all tests
-afterAll(async () => {
+test.after.always(async () => {
     await testServer.stop();
 });
 
-it('test translate endpoint with huge arabic text english translation and check return non-arabic/english', async () => {
+test('test translate endpoint with huge arabic text english translation and check return non-arabic/english', async t => {
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!, $to:String) { translate(text: $text, to:$to) { result } }',
         variables: {
@@ -115,9 +118,9 @@ it('test translate endpoint with huge arabic text english translation and check 
 ` },
     });
 
-    expect(response.errors).toBeUndefined();
-    expect(response.data?.translate.result.length).toBeGreaterThan(1000); //check return length huge
-    //check return only contains non-Arabic characters
-    expect(response.data?.translate.result).not.toMatch(/[ء-ي]/);
+    t.falsy(response.errors);
+    t.true(response.data?.translate.result.length > 1000); // check return length huge
+    // check return only contains non-Arabic characters
+    t.notRegex(response.data?.translate.result, /[ء-ي]/);
 });
 

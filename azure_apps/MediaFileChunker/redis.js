@@ -1,4 +1,4 @@
-const redis = require('ioredis');
+import redis from 'ioredis';
 const connectionString = process.env["REDIS_CONNECTION_STRING"];
 const client = redis.createClient(connectionString);
 // client.connect();
@@ -27,6 +27,6 @@ const publishRequestProgress = async (data) => {
     }
 };
 
-module.exports = {
+export {
     publishRequestProgress, connectClient
 }

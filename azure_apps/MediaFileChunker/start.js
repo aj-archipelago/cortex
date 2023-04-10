@@ -1,6 +1,6 @@
-const MediaFileChunker = require("./index");
+import MediaFileChunker from "./index.js";
+import express from "express";
 
-const express = require('express');
 const app = express();
 const port = process.env.PORT || 7071;
 

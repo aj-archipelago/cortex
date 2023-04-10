@@ -1,20 +1,20 @@
-const fs = require('fs');
-const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-const ffprobePath = require('@ffprobe-installer/ffprobe').path;
-const path = require('path');
-// const ffmpegPath = path.join(process.env.HOME, 'site/wwwroot/bin/ffmpeg');
-const ffmpeg = require('fluent-ffmpeg');
-console.log(`ffmpegPath: ${ffmpegPath}`);
-console.log(`ffprobePath: ${ffprobePath}`);
+import fs from 'fs';
+import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
+import { path as ffprobePath } from '@ffprobe-installer/ffprobe';
+import path from 'path';
+import ffmpeg from 'fluent-ffmpeg';
+import { v4 as uuidv4 } from 'uuid';
+import os from 'os';
+import { pipeline } from 'stream';
+import ytdl from 'ytdl-core';
+import { promisify } from 'util';
+
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
-const { v4: uuidv4 } = require('uuid');
-const os = require('os');
-const util = require('util');
-const ffmpegProbe = util.promisify(ffmpeg.ffprobe);
-const pipeline = util.promisify(require('stream').pipeline);
-const ytdl = require('ytdl-core');
+console.log(`ffmpegPath: ${ffmpegPath}`);
+console.log(`ffprobePath: ${ffprobePath}`);
 
+const ffmpegProbe = promisify(ffmpeg.ffprobe);
 
 async function processChunk(inputPath, outputFileName, start, duration) {
     return new Promise((resolve, reject) => {
@@ -211,6 +211,6 @@ function deleteFile(filePath) {
     }
 }
 
-module.exports = {
+export {
     splitMediaFile, deleteTempPath, processYoutubeUrl, isValidYoutubeUrl, saveYoutubeUrl
 };

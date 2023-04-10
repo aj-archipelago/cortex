@@ -1,17 +1,17 @@
 // OpenAICompletionPlugin.js
-const ModelPlugin = require('./modelPlugin');
-const FormData = require('form-data');
-const { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } = require('../../azure_apps/MediaFileChunker/fileChunker');
-const pubsub = require('../pubsub');
-const { axios } = require('../../lib/request');
-const https = require('https');
-const stream = require('stream');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { v4: uuidv4 } = require('uuid');
-const { PassThrough } = require('stream');
-const { config } = require('../../config');
+import ModelPlugin from './modelPlugin.js';
+import FormData from 'form-data';
+import fs from 'fs';
+import pubsub from '../pubsub.js';
+import { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } from '../../azure_apps/MediaFileChunker/fileChunker.js';
+import { axios } from '../../lib/request.js';
+import https from 'https';
+import stream from 'stream';
+import os from 'os';
+import path from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import { PassThrough } from 'stream';
+import { config } from '../../config.js';
 
 const API_URL = config.get('whisperMediaApiUrl');
 
@@ -195,5 +195,5 @@ class OpenAIWhisperPlugin extends ModelPlugin {
     }
 }
 
-module.exports = OpenAIWhisperPlugin;
+export default OpenAIWhisperPlugin;
 

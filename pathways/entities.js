@@ -2,7 +2,7 @@
 // Entity extraction module
 // This module exports a prompt that takes an input text and extracts the top entities and their definitions as specified by the count parameter.
 
-module.exports = {
+export default {
     // Set the temperature to 0 to favor more deterministic output when generating entity extraction.
     temperature: 0,
 
@@ -18,4 +18,5 @@ module.exports = {
 
     // Set the list option to true as the prompt is expected to return a list of entities.
     list: true,
-}
+};
+

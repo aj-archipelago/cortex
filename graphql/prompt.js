@@ -43,4 +43,4 @@ function promptContains(variable, prompt) {
     return variables.includes(variable);
 }
 
-module.exports = { Prompt, promptContains };
+export { Prompt, promptContains };

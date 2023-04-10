@@ -1,8 +1,8 @@
-const { rootResolver, resolver } = require("../graphql/resolver");
-const { typeDef } = require('../graphql/typeDef')
+import { rootResolver, resolver } from '../graphql/resolver.js';
+import { typeDef } from '../graphql/typeDef.js';
 
 // all default definitions of a single pathway
-module.exports = {
+export default {
     prompt: `{{text}}`,
     defaultInputParameters: {
         text: ``,
@@ -19,4 +19,5 @@ module.exports = {
     useInputSummarization: false,    
     truncateFromFront: false,
     timeout: 120, // in seconds
-}
+};
+

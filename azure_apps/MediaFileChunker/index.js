@@ -1,6 +1,6 @@
-const { isValidYoutubeUrl, processYoutubeUrl, splitMediaFile, deleteTempPath } = require("./fileChunker");
-const { saveFileToBlob, deleteBlob, uploadBlob } = require("./blobHandler");
-const { publishRequestProgress, connectClient } = require("./redis");
+import { isValidYoutubeUrl, processYoutubeUrl, splitMediaFile, deleteTempPath } from './fileChunker.js';
+import { saveFileToBlob, deleteBlob, uploadBlob } from './blobHandler.js';
+import { publishRequestProgress, connectClient } from './redis.js';
 
 async function main(context, req) {
     context.log('Starting req processing..');
@@ -100,4 +100,4 @@ async function main(context, req) {
 
 // main(console, { query: { uri: "https://www.youtube.com/watch?v=QH2-TGUlwu4" } });
 
-module.exports = main;
+export default main;

@@ -1,4 +1,4 @@
-const { parseNumberedList, parseNumberedObjectList } = require('./parser')
+import { parseNumberedList, parseNumberedObjectList } from './parser.js';
 
 class PathwayResponseParser {
     constructor(pathway) {
@@ -21,4 +21,4 @@ class PathwayResponseParser {
     }
 }
 
-module.exports = { PathwayResponseParser };
+export { PathwayResponseParser };

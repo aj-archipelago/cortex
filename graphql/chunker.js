@@ -1,4 +1,4 @@
-const { encode, decode } = require('gpt-3-encoder')
+import { encode, decode } from 'gpt-3-encoder';
 
 const getLastNToken = (text, maxTokenLen) => { 
     const encoded = encode(text);
@@ -132,6 +132,6 @@ const semanticTruncate = (text, maxLength) => {
     : truncatedText + "...";
 };
 
-module.exports = {
+export {
     getSemanticChunks, semanticTruncate, getLastNToken, getFirstNToken
-}
+};

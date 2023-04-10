@@ -1,10 +1,9 @@
-const fs = require('fs');
-const path = require('path');
-const { BlobServiceClient } = require('@azure/storage-blob');
-const { v4: uuidv4 } = require('uuid');
-const Busboy = require('busboy');
-const { PassThrough } = require('stream');
-
+import fs from 'fs';
+import path from 'path';
+import { BlobServiceClient } from '@azure/storage-blob';
+import { v4 as uuidv4 } from 'uuid';
+import Busboy from 'busboy';
+import { PassThrough } from 'stream';
 
 const getBlobClient = () => {
     const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -114,6 +113,6 @@ async function uploadBlob(context, req) {
     });
 }
 
-module.exports = {
+export {
     saveFileToBlob, deleteBlob, uploadBlob
 }

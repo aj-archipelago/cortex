@@ -1,5 +1,5 @@
 // AzureTranslatePlugin.js
-const ModelPlugin = require('./modelPlugin');
+import ModelPlugin from './modelPlugin.js';
 
 class AzureTranslatePlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -37,4 +37,4 @@ class AzureTranslatePlugin extends ModelPlugin {
     }
 }
 
-module.exports = AzureTranslatePlugin;
+export default AzureTranslatePlugin;
