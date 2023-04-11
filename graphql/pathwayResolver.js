@@ -151,7 +151,7 @@ class PathwayResolver {
         }
         const encoded = encode(text);
         if (!this.useInputChunking || encoded.length <= chunkTokenLength) { // no chunking, return as is
-            if (encoded.length >= chunkTokenLength) {
+            if (encoded.length > 0 && encoded.length >= chunkTokenLength) {
                 const warnText = `Truncating long input text. Text length: ${text.length}`;
                 this.warnings.push(warnText);
                 console.warn(warnText);
@@ -189,7 +189,7 @@ class PathwayResolver {
         // the token ratio is the ratio of the total prompt to the result text - both have to be included
         // in computing the max token length
         const promptRatio = this.pathwayPrompter.plugin.getPromptTokenRatio();
-        let chunkMaxTokenLength = promptRatio * this.pathwayPrompter.plugin.getModelMaxTokenLength() - maxPromptTokenLength;
+        let chunkMaxTokenLength = promptRatio * this.pathwayPrompter.plugin.getModelMaxTokenLength() - maxPromptTokenLength - 1;
         
         // if we have to deal with prompts that have both text input
         // and previous result, we need to split the maxChunkToken in half
