@@ -25,7 +25,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
             tokenLength = encode(modelPromptMessagesML).length;
         
             if (tokenLength > modelTargetTokenLength) {
-                throw new Error(`The target number of tokens for this model is ${modelTargetTokenLength}. Please reduce the number of messages in the prompt.`);
+                throw new Error(`Input is too long at ${tokenLength} tokens (this target token length for this pathway is ${modelTargetTokenLength} tokens because the response is expected to take up the rest of the model's max tokens (${this.getModelMaxTokenLength()}). You must reduce the size of the prompt to continue.`);
             }
         
             const max_tokens = this.getModelMaxTokenLength() - tokenLength;
@@ -42,7 +42,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
             };
         } else {
             if (tokenLength > modelTargetTokenLength) {
-                throw new Error(`The target number of tokens for this model is ${modelTargetTokenLength}. Please reduce the length of the prompt.`);
+                throw new Error(`Input is too long at ${tokenLength} tokens. The target token length for this pathway is ${modelTargetTokenLength} tokens because the response is expected to take up the rest of the ${this.getModelMaxTokenLength()} tokens that the model can handle. You must reduce the size of the prompt to continue.`);
             }
         
             const max_tokens = this.getModelMaxTokenLength() - tokenLength;
