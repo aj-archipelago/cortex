@@ -151,7 +151,7 @@ class PathwayResolver {
         }
         const encoded = encode(text);
         if (!this.useInputChunking || encoded.length <= chunkTokenLength) { // no chunking, return as is
-            if (encoded.length >= chunkTokenLength) {
+            if (encoded.length > 0 && encoded.length >= chunkTokenLength) {
                 const warnText = `Truncating long input text. Text length: ${text.length}`;
                 this.warnings.push(warnText);
                 console.warn(warnText);
