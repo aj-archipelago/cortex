@@ -13,19 +13,22 @@ class OpenAICompletionPlugin extends ModelPlugin {
         let { modelPromptMessages, modelPromptText, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
         const { stream } = parameters;
         let modelPromptMessagesML = '';
-        const modelMaxTokenLength = this.getModelMaxTokenLength();
+        // Define the model's max token length
+        const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
         let requestParameters = {};
     
         if (modelPromptMessages) {
-            const requestMessages = this.truncateMessagesToTargetLength(modelPromptMessages, modelMaxTokenLength - 1);
+            const minMsg = [{ role: "system", content: "" }];
+            const addAssistantTokens = encode(this.messagesToChatML(minMsg, true).replace(this.messagesToChatML(minMsg, false), '')).length;
+            const requestMessages = this.truncateMessagesToTargetLength(modelPromptMessages, (modelTargetTokenLength - addAssistantTokens));
             modelPromptMessagesML = this.messagesToChatML(requestMessages);
             tokenLength = encode(modelPromptMessagesML).length;
         
-            if (tokenLength >= modelMaxTokenLength) {
-                throw new Error(`The maximum number of tokens for this model is ${modelMaxTokenLength}. Please reduce the number of messages in the prompt.`);
+            if (tokenLength > modelTargetTokenLength) {
+                throw new Error(`The target number of tokens for this model is ${modelTargetTokenLength}. Please reduce the number of messages in the prompt.`);
             }
         
-            const max_tokens = modelMaxTokenLength - tokenLength - 1;
+            const max_tokens = this.getModelMaxTokenLength() - tokenLength;
         
             requestParameters = {
                 prompt: modelPromptMessagesML,
@@ -38,11 +41,11 @@ class OpenAICompletionPlugin extends ModelPlugin {
                 stream
             };
         } else {
-            if (tokenLength >= modelMaxTokenLength) {
-                throw new Error(`The maximum number of tokens for this model is ${modelMaxTokenLength}. Please reduce the length of the prompt.`);
+            if (tokenLength > modelTargetTokenLength) {
+                throw new Error(`The target number of tokens for this model is ${modelTargetTokenLength}. Please reduce the length of the prompt.`);
             }
         
-            const max_tokens = modelMaxTokenLength - tokenLength - 1;
+            const max_tokens = this.getModelMaxTokenLength() - tokenLength;
         
             requestParameters = {
                 prompt: modelPromptText,

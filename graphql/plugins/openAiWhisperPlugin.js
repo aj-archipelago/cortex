@@ -1,4 +1,4 @@
-// OpenAICompletionPlugin.js
+// openAiWhisperPlugin.js
 import ModelPlugin from './modelPlugin.js';
 
 import FormData from 'form-data';
