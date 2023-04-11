@@ -173,7 +173,7 @@ const ytdlDownload = async (url, filename) => {
         video.on('progress', (chunkLength, downloaded, total) => {
             const currentTime = Date.now();
             if (currentTime - lastLoggedTime >= 2000) { // Log every 2 seconds
-                const percent = (downloaded / total).toFixed(2);
+                const percent = downloaded / total;
                 console.log(`${(percent * 100).toFixed(2)}% downloaded ${url}`);
                 lastLoggedTime = currentTime;
             }
