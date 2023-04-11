@@ -163,11 +163,23 @@ const saveYoutubeUrl = async (url, filename) => {
 
 const ytdlDownload = async (url, filename) => {
     return new Promise((resolve, reject) => {
-        ytdl(url, { quality: 'highestaudio' })
-            .on('error', (error) => {
-                reject(error);
-            })
-            .pipe(fs.createWriteStream(filename))
+        const video = ytdl(url, { quality: 'highestaudio' });
+        let lastLoggedTime = Date.now();
+
+        video.on('error', (error) => {
+            reject(error);
+        });
+
+        video.on('progress', (chunkLength, downloaded, total) => {
+            const currentTime = Date.now();
+            if (currentTime - lastLoggedTime >= 2000) { // Log every 2 seconds
+                const percent = (downloaded / total).toFixed(2);
+                console.log(`${(percent * 100).toFixed(2)}% downloaded ${url}`);
+                lastLoggedTime = currentTime;
+            }
+        });
+
+        video.pipe(fs.createWriteStream(filename))
             .on('finish', () => {
                 resolve();
             })
