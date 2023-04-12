@@ -26,12 +26,12 @@ const rootResolver = async (parent, args, contextValue, info) => {
 }
 
 // This resolver is used by the root resolver to process the request
-const resolver = async (parent, args, contextValue, info) => {
+const resolver = async (parent, args, contextValue, _info) => {
     const { pathwayResolver } = contextValue;
     return await pathwayResolver.resolve(args);
 }
 
-const cancelRequestResolver = (parent, args, contextValue, info) => {
+const cancelRequestResolver = (parent, args, contextValue, _info) => {
     const { requestId } = args;
     const { requestState } = contextValue;
     requestState[requestId] = { canceled: true };
