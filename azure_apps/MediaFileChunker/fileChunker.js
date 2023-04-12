@@ -21,6 +21,7 @@ async function processChunk(inputPath, outputFileName, start, duration) {
         ffmpeg(inputPath)
             .seekInput(start)
             .duration(duration)
+            .audioCodec('libmp3lame') // Ensure output is always in MP3 format
             .on('start', (cmd) => {
                 console.log(`Started FFmpeg with command: ${cmd}`);
             })
@@ -64,7 +65,7 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 600) {
         for (let i = 0; i < numChunks; i++) {
             const outputFileName = path.join(
                 uniqueOutputPath,
-                `chunk-${i + 1}-${path.basename(inputPath)}`
+                `chunk-${i + 1}-${path.parse(inputPath).name}.mp3`
             );
 
             const chunkPromise = processChunk(
