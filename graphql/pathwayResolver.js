@@ -8,8 +8,6 @@ import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 
-const MAX_PREVIOUS_RESULT_TOKEN_LENGTH = 1000;
-
 const callPathway = async (config, pathwayName, args, requestState, { text, ...parameters }) => {
     const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`), args, requestState });
     return await pathwayResolver.resolve({ text, ...parameters });

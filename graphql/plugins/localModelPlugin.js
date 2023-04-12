@@ -46,7 +46,7 @@ class LocalModelPlugin extends ModelPlugin {
         };
     }
 
-    async execute(text, parameters, prompt, pathwayResolver) {
+    async execute(text, parameters, prompt, _pathwayResolver) {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
         const { executablePath, args } = this.model;
         args.push("--prompt", requestParameters.prompt);
