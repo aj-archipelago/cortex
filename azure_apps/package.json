@@ -17,6 +17,6 @@
     "fluent-ffmpeg": "^2.1.2",
     "ioredis": "^5.3.1",
     "uuid": "^9.0.0",
-    "ytdl-core": "^4.10.0"
+    "ytdl-core": "git+ssh://git@github.com:khlevon/node-ytdl-core.git#v4.11.3-patch.1"
   }
 }
