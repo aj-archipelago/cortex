@@ -1,8 +1,9 @@
 // PathwayPrompter.js
-import OpenAIChatPlugin from './plugins/openAIChatPlugin.js';
-import OpenAICompletionPlugin from './plugins/openAICompletionPlugin.js';
+import OpenAIChatPlugin from './plugins/openAiChatPlugin.js';
+import OpenAICompletionPlugin from './plugins/openAiCompletionPlugin.js';
 import AzureTranslatePlugin from './plugins/azureTranslatePlugin.js';
 import OpenAIWhisperPlugin from './plugins/openAiWhisperPlugin.js';
+import LocalModelPlugin from './plugins/localModelPlugin.js';
 import handlebars from 'handlebars';
 
 // register functions that can be called directly in the prompt markdown
@@ -43,6 +44,9 @@ class PathwayPrompter {
                 break;
             case 'OPENAI_WHISPER':
                 plugin = new OpenAIWhisperPlugin(config, pathway);
+                break;
+            case 'LOCAL-CPP-MODEL':
+                plugin = new LocalModelPlugin(config, pathway);
                 break;
             default:
                 throw new handlebars.Exception(`Unsupported model type: ${model.type}`);

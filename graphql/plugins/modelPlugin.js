@@ -40,7 +40,7 @@ class ModelPlugin {
         this.shouldCache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
     }
 
-    truncateMessagesToTargetLength = (messages, targetTokenLength) => {
+    truncateMessagesToTargetLength(messages, targetTokenLength) {
         // Calculate the token length of each message
         const tokenLengths = messages.map((message) => ({
             message,
@@ -97,7 +97,7 @@ class ModelPlugin {
     
         // Return the modified messages array
         return tokenLengths.map(({ message }) => message);
-    };
+    }
     
     //convert a messages array to a simple chatML format
     messagesToChatML(messages, addAssistant = true) {
