@@ -1,0 +1,70 @@
+{
+    "defaultModelName": "oai-td3",
+    "models": {
+        "azure-translate": {
+            "type": "AZURE-TRANSLATE",
+            "url": "https://api.cognitive.microsofttranslator.com/translate?api-version=3.0",
+            "headers": {
+                "Ocp-Apim-Subscription-Key": "{{ARCHIPELAGO_TRANSLATE_KEY}}",
+                "Ocp-Apim-Subscription-Region": "eastus",
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 2000
+        },
+        "oai-td3": {
+            "type": "OPENAI-COMPLETION",
+            "url": "https://api.openai.com/v1/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "text-davinci-003"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 4096
+        },
+        "oai-gpturbo": {
+            "type": "OPENAI-CHAT",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-3.5-turbo"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 8192
+        },
+        "oai-gpt4": {
+            "type": "OPENAI-CHAT",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-4"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 8192
+        },
+        "local-llama13B": {
+            "type": "LOCAL-CPP-MODEL",
+            "executablePath": "../llm/llama.cpp/main",
+            "args": [
+                "-m", "../llm/llama.cpp/models/13B/ggml-model-q4_0.bin",
+                "--repeat_penalty", "1.0",
+                "--keep", "0",
+                "-t", "8",
+                "--mlock"
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 1024
+        }
+    },
+    "enableCache": false,
+    "enableRestEndpoints": false
+}
