@@ -3,7 +3,6 @@ import ModelPlugin from './modelPlugin.js';
 import FormData from 'form-data';
 import fs from 'fs';
 import pubsub from '../pubsub.js';
-import { splitMediaFile, isValidYoutubeUrl, processYoutubeUrl, deleteTempPath } from '../../azure_apps/MediaFileChunker/fileChunker.js';
 import { axios } from '../../lib/request.js';
 import https from 'https';
 import stream from 'stream';
@@ -12,6 +11,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { PassThrough } from 'stream';
 import { config } from '../../config.js';
+import { deleteTempPath, isValidYoutubeUrl } from '../../azure_apps/MediaFileChunker/helper.js';
 
 const API_URL = config.get('whisperMediaApiUrl');
 

@@ -1,6 +1,7 @@
-import { isValidYoutubeUrl, processYoutubeUrl, splitMediaFile, deleteTempPath } from './fileChunker.js';
+import { processYoutubeUrl, splitMediaFile } from './fileChunker.js';
 import { saveFileToBlob, deleteBlob, uploadBlob } from './blobHandler.js';
 import { publishRequestProgress, connectClient } from './redis.js';
+import { deleteTempPath, isValidYoutubeUrl } from './helper.js';
 
 async function main(context, req) {
     context.log('Starting req processing..');

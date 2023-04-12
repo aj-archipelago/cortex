@@ -1,6 +1,6 @@
 // PathwayPrompter.js
-import OpenAIChatPlugin from './plugins/openAIChatPlugin.js';
-import OpenAICompletionPlugin from './plugins/openAICompletionPlugin.js';
+import OpenAIChatPlugin from './plugins/openAiChatPlugin.js';
+import OpenAICompletionPlugin from './plugins/openAiCompletionPlugin.js';
 import AzureTranslatePlugin from './plugins/azureTranslatePlugin.js';
 import OpenAIWhisperPlugin from './plugins/openAiWhisperPlugin.js';
 import handlebars from 'handlebars';
