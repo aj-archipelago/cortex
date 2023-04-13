@@ -4,13 +4,15 @@ Cortex simplifies and accelerates the process of creating applications that harn
 Modern AI models are transformational, but a number of complexities emerge when developers start using them to deliver application-ready functions. Most models require precisely formatted, carefully engineered and sequenced prompts to produce consistent results, and the responses are typically largely unstructured text without validation or formatting. Additionally, these models are evolving rapidly, are typically costly and slow to query and implement hard request size and rate restrictions that need to be carefully navigated for optimum throughput. Cortex offers a solution to these problems and provides a simple and extensible package for interacting with NL AI models.
 
 ## Okay, but what can I really do with this thing?
-Yikes.  Everything! It's kind of an LLM swiss army knife.  Here are some ideas:
-* Create custom chat agents with memory and personalization and then expose it to a bunch of different UIs (custom chat portals, Slack, teams, etc. - anything that can speak to a REST or GraphQL endpoint)
-* Create custom coding assistants (code generation, code reviews, test writing, AI pair programming) and easily integrate them with your existing editing tools.
-* Create powerful AI editing tools (copy editing, paraphrasing, summarization, etc.) tools for your company and then integrate them with your existing workflow tools without having to build all the LLM-handling logic into those tools.
+Just about anything! It's kind of an LLM swiss army knife.  Here are some ideas:
+* Create custom chat agents with memory and personalization and then expose them through a bunch of different UIs (custom chat portals, Slack, Microsoft Teams, etc. - anything that can be extended and speak to a REST or GraphQL endpoint)
+* Spin up LLM powered automatons with their prompting logic and AI API handling logic all centrally encapsulated.
 * Make LLM chains and agents from LangChain.js available via scalable REST or GraphQL endpoints.
 * Put a REST or GraphQL front end on your locally-run models (e.g. llama.cpp) and use them in concert with other tools.
-* The sky is the limit!
+* Create modular custom coding assistants (code generation, code reviews, test writing, AI pair programming) and easily integrate them with your existing editing tools.
+* Create powerful AI editing tools (copy editing, paraphrasing, summarization, etc.) for your company and then integrate them with your existing workflow tools without having to build all the LLM-handling logic into those tools.
+* Create cached endpoints for functions with repeated calls so the results return instantly and you don't run up LLM token charges.
+* Route all of your company's LLM access through a single API layer to optimize and monitor usage and centrally control rate limiting and which models are being used.
 
 ## Features
 
