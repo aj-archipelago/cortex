@@ -11,7 +11,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { PassThrough } from 'stream';
 import { config } from '../../config.js';
-import { deleteTempPath, isValidYoutubeUrl } from '../../azure_apps/MediaFileChunker/helper.js';
+import { deleteTempPath, isValidYoutubeUrl } from '../../helper_apps/MediaFileChunker/helper.js';
 
 const API_URL = config.get('whisperMediaApiUrl');
 
@@ -132,7 +132,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         const sendProgress = () => {
             completedCount++;
-            if(completedCount >= totalCount) return;
+            if (completedCount >= totalCount) return;
             pubsub.publish('REQUEST_PROGRESS', {
                 requestProgress: {
                     requestId,

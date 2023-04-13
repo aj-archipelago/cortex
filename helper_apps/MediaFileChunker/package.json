@@ -1,11 +1,10 @@
 {
-  "name": "azure_apps",
+  "name": "@aj-archipelago/mediafilechunker",
   "version": "1.0.0",
   "description": "",
   "type": "module",
   "scripts": {
-    "start": "func start",
-    "start-single-media": "node MediaFileChunker/start.js",
+    "start": "node start.js",
     "test": "echo \"No tests yet...\""
   },
   "dependencies": {
