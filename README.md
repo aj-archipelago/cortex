@@ -36,7 +36,7 @@ npm install
 export OPENAI_API_KEY=<your key>
 npm start
 ```
-Yup, that's it, at least in the simplest possible case. That will get you access to all of the built in pathways.
+Yup, that's it, at least in the simplest possible case. That will get you access to all of the built in pathways.  If you prefer to use npm instead instead of cloning, we have an npm package too: [@aj-archipelago/cortex](https://www.npmjs.com/package/@aj-archipelago/cortex)
 ## Connecting Applications to Cortex
 Cortex speaks GraphQL and by default it enables the GraphQL playground. If you're just using default options, that's at [http://localhost:4000/graphql](http://localhost:4000/graphql). From there you can begin making requests and test out the pathways (listed under Query) to your heart's content. If GraphQL isn't your thing or if you have a client that would rather have REST that's fine - Cortex speaks REST as well.
 
