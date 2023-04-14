@@ -15,6 +15,13 @@ async function main(context, req) {
     // Clean up blob when request delete which means processing marked completed
     if (req.method.toLowerCase() === `delete`) {
         const { requestId } = req.query;
+        if (!requestId) {
+            context.res = {
+                status: 400,
+                body: "Please pass a requestId on the query string"
+            };
+            return;
+        }
         const result = useAzure ? await deleteBlob(requestId) : await deleteFolder(requestId);
         context.res = {
             body: result
