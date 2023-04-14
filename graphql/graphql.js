@@ -49,7 +49,7 @@ const buildRestEndpoints = (pathways, app, server, config) => {
 
     app.post(`/rest/${name}`, async (req, res) => {
       const variables = fieldVariableDefs.reduce((acc, variableDef) => {
-        if (req.body.hasOwnProperty(variableDef.name)) {
+        if (Object.prototype.hasOwnProperty.call(req.body, variableDef.name)) {
           acc[variableDef.name] = req.body[variableDef.name];
         }
         return acc;

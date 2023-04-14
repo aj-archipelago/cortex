@@ -44,10 +44,6 @@ const generateUniqueFolderName = () => {
     return uniqueOutputPath;
 }
 
-const generateUniqueTempFileName = () => {
-    return path.join(os.tmpdir(), uuidv4());
-}
-
 async function splitMediaFile(inputPath, chunkDurationInSeconds = 600) {
     try {
         const metadata = await ffmpegProbe(inputPath);
@@ -184,15 +180,6 @@ const processYoutubeUrl = async (url) => {
     // const mp3Stream = convertYoutubeToMp3Stream(stream);
     // await pipeStreamToFile(mp3Stream, outputFileName); // You can also pipe the stream to a file
     // return outputFileName;
-}
-
-function deleteFile(filePath) {
-    try {
-        fs.unlinkSync(filePath);
-        console.log(`File ${filePath} cleaned successfully.`);
-    } catch (error) {
-        console.error(`Error deleting file ${filePath}:`, error);
-    }
 }
 
 export {

@@ -16,7 +16,7 @@ export default {
     },
 
     // Custom resolver to generate summaries by reprompting if they are too long or too short.
-    resolver: async (parent, args, contextValue, info) => {
+    resolver: async (parent, args, contextValue, _info) => {
         const { config, pathway, requestState } = contextValue;
         const originalTargetLength = args.targetLength;
 

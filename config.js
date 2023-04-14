@@ -110,12 +110,6 @@ var config = convict({
         default: null,
         env: 'CORTEX_CONFIG_FILE'
     },
-    serpApiKey: {
-        format: String,
-        default: null,
-        env: 'SERPAPI_API_KEY',
-        sensitive: true
-    },
     whisperMediaApiUrl: {
         format: String,
         default: 'null',

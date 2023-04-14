@@ -43,7 +43,7 @@ const getSemanticChunks = (text, chunkSize) => {
   };
 
   const breakByParagraphs = (str) => breakByRegex(str, /[\r\n]+/, true);
-  const breakBySentences = (str) => breakByRegex(str, /(?<=[.。؟！\?!\n])\s+/, true);
+  const breakBySentences = (str) => breakByRegex(str, /(?<=[.。؟！?!\n])\s+/, true);
   const breakByWords = (str) => breakByRegex(str, /(\s,;:.+)/);
 
   const createChunks = (tokens) => {

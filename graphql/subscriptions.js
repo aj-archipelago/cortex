@@ -10,7 +10,7 @@ import { requestState } from './requestState.js';
 const subscriptions = {
     requestProgress: {
         subscribe: withFilter(
-            (_, args, __, info) => {
+            (_, args, __, _info) => {
                 const { requestIds } = args;
                 for (const requestId of requestIds) {
                     if (!requestState[requestId]) {

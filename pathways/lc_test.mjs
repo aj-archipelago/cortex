@@ -3,20 +3,24 @@
 
 // Import required modules
 import { OpenAI } from "langchain/llms";
-import { PromptTemplate } from "langchain/prompts";
-import { LLMChain, ConversationChain } from "langchain/chains";
+//import { PromptTemplate } from "langchain/prompts";
+//import { LLMChain, ConversationChain } from "langchain/chains";
 import { initializeAgentExecutor } from "langchain/agents";
 import { SerpAPI, Calculator } from "langchain/tools";
-import { BufferMemory } from "langchain/memory";
+//import { BufferMemory } from "langchain/memory";
 
 export default {
 
     // Agent test case
-    resolver: async (parent, args, contextValue, info) => {
+    resolver: async (parent, args, contextValue, _info) => {
 
         const { config } = contextValue;
+        const env = config.getEnv();
+
+        // example of reading from a predefined config variable
         const openAIApiKey = config.get('openaiApiKey');
-        const serpApiKey = config.get('serpApiKey');
+        // example of reading straight from environment
+        const serpApiKey = env.SERPAPI_API_KEY;
 
         const model = new OpenAI({ openAIApiKey: openAIApiKey, temperature: 0 });
         const tools = [new SerpAPI( serpApiKey ), new Calculator()];

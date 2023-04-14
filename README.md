@@ -2,6 +2,18 @@
 Cortex simplifies and accelerates the process of creating applications that harness the power of modern AI models like chatGPT and GPT-4 by providing a structured interface (GraphQL or REST) to a powerful prompt execution environment. This enables complex augmented prompting and abstracts away most of the complexity of managing model connections like chunking input, rate limiting, formatting output, caching, and handling errors.
 ## Why build Cortex?
 Modern AI models are transformational, but a number of complexities emerge when developers start using them to deliver application-ready functions. Most models require precisely formatted, carefully engineered and sequenced prompts to produce consistent results, and the responses are typically largely unstructured text without validation or formatting. Additionally, these models are evolving rapidly, are typically costly and slow to query and implement hard request size and rate restrictions that need to be carefully navigated for optimum throughput. Cortex offers a solution to these problems and provides a simple and extensible package for interacting with NL AI models.
+
+## Okay, but what can I really do with this thing?
+Just about anything! It's kind of an LLM swiss army knife.  Here are some ideas:
+* Create custom chat agents with memory and personalization and then expose them through a bunch of different UIs (custom chat portals, Slack, Microsoft Teams, etc. - anything that can be extended and speak to a REST or GraphQL endpoint)
+* Spin up LLM powered automatons with their prompting logic and AI API handling logic all centrally encapsulated.
+* Make LLM chains and agents from LangChain.js available via scalable REST or GraphQL endpoints.
+* Put a REST or GraphQL front end on your locally-run models (e.g. llama.cpp) and use them in concert with other tools.
+* Create modular custom coding assistants (code generation, code reviews, test writing, AI pair programming) and easily integrate them with your existing editing tools.
+* Create powerful AI editing tools (copy editing, paraphrasing, summarization, etc.) for your company and then integrate them with your existing workflow tools without having to build all the LLM-handling logic into those tools.
+* Create cached endpoints for functions with repeated calls so the results return instantly and you don't run up LLM token charges.
+* Route all of your company's LLM access through a single API layer to optimize and monitor usage and centrally control rate limiting and which models are being used.
+
 ## Features
 
 * Simple architecture to build custom functional endpoints (called `pathways`), that implement common NL AI tasks. Default pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, sentiment analysis, and bias analysis.
@@ -24,7 +36,7 @@ npm install
 export OPENAI_API_KEY=<your key>
 npm start
 ```
-Yup, that's it, at least in the simplest possible case. That will get you access to all of the built in pathways.
+Yup, that's it, at least in the simplest possible case. That will get you access to all of the built in pathways.  If you prefer to use npm instead instead of cloning, we have an npm package too: [@aj-archipelago/cortex](https://www.npmjs.com/package/@aj-archipelago/cortex)
 ## Connecting Applications to Cortex
 Cortex speaks GraphQL and by default it enables the GraphQL playground. If you're just using default options, that's at [http://localhost:4000/graphql](http://localhost:4000/graphql). From there you can begin making requests and test out the pathways (listed under Query) to your heart's content. If GraphQL isn't your thing or if you have a client that would rather have REST that's fine - Cortex speaks REST as well.
 

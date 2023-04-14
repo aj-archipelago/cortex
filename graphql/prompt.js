@@ -26,6 +26,7 @@ function promptContains(variable, prompt) {
     // if it's an array, it's the messages format
     if (Array.isArray(prompt)) {
       prompt.forEach(p => {
+        // eslint-disable-next-line no-cond-assign
         while (match = p.content && regexp.exec(p.content)) {
           matches.push(match[1]);
         }
