@@ -1,7 +1,7 @@
 import path from 'path';
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 import convict from 'convict';
-import handlebars from 'handlebars';
+import HandleBars from './lib/handleBars.js';
 import fs from 'fs';
 
 // Schema for config
@@ -167,7 +167,7 @@ const buildModels = (config) => {
 
     for (const [key, model] of Object.entries(models)) {        
         // Compile handlebars templates for models
-        models[key] = JSON.parse(handlebars.compile(JSON.stringify(model))({ ...config.getEnv(), ...config.getProperties() }))
+        models[key] = JSON.parse(HandleBars.compile(JSON.stringify(model))({ ...config.getEnv(), ...config.getProperties() }))
     }
 
     // Add constructed models to config

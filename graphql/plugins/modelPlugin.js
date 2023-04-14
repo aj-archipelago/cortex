@@ -1,5 +1,5 @@
 // ModelPlugin.js
-import handlebars from 'handlebars';
+import HandleBars from '../../lib/handleBars.js';
 
 import { request } from '../../lib/request.js';
 import { encode } from 'gpt-3-encoder';
@@ -79,19 +79,28 @@ class ModelPlugin {
                 const otherMessageTokens = totalTokenLength - currentTokenLength;
                 const tokensToKeep = targetTokenLength - (otherMessageTokens + emptyContentLength);
 
-                const truncatedContent = getFirstNToken(message.content, tokensToKeep);
-                const truncatedMessage = { ...message, content: truncatedContent };
-            
-                tokenLengths[index] = {
-                    message: truncatedMessage,
-                    tokenLength: encode(this.messagesToChatML([ truncatedMessage ], false)).length
-                }
+                if (tokensToKeep <= 0) {
+                    // If the message needs to be empty to make the target, remove it entirely
+                    totalTokenLength -= currentTokenLength;
+                    tokenLengths.splice(index, 1);
+                } else {
+                    // Otherwise, update the message and token length
+                    const truncatedContent = getFirstNToken(message.content, tokensToKeep);
+                    const truncatedMessage = { ...message, content: truncatedContent };
 
-                // calculate the length again to keep us honest
-                totalTokenLength = tokenLengths.reduce(
-                    (sum, { tokenLength }) => sum + tokenLength,
-                    0
-                );
+                    tokenLengths[index] = {
+                        message: truncatedMessage,
+                        tokenLength: encode(this.messagesToChatML([ truncatedMessage ], false)).length
+                    }
+
+                    // calculate the length again to keep us honest
+                    totalTokenLength = tokenLengths.reduce(
+                        (sum, { tokenLength }) => sum + tokenLength,
+                        0
+                    );
+
+                    index++;
+                }
             }
         }
     
@@ -118,7 +127,7 @@ class ModelPlugin {
     getCompiledPrompt(text, parameters, prompt) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const modelPrompt = this.getModelPrompt(prompt, parameters);
-        const modelPromptText = modelPrompt.prompt ? handlebars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+        const modelPromptText = modelPrompt.prompt ? HandleBars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
         const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
         const modelPromptMessagesML = this.messagesToChatML(modelPromptMessages);
 
@@ -135,7 +144,7 @@ class ModelPlugin {
 
     getPromptTokenRatio() {
         // TODO: Is this the right order of precedence? inputParameters should maybe be second?
-        return this.promptParameters.inputParameters.tokenRatio ?? this.promptParameters.tokenRatio ?? DEFAULT_PROMPT_TOKEN_RATIO;
+        return this.promptParameters.inputParameters?.tokenRatio ?? this.promptParameters.tokenRatio ?? DEFAULT_PROMPT_TOKEN_RATIO;
     }
 
 
@@ -155,7 +164,7 @@ class ModelPlugin {
         // First run handlebars compile on the pathway messages
         const compiledMessages = modelPrompt.messages.map((message) => {
             if (message.content) {
-                const compileText = handlebars.compile(message.content);
+                const compileText = HandleBars.compile(message.content);
                 return {
                     role: message.role,
                     content: compileText({ ...combinedParameters, text }),
@@ -184,7 +193,7 @@ class ModelPlugin {
     }
 
     requestUrl() {
-        const generateUrl = handlebars.compile(this.model.url);
+        const generateUrl = HandleBars.compile(this.model.url);
         return generateUrl({ ...this.model, ...this.environmentVariables, ...this.config });
     }
 
