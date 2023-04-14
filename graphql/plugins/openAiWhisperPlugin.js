@@ -198,6 +198,16 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
 
                 await this.markCompletedForCleanUp(requestId);
+
+                //check cleanup for whisper temp uploaded files url
+                const regex = /whispertempfiles\/(\d+)/;
+                const match = file.match(regex);
+                if (match && match[1]) {
+                    const extractedValue = match[1];
+                    await this.markCompletedForCleanUp(extractedValue);
+                    console.log(`Cleaned temp whisper file ${file} with request id ${extractedValue}`);
+                }
+
             } catch (error) {
                 console.error("An error occurred while deleting:", error);
             }
