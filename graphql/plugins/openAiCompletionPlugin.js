@@ -1,7 +1,19 @@
 // OpenAICompletionPlugin.js
+
 import ModelPlugin from './modelPlugin.js';
 
 import { encode } from 'gpt-3-encoder';
+
+// Helper function to truncate the prompt if it is too long
+const truncatePromptIfNecessary = (text, textTokenCount, modelMaxTokenCount, targetTextTokenCount, pathwayResolver) => {
+    const maxAllowedTextTokenCount = textTokenCount + ((modelMaxTokenCount - targetTextTokenCount) * 0.5);
+
+    if (textTokenCount > maxAllowedTextTokenCount) {
+        pathwayResolver.logWarning(`Prompt is too long at ${textTokenCount} tokens (this target token length for this pathway is ${targetTextTokenCount} tokens because the response is expected to take up the rest of the model's max tokens (${modelMaxTokenCount}). Prompt will be truncated.`);
+        return pathwayResolver.truncate(text, maxAllowedTextTokenCount);
+    }
+    return text;
+}
 
 class OpenAICompletionPlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -9,7 +21,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
     }
 
     // Set up parameters specific to the OpenAI Completion API
-    getRequestParameters(text, parameters, prompt) {
+    getRequestParameters(text, parameters, prompt, pathwayResolver) {
         let { modelPromptMessages, modelPromptText, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
         const { stream } = parameters;
         let modelPromptMessagesML = '';
@@ -23,12 +35,14 @@ class OpenAICompletionPlugin extends ModelPlugin {
             const requestMessages = this.truncateMessagesToTargetLength(modelPromptMessages, (modelTargetTokenLength - addAssistantTokens));
             modelPromptMessagesML = this.messagesToChatML(requestMessages);
             tokenLength = encode(modelPromptMessagesML).length;
-        
-            if (tokenLength > modelTargetTokenLength) {
-                throw new Error(`Input is too long at ${tokenLength} tokens (this target token length for this pathway is ${modelTargetTokenLength} tokens because the response is expected to take up the rest of the model's max tokens (${this.getModelMaxTokenLength()}). You must reduce the size of the prompt to continue.`);
-            }
-        
+
+            modelPromptMessagesML = truncatePromptIfNecessary(modelPromptMessagesML, tokenLength, this.getModelMaxTokenLength(), modelTargetTokenLength, pathwayResolver);
+
             const max_tokens = this.getModelMaxTokenLength() - tokenLength;
+            
+            if (max_tokens < 0) {
+                throw new Error(`Prompt is too long to successfully call the model at ${tokenLength} tokens.  The model will not be called.`);
+            }
         
             requestParameters = {
                 prompt: modelPromptMessagesML,
@@ -41,11 +55,14 @@ class OpenAICompletionPlugin extends ModelPlugin {
                 stream
             };
         } else {
-            if (tokenLength > modelTargetTokenLength) {
-                throw new Error(`Input is too long at ${tokenLength} tokens. The target token length for this pathway is ${modelTargetTokenLength} tokens because the response is expected to take up the rest of the ${this.getModelMaxTokenLength()} tokens that the model can handle. You must reduce the size of the prompt to continue.`);
-            }
-        
+
+            modelPromptText = truncatePromptIfNecessary(modelPromptText, tokenLength, this.getModelMaxTokenLength(), modelTargetTokenLength, pathwayResolver);
+
             const max_tokens = this.getModelMaxTokenLength() - tokenLength;
+            
+            if (max_tokens < 0) {
+                throw new Error(`Prompt is too long to successfully call the model at ${tokenLength} tokens.  The model will not be called.`);
+            }
         
             requestParameters = {
                 prompt: modelPromptText,
@@ -59,9 +76,9 @@ class OpenAICompletionPlugin extends ModelPlugin {
     }
 
     // Execute the request to the OpenAI Completion API
-    async execute(text, parameters, prompt) {
+    async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
-        const requestParameters = this.getRequestParameters(text, parameters, prompt);
+        const requestParameters = this.getRequestParameters(text, parameters, prompt, pathwayResolver);
     
         const data = { ...(this.model.params || {}), ...requestParameters };
         const params = {};
