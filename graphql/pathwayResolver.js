@@ -1,4 +1,5 @@
 import { PathwayPrompter } from './pathwayPrompter.js';
+// eslint-disable-next-line import/no-extraneous-dependencies
 import { v4 as uuidv4 } from 'uuid';
 import pubsub from './pubsub.js';
 import { encode } from 'gpt-3-encoder';
@@ -139,6 +140,12 @@ class PathwayResolver {
         return this.responseParser.parse(data);
     }
 
+    // Add a warning and log it
+    logWarning(warning) {
+        this.warnings.push(warning);
+        console.warn(warning);
+    }
+
     // Here we choose how to handle long input - either summarize or chunk
     processInputText(text) {
         let chunkTokenLength = 0;
@@ -151,8 +158,7 @@ class PathwayResolver {
         if (!this.useInputChunking || encoded.length <= chunkTokenLength) { // no chunking, return as is
             if (encoded.length > 0 && encoded.length >= chunkTokenLength) {
                 const warnText = `Truncating long input text. Text length: ${text.length}`;
-                this.warnings.push(warnText);
-                console.warn(warnText);
+                this.logWarning(warnText);
                 text = this.truncate(text, chunkTokenLength);
             }
             return [text];
