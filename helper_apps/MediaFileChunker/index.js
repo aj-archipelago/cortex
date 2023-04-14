@@ -2,6 +2,11 @@ import { processYoutubeUrl, splitMediaFile } from './fileChunker.js';
 import { saveFileToBlob, deleteBlob, uploadBlob } from './blobHandler.js';
 import { publishRequestProgress, connectClient } from './redis.js';
 import { deleteTempPath, isValidYoutubeUrl } from './helper.js';
+import { moveFileToPublicFolder, deleteFolder, uploadToPublicFolder } from './localFileHandler.js';
+
+const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
+console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
+
 
 async function main(context, req) {
     context.log('Starting req processing..');
@@ -10,7 +15,7 @@ async function main(context, req) {
     // Clean up blob when request delete which means processing marked completed
     if (req.method.toLowerCase() === `delete`) {
         const { requestId } = req.query;
-        const result = await deleteBlob(requestId);
+        const result = useAzure ? await deleteBlob(requestId) : await deleteFolder(requestId);
         context.res = {
             body: result
         };
@@ -18,7 +23,7 @@ async function main(context, req) {
     }
 
     if (req.method.toLowerCase() === `post`) {
-        const { message, url } = await uploadBlob(context, req);
+        const { message, url } = await uploadBlob(context, req, !useAzure);
         context.log(`File url: ${url}`);
         return
     }
@@ -70,9 +75,9 @@ async function main(context, req) {
 
         // sequential processing of chunks
         for (const chunk of chunks) {
-            const blobName = await saveFileToBlob(chunk, requestId);
+            const blobName = useAzure ? await saveFileToBlob(chunk, requestId) : await moveFileToPublicFolder(chunk, requestId);
             result.push(blobName);
-            context.log(`Chunk saved to Azure Blob Storage as: ${blobName}`);
+            context.log(`Saved chunk as: ${blobName}`);
             sendProgress();
         }
 

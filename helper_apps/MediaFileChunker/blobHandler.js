@@ -4,6 +4,13 @@ import { BlobServiceClient } from '@azure/storage-blob';
 import { v4 as uuidv4 } from 'uuid';
 import Busboy from 'busboy';
 import { PassThrough } from 'stream';
+import { pipeline as _pipeline } from 'stream';
+import { promisify } from 'util';
+const pipeline = promisify(_pipeline);
+import { join } from 'path';
+
+
+import { publicFolder, port, ipAddress } from "./start.js";
 
 const getBlobClient = () => {
     const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -56,7 +63,7 @@ async function deleteBlob(requestId) {
     return result
 }
 
-async function uploadBlob(context, req) {
+async function uploadBlob(context, req, saveToLocal = false) {
     return new Promise((resolve, reject) => {
         try {
             const busboy = Busboy({ headers: req.headers });
@@ -69,27 +76,53 @@ async function uploadBlob(context, req) {
             });
 
             busboy.on('file', async (fieldname, file, info) => {
-                const { containerClient } = getBlobClient();
-                const filename = `${requestId}/${uuidv4()}_${info.filename}`;
+                if (saveToLocal) {
+                    // Create the target folder if it doesn't exist
+                    const localPath = join(publicFolder, requestId);
+                    fs.mkdirSync(localPath, { recursive: true });
 
-                const blockBlobClient = containerClient.getBlockBlobClient(filename);
+                    const filename = `${uuidv4()}_${info.filename}`;
+                    const destinationPath = `${localPath}/${filename}`;
 
-                const passThroughStream = new PassThrough();
-                file.pipe(passThroughStream);
+                    await pipeline(file, fs.createWriteStream(destinationPath));
 
-                await blockBlobClient.uploadStream(passThroughStream);
+                    const message = `File '${filename}' saved to folder successfully.`;
+                    context.log(message);
 
-                const message = `File '${filename}' uploaded successfully.`;
-                const url = blockBlobClient.url;
-                context.log(message);
-                const body = { message, url };
+                    const url = `http://${ipAddress}:${port}/files/${requestId}/${filename}`;
 
-                context.res = {
-                    status: 200,
-                    body,
-                };
+                    const body = { message, url };
 
-                resolve(body); // Resolve the promise
+                    context.res = {
+                        status: 200,
+                        body,
+                    };
+
+
+                    resolve(body); // Resolve the promise
+                } else {
+                    const { containerClient } = getBlobClient();
+                    const filename = `${requestId}/${uuidv4()}_${info.filename}`;
+
+                    const blockBlobClient = containerClient.getBlockBlobClient(filename);
+
+                    const passThroughStream = new PassThrough();
+                    file.pipe(passThroughStream);
+
+                    await blockBlobClient.uploadStream(passThroughStream);
+
+                    const message = `File '${filename}' uploaded successfully.`;
+                    const url = blockBlobClient.url;
+                    context.log(message);
+                    const body = { message, url };
+
+                    context.res = {
+                        status: 200,
+                        body,
+                    };
+
+                    resolve(body); // Resolve the promise
+                }
             });
 
             busboy.on('error', (error) => {

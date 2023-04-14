@@ -4,7 +4,6 @@ import FormData from 'form-data';
 import fs from 'fs';
 import pubsub from '../pubsub.js';
 import { axios } from '../../lib/request.js';
-import https from 'https';
 import stream from 'stream';
 import os from 'os';
 import path from 'path';
@@ -12,6 +11,12 @@ import { v4 as uuidv4 } from 'uuid';
 import { PassThrough } from 'stream';
 import { config } from '../../config.js';
 import { deleteTempPath, isValidYoutubeUrl } from '../../helper_apps/MediaFileChunker/helper.js';
+import http from 'http';
+import https from 'https';
+import url from 'url';
+import { promisify } from 'util';
+const pipeline = promisify(stream.pipeline);
+
 
 const API_URL = config.get('whisperMediaApiUrl');
 
@@ -19,31 +24,37 @@ function generateUniqueFilename(extension) {
     return `${uuidv4()}.${extension}`;
 }
 
-function downloadFile(uri) {
-    return new Promise((resolve, reject) => {
-        https.get(uri, (res) => {
-            const fileExtension = path.extname(uri).slice(1);
-            const uniqueFilename = generateUniqueFilename(fileExtension);
-            const tempDir = os.tmpdir();
-            const localFilePath = `${tempDir}/${uniqueFilename}`;
+const downloadFile = async (fileUrl) => {
+    const fileExtension = path.extname(fileUrl).slice(1);
+    const uniqueFilename = generateUniqueFilename(fileExtension);
+    const tempDir = os.tmpdir();
+    const localFilePath = `${tempDir}/${uniqueFilename}`;
 
-            const writeStream = fs.createWriteStream(localFilePath);
-            res.pipe(writeStream);
+    return new Promise(async (resolve, reject) => {
+        try {
+            const parsedUrl = url.parse(fileUrl);
+            const protocol = parsedUrl.protocol === 'https:' ? https : http;
 
-            writeStream.on('finish', () => {
-                console.log(`Finished downloading file to ${localFilePath}`);
-                resolve(localFilePath);
+            const response = await new Promise((resolve, reject) => {
+                protocol.get(parsedUrl, (res) => {
+                    if (res.statusCode === 200) {
+                        resolve(res);
+                    } else {
+                        reject(new Error(`HTTP request failed with status code ${res.statusCode}`));
+                    }
+                }).on('error', reject);
             });
 
-            writeStream.on('error', (err) => {
-                console.error(`Error occurred while downloading file:`, err);
-                reject(err);
+            await pipeline(response, fs.createWriteStream(localFilePath));
+            console.log(`Downloaded file to ${localFilePath}`);
+            resolve(localFilePath);
+        } catch (error) {
+            fs.unlink(localFilePath, () => {
+                reject(error);
             });
-        }).on('error', (err) => {
-            reject(err);
-        });
+        }
     });
-}
+};
 
 
 
