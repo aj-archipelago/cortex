@@ -67,7 +67,7 @@ async function uploadBlob(context, req, saveToLocal = false) {
     return new Promise((resolve, reject) => {
         try {
             const busboy = Busboy({ headers: req.headers });
-            let requestId = '';
+            let requestId = uuidv4();
 
             busboy.on('field', (fieldname, value) => {
                 if (fieldname === 'requestId') {
