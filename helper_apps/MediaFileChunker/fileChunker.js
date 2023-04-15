@@ -74,26 +74,10 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 600) {
             chunkPromises.push(chunkPromise);
         }
 
-        // const chunkedFiles = await Promise.all(chunkPromises);
-        // console.log('All chunks processed. Chunked file names:', chunkedFiles);
-        // return { chunks: chunkedFiles, folder: uniqueOutputPath }
         return { chunkPromises, uniqueOutputPath }
     } catch (err) {
         console.error('Error occurred during the splitting process:', err);
     }
-}
-
-function convertYoutubeToMp3Stream(video) {
-    // Configure ffmpeg to convert the video to mp3
-    const mp3Stream = ffmpeg(video)
-        // .withAudioCodec('libmp3lame')
-        // .toFormat('mp3')
-        .audioBitrate(128)
-        .on('error', (err) => {
-            console.error(`An error occurred during conversion: ${err.message}`);
-        });
-
-    return mp3Stream;
 }
 
 async function pipeStreamToFile(stream, filePath) {
@@ -105,29 +89,6 @@ async function pipeStreamToFile(stream, filePath) {
     }
 }
 
-const saveYoutubeUrl = async (url, filename) => {
-    let stream = ytdl(url, {
-        quality: 'highestaudio',
-    });
-
-    return new Promise((resolve, reject) => {
-        ffmpeg(stream)
-            .audioBitrate(128)
-            .save(filename)
-            .on('progress', p => {
-                readline.cursorTo(process.stdout, 0);
-                process.stdout.write(`${p.targetSize}kb downloaded`);
-            })
-            .on('error', (err) => {
-                console.log('an error happened: ' + err.message);
-                reject(err);
-            })
-            .on('end', () => {
-                console.log(`\ndone, thanks - ${(Date.now() - start) / 1000}s`);
-                resolve(filename);
-            });
-    });
-}
 
 const ytdlDownload = async (url, filename) => {
     return new Promise((resolve, reject) => {
@@ -166,22 +127,8 @@ const processYoutubeUrl = async (url) => {
         console.log(e);
         throw e;
     }
-
-    // const info = await ytdl.getInfo(url);
-    // const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'highestaudio' });
-
-    // if (!audioFormat) {
-    //     throw new Error('No suitable audio format found');
-    // }
-
-    // const stream = ytdl.downloadFromInfo(info, { format: audioFormat });
-    // // const stream = ytdl(url, { filter: 'audioonly' })
-
-    // const mp3Stream = convertYoutubeToMp3Stream(stream);
-    // await pipeStreamToFile(mp3Stream, outputFileName); // You can also pipe the stream to a file
-    // return outputFileName;
 }
 
 export {
-    splitMediaFile, processYoutubeUrl, saveYoutubeUrl
+    splitMediaFile, processYoutubeUrl
 };

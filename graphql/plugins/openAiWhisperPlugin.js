@@ -156,16 +156,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         let chunks = []; // array of local file paths
         try {
-            // if (isYoutubeUrl) {
-            //     // totalCount += 1; // extra 1 step for youtube download
-            //     file = await processYoutubeUrl(file);
-            // }
-
-            // const { chunkPromises, uniqueOutputPath } = await splitMediaFile(file);
-            // folder = uniqueOutputPath;
-            // totalCount += chunkPromises.length * 2; // 2 steps for each chunk (download and upload)
-            // // isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
-
 
             const uris = await this.getMediaChunks(file, requestId); // array of remote file uris
             if (!uris || !uris.length) {

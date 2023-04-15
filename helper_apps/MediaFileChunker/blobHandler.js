@@ -19,8 +19,8 @@ const getBlobClient = () => {
         throw new Error('Missing Azure Storage connection string or container name environment variable');
     }
 
-    const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING);
-    const containerClient = blobServiceClient.getContainerClient(process.env.AZURE_STORAGE_CONTAINER_NAME);
+    const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
+    const containerClient = blobServiceClient.getContainerClient(containerName);
 
     return { blobServiceClient, containerClient };
 }
