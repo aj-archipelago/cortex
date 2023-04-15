@@ -2,7 +2,7 @@ import { processYoutubeUrl, splitMediaFile } from './fileChunker.js';
 import { saveFileToBlob, deleteBlob, uploadBlob } from './blobHandler.js';
 import { publishRequestProgress, connectClient } from './redis.js';
 import { deleteTempPath, isValidYoutubeUrl } from './helper.js';
-import { moveFileToPublicFolder, deleteFolder, uploadToPublicFolder } from './localFileHandler.js';
+import { moveFileToPublicFolder, deleteFolder } from './localFileHandler.js';
 
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
 console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');

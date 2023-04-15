@@ -31,10 +31,7 @@ async function deleteFolder(requestId) {
     console.log(`Cleaned folder: ${targetFolder}`);
 }
 
-async function uploadToPublicFolder(context, req) {
-    //TODO
-}
 
 export {
-    moveFileToPublicFolder, deleteFolder, uploadToPublicFolder
+    moveFileToPublicFolder, deleteFolder
 };
