@@ -3,6 +3,7 @@ export default {
     model: `oai-whisper`,
     inputParameters: {
         file: ``,
+        language: ``,
     },
     timeout: 1800, // in seconds
 };

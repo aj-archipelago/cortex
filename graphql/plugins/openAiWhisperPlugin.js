@@ -120,11 +120,12 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         const processChunk = async (chunk) => {
             try {
+                const { language } = parameters;
                 const formData = new FormData();
                 formData.append('file', fs.createReadStream(chunk));
                 formData.append('model', this.model.params.model);
                 formData.append('response_format', 'text');
-                // formData.append('language', 'tr');
+                language && formData.append('language', language);
                 modelPromptText && formData.append('prompt', modelPromptText);
 
                 return this.executeRequest(url, formData, params, { ...this.model.headers, ...formData.getHeaders() });
@@ -167,6 +168,9 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
 
             const uris = await this.getMediaChunks(file, requestId); // array of remote file uris
+            if (!uris || !uris.length) {
+                throw new Error(`Error in getting chunks from media helper for file ${file}`);
+            }
             totalCount = uris.length * 4; // 4 steps for each chunk (download and upload)
             API_URL && (completedCount = uris.length); // api progress is already calculated
 
