@@ -37,7 +37,6 @@ async function saveFileToBlob(chunkPath, requestId) {
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
     await blockBlobClient.uploadStream(fileStream);
 
-    // return blobName;
     // Return the full URI of the uploaded blob
     const blobUrl = blockBlobClient.url;
     return blobUrl;
