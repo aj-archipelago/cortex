@@ -16,6 +16,7 @@ import { buildLimiters } from '../lib/request.js';
 import { cancelRequestResolver } from './resolver.js';
 import { buildPathways, buildModels } from '../config.js';
 import { requestState } from './requestState.js';
+import { subscriptionClient } from '../lib/redisSubscription.js';
 
 const getPlugins = (config) => {
     // server plugins
