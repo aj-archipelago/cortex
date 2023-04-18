@@ -9,9 +9,12 @@ import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 
-const callPathway = async (config, pathwayName, args, requestState, { text, ...parameters }) => {
-    const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`), args, requestState });
-    return await pathwayResolver.resolve({ text, ...parameters });
+const callPathway = async (config, pathwayName, args) => {
+    const pathway = config.get(`pathways.${pathwayName}`);
+    const requestState = {};
+    const parent = {};
+    const pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
+    return await pathwayResolver.pathway?.resolver(parent, args, { config, pathway, requestState } );
 }
 
 class PathwayResolver {
@@ -177,7 +180,7 @@ class PathwayResolver {
 
     async summarizeIfEnabled({ text, ...parameters }) {
         if (this.pathway.useInputSummarization) {
-            return await callPathway(this.config, 'summary', this.args, requestState, { text, targetLength: 1000, ...parameters });
+            return await callPathway(this.config, 'summary', { ...this.args, ...parameters, targetLength: 0});
         }
         return text;
     }
