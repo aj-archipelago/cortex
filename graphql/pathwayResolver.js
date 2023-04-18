@@ -8,14 +8,7 @@ import { PathwayResponseParser } from './pathwayResponseParser.js';
 import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
-
-const callPathway = async (config, pathwayName, args) => {
-    const pathway = config.get(`pathways.${pathwayName}`);
-    const requestState = {};
-    const parent = {};
-    const pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
-    return await pathwayResolver.pathway?.resolver(parent, args, { config, pathway, requestState } );
-}
+import { callPathway } from '../lib/pathwayTools.js';
 
 class PathwayResolver {
     constructor({ config, pathway, args }) {
