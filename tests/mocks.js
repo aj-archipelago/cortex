@@ -7,6 +7,7 @@ export const mockConfig = {
         models: {
           testModel: {
             url: 'https://api.example.com/testModel',
+            type: 'OPENAI-COMPLETION',
           },
         },
       };
