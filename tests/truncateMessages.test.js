@@ -78,3 +78,22 @@ test('truncateMessagesToTargetLength: should return an empty array if target len
   const result = modelPlugin.truncateMessagesToTargetLength(messages, 0);
   t.deepEqual(result, []);
 });
+
+test('truncateMessagesToTargetLength: should not remove system messages even if they are too long', (t) => {
+  const messages = [
+      generateMessage('user', 'Hello, how are you?'),
+      generateMessage('system', 'System message content that is very long and exceeds the target token length'),
+      generateMessage('assistant', 'I am fine, thank you.'),
+  ];
+
+  const targetTokenLength = 20;
+  const result = modelPlugin.truncateMessagesToTargetLength(messages, targetTokenLength);
+
+  const systemMessage = result.find((message) => message.role === 'system');
+  t.truthy(systemMessage, 'System message should not be removed');
+  t.is(
+      systemMessage.content,
+      'System message content that is very long and exceeds the target token length',
+      'System message content should not be altered'
+  );
+});

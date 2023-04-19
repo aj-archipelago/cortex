@@ -32,8 +32,14 @@ const parseNumberedObjectList = (text, format) => {
     return result;
 }
 
+// parse a comma-separated list text format into list
+const parseCommaSeparatedList = (str) => {
+    return str.split(',').map(s => s.trim()).filter(s => s.length);
+}
+
 export {
     regexParser,
     parseNumberedList,
     parseNumberedObjectList,
+    parseCommaSeparatedList,
 };

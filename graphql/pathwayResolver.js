@@ -8,11 +8,7 @@ import { PathwayResponseParser } from './pathwayResponseParser.js';
 import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
-
-const callPathway = async (config, pathwayName, args, requestState, { text, ...parameters }) => {
-    const pathwayResolver = new PathwayResolver({ config, pathway: config.get(`pathways.${pathwayName}`), args, requestState });
-    return await pathwayResolver.resolve({ text, ...parameters });
-}
+import { callPathway } from '../lib/pathwayTools.js';
 
 class PathwayResolver {
     constructor({ config, pathway, args }) {
@@ -177,7 +173,7 @@ class PathwayResolver {
 
     async summarizeIfEnabled({ text, ...parameters }) {
         if (this.pathway.useInputSummarization) {
-            return await callPathway(this.config, 'summary', this.args, requestState, { text, targetLength: 1000, ...parameters });
+            return await callPathway(this.config, 'summary', { ...this.args, ...parameters, targetLength: 0});
         }
         return text;
     }

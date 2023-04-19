@@ -58,7 +58,7 @@ class ModelPlugin {
     
         // Remove and/or truncate messages until the target token length is reached
         let index = 0;
-        while (totalTokenLength > targetTokenLength) {
+        while ((totalTokenLength > targetTokenLength) && (index < tokenLengths.length)) {
             const message = tokenLengths[index].message;
 
             // Skip system messages

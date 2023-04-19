@@ -58,7 +58,8 @@
     "ava": "^5.2.0",
     "dotenv": "^16.0.3",
     "eslint": "^8.38.0",
-    "eslint-plugin-import": "^2.27.5"
+    "eslint-plugin-import": "^2.27.5",
+    "sinon": "^15.0.3"
   },
   "publishConfig": {
     "access": "restricted"
