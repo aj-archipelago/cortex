@@ -8,9 +8,8 @@ import stream from 'stream';
 import os from 'os';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { PassThrough } from 'stream';
 import { config } from '../../config.js';
-import { deleteTempPath, isValidYoutubeUrl } from '../../helper_apps/MediaFileChunker/helper.js';
+import { deleteTempPath } from '../../helper_apps/MediaFileChunker/helper.js';
 import http from 'http';
 import https from 'https';
 import url from 'url';
@@ -30,6 +29,7 @@ const downloadFile = async (fileUrl) => {
     const tempDir = os.tmpdir();
     const localFilePath = `${tempDir}/${uniqueFilename}`;
 
+    // eslint-disable-next-line no-async-promise-executor
     return new Promise(async (resolve, reject) => {
         try {
             const parsedUrl = url.parse(fileUrl);
@@ -55,33 +55,6 @@ const downloadFile = async (fileUrl) => {
         }
     });
 };
-
-
-
-function getPassThroughStreamFromRemoteFile(remoteUrl) {
-    return new Promise((resolve, reject) => {
-        // Obtain the remote file as a readable stream
-        https.get(remoteUrl, (fileStream) => {
-            // Initialize a PassThrough stream to pipe the file data
-            const passThroughStream = new PassThrough();
-
-            // Pipe the remote file stream to the PassThrough stream
-            fileStream.pipe(passThroughStream);
-
-            // Wait for the stream to finish piping before resolving the Promise
-            finished(passThroughStream, (err) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    resolve(passThroughStream);
-                }
-            });
-        }).on('error', (err) => {
-            reject(err);
-        });
-    });
-}
-
 
 class OpenAIWhisperPlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -136,8 +109,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         let result = ``;
         let { file } = parameters;
-        let folder;
-        const isYoutubeUrl = isValidYoutubeUrl(file);
         let totalCount = 0;
         let completedCount = 0;
         const { requestId } = pathwayResolver;

@@ -1,6 +1,6 @@
 import { processYoutubeUrl, splitMediaFile } from './fileChunker.js';
 import { saveFileToBlob, deleteBlob, uploadBlob } from './blobHandler.js';
-import { publishRequestProgress, connectClient } from './redis.js';
+import { publishRequestProgress } from './redis.js';
 import { deleteTempPath, isValidYoutubeUrl } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder } from './localFileHandler.js';
 
@@ -30,7 +30,7 @@ async function main(context, req) {
     }
 
     if (req.method.toLowerCase() === `post`) {
-        const { message, url } = await uploadBlob(context, req, !useAzure);
+        const { url } = await uploadBlob(context, req, !useAzure);
         context.log(`File url: ${url}`);
         return
     }
