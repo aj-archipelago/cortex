@@ -1,6 +1,5 @@
 import { promises as fs } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join, basename } from 'path';
+import { join, basename } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
 import { publicFolder, port, ipAddress } from "./start.js";

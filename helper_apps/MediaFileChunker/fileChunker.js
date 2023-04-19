@@ -5,7 +5,6 @@ import path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
-import { pipeline } from 'stream';
 import ytdl from 'ytdl-core';
 import { promisify } from 'util';
 
@@ -79,16 +78,6 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 600) {
         console.error('Error occurred during the splitting process:', err);
     }
 }
-
-async function pipeStreamToFile(stream, filePath) {
-    try {
-        await pipeline(stream, fs.createWriteStream(filePath));
-        console.log('Stream piped to file successfully.');
-    } catch (error) {
-        console.error(`Error piping stream to file: ${error.message}`);
-    }
-}
-
 
 const ytdlDownload = async (url, filename) => {
     return new Promise((resolve, reject) => {
