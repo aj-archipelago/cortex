@@ -52,6 +52,7 @@ const downloadFile = async (fileUrl) => {
             fs.unlink(localFilePath, () => {
                 reject(error);
             });
+            throw error;
         }
     });
 };
@@ -73,15 +74,20 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             }
         } catch (err) {
             console.log(`Error getting media chunks list from api:`, err);
+            throw err;
         }
     }
 
     async markCompletedForCleanUp(requestId) {
-        if (API_URL) {
-            //call helper api to mark processing as completed
-            const res = await axios.delete(API_URL, { params: { requestId } });
-            console.log(`Marked request ${requestId} as completed:`, res.data);
-            return res.data;
+        try {
+            if (API_URL) {
+                //call helper api to mark processing as completed
+                const res = await axios.delete(API_URL, { params: { requestId } });
+                console.log(`Marked request ${requestId} as completed:`, res.data);
+                return res.data;
+            }
+        } catch (err) {
+            console.log(`Error marking request ${requestId} as completed:`, err);
         }
     }
 
@@ -104,6 +110,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 return this.executeRequest(url, formData, params, { ...this.model.headers, ...formData.getHeaders() });
             } catch (err) {
                 console.log(err);
+                throw err;
             }
         }
 
@@ -152,11 +159,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             // result = await Promise.all(mediaSplit.chunks.map(processChunk));
 
         } catch (error) {
-            console.error("An error occurred:", error);
+            const errMsg = `Transcribe error: ${error?.message || JSON.stringify(error)}`;
+            console.error(errMsg);
+            return errMsg;
         }
         finally {
-            // isYoutubeUrl && (await deleteTempPath(file));
-            // folder && (await deleteTempPath(folder));
             try {
                 for (const chunk of chunks) {
                     await deleteTempPath(chunk);
