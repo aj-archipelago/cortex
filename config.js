@@ -1,8 +1,10 @@
 import path from 'path';
-const __dirname = path.dirname(new URL(import.meta.url).pathname);
 import convict from 'convict';
 import HandleBars from './lib/handleBars.js';
 import fs from 'fs';
+import { fileURLToPath, pathToFileURL } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Schema for config
 var config = convict({
@@ -137,17 +139,21 @@ if (configFile && fs.existsSync(configFile)) {
 const buildPathways = async (config) => {
     const { pathwaysPath, corePathwaysPath, basePathwayPath } = config.getProperties();
 
+    const pathwaysURL = pathToFileURL(pathwaysPath).toString();
+    const corePathwaysURL = pathToFileURL(corePathwaysPath).toString();
+    const basePathwayURL = pathToFileURL(basePathwayPath).toString();
+
     // Load cortex base pathway 
-    const basePathway = await import(basePathwayPath).then(module => module.default);
+    const basePathway = await import(basePathwayURL).then(module => module.default);
 
     // Load core pathways, default from the Cortex package
     console.log('Loading core pathways from', corePathwaysPath)
-    let loadedPathways = await import(`${corePathwaysPath}/index.js`).then(module => module);
+    let loadedPathways = await import(`${corePathwaysURL}/index.js`).then(module => module);
 
     // Load custom pathways and override core pathways if same
     if (pathwaysPath && fs.existsSync(pathwaysPath)) {
         console.log('Loading custom pathways from', pathwaysPath)
-        const customPathways = await import(`${pathwaysPath}/index.js`).then(module => module);
+        const customPathways = await import(`${pathwaysURL}/index.js`).then(module => module);
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
 
