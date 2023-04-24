@@ -1,7 +1,7 @@
 import { processYoutubeUrl, splitMediaFile } from './fileChunker.js';
 import { saveFileToBlob, deleteBlob, uploadBlob } from './blobHandler.js';
 import { publishRequestProgress } from './redis.js';
-import { deleteTempPath, isValidYoutubeUrl } from './helper.js';
+import { deleteTempPath, ensureEncoded, isValidYoutubeUrl } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder } from './localFileHandler.js';
 
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
@@ -10,7 +10,6 @@ console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
 
 async function main(context, req) {
     context.log('Starting req processing..');
-    // await publishRequestProgress({ requestId:222, progress: 0, data: null });
 
     // Clean up blob when request delete which means processing marked completed
     if (req.method.toLowerCase() === `delete`) {
@@ -48,7 +47,7 @@ async function main(context, req) {
     let completedCount = 0;
     let numberOfChunks;
 
-    let file = uri;
+    let file = ensureEncoded(uri); // encode url to handle special characters
     let folder;
     const isYoutubeUrl = isValidYoutubeUrl(uri);
 
@@ -111,6 +110,5 @@ async function main(context, req) {
     };
 }
 
-// main(console, { query: { uri: "https://www.youtube.com/watch?v=QH2-TGUlwu4" } });
 
 export default main;
