@@ -28,6 +28,18 @@ async function deleteTempPath(path) {
     }
 }
 
+function ensureEncoded(url) {
+    try {
+        const decodedUrl = decodeURI(url);
+        if (decodedUrl === url) {
+            return encodeURI(url);
+        }
+        return url;
+    } catch (e) {
+        return url;
+    }
+}
+
 export {
-    isValidYoutubeUrl, deleteTempPath
+    isValidYoutubeUrl, deleteTempPath, ensureEncoded
 }

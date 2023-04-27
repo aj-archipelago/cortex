@@ -7,6 +7,8 @@ import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
 import ytdl from 'ytdl-core';
 import { promisify } from 'util';
+import axios from 'axios';
+import { ensureEncoded } from './helper.js';
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
@@ -15,12 +17,15 @@ console.log(`ffprobePath: ${ffprobePath}`);
 
 const ffmpegProbe = promisify(ffmpeg.ffprobe);
 
+
 async function processChunk(inputPath, outputFileName, start, duration) {
     return new Promise((resolve, reject) => {
         ffmpeg(inputPath)
             .seekInput(start)
             .duration(duration)
-            .audioCodec('libmp3lame') // Ensure output is always in MP3 format
+            .format('mp3')
+            .audioCodec('libmp3lame')
+            .audioBitrate(128)
             .on('start', (cmd) => {
                 console.log(`Started FFmpeg with command: ${cmd}`);
             })
@@ -43,18 +48,57 @@ const generateUniqueFolderName = () => {
     return uniqueOutputPath;
 }
 
+async function downloadFile(url, outputPath) {
+    try {
+        // Make an HTTP request for the file
+        const response = await axios.get(url, { responseType: 'stream' });
+
+        // Create a writable file stream to save the file
+        const fileStream = fs.createWriteStream(outputPath);
+
+        // Pipe the response data into the file stream
+        response.data.pipe(fileStream);
+
+        // Wait for the file stream to finish writing
+        await new Promise((resolve, reject) => {
+            fileStream.on('finish', resolve);
+            fileStream.on('error', reject);
+        });
+
+        console.log(`Downloaded file saved to: ${outputPath}`);
+    } catch (error) {
+        console.error(`Error downloading file from ${url}:`, error);
+        throw error;
+    }
+}
+
 async function splitMediaFile(inputPath, chunkDurationInSeconds = 600) {
     try {
+        // Create unique folder
+        const uniqueOutputPath = generateUniqueFolderName();
+        fs.mkdirSync(uniqueOutputPath, { recursive: true });
+
+        // Download the file if it's not a local file
+        const isUrl = /^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(inputPath);
+        if (isUrl) {
+            inputPath = ensureEncoded(inputPath);
+            // Extract the original file name from the URL
+            const urlObj = new URL(inputPath);
+            const originalFileName = path.basename(urlObj.pathname);
+
+            // Use the original file name when saving the downloaded file
+            const downloadPath = path.join(uniqueOutputPath, originalFileName);
+            await downloadFile(inputPath, downloadPath);
+            inputPath = downloadPath;
+        }
+
+        
         const metadata = await ffmpegProbe(inputPath);
         const duration = metadata.format.duration;
         const numChunks = Math.ceil((duration - 1) / chunkDurationInSeconds);
 
         const chunkPromises = [];
 
-        const uniqueOutputPath = generateUniqueFolderName();
-
-        // Create unique folder
-        fs.mkdirSync(uniqueOutputPath, { recursive: true });
 
 
         for (let i = 0; i < numChunks; i++) {
@@ -73,7 +117,7 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 600) {
             chunkPromises.push(chunkPromise);
         }
 
-        return { chunkPromises, uniqueOutputPath }
+        return { chunkPromises, uniqueOutputPath };
     } catch (err) {
         console.error('Error occurred during the splitting process:', err);
     }
