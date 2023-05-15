@@ -1,5 +1,6 @@
 import test from 'ava';
-import { getSemanticChunks } from '../graphql/chunker.js';
+import { getSemanticChunks, determineTextFormat } from '../graphql/chunker.js';
+
 import { encode } from 'gpt-3-encoder';
 
 const testText = `Lorem ipsum dolor sit amet, consectetur adipiscing elit. In id erat sem. Phasellus ac dapibus purus, in fermentum nunc. Mauris quis rutrum magna. Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc. Aenean sit amet leo est. Nunc ante ex, blandit et felis ut, iaculis lacinia est. Phasellus dictum orci id libero ullamcorper tempor.
@@ -67,6 +68,101 @@ test('should return identical text that chunker was passed, given tiny chunk siz
     t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
     const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
     t.is(recomposedText, testText); //check recomposition
+});
+
+const htmlChunkOne = `<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. <a href="https://www.google.com">Google</a></p> Vivamus id pharetra odio.   Sed consectetur leo sed tortor dictum venenatis.Donec gravida libero non accumsan suscipit.Donec lectus turpis, ullamcorper eu pulvinar iaculis, ornare ut risus.Phasellus aliquam, turpis quis viverra condimentum, risus est pretium    metus, in porta ipsum tortor vitae elit.Pellentesque id finibus erat.  In suscipit, sapien non posuere dignissim, augue nisl ultrices tortor, sit amet eleifend nibh elit at risus.`
+const htmlVoidElement = `<br>`
+const htmlChunkTwo = `<p><img src="https://www.google.com/googlelogo_color_272x92dp.png"></p>`
+const htmlSelfClosingElement = `<img src="https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png" />`
+const plainTextChunk = 'Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Fusce at dignissim quam.'
+
+test('should throw an error if html cannot be accommodated within the chunk size', async t => {
+    const chunkSize = encode(htmlChunkTwo).length;
+    const error = t.throws(() => getSemanticChunks(htmlChunkTwo, chunkSize - 1));
+    t.is(error.message, 'The HTML contains elements that are larger than the chunk size. Please try again with HTML that has smaller elements.');
+});
+
+test('should chunk text between html elements if needed', async t => {
+    const chunkSize = encode(htmlChunkTwo).length;
+    const chunks = getSemanticChunks(htmlChunkTwo + plainTextChunk + htmlChunkTwo, chunkSize);
+    
+    t.is(chunks.length, 4);
+    t.is(chunks[0], htmlChunkTwo);
+    t.is(chunks[1], 'Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae');
+    t.is(encode(chunks[1]).length, chunkSize);
+    t.is(chunks[2], '; Fusce at dignissim quam.');
+    t.is(chunks[3], htmlChunkTwo);
+});
+
+test('should chunk html element correctly when chunk size is exactly the same as the element length', async t => {
+    const chunkSize = encode(htmlChunkTwo).length;
+    const chunks = getSemanticChunks(htmlChunkTwo, chunkSize);
+    
+    t.is(chunks.length, 1);
+    t.is(chunks[0], htmlChunkTwo);
+});
+
+test('should chunk html element correctly when chunk size is greater than the element length', async t => {
+    const chunkSize = encode(htmlChunkTwo).length;
+    const chunks = getSemanticChunks(htmlChunkTwo, chunkSize + 1);
+    
+    t.is(chunks.length, 1);
+    t.is(chunks[0], htmlChunkTwo);
+});
+
+test('should not break up second html element correctly when chunk size is greater than the first element length', async t => {
+    const chunkSize = encode(htmlChunkTwo).length;
+    const chunks = getSemanticChunks(htmlChunkTwo + htmlChunkTwo, chunkSize + 10);
+    
+    t.is(chunks.length, 2);
+    t.is(chunks[0], htmlChunkTwo);
+    t.is(chunks[1], htmlChunkTwo);
+});
+
+test('should treat text chunks as also unbreakable chunks', async t => {
+    const chunkSize = encode(htmlChunkTwo).length;
+    const chunks = getSemanticChunks(htmlChunkTwo + plainTextChunk + htmlChunkTwo, chunkSize + 20);
+    
+    t.is(chunks.length, 3);
+    t.is(chunks[0], htmlChunkTwo);
+    t.is(chunks[1], plainTextChunk);
+    t.is(chunks[2], htmlChunkTwo);
+});
+
+
+test('should determine format correctly for text only', async t => {
+    const format = determineTextFormat(plainTextChunk);
+    t.is(format, 'text');
+});
+
+test('should determine format correctly for simple html element', async t => {
+    const format = determineTextFormat(htmlChunkTwo);
+    t.is(format, 'html');
+});
+
+test('should determine format correctly for simple html element embedded in text', async t => {
+    const format = determineTextFormat(plainTextChunk + htmlChunkTwo + plainTextChunk);
+    t.is(format, 'html');
+});
+
+test('should determine format correctly for self-closing html element', async t => {
+    const format = determineTextFormat(htmlSelfClosingElement);
+    t.is(format, 'html');
+});
+
+test('should determine format correctly for self-closing html element embedded in text', async t => {
+    const format = determineTextFormat(plainTextChunk + htmlSelfClosingElement + plainTextChunk);
+    t.is(format, 'html');
+});
+
+test('should determine format correctly for void element', async t => {
+    const format = determineTextFormat(htmlVoidElement);
+    t.is(format, 'html');
+});
+
+test('should determine format correctly for void element embedded in text', async t => {
+    const format = determineTextFormat(plainTextChunk + htmlVoidElement + plainTextChunk);
+    t.is(format, 'html');
 });
 
 /*

@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import test from 'ava';
 import { ApolloServer } from 'apollo-server';
 import { config } from '../config.js';

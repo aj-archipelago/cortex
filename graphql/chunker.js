@@ -1,4 +1,5 @@
 import { encode, decode } from 'gpt-3-encoder';
+import cheerio from 'cheerio';
 
 const getLastNToken = (text, maxTokenLen) => { 
     const encoded = encode(text);
@@ -18,7 +19,19 @@ const getFirstNToken = (text, maxTokenLen) => {
     return text;
 }
 
+const determineTextFormat = (text) => {
+  const htmlTagPattern = /<[^>]*>/g;
+  
+  if (htmlTagPattern.test(text)) {
+    return 'html';
+  }
+  else {
+    return 'text';
+  }
+}
+
 const getSemanticChunks = (text, chunkSize) => {
+  const inputFormat = determineTextFormat(text);
 
   const breakByRegex = (str, regex, preserveWhitespace = false) => {
     const result = [];
@@ -45,6 +58,24 @@ const getSemanticChunks = (text, chunkSize) => {
   const breakByParagraphs = (str) => breakByRegex(str, /[\r\n]+/, true);
   const breakBySentences = (str) => breakByRegex(str, /(?<=[.。؟！?!\n])\s+/, true);
   const breakByWords = (str) => breakByRegex(str, /(\s,;:.+)/);
+
+  const breakByHtmlElements = (str) => {
+    const $ = cheerio.load(str, null, true);
+
+    // the .filter() call is important to get the text nodes
+    // https://stackoverflow.com/questions/54878673/cheerio-get-normal-text-nodes
+    let rootNodes = $('body').contents();
+
+    // create an array with the outerHTML of each node
+    const nodes = rootNodes.map((i, el) => $(el).prop('outerHTML') || $(el).text()).get();
+
+    // remove newlines from each node
+    nodes.forEach((node, i) => {
+        nodes[i] = node.replace(/\r?\n|\r/g, " ").trim();
+    });
+
+    return nodes.map(n => n.trim()).filter(n => n);
+};
 
   const createChunks = (tokens) => {
     let chunks = [];
@@ -115,7 +146,28 @@ const getSemanticChunks = (text, chunkSize) => {
     return createChunks([...str]); // Split by characters
   };
 
-  return breakText(text);
+  if (inputFormat === 'html') {
+    const tokens = breakByHtmlElements(text);
+    let chunks = createChunks(tokens);
+    chunks = combineChunks(chunks);
+
+    chunks = chunks.flatMap(chunk => {
+      if (determineTextFormat(chunk) === 'text') {
+        return getSemanticChunks(chunk, chunkSize);
+      } else {
+        return chunk;
+      }
+    });
+
+    if (chunks.some(chunk => encode(chunk).length > chunkSize)) {
+      throw new Error('The HTML contains elements that are larger than the chunk size. Please try again with HTML that has smaller elements.');
+    }
+
+    return chunks;
+  }
+  else {
+      return breakText(text);
+  }
 }
 
 
@@ -133,5 +185,5 @@ const semanticTruncate = (text, maxLength) => {
 };
 
 export {
-    getSemanticChunks, semanticTruncate, getLastNToken, getFirstNToken
+    getSemanticChunks, semanticTruncate, getLastNToken, getFirstNToken, determineTextFormat
 };
