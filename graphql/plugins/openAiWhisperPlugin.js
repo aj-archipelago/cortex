@@ -213,7 +213,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         if (['srt','vtt'].includes(responseFormat)) { // align subtitles for formats
             return alignSubtitles(result);
         }
-        return result.join();
+        return result.join(` `);
     }
 }
 
