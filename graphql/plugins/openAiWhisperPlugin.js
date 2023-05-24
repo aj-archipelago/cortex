@@ -21,7 +21,7 @@ const pipeline = promisify(stream.pipeline);
 const API_URL = config.get('whisperMediaApiUrl');
 
 function alignSubtitles(subtitles) {
-    let result = [];
+    const result = [];
     const offset = 1000 * 60 * 10; // 10 minutes for each chunk
 
     function preprocessStr(str) {
