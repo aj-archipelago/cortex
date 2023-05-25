@@ -4,6 +4,7 @@ export default {
     inputParameters: {
         file: ``,
         language: ``,
+        responseFormat: `text`,
     },
     timeout: 1800, // in seconds
 };
