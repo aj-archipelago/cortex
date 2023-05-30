@@ -19,6 +19,7 @@ const pipeline = promisify(stream.pipeline);
 
 
 const API_URL = config.get('whisperMediaApiUrl');
+const WHISPER_TS_API_URL  = config.get('whisperTSApiUrl');
 
 function alignSubtitles(subtitles) {
     const result = [];
@@ -115,10 +116,26 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, pathwayResolver) {
-        const { responseFormat } = parameters;
+        const { responseFormat, wordTimestamped } = parameters;
         const url = this.requestUrl(text);
         const params = {};
         const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
+
+        const processTS = async (uri) => {
+            if (wordTimestamped) {
+                if (!WHISPER_TS_API_URL) {
+                    throw new Error(`WHISPER_TS_API_URL not set for word timestamped processing`);
+                }
+
+                try {
+                    const res = await axios.get(WHISPER_TS_API_URL, { params: { fileurl: uri } });
+                    return res.data;
+                } catch (err) {
+                    console.log(`Error getting word timestamped data from api:`, err);
+                    throw err;
+                }
+            }
+        }
 
         const processChunk = async (chunk) => {
             try {
@@ -169,7 +186,13 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
             // sequential download of chunks
             for (const uri of uris) {
-                chunks.push(await downloadFile(uri));
+                if (wordTimestamped) { // get word timestamped data 
+                    sendProgress(); // no download needed auto progress 
+                    const ts = await processTS(uri);
+                    result.push(ts);
+                } else {
+                    chunks.push(await downloadFile(uri));
+                }
                 sendProgress();
             }
 
@@ -210,7 +233,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             }
         }
 
-        if (['srt','vtt'].includes(responseFormat)) { // align subtitles for formats
+        if (['srt','vtt'].includes(responseFormat) || wordTimestamped) { // align subtitles for formats
             return alignSubtitles(result);
         }
         return result.join(` `);

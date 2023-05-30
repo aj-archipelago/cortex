@@ -117,6 +117,11 @@ var config = convict({
         default: 'null',
         env: 'WHISPER_MEDIA_API_URL'
     },
+    whisperTSApiUrl: {
+        format: String,
+        default: 'null',
+        env: 'WHISPER_TS_API_URL'
+    },
 });
 
 // Read in environment variables and set up service configuration
