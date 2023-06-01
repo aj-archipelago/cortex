@@ -30,9 +30,7 @@ const determineTextFormat = (text) => {
   }
 }
 
-const getSemanticChunks = (text, chunkSize) => {
-  const inputFormat = determineTextFormat(text);
-
+const getSemanticChunks = (text, chunkSize, inputFormat = 'text') => {
   const breakByRegex = (str, regex, preserveWhitespace = false) => {
     const result = [];
     let match;
@@ -74,7 +72,7 @@ const getSemanticChunks = (text, chunkSize) => {
         nodes[i] = node.replace(/\r?\n|\r/g, " ").trim();
     });
 
-    return nodes.map(n => n.trim()).filter(n => n);
+    return nodes.map(n => n + '\n\n').filter(n => n);
 };
 
   const createChunks = (tokens) => {

@@ -14,6 +14,7 @@ export default {
     typeDef,
     rootResolver,
     resolver,
+    inputFormat: 'text',
     useInputChunking: true,
     useParallelChunkProcessing: false,
     useInputSummarization: false,    
