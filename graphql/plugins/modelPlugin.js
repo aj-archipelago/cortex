@@ -124,41 +124,6 @@ class ModelPlugin {
         return output;
     }
 
-    // convert to OpenAI messages array format if necessary
-    convertPalmToOpenAIMessages(context, examples, messages) {
-        let openAIMessages = [];
-        
-        // Add context as a system message
-        if (context) {
-            openAIMessages.push({
-            role: 'system',
-            content: context,
-            });
-        }
-        
-        // Add examples to the messages array
-        examples.forEach(example => {
-            openAIMessages.push({
-            role: example.input.author || 'user',
-            content: example.input.content,
-            });
-            openAIMessages.push({
-            role: example.output.author || 'assistant',
-            content: example.output.content,
-            });
-        });
-        
-        // Add remaining messages to the messages array
-        messages.forEach(message => {
-            openAIMessages.push({
-            role: message.author,
-            content: message.content,
-            });
-        });
-        
-        return openAIMessages;
-    }
-
     // compile the Prompt    
     getCompiledPrompt(text, parameters, prompt) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
@@ -168,9 +133,9 @@ class ModelPlugin {
         const modelPromptMessagesML = this.messagesToChatML(modelPromptMessages);
 
         if (modelPromptMessagesML) {
-            return { modelPromptMessages, tokenLength: encode(modelPromptMessagesML).length };
+            return { modelPromptMessages, tokenLength: encode(modelPromptMessagesML).length, modelPrompt };
         } else {
-            return { modelPromptText, tokenLength: encode(modelPromptText).length };
+            return { modelPromptText, tokenLength: encode(modelPromptText).length, modelPrompt };
         }
     }
 
@@ -195,27 +160,20 @@ class ModelPlugin {
         if (!modelPrompt.messages) {
             return null;
         }
-
+    
         // First run handlebars compile on the pathway messages
         const compiledMessages = modelPrompt.messages.map((message) => {
             if (message.content) {
                 const compileText = HandleBars.compile(message.content);
-                if (message.author) {
-                    return {
-                        author: message.author,
-                        content: compileText({ ...combinedParameters, text }),
-                    };
-                } else {
-                    return {
-                        role: message.role,
-                        content: compileText({ ...combinedParameters, text }),
-                    };
-                }
+                return {
+                    ...message,
+                    content: compileText({ ...combinedParameters, text }),
+                };
             } else {
                 return message;
             }
         });
-
+    
         // Next add in any parameters that are referenced by name in the array
         const expandedMessages = compiledMessages.flatMap((message) => {
             if (typeof message === 'string') {
@@ -230,7 +188,7 @@ class ModelPlugin {
                 return [message];
             }
         });
-
+     
         return expandedMessages;
     }
 

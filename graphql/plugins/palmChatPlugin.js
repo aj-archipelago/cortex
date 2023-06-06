@@ -2,7 +2,6 @@
 import ModelPlugin from './modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
 import HandleBars from '../../lib/handleBars.js';
-import { auth } from 'google-auth-library';
 
 class PalmChatPlugin extends ModelPlugin {
     constructor(config, pathway) {
@@ -80,17 +79,13 @@ class PalmChatPlugin extends ModelPlugin {
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
     
-        let requestMessages = modelPromptMessages || [{ "author": "user", "content": modelPromptText }];
-    
+        let requestMessages = this.convertMessagesToPalm(modelPromptMessages || [{ "author": "user", "content": modelPromptText }]).messages;
+
         // Check if the token length exceeds the model's max token length
         if (tokenLength > modelTargetTokenLength) {
             // Remove older messages until the token length is within the model's limit
             requestMessages = this.truncateMessagesToTargetLength(requestMessages, modelTargetTokenLength);
         }
-    
-        const palmMessages = this.convertMessagesToPalm(requestMessages);
-
-        requestMessages = palmMessages.messages;
 
         const context = this.getCompiledContext(text, parameters, prompt.context || palmMessages.context || '');
         const examples = this.getCompiledExamples(text, parameters, prompt.examples || []);

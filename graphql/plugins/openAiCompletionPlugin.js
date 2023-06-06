@@ -1,7 +1,6 @@
 // OpenAICompletionPlugin.js
 
 import ModelPlugin from './modelPlugin.js';
-import HandleBars from '../../lib/handleBars.js';
 import { encode } from 'gpt-3-encoder';
 
 // Helper function to truncate the prompt if it is too long
@@ -18,51 +17,6 @@ const truncatePromptIfNecessary = (text, textTokenCount, modelMaxTokenCount, tar
 class OpenAICompletionPlugin extends ModelPlugin {
     constructor(config, pathway) {
         super(config, pathway);
-    }
-
-    // Handlebars compiler for prompt messages array (OpenAI chat specific)
-    getModelPromptMessages(modelPrompt, combinedParameters, text) {
-        if (!modelPrompt.messages) {
-            return null;
-        }
-
-        // First run handlebars compile on the pathway messages
-        const compiledMessages = modelPrompt.messages.map((message) => {
-            if (message.content) {
-                const compileText = HandleBars.compile(message.content);
-                return {
-                    ...message,
-                    content: compileText({ ...combinedParameters, text }),
-                };
-            } else {
-                return message;
-            }
-        });
-
-        // Next add in any parameters that are referenced by name in the array
-        const expandedMessages = compiledMessages.flatMap((message) => {
-            if (typeof message === 'string') {
-                const match = message.match(/{{(.+?)}}/);
-                const placeholder = match ? match[1] : null;
-                if (placeholder === null) {
-                    return message;
-                } else {
-                    return combinedParameters[placeholder] || [];
-                }
-            } else {
-                return [message];
-            }
-        });
-
-        // Check if the messages are in Palm format and convert them to OpenAI format if necessary
-        const isPalmFormat = expandedMessages.some(message => 'author' in message);
-        if (isPalmFormat) {
-            const context = modelPrompt.context || '';
-            const examples = modelPrompt.examples || [];
-            return this.convertPalmToOpenAIMessages(context, examples, expandedMessages);
-        }
-
-        return expandedMessages;
     }
 
     // Set up parameters specific to the OpenAI Completion API

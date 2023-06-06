@@ -1,6 +1,5 @@
 // OpenAIChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
-import HandleBars from '../../lib/handleBars.js';
 import { encode } from 'gpt-3-encoder';
 
 class OpenAIChatPlugin extends ModelPlugin {
@@ -8,60 +7,58 @@ class OpenAIChatPlugin extends ModelPlugin {
         super(config, pathway);
     }
 
-    // Handlebars compiler for prompt messages array (OpenAI chat specific)
-    getModelPromptMessages(modelPrompt, combinedParameters, text) {
-        if (!modelPrompt.messages) {
-            return null;
+    // convert to OpenAI messages array format if necessary
+    convertPalmToOpenAIMessages(context, examples, messages) {
+        let openAIMessages = [];
+        
+        // Add context as a system message
+        if (context) {
+            openAIMessages.push({
+            role: 'system',
+            content: context,
+            });
         }
-
-        // First run handlebars compile on the pathway messages
-        const compiledMessages = modelPrompt.messages.map((message) => {
-            if (message.content) {
-                const compileText = HandleBars.compile(message.content);
-                return {
-                    ...message,
-                    content: compileText({ ...combinedParameters, text }),
-                };
-            } else {
-                return message;
-            }
+        
+        // Add examples to the messages array
+        examples.forEach(example => {
+            openAIMessages.push({
+            role: example.input.author || 'user',
+            content: example.input.content,
+            });
+            openAIMessages.push({
+            role: example.output.author || 'assistant',
+            content: example.output.content,
+            });
         });
-
-        // Next add in any parameters that are referenced by name in the array
-        const expandedMessages = compiledMessages.flatMap((message) => {
-            if (typeof message === 'string') {
-                const match = message.match(/{{(.+?)}}/);
-                const placeholder = match ? match[1] : null;
-                if (placeholder === null) {
-                    return message;
-                } else {
-                    return combinedParameters[placeholder] || [];
-                }
-            } else {
-                return [message];
-            }
+        
+        // Add remaining messages to the messages array
+        messages.forEach(message => {
+            openAIMessages.push({
+            role: message.author,
+            content: message.content,
+            });
         });
-
-        // Check if the messages are in Palm format and convert them to OpenAI format if necessary
-        const isPalmFormat = expandedMessages.some(message => 'author' in message);
-        if (isPalmFormat) {
-            const context = modelPrompt.context || '';
-            const examples = modelPrompt.examples || [];
-            return this.convertPalmToOpenAIMessages(context, examples, expandedMessages);
-        }
-
-        return expandedMessages;
+        
+        return openAIMessages;
     }
 
     // Set up parameters specific to the OpenAI Chat API
     getRequestParameters(text, parameters, prompt) {
-        const { modelPromptText, modelPromptMessages, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
+        const { modelPromptText, modelPromptMessages, tokenLength, modelPrompt } = this.getCompiledPrompt(text, parameters, prompt);
         const { stream } = parameters;
     
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
     
         let requestMessages = modelPromptMessages || [{ "role": "user", "content": modelPromptText }];
+        
+        // Check if the messages are in Palm format and convert them to OpenAI format if necessary
+        const isPalmFormat = requestMessages.some(message => 'author' in message);
+        if (isPalmFormat) {
+            const context = modelPrompt.context || '';
+            const examples = modelPrompt.examples || [];
+            requestMessages = this.convertPalmToOpenAIMessages(context, examples, expandedMessages);
+        }
     
         // Check if the token length exceeds the model's max token length
         if (tokenLength > modelTargetTokenLength) {

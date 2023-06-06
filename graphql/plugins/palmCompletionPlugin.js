@@ -33,6 +33,10 @@ class PalmCompletionPlugin extends ModelPlugin {
         if (max_tokens < 0) {
             throw new Error(`Prompt is too long to successfully call the model at ${tokenLength} tokens.  The model will not be called.`);
         }
+
+        if (!truncatedPrompt) {
+            throw new Error(`Prompt is empty.  The model will not be called.`);
+        }
     
         const requestParameters = {
             instances: [
