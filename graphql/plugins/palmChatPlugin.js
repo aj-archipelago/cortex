@@ -37,8 +37,9 @@ class PalmChatPlugin extends ModelPlugin {
             }
         });
     
+        // Ensure modifiedMessages has an odd number of messages by removing the earliest message if the length is even
         return {
-            messages: modifiedMessages,
+            messages: (modifiedMessages.length % 2 === 0) ? modifiedMessages.slice(1) : modifiedMessages,
             context,
         };
     }
@@ -79,7 +80,9 @@ class PalmChatPlugin extends ModelPlugin {
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
     
-        let requestMessages = this.convertMessagesToPalm(modelPromptMessages || [{ "author": "user", "content": modelPromptText }]).messages;
+        const palmMessages = this.convertMessagesToPalm(modelPromptMessages || [{ "author": "user", "content": modelPromptText }]);
+        
+        let requestMessages = palmMessages.messages;
 
         // Check if the token length exceeds the model's max token length
         if (tokenLength > modelTargetTokenLength) {
@@ -99,7 +102,7 @@ class PalmChatPlugin extends ModelPlugin {
         const requestParameters = {
             instances: [{
                 context: context,
-                examples: prompt.examples || [],
+                examples: examples,
                 messages: requestMessages,
             }],
             parameters: {
@@ -179,7 +182,7 @@ class PalmChatPlugin extends ModelPlugin {
     
         const instances = data && data.instances;
         const messages = instances && instances[0] && instances[0].messages;
-        const { context, examples } = prompt || {};
+        const { context, examples } = instances && instances [0] || {};
     
         if (context) {
             console.log(`\x1b[36mContext: ${context}\x1b[0m`);
