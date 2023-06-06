@@ -62,7 +62,7 @@ class ModelPlugin {
             const message = tokenLengths[index].message;
 
             // Skip system messages
-            if (message.role === 'system') {
+            if (message.role && message.role === 'system') {
                 index++;
                 continue;
             }
@@ -113,7 +113,7 @@ class ModelPlugin {
         let output = "";
         if (messages && messages.length) {
             for (let message of messages) {
-                output += (message.role && (message.content || message.content === '')) ? `<|im_start|>${message.role}\n${message.content}\n<|im_end|>\n` : `${message}\n`;
+                output += ((message.author || message.role) && (message.content || message.content === '')) ? `<|im_start|>${(message.author || message.role)}\n${message.content}\n<|im_end|>\n` : `${message}\n`;
             }
             // you always want the assistant to respond next so add a
             // directive for that
@@ -124,6 +124,42 @@ class ModelPlugin {
         return output;
     }
 
+    // convert to OpenAI messages array format if necessary
+    convertPalmToOpenAIMessages(context, examples, messages) {
+        let openAIMessages = [];
+        
+        // Add context as a system message
+        if (context) {
+            openAIMessages.push({
+            role: 'system',
+            content: context,
+            });
+        }
+        
+        // Add examples to the messages array
+        examples.forEach(example => {
+            openAIMessages.push({
+            role: example.input.author || 'user',
+            content: example.input.content,
+            });
+            openAIMessages.push({
+            role: example.output.author || 'assistant',
+            content: example.output.content,
+            });
+        });
+        
+        // Add remaining messages to the messages array
+        messages.forEach(message => {
+            openAIMessages.push({
+            role: message.author,
+            content: message.content,
+            });
+        });
+        
+        return openAIMessages;
+    }
+
+    // compile the Prompt    
     getCompiledPrompt(text, parameters, prompt) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const modelPrompt = this.getModelPrompt(prompt, parameters);
@@ -147,12 +183,11 @@ class ModelPlugin {
         return this.promptParameters.inputParameters?.tokenRatio ?? this.promptParameters.tokenRatio ?? DEFAULT_PROMPT_TOKEN_RATIO;
     }
 
-
     getModelPrompt(prompt, parameters) {
         if (typeof(prompt) === 'function') {
-        return prompt(parameters);
+            return prompt(parameters);
         } else {
-        return prompt;
+            return prompt;
         }
     }
 
@@ -165,10 +200,17 @@ class ModelPlugin {
         const compiledMessages = modelPrompt.messages.map((message) => {
             if (message.content) {
                 const compileText = HandleBars.compile(message.content);
-                return {
-                    role: message.role,
-                    content: compileText({ ...combinedParameters, text }),
-                };
+                if (message.author) {
+                    return {
+                        author: message.author,
+                        content: compileText({ ...combinedParameters, text }),
+                    };
+                } else {
+                    return {
+                        role: message.role,
+                        content: compileText({ ...combinedParameters, text }),
+                    };
+                }
             } else {
                 return message;
             }
@@ -197,44 +239,17 @@ class ModelPlugin {
         return generateUrl({ ...this.model, ...this.environmentVariables, ...this.config });
     }
 
-    //simples form string single or list return
-    parseResponse(data) {
-        const { choices } = data;
-        if (!choices || !choices.length) {
-            if (Array.isArray(data) && data.length > 0 && data[0].translations) {
-                return data[0].translations[0].text.trim();
-            } else {
-                return data;
-            }
-        }
+    // Default response parsing
+    parseResponse(data) { return data; };
 
-        // if we got a choices array back with more than one choice, return the whole array
-        if (choices.length > 1) {
-            return choices;
-        }
-
-        // otherwise, return the first choice
-        const textResult = choices[0].text && choices[0].text.trim();
-        const messageResult = choices[0].message && choices[0].message.content && choices[0].message.content.trim();
-
-        return messageResult ?? textResult ?? null;
-    }
-
+    // Default simple logging
     logRequestData(data, responseData, prompt) {
         const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
         console.log(separator);
     
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
     
-        if (data && data.messages && data.messages.length > 1) {
-            data.messages.forEach((message, index) => {
-                const words = message.content.split(" ");
-                const tokenCount = encode(message.content).length;
-                const preview = words.length < 41 ? message.content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
-    
-                console.log(`\x1b[36mMessage ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"\x1b[0m`);
-            });
-        } else {
+        if (modelInput) {
             console.log(`\x1b[36m${modelInput}\x1b[0m`);
         }
     

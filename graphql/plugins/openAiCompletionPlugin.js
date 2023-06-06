@@ -1,7 +1,7 @@
 // OpenAICompletionPlugin.js
 
 import ModelPlugin from './modelPlugin.js';
-
+import HandleBars from '../../lib/handleBars.js';
 import { encode } from 'gpt-3-encoder';
 
 // Helper function to truncate the prompt if it is too long
@@ -18,6 +18,51 @@ const truncatePromptIfNecessary = (text, textTokenCount, modelMaxTokenCount, tar
 class OpenAICompletionPlugin extends ModelPlugin {
     constructor(config, pathway) {
         super(config, pathway);
+    }
+
+    // Handlebars compiler for prompt messages array (OpenAI chat specific)
+    getModelPromptMessages(modelPrompt, combinedParameters, text) {
+        if (!modelPrompt.messages) {
+            return null;
+        }
+
+        // First run handlebars compile on the pathway messages
+        const compiledMessages = modelPrompt.messages.map((message) => {
+            if (message.content) {
+                const compileText = HandleBars.compile(message.content);
+                return {
+                    ...message,
+                    content: compileText({ ...combinedParameters, text }),
+                };
+            } else {
+                return message;
+            }
+        });
+
+        // Next add in any parameters that are referenced by name in the array
+        const expandedMessages = compiledMessages.flatMap((message) => {
+            if (typeof message === 'string') {
+                const match = message.match(/{{(.+?)}}/);
+                const placeholder = match ? match[1] : null;
+                if (placeholder === null) {
+                    return message;
+                } else {
+                    return combinedParameters[placeholder] || [];
+                }
+            } else {
+                return [message];
+            }
+        });
+
+        // Check if the messages are in Palm format and convert them to OpenAI format if necessary
+        const isPalmFormat = expandedMessages.some(message => 'author' in message);
+        if (isPalmFormat) {
+            const context = modelPrompt.context || '';
+            const examples = modelPrompt.examples || [];
+            return this.convertPalmToOpenAIMessages(context, examples, expandedMessages);
+        }
+
+        return expandedMessages;
     }
 
     // Set up parameters specific to the OpenAI Completion API
@@ -52,7 +97,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
                 frequency_penalty: 0,
                 presence_penalty: 0,
                 stop: ["<|im_end|>"],
-                stream
+                ...(stream !== undefined ? { stream } : {}),
             };
         } else {
 
@@ -83,7 +128,38 @@ class OpenAICompletionPlugin extends ModelPlugin {
         const data = { ...(this.model.params || {}), ...requestParameters };
         const params = {};
         const headers = this.model.headers || {};
+        
         return this.executeRequest(url, data, params, headers, prompt);
+    }
+
+    // Parse the response from the OpenAI Completion API
+    parseResponse(data) {
+        const { choices } = data;
+        if (!choices || !choices.length) {
+            return data;
+        }
+
+        // if we got a choices array back with more than one choice, return the whole array
+        if (choices.length > 1) {
+            return choices;
+        }
+
+        // otherwise, return the first choice
+        const textResult = choices[0].text && choices[0].text.trim();
+        return textResult ?? null;
+    }
+
+    // Override the logging function to log the prompt and response
+    logRequestData(data, responseData, prompt) {
+        const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
+        console.log(separator);
+    
+        const modelInput = data.prompt;
+    
+        console.log(`\x1b[36m${modelInput}\x1b[0m`);
+        console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+    
+        prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
     }
 }
 
