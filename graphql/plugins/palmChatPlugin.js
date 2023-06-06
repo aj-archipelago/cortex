@@ -179,7 +179,18 @@ class PalmChatPlugin extends ModelPlugin {
     
         const instances = data && data.instances;
         const messages = instances && instances[0] && instances[0].messages;
+        const { context, examples } = prompt || {};
     
+        if (context) {
+            console.log(`\x1b[36mContext: ${context}\x1b[0m`);
+        }
+
+        if (examples && examples.length) {
+            examples.forEach((example, index) => {
+                console.log(`\x1b[36mExample ${index + 1}: Input: "${example.input.content}", Output: "${example.output.content}"\x1b[0m`);
+            });
+        }
+        
         if (messages && messages.length > 1) {
             messages.forEach((message, index) => {
                 const words = message.content.split(" ");
