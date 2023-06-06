@@ -15,13 +15,11 @@ test('convertMessagesToPalm', (t) => {
     { role: 'system', content: 'System Message' },
     { role: 'user', content: 'User Message' },
     { role: 'user', content: 'User Message 2'},
-    { role: 'assistant', content: 'Assistant Message' },
   ];
 
   const expectedResult = {
     messages: [
       { author: 'user', content: 'User Message\nUser Message 2' },
-      { author: 'assistant', content: 'Assistant Message' },
     ],
     context: 'System Message',
   };
@@ -34,13 +32,11 @@ test('convertMessagesToPalm - already PaLM format', (t) => {
     const messages = [
       { author: 'user', content: 'User Message' },
       { author: 'user', content: 'User Message 2'},
-      { author: 'assistant', content: 'Assistant Message' },
     ];
   
     const expectedResult = {
       messages: [
         { author: 'user', content: 'User Message\nUser Message 2' },
-        { author: 'assistant', content: 'Assistant Message' },
       ],
       context: '',
     };
@@ -53,13 +49,11 @@ test('convertMessagesToPalm - already PaLM format', (t) => {
     const messages = [
       { role: '', content: 'Empty role message' },
       { role: 'user', content: 'User Message' },
-      { role: 'assistant', content: 'Assistant Message' },
     ];
   
     const expectedResult = {
       messages: [
         { author: 'user', content: 'User Message' },
-        { author: 'assistant', content: 'Assistant Message' },
       ],
       context: '',
     };
@@ -73,13 +67,11 @@ test('convertMessagesToPalm - already PaLM format', (t) => {
       { role: 'system', content: 'System Message 1' },
       { role: 'system', content: 'System Message 2' },
       { role: 'user', content: 'User Message' },
-      { role: 'assistant', content: 'Assistant Message' },
     ];
   
     const expectedResult = {
       messages: [
         { author: 'user', content: 'User Message' },
-        { author: 'assistant', content: 'Assistant Message' },
       ],
       context: 'System Message 1\nSystem Message 2',
     };
@@ -176,6 +168,7 @@ test('getRequestParameters', (t) => {
     { role: 'system', content: 'System Message' },
     { role: 'user', content: 'Hello' },
     { role: 'assistant', content: 'What can I do for you?' },
+    { role: 'user', content: 'Be my assistant!' },
   ];
   const prompt = { context: '{{text}} from {{name}}', examples: [], messages };
 
