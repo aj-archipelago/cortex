@@ -62,7 +62,7 @@ class ModelPlugin {
             const message = tokenLengths[index].message;
 
             // Skip system messages
-            if (message.role && message.role === 'system') {
+            if (message?.role === 'system') {
                 index++;
                 continue;
             }
