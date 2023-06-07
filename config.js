@@ -79,6 +79,7 @@ var config = convict({
                 "params": {
                     "model": "{{openaiDefaultModel}}"
                 },
+                "requestsPerSecond": 2,
             },
             "oai-whisper": {
                 "type": "OPENAI_WHISPER",

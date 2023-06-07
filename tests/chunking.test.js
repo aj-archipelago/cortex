@@ -13,7 +13,7 @@ test.after.always(async () => {
 });
 
 test('chunking test of translate endpoint with huge text', async t => {
-    t.timeout(360000);
+    t.timeout(400000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!, $to: String) { translate(text: $text, to: $to) { result } }',
         variables: {
@@ -64,7 +64,7 @@ Mauris diam dolor, maximus et ultrices sed, semper sed felis.Morbi ac eros tellu
 });
 
 test('chunking test of translate endpoint with single long text sentence', async t => {
-    t.timeout(360000);
+    t.timeout(400000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!) { translate(text: $text) { result } }',
         variables: {
@@ -77,7 +77,7 @@ test('chunking test of translate endpoint with single long text sentence', async
 });
 
 test('chunking test of translate endpoint with two long text sentence', async t => {
-    t.timeout(360000);
+    t.timeout(400000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!) { translate(text: $text) { result } }',
         variables: {
@@ -90,7 +90,7 @@ test('chunking test of translate endpoint with two long text sentence', async t 
 });
 
 test('chunking test...', async t => {
-    t.timeout(360000);
+    t.timeout(400000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!, $to: String) { translate(text: $text, to: $to) { result } }',
         variables: {
