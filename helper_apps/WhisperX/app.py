@@ -1,15 +1,19 @@
 import uvicorn
 from fastapi import FastAPI
-import stable_whisper
 from uuid import uuid4
-import requests
 import os
+import requests
+import asyncio
+import whisper
+from whisper.utils import get_writer
 
-model = stable_whisper.load_model('large') 
+model_download_root = './models'
+model = whisper.load_model("large", download_root=model_download_root) #large, tiny
+
 
 app = FastAPI()
 
-save_directory = "./tmp" # folder for downloaded files
+save_directory = "./tmp"  # folder for downloaded files
 os.makedirs(save_directory, exist_ok=True)
 
 
@@ -37,26 +41,23 @@ def delete_tmp_file(file_path):
         print(f"Error: {e.strerror}")
 
 
-
-@app.get("/")
-async def root(fileurl: str):
-    if not fileurl:
-        return "No fileurl given!"
-    
+def transcribe(fileurl):
     print(f"Downloading file from: {fileurl}")
-    [unique_file_name, save_path] = download_remote_file(fileurl, save_directory)
+    [unique_file_name, save_path] = download_remote_file(
+        fileurl, save_directory)
     print(f"Downloaded file saved as: {unique_file_name}")
-    
-    print(f"Transcribing file")
-    result = model.transcribe(save_path)
 
-    
+    print(f"Transcribing file")
+    result = model.transcribe(save_path, word_timestamps=True)
+
     srtpath = os.path.join(save_directory, str(uuid4()) + ".srt")
 
     print(f"Saving transcription as : {srtpath}")
-    result.to_srt_vtt(srtpath, segment_level=False)
+    writer = get_writer("srt", save_directory)
+    with open(srtpath, 'w', encoding='utf-8') as file_obj :
+        writer.write_result(result, file_obj)
 
-    with open(srtpath,"r") as f:
+    with open(srtpath, "r") as f:
         srtstr = f.read()
 
     # clean up tmp files
@@ -67,5 +68,15 @@ async def root(fileurl: str):
     return srtstr
 
 
+@app.get("/")
+async def root(fileurl: str):
+    if not fileurl:
+        return "No fileurl given!"
+
+    result = await asyncio.to_thread(transcribe, fileurl)
+
+    return result
+
 if __name__ == "__main__":
+    print("Starting APPWhisper server", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=8000)
