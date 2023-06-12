@@ -71,7 +71,7 @@ class PalmChatPlugin extends ModelPlugin {
         }));
     }
 
-    // Set up parameters specific to the OpenAI Chat API
+    // Set up parameters specific to the PaLM Chat API
     getRequestParameters(text, parameters, prompt) {
         const { modelPromptText, modelPromptMessages, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
         const { stream } = parameters;
@@ -91,7 +91,9 @@ class PalmChatPlugin extends ModelPlugin {
 
         const context = this.getCompiledContext(text, parameters, prompt.context || palmMessages.context || '');
         const examples = this.getCompiledExamples(text, parameters, prompt.examples || []);
-
+        
+        // For PaLM right now, the max return tokens is 1024, regardless of the max context length
+        // I can't think of a time you'd want to constrain it to fewer at the moment.
         const max_tokens = 1024//this.getModelMaxTokenLength() - tokenLength;
     
         if (max_tokens < 0) {
@@ -120,7 +122,7 @@ class PalmChatPlugin extends ModelPlugin {
         return requestParameters;
     }
 
-    // Get the safetyAttributes from the PaLM API Text Completion API response data
+    // Get the safetyAttributes from the PaLM Chat API response data
     getSafetyAttributes(data) {
         const { predictions } = data;
         if (!predictions || !predictions.length) {
@@ -136,7 +138,7 @@ class PalmChatPlugin extends ModelPlugin {
         return predictions[0].safetyAttributes ?? null;
     }
 
-    // Execute the request to the OpenAI Chat API
+    // Execute the request to the PaLM Chat API
     async execute(text, parameters, prompt) {
         const url = this.requestUrl(text);
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
