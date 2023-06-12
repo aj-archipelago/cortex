@@ -6,6 +6,7 @@ import requests
 import asyncio
 import whisper
 from whisper.utils import get_writer
+import io
 
 model_download_root = './models'
 model = whisper.load_model("large", download_root=model_download_root) #large, tiny
@@ -40,7 +41,26 @@ def delete_tmp_file(file_path):
     except OSError as e:
         print(f"Error: {e.strerror}")
 
-
+def modify_segments(result):
+    modified_segments = []
+    
+    id = 0
+    for segment in result["segments"]:
+        for word_info in segment['words']:
+            word = word_info['word']
+            start = word_info['start']
+            end = word_info['end']
+            
+            modified_segment = {} #segment.copy()
+            modified_segment['id'] = id
+            modified_segment['text'] = word
+            modified_segment['start'] = start
+            modified_segment['end'] = end
+            modified_segments.append(modified_segment)
+            id+=1
+    
+    result["segments"] = modified_segments
+    
 def transcribe(fileurl):
     print(f"Downloading file from: {fileurl}")
     [unique_file_name, save_path] = download_remote_file(
@@ -49,6 +69,8 @@ def transcribe(fileurl):
 
     print(f"Transcribing file")
     result = model.transcribe(save_path, word_timestamps=True)
+
+    modify_segments(result)
 
     srtpath = os.path.join(save_directory, str(uuid4()) + ".srt")
 
