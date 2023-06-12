@@ -37,9 +37,8 @@ class PalmChatPlugin extends ModelPlugin {
             }
         });
     
-        // Ensure modifiedMessages has an odd number of messages by removing the earliest message if the length is even
         return {
-            messages: (modifiedMessages.length % 2 === 0) ? modifiedMessages.slice(1) : modifiedMessages,
+            modifiedMessages,
             context,
         };
     }
@@ -82,7 +81,7 @@ class PalmChatPlugin extends ModelPlugin {
     
         const palmMessages = this.convertMessagesToPalm(modelPromptMessages || [{ "author": "user", "content": modelPromptText }]);
         
-        let requestMessages = palmMessages.messages;
+        let requestMessages = palmMessages.modifiedMessages;
 
         // Check if the token length exceeds the model's max token length
         if (tokenLength > modelTargetTokenLength) {
@@ -99,6 +98,11 @@ class PalmChatPlugin extends ModelPlugin {
             throw new Error(`Prompt is too long to successfully call the model at ${tokenLength} tokens.  The model will not be called.`);
         }
     
+        // Ensure there are an even number of messages (PaLM requires an even number of messages)
+        if (requestMessages.length % 2 === 0) {
+            requestMessages = requestMessages.slice(1);
+        }
+
         const requestParameters = {
             instances: [{
                 context: context,
