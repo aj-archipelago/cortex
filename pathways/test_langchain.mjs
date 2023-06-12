@@ -1,4 +1,4 @@
-// lc_test.js
+// test_langchain.mjs
 // LangChain Cortex integration test
 
 // Import required modules

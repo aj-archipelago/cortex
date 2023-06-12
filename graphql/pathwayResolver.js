@@ -289,7 +289,15 @@ class PathwayResolver {
         if (requestState[this.requestId].canceled) {
             return;
         }
-        const result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt, this);
+        let result = '';
+
+        // If this text is empty, skip applying the prompt as it will likely be a nonsensical result
+        if (!/^\s*$/.test(text)) {
+            result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt, this);
+        } else {
+            result = text;
+        }
+        
         requestState[this.requestId].completedCount++;
 
         const { completedCount, totalCount } = requestState[this.requestId];
