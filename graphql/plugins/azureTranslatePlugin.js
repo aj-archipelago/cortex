@@ -35,6 +35,28 @@ class AzureTranslatePlugin extends ModelPlugin {
 
         return this.executeRequest(url, data, params, headers, prompt);
     }
+    
+    // Parse the response from the Azure Translate API
+    parseResponse(data) {
+        if (Array.isArray(data) && data.length > 0 && data[0].translations) {
+            return data[0].translations[0].text.trim();
+        } else {
+            return data;
+        }
+    }
+    
+    // Override the logging function to display the request and response
+    logRequestData(data, responseData, prompt) {
+        const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
+        console.log(separator);
+    
+        const modelInput = data[0].Text;
+    
+        console.log(`\x1b[36m${modelInput}\x1b[0m`);
+        console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+    
+        prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
+    }
 }
 
 export default AzureTranslatePlugin;

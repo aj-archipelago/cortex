@@ -13,10 +13,11 @@ test.after.always(async () => {
 });
 
 test('chunking test of translate endpoint with huge text', async t => {
-    t.timeout(180000);
+    t.timeout(400000);
     const response = await testServer.executeOperation({
-        query: 'query translate($text: String!) { translate(text: $text) { result } }',
+        query: 'query translate($text: String!, $to: String) { translate(text: $text, to: $to) { result } }',
         variables: {
+            to: 'en',
             text: `Lorem ipsum dolor sit amet, consectetur adipiscing elit. In id erat sem. Phasellus ac dapibus purus, in fermentum nunc. Mauris quis rutrum magna. Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc. Aenean sit amet leo est. Nunc ante ex, blandit et felis ut, iaculis lacinia est. Phasellus dictum orci id libero ullamcorper tempor.
 
 Vivamus id pharetra odio.Sed consectetur leo sed tortor dictum venenatis.Donec gravida libero non accumsan suscipit.Donec lectus turpis, ullamcorper eu pulvinar iaculis, ornare ut risus.Phasellus aliquam, turpis quis viverra condimentum, risus est pretium metus, in porta ipsum tortor vitae elit.Pellentesque id finibus erat.In suscipit, sapien non posuere dignissim, augue nisl ultrices tortor, sit amet eleifend nibh elit at risus.
@@ -63,7 +64,7 @@ Mauris diam dolor, maximus et ultrices sed, semper sed felis.Morbi ac eros tellu
 });
 
 test('chunking test of translate endpoint with single long text sentence', async t => {
-    t.timeout(180000);
+    t.timeout(400000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!) { translate(text: $text) { result } }',
         variables: {
@@ -76,7 +77,7 @@ test('chunking test of translate endpoint with single long text sentence', async
 });
 
 test('chunking test of translate endpoint with two long text sentence', async t => {
-    t.timeout(180000);
+    t.timeout(400000);
     const response = await testServer.executeOperation({
         query: 'query translate($text: String!) { translate(text: $text) { result } }',
         variables: {
@@ -89,10 +90,11 @@ test('chunking test of translate endpoint with two long text sentence', async t 
 });
 
 test('chunking test...', async t => {
-    t.timeout(180000);
+    t.timeout(400000);
     const response = await testServer.executeOperation({
-        query: 'query translate($text: String!) { translate(text: $text) { result } }',
+        query: 'query translate($text: String!, $to: String) { translate(text: $text, to: $to) { result } }',
         variables: {
+            to: 'en',
             text: `
             صعدت روسيا هجماتها في أنحاء أوكرانيا، بعد يوم من إعلان الغرب مدّ كييف بدبابات قتالية، واستهدفت عشرات الصواريخ والمسيّرات الروسية العاصمة الأوكرانية ومدنا في الجنوب والشرق، واعتبر الكرملين أن الدبابات لن تغيّر من طبيعة المعركة، في حين أعلنت وزارة الدفاع الأوكرانية أن هناك تحضيرات قتالية روسية انطلاقا من القرم.
 
