@@ -176,7 +176,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         let chunks = []; // array of local file paths
         try {
-
             const uris = await this.getMediaChunks(file, requestId); // array of remote file uris
             if (!uris || !uris.length) {
                 throw new Error(`Error in getting chunks from media helper for file ${file}`);
