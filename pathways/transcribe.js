@@ -7,7 +7,7 @@ export default {
         responseFormat: `text`,
         wordTimestamped: false,
     },
-    timeout: 1800, // in seconds
+    timeout: 3600, // in seconds
 };
 
 
