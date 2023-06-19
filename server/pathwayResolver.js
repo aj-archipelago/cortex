@@ -283,7 +283,7 @@ class PathwayResolver {
         let result = '';
 
         // If this text is empty, skip applying the prompt as it will likely be a nonsensical result
-        if (!/^\s*$/.test(text)) {
+        if (!/^\s*$/.test(text) || parameters?.file) {
             result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt, this);
         } else {
             result = text;

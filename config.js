@@ -120,6 +120,11 @@ var config = convict({
         default: 'null',
         env: 'WHISPER_MEDIA_API_URL'
     },
+    whisperTSApiUrl: {
+        format: String,
+        default: 'null',
+        env: 'WHISPER_TS_API_URL'
+    },
     gcpServiceAccountKey: {
         format: String,
         default: null,
