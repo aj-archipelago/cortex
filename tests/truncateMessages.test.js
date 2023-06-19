@@ -1,6 +1,6 @@
 // ModelPlugin.test.js
 import test from 'ava';
-import ModelPlugin from '../graphql/plugins/modelPlugin.js';
+import ModelPlugin from '../server/plugins/modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
 import { mockConfig, mockPathwayString } from './mocks.js';
 

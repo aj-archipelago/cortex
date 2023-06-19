@@ -90,7 +90,7 @@ class OpenAIChatPlugin extends ModelPlugin {
     parseResponse(data) {
         const { choices } = data;
         if (!choices || !choices.length) {
-            return null;
+            return data;
         }
 
         // if we got a choices array back with more than one choice, return the whole array
@@ -108,8 +108,9 @@ class OpenAIChatPlugin extends ModelPlugin {
         const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
         console.log(separator);
     
-        if (data && data.messages && data.messages.length > 1) {
-            data.messages.forEach((message, index) => {
+        const { stream, messages } = data;
+        if (messages && messages.length > 1) {
+            messages.forEach((message, index) => {
                 const words = message.content.split(" ");
                 const tokenCount = encode(message.content).length;
                 const preview = words.length < 41 ? message.content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
@@ -117,11 +118,15 @@ class OpenAIChatPlugin extends ModelPlugin {
                 console.log(`\x1b[36mMessage ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"\x1b[0m`);
             });
         } else {
-            console.log(`\x1b[36m${data.messages[0].content}\x1b[0m`);
+            console.log(`\x1b[36m${messages[0].content}\x1b[0m`);
         }
     
-        console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
-    
+        if (stream) {
+            console.log(`\x1b[34m> Response is streaming...\x1b[0m`);
+        } else {
+            console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+        }
+
         prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
     }
 }

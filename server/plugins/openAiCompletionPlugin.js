@@ -108,10 +108,16 @@ class OpenAICompletionPlugin extends ModelPlugin {
         const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
         console.log(separator);
     
+        const stream = data.stream;
         const modelInput = data.prompt;
     
         console.log(`\x1b[36m${modelInput}\x1b[0m`);
-        console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+
+        if (stream) {
+            console.log(`\x1b[34m> Response is streaming...\x1b[0m`);
+        } else {
+            console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+        }
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
     }

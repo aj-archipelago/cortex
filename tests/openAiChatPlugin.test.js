@@ -1,5 +1,5 @@
 import test from 'ava';
-import OpenAIChatPlugin from '../graphql/plugins/openAiChatPlugin.js';
+import OpenAIChatPlugin from '../server/plugins/openAiChatPlugin.js';
 import { mockConfig, mockPathwayString, mockPathwayFunction, mockPathwayMessages } from './mocks.js';
 
 // Test the constructor

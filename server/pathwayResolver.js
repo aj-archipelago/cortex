@@ -42,66 +42,57 @@ class PathwayResolver {
     }
 
     async asyncResolve(args) {
-        // Wait with a sleep promise for the race condition to resolve
-        // const results = await Promise.all([this.promptAndParse(args), await new Promise(resolve => setTimeout(resolve, 250))]);
-        const data = await this.promptAndParse(args);
-        // Process the results for async
-        if(args.async || typeof data === 'string') { // if async flag set or processed async and got string response
+        const responseData = await this.promptAndParse(args);
+
+        // Either we're dealing with an async request or a stream
+        if(args.async || typeof responseData === 'string') {
             const { completedCount, totalCount } = requestState[this.requestId];
-            requestState[this.requestId].data = data;
+            requestState[this.requestId].data = responseData;
             pubsub.publish('REQUEST_PROGRESS', {
                 requestProgress: {
                     requestId: this.requestId,
                     progress: completedCount / totalCount,
-                    data: JSON.stringify(data),
+                    data: JSON.stringify(responseData),
                 }
             });
-        } else { //stream
-            for (const handle of data) {
-                handle.on('data', data => {
-                    console.log(data.toString());
-                    const lines = data.toString().split('\n').filter(line => line.trim() !== '');
-                    for (const line of lines) {
-                        const message = line.replace(/^data: /, '');
-                        if (message === '[DONE]') {
-                            // Send stream finished message
-                            pubsub.publish('REQUEST_PROGRESS', {
-                                requestProgress: {
-                                    requestId: this.requestId,
-                                    data: null,
-                                    progress: 1,
-                                }
-                            });
-                            return; // Stream finished
-                        }
-                        try {
-                            const parsed = JSON.parse(message);
-                            const result = this.pathwayPrompter.plugin.parseResponse(parsed)
-
-                            pubsub.publish('REQUEST_PROGRESS', {
-                                requestProgress: {
-                                    requestId: this.requestId,
-                                    data: JSON.stringify(result)
-                                }
-                            });
-                        } catch (error) {
-                            console.error('Could not JSON parse stream message', message, error);
-                        }
+        } else { // stream
+            const incomingMessage = Array.isArray(responseData) && responseData.length > 0 ? responseData[0] : responseData;
+            incomingMessage.on('data', data => {
+                const events = data.toString().split('\n');
+        
+                events.forEach(event => {
+                    if (event.trim() === '') return; // Skip empty lines
+        
+                    const message = event.replace(/^data: /, '');
+                    
+                    console.log(`====================================`);
+                    console.log(`STREAM EVENT: ${event}`);
+                    //console.log(`MESSAGE: ${message}`);
+        
+                    const requestProgress = {
+                        requestId: this.requestId,
+                        data: message,
+                    }
+        
+                    if (message.trim() === '[DONE]') {
+                        requestProgress.progress = 1;
+                    }
+        
+                    try {
+                        pubsub.publish('REQUEST_PROGRESS', {
+                            requestProgress: requestProgress
+                        });
+                    } catch (error) {
+                        console.error('Could not JSON parse stream message', message, error);
                     }
                 });
-
-                // data.on('end', () => {
-                //     console.log("stream done");
-                // });
-            }
-            
+            });
         }
     }
 
     async resolve(args) {
+        // Either we're dealing with an async request, stream, or regular request
         if (args.async || args.stream) {
-            // Asyncronously process the request
-            // this.asyncResolve(args);
             if (!requestState[this.requestId]) {
                 requestState[this.requestId] = {}
             }

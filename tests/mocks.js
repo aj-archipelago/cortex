@@ -1,4 +1,4 @@
-import { Prompt } from '../graphql/prompt.js';
+import { Prompt } from '../server/prompt.js';
 
 export const mockConfig = {
     get: (key) => {

@@ -1,6 +1,6 @@
 // test_palmChatPlugin.js
 import test from 'ava';
-import PalmChatPlugin from '../graphql/plugins/palmChatPlugin.js';
+import PalmChatPlugin from '../server/plugins/palmChatPlugin.js';
 import { mockConfig } from './mocks.js';
 
 test.beforeEach((t) => {
@@ -18,7 +18,7 @@ test('convertMessagesToPalm', (t) => {
   ];
 
   const expectedResult = {
-    messages: [
+    modifiedMessages: [
       { author: 'user', content: 'User Message\nUser Message 2' },
     ],
     context: 'System Message',
@@ -35,7 +35,7 @@ test('convertMessagesToPalm - already PaLM format', (t) => {
     ];
   
     const expectedResult = {
-      messages: [
+      modifiedMessages: [
         { author: 'user', content: 'User Message\nUser Message 2' },
       ],
       context: '',
@@ -52,7 +52,7 @@ test('convertMessagesToPalm - already PaLM format', (t) => {
     ];
   
     const expectedResult = {
-      messages: [
+      modifiedMessages: [
         { author: 'user', content: 'User Message' },
       ],
       context: '',
@@ -70,7 +70,7 @@ test('convertMessagesToPalm - already PaLM format', (t) => {
     ];
   
     const expectedResult = {
-      messages: [
+      modifiedMessages: [
         { author: 'user', content: 'User Message' },
       ],
       context: 'System Message 1\nSystem Message 2',
@@ -90,7 +90,7 @@ test('convertMessagesToPalm - already PaLM format', (t) => {
     ];
   
     const expectedResult = {
-      messages: [
+      modifiedMessages: [
         { author: 'user1', content: 'User1 Message\nUser1 Message 2' },
         { author: 'user2', content: 'User2 Message' },
         { author: 'assistant', content: 'Assistant Message' },
@@ -106,7 +106,7 @@ test('convertMessagesToPalm - already PaLM format', (t) => {
     const messages = [];
   
     const expectedResult = {
-      messages: [],
+      modifiedMessages: [],
       context: '',
     };
   
@@ -121,7 +121,7 @@ test('convertMessagesToPalm - already PaLM format', (t) => {
     ];
   
     const expectedResult = {
-      messages: [],
+      modifiedMessages: [],
       context: 'System Message 1\nSystem Message 2',
     };
   
