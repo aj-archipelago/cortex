@@ -6,6 +6,7 @@ import OpenAIWhisperPlugin from './plugins/openAiWhisperPlugin.js';
 import LocalModelPlugin from './plugins/localModelPlugin.js';
 import PalmChatPlugin from './plugins/palmChatPlugin.js';
 import PalmCompletionPlugin from './plugins/palmCompletionPlugin.js';
+import PalmCodeCompletionPlugin from './plugins/palmCodeCompletionPlugin.js';
 
 class PathwayPrompter {
     constructor({ config, pathway }) {
@@ -40,6 +41,9 @@ class PathwayPrompter {
                 break;
             case 'PALM-COMPLETION':
                 plugin = new PalmCompletionPlugin(config, pathway);
+                break;
+            case 'PALM-CODE-COMPLETION':
+                plugin = new PalmCodeCompletionPlugin(config, pathway);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);
