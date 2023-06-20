@@ -78,13 +78,13 @@ const plainTextChunk = 'Vestibulum ante ipsum primis in faucibus orci luctus et 
 
 test('should throw an error if html cannot be accommodated within the chunk size', async t => {
     const chunkSize = encode(htmlChunkTwo).length;
-    const error = t.throws(() => getSemanticChunks(htmlChunkTwo, chunkSize - 1));
+    const error = t.throws(() => getSemanticChunks(htmlChunkTwo, chunkSize - 1, 'html'));
     t.is(error.message, 'The HTML contains elements that are larger than the chunk size. Please try again with HTML that has smaller elements.');
 });
 
 test('should chunk text between html elements if needed', async t => {
     const chunkSize = encode(htmlChunkTwo).length;
-    const chunks = getSemanticChunks(htmlChunkTwo + plainTextChunk + htmlChunkTwo, chunkSize);
+    const chunks = getSemanticChunks(htmlChunkTwo + plainTextChunk + htmlChunkTwo, chunkSize, 'html');
     
     t.is(chunks.length, 4);
     t.is(chunks[0], htmlChunkTwo);
@@ -96,7 +96,7 @@ test('should chunk text between html elements if needed', async t => {
 
 test('should chunk html element correctly when chunk size is exactly the same as the element length', async t => {
     const chunkSize = encode(htmlChunkTwo).length;
-    const chunks = getSemanticChunks(htmlChunkTwo, chunkSize);
+    const chunks = getSemanticChunks(htmlChunkTwo, chunkSize, 'html');
     
     t.is(chunks.length, 1);
     t.is(chunks[0], htmlChunkTwo);
@@ -104,7 +104,7 @@ test('should chunk html element correctly when chunk size is exactly the same as
 
 test('should chunk html element correctly when chunk size is greater than the element length', async t => {
     const chunkSize = encode(htmlChunkTwo).length;
-    const chunks = getSemanticChunks(htmlChunkTwo, chunkSize + 1);
+    const chunks = getSemanticChunks(htmlChunkTwo, chunkSize + 1, 'html');
     
     t.is(chunks.length, 1);
     t.is(chunks[0], htmlChunkTwo);
@@ -112,7 +112,7 @@ test('should chunk html element correctly when chunk size is greater than the el
 
 test('should not break up second html element correctly when chunk size is greater than the first element length', async t => {
     const chunkSize = encode(htmlChunkTwo).length;
-    const chunks = getSemanticChunks(htmlChunkTwo + htmlChunkTwo, chunkSize + 10);
+    const chunks = getSemanticChunks(htmlChunkTwo + htmlChunkTwo, chunkSize + 10, 'html');
     
     t.is(chunks.length, 2);
     t.is(chunks[0], htmlChunkTwo);
@@ -121,7 +121,7 @@ test('should not break up second html element correctly when chunk size is great
 
 test('should treat text chunks as also unbreakable chunks', async t => {
     const chunkSize = encode(htmlChunkTwo).length;
-    const chunks = getSemanticChunks(htmlChunkTwo + plainTextChunk + htmlChunkTwo, chunkSize + 20);
+    const chunks = getSemanticChunks(htmlChunkTwo + plainTextChunk + htmlChunkTwo, chunkSize + 20, 'html');
     
     t.is(chunks.length, 3);
     t.is(chunks[0], htmlChunkTwo);
@@ -165,34 +165,24 @@ test('should determine format correctly for void element embedded in text', asyn
     t.is(format, 'html');
 });
 
-/*
-it('should return identical text that chunker was passed, given tiny chunk size (1)', () => {
-    const maxChunkToken = 1;
-    const chunks = getSemanticChunks(testText, maxChunkToken);
-    expect(chunks.length).toBeGreaterThan(1); //check chunking
-    expect(chunks.every(chunk => encode(chunk).length <= maxChunkToken)).toBe(true); //check chunk size
-    const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
-    expect(recomposedText).toBe(testText); //check recomposition
-});
-
-it('should return identical text that chunker was passed, given huge chunk size (32000)', () => {
+test('should return identical text that chunker was passed, given huge chunk size (32000)', t => {
     const maxChunkToken = 32000;
     const chunks = getSemanticChunks(testText, maxChunkToken);
-    expect(chunks.length).toBe(1); //check chunking
-    expect(chunks.every(chunk => encode(chunk).length <= maxChunkToken)).toBe(true); //check chunk size
+    t.assert(chunks.length === 1); //check chunking
+    t.assert(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
     const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
-    expect(recomposedText).toBe(testText); //check recomposition
+    t.assert(recomposedText === testText); //check recomposition
 });
 
 const testTextNoSpaces = `Loremipsumdolorsitamet,consecteturadipiscingelit.Inideratsem.Phasellusacdapibuspurus,infermentumnunc.Maurisquisrutrummagna.Quisquerutrum,auguevelblanditposuere,auguemagnacon vallisturpis,necelementumauguemaurissitametnunc.Aeneansitametleoest.Nuncanteex,blanditetfelisut,iaculislaciniaest.Phasellusdictumorciidliberoullamcorpertempor.Vivamusidpharetraodioq.Sedconsecteturleosedtortordictumvenenatis.Donecgravidaliberononaccumsansuscipit.Doneclectusturpis,ullamcorpereupulvinariaculis,ornareutrisus.Phasellusaliquam,turpisquisviverracondimentum,risusestpretiummetus,inportaips umtortorvita elit.Pellentesqueidfinibuserat.Insuscipit,sapiennonposueredignissim,auguenisl ultricestortor,sitameteleifendnibhelitatrisus.`;
 
-it('should return identical text that chunker was passed, given no spaces and small chunks(5)', () => {
+test('should return identical text that chunker was passed, given no spaces and small chunks(5)', t => {
     const maxChunkToken = 5;
     const chunks = getSemanticChunks(testTextNoSpaces, maxChunkToken);
-    expect(chunks.length).toBeGreaterThan(0); //check chunking
-    expect(chunks.every(chunk => encode(chunk).length <= maxChunkToken)).toBe(true); //check chunk size
+    t.assert(chunks.length > 0); //check chunking
+    t.assert(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
     const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
-    expect(recomposedText).toBe(testTextNoSpaces); //check recomposition
+    t.assert(recomposedText === testTextNoSpaces); //check recomposition
 });
 
 const testTextShortWeirdSpaces=`Lorem ipsum dolor sit amet, consectetur adipiscing elit. In id erat sem. Phasellus ac dapibus purus, in fermentum nunc.............................. Mauris quis rutrum magna. Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc. Aenean sit a;lksjdf 098098- -23 eln ;lkn l;kn09 oij[0u ,,,,,,,,,,,,,,,,,,,,, amet leo est. Nunc ante ex, blandit et felis ut, iaculis lacinia est. Phasellus dictum orci id libero ullamcorper tempor.
@@ -202,20 +192,20 @@ const testTextShortWeirdSpaces=`Lorem ipsum dolor sit amet, consectetur adipisci
 
     Vivamus id pharetra odio.   Sed consectetur leo sed tortor dictum venenatis.Donec gravida libero non accumsan suscipit.Donec lectus turpis, ullamcorper eu pulvinar iaculis, ornare ut risus.Phasellus aliquam, turpis quis viverra condimentum, risus est pretium    metus, in porta ipsum tortor vitae elit.Pellentesque id finibus erat.  In suscipit, sapien non posuere dignissim, augue nisl ultrices tortor, sit amet eleifend nibh elit at risus.`;
 
-it('should return identical text that chunker was passed, given weird spaces and tiny chunks(1)', () => {
+test('should return identical text that chunker was passed, given weird spaces and tiny chunks(1)', t => {
     const maxChunkToken = 1;
     const chunks = getSemanticChunks(testTextShortWeirdSpaces, maxChunkToken);
-    expect(chunks.length).toBeGreaterThan(0); //check chunking
-    expect(chunks.every(chunk => encode(chunk).length <= maxChunkToken)).toBe(true); //check chunk size
+    t.assert(chunks.length > 0); //check chunking
+    t.assert(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
     const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
-    expect(recomposedText).toBe(testTextShortWeirdSpaces); //check recomposition
+    t.assert(recomposedText === testTextShortWeirdSpaces); //check recomposition
 });
 
-it('should return identical text that chunker was passed, given weird spaces and small chunks(10)', () => {
+test('should return identical text that chunker was passed, given weird spaces and small chunks(10)', t => {
     const maxChunkToken = 1;
     const chunks = getSemanticChunks(testTextShortWeirdSpaces, maxChunkToken);
-    expect(chunks.length).toBeGreaterThan(0); //check chunking
-    expect(chunks.every(chunk => encode(chunk).length <= maxChunkToken)).toBe(true); //check chunk size
+    t.assert(chunks.length > 0); //check chunking
+    t.assert(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
     const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
-    expect(recomposedText).toBe(testTextShortWeirdSpaces); //check recomposition
-});*/
+    t.assert(recomposedText === testTextShortWeirdSpaces); //check recomposition
+});

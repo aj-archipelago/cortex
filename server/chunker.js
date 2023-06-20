@@ -67,12 +67,7 @@ const getSemanticChunks = (text, chunkSize, inputFormat = 'text') => {
     // create an array with the outerHTML of each node
     const nodes = rootNodes.map((i, el) => $(el).prop('outerHTML') || $(el).text()).get();
 
-    // remove newlines from each node
-    nodes.forEach((node, i) => {
-        nodes[i] = node.replace(/\r?\n|\r/g, " ").trim();
-    });
-
-    return nodes.map(n => n + '\n\n').filter(n => n);
+    return nodes;
 };
 
   const createChunks = (tokens) => {
