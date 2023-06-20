@@ -1,16 +1,18 @@
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from uuid import uuid4
 import os
 import requests
 import asyncio
 import whisper
 from whisper.utils import get_writer
-import io
+from fastapi.encoders import jsonable_encoder
 
 model_download_root = './models'
 model = whisper.load_model("large", download_root=model_download_root) #large, tiny
 
+# Create a semaphore with a limit of 1
+semaphore = asyncio.Semaphore(1)
 
 app = FastAPI()
 
@@ -91,13 +93,22 @@ def transcribe(fileurl):
 
 
 @app.get("/")
-async def root(fileurl: str):
+@app.post("/")
+async def root(request: Request):
+    if request.method == "POST":
+        body = jsonable_encoder(await request.json())
+        fileurl = body.get("fileurl")
+    else:
+        fileurl = request.query_params.get("fileurl")
     if not fileurl:
         return "No fileurl given!"
 
-    result = await asyncio.to_thread(transcribe, fileurl)
-
-    return result
+    if semaphore.locked():
+        raise HTTPException(status_code=429, detail="Too Many Requests")
+    
+    async with semaphore:
+        result = await asyncio.to_thread(transcribe, fileurl)
+        return result
 
 if __name__ == "__main__":
     print("Starting APPWhisper server", flush=True)
