@@ -69,20 +69,21 @@ var config = convict({
     models: {
         format: Object,
         default: {
-            "oai-td3": {
-                "type": "OPENAI-COMPLETION",
-                "url": "{{openaiApiUrl}}",
+            "oai-gpturbo": {
+                "type": "OPENAI-CHAT",
+                "url": "https://api.openai.com/v1/chat/completions",
                 "headers": {
-                    "Authorization": "Bearer {{openaiApiKey}}",
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
                     "Content-Type": "application/json"
                 },
                 "params": {
-                    "model": "{{openaiDefaultModel}}"
+                    "model": "gpt-3.5-turbo"
                 },
-                "requestsPerSecond": 2,
+                "requestsPerSecond": 10,
+                "maxTokenLength": 8192
             },
             "oai-whisper": {
-                "type": "OPENAI_WHISPER",
+                "type": "OPENAI-WHISPER",
                 "url": "https://api.openai.com/v1/audio/transcriptions",
                 "headers": {
                     "Authorization": "Bearer {{OPENAI_API_KEY}}"
@@ -96,7 +97,7 @@ var config = convict({
     },
     openaiDefaultModel: {
         format: String,
-        default: 'text-davinci-003',
+        default: 'gpt-3.5-turbo',
         env: 'OPENAI_DEFAULT_MODEL'
     },
     openaiApiKey: {

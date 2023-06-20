@@ -45,7 +45,7 @@ test('config enableRestEndpoints', (t) => {
 });
 
 test('config openaiDefaultModel', (t) => {
-    const expectedDefault = 'text-davinci-003';
+    const expectedDefault = 'gpt-3.5-turbo';
     t.is(config.get('openaiDefaultModel'), expectedDefault);
 });
 

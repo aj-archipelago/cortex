@@ -77,16 +77,16 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
                 jsonEndStream.choices[0].delta = {};
             }
     
-            console.log(`REST SEND: data: ${JSON.stringify(jsonEndStream)}`);
+            //console.log(`REST SEND: data: ${JSON.stringify(jsonEndStream)}`);
             res.write(`data: ${JSON.stringify(jsonEndStream)}\n\n`);
         }
     
-        console.log(`REST SEND: data: [DONE]\n\n`);
+        //console.log(`REST SEND: data: [DONE]\n\n`);
         res.write(`data: [DONE]\n\n`);
     }
 
     const sendStreamData = (data) => {
-        console.log(`REST SEND: data: ${JSON.stringify(data)}`);
+        //console.log(`REST SEND: data: ${JSON.stringify(data)}`);
         res.write(`data: ${JSON.stringify(data)}\n\n`);
     }
 

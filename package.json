@@ -59,6 +59,7 @@
     "dotenv": "^16.0.3",
     "eslint": "^8.38.0",
     "eslint-plugin-import": "^2.27.5",
+    "got": "^13.0.0",
     "sinon": "^15.0.3"
   },
   "publishConfig": {
@@ -70,6 +71,7 @@
     ],
     "require": [
       "dotenv/config"
-    ]
+    ],
+    "concurrency": 1
   }
 }

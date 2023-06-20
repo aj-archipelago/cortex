@@ -65,8 +65,8 @@ class PathwayResolver {
         
                     const message = event.replace(/^data: /, '');
                     
-                    console.log(`====================================`);
-                    console.log(`STREAM EVENT: ${event}`);
+                    //console.log(`====================================`);
+                    //console.log(`STREAM EVENT: ${event}`);
                     //console.log(`MESSAGE: ${message}`);
         
                     const requestProgress = {
