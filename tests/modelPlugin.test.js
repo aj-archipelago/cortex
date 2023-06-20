@@ -1,6 +1,6 @@
 // test/ModelPlugin.test.js
 import test from 'ava';
-import ModelPlugin from '../graphql/plugins/modelPlugin.js';
+import ModelPlugin from '../server/plugins/modelPlugin.js';
 import HandleBars from '../lib/handleBars.js';
 import { mockConfig, mockPathwayString, mockPathwayFunction, mockPathwayMessages } from './mocks.js';
 

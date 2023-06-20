@@ -198,8 +198,8 @@ The core pathway `summary.js` below is implemented using custom pathway logic an
 // This module exports a prompt that takes an input text and generates a summary using a custom resolver.
 
 // Import required modules
-import { semanticTruncate } from '../graphql/chunker.js';
-import { PathwayResolver } from '../graphql/pathwayResolver.js';
+import { semanticTruncate } from '../server/chunker.js';
+import { PathwayResolver } from '../server/pathwayResolver.js';
 
 export default {
     // The main prompt function that takes the input text and asks to generate a summary.

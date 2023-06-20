@@ -1,5 +1,5 @@
 import test from 'ava';
-import { PathwayResolver } from '../graphql/pathwayResolver.js';
+import { PathwayResolver } from '../server/pathwayResolver.js';
 import sinon from 'sinon';
 import { mockConfig, mockPathwayString } from './mocks.js';
 

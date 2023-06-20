@@ -29,7 +29,7 @@ class PathwayPrompter {
             case 'OPENAI-COMPLETION':
                 plugin = new OpenAICompletionPlugin(config, pathway);
                 break;
-            case 'OPENAI_WHISPER':
+            case 'OPENAI-WHISPER':
                 plugin = new OpenAIWhisperPlugin(config, pathway);
                 break;
             case 'LOCAL-CPP-MODEL':

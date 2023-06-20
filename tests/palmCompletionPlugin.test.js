@@ -1,7 +1,7 @@
 // palmCompletionPlugin.test.js
 
 import test from 'ava';
-import PalmCompletionPlugin from '../graphql/plugins/palmCompletionPlugin.js';
+import PalmCompletionPlugin from '../server/plugins/palmCompletionPlugin.js';
 import { mockConfig } from './mocks.js';
 
 test.beforeEach((t) => {

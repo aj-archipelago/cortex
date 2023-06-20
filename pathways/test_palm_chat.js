@@ -1,7 +1,7 @@
 //test_palm_chat.mjs
 // Test for handling of prompts in the PaLM chat format for Cortex
 
-import { Prompt } from '../graphql/prompt.js';
+import { Prompt } from '../server/prompt.js';
 
 // Description: Have a chat with a bot that uses context to understand the conversation
 export default {
