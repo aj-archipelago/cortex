@@ -128,8 +128,9 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
 
                 try {
-                    const res = await axios.get(WHISPER_TS_API_URL, { params: { fileurl: uri } });
-                    return res.data;
+                    // const res = await axios.post(WHISPER_TS_API_URL, { params: { fileurl: uri } });
+                    const res = await this.executeRequest(WHISPER_TS_API_URL, {fileurl:uri},{},{});
+                    return res;
                 } catch (err) {
                     console.log(`Error getting word timestamped data from api:`, err);
                     throw err;
