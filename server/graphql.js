@@ -1,24 +1,29 @@
-import { createServer } from 'http';
-import {
-    ApolloServerPluginDrainHttpServer,
-    ApolloServerPluginLandingPageLocalDefault,
-} from 'apollo-server-core';
+// graphql.js
+// Setup the Apollo server and Express middleware
+
+import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
+import { ApolloServerPluginLandingPageLocalDefault } from '@apollo/server/plugin/landingPage/default';
+import { ApolloServer } from '@apollo/server';
+import { expressMiddleware } from '@apollo/server/express4';
 import { makeExecutableSchema } from '@graphql-tools/schema';
 import { WebSocketServer } from 'ws';
 import { useServer } from 'graphql-ws/lib/use/ws';
 import express from 'express';
-import { ApolloServer } from 'apollo-server-express';
+import http from 'http';
 import Keyv from 'keyv';
+import cors from 'cors';
 import { KeyvAdapter } from '@apollo/utils.keyvadapter';
-import responseCachePlugin from 'apollo-server-plugin-response-cache';
+import responseCachePlugin from '@apollo/server-plugin-response-cache';
 import subscriptions from './subscriptions.js';
 import { buildLimiters } from '../lib/request.js';
 import { cancelRequestResolver } from './resolver.js';
 import { buildPathways, buildModels } from '../config.js';
 import { requestState } from './requestState.js';
+import { buildRestEndpoints } from './rest.js';
 
+// Utility functions
+// Server plugins
 const getPlugins = (config) => {
-    // server plugins
     const plugins = [
         ApolloServerPluginLandingPageLocalDefault({ embed: true }), // For local development.   
     ];
@@ -39,41 +44,8 @@ const getPlugins = (config) => {
     return { plugins, cache };
 }
 
-const buildRestEndpoints = (pathways, app, server, config) => {
-  for (const [name, pathway] of Object.entries(pathways)) {
-    // Only expose endpoints for enabled pathways that explicitly want to expose a REST endpoint
-    if (pathway.disabled || !config.get('enableRestEndpoints')) continue;
 
-    const fieldVariableDefs = pathway.typeDef(pathway).restDefinition || [];
-
-    app.post(`/rest/${name}`, async (req, res) => {
-      const variables = fieldVariableDefs.reduce((acc, variableDef) => {
-        if (Object.prototype.hasOwnProperty.call(req.body, variableDef.name)) {
-          acc[variableDef.name] = req.body[variableDef.name];
-        }
-        return acc;
-      }, {});
-
-      const variableParams = fieldVariableDefs.map(({ name, type }) => `$${name}: ${type}`).join(', ');
-      const queryArgs = fieldVariableDefs.map(({ name }) => `${name}: $${name}`).join(', ');
-
-      const query = `
-                query ${name}(${variableParams}) {
-                    ${name}(${queryArgs}) {
-                        contextId
-                        previousResult
-                        result
-                    }
-                }
-            `;
-
-      const result = await server.executeOperation({ query, variables });
-      res.json(result.data[name]);
-    });
-  }
-};
-
-//typeDefs
+// Type Definitions for GraphQL
 const getTypedefs = (pathways) => {
 
     const defaultTypeDefs = `#graphql
@@ -111,6 +83,7 @@ const getTypedefs = (pathways) => {
     return typeDefs.join('\n');
 }
 
+// Resolvers for GraphQL
 const getResolvers = (config, pathways) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
@@ -118,6 +91,7 @@ const getResolvers = (config, pathways) => {
         resolverFunctions[name] = (parent, args, contextValue, info) => {
             // add shared state to contextValue
             contextValue.pathway = pathway;
+            contextValue.config = config;
             return pathway.rootResolver(parent, args, contextValue, info);
         }
     }
@@ -131,7 +105,7 @@ const getResolvers = (config, pathways) => {
     return resolvers;
 }
 
-//graphql api build factory method
+// Build the server including the GraphQL schema and REST endpoints
 const build = async (config) => {
     // First perform config build
     await buildPathways(config);
@@ -150,9 +124,9 @@ const build = async (config) => {
 
     const { plugins, cache } = getPlugins(config);
 
-    const app = express()
+    const app = express();
 
-    const httpServer = createServer(app);
+    const httpServer = http.createServer(app);
 
     // Creating the WebSocket server
     const wsServer = new WebSocketServer({
@@ -182,35 +156,63 @@ const build = async (config) => {
                         },
                     };
                 },
-            }]),
-        context: ({ req, res }) => ({ req, res, config, requestState }),
+            }
+        ]),
     });
 
     // If CORTEX_API_KEY is set, we roll our own auth middleware - usually not used if you're being fronted by a proxy
     const cortexApiKey = config.get('cortexApiKey');
+    if (cortexApiKey) {
+        app.use((req, res, next) => {
+            if (cortexApiKey && req.headers['Cortex-Api-Key'] !== cortexApiKey && req.query['Cortex-Api-Key'] !== cortexApiKey) {
+                if (req.baseUrl === '/graphql' || req.headers['content-type'] === 'application/graphql') {
+                    res.status(401)
+                    .set('WWW-Authenticate', 'Cortex-Api-Key')
+                    .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
+                    .json({
+                            errors: [
+                                {
+                                    message: 'Unauthorized',
+                                    extensions: {
+                                        code: 'UNAUTHENTICATED',
+                                    },
+                                },
+                            ],
+                        });
+                } else {
+                    res.status(401)
+                    .set('WWW-Authenticate', 'Cortex-Api-Key')
+                    .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
+                    .send('Unauthorized');
+                }
+            } else {
+                next();
+            }
+        });
+    };
 
-    app.use((req, res, next) => {
-        if (cortexApiKey && req.headers.cortexApiKey !== cortexApiKey && req.query.cortexApiKey !== cortexApiKey) {
-            res.status(401).send('Unauthorized');
-        } else {
-            next();
-        }
-    });
-    
-    // Use the JSON body parser middleware for REST endpoints
+    // Parse the body for REST endpoints
     app.use(express.json());
-        
-    // add the REST endpoints
-    buildRestEndpoints(pathways, app, server, config);
 
-    // if local start server
+    // Server Startup Function
     const startServer = async () => {
         await server.start();
-        server.applyMiddleware({ app });
+        app.use(
+            '/graphql',
+
+            cors(),
+
+            expressMiddleware(server, {
+                context: async ({ req, res }) => ({ req, res, config, requestState }),
+            }),
+        );
+            
+        // add the REST endpoints
+        buildRestEndpoints(pathways, app, server, config);
 
         // Now that our HTTP server is fully set up, we can listen to it.
         httpServer.listen(config.get('PORT'), () => {
-            console.log(`🚀 Server is now running at http://localhost:${config.get('PORT')}${server.graphqlPath}`);
+            console.log(`🚀 Server is now running at http://localhost:${config.get('PORT')}/graphql`);
         });
     };
 

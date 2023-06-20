@@ -1,8 +1,25 @@
-const GRAPHQL_TYPE_MAP = {
-    boolean: 'Boolean',
-    string: 'String',
-    number: 'Int',
-  };
+const getGraphQlType = (value) => {
+  switch (typeof value) {
+    case 'boolean':
+      return {type: 'Boolean', defaultValue: 'false'};
+      break;
+    case 'string':
+      return {type: 'String', defaultValue: `""`};
+      break;
+    case 'number':
+      return {type: 'Int', defaultValue: '0'};
+      break;
+    case 'object':
+      if (Array.isArray(value)) {
+        return {type: '[Message]', defaultValue: '[]'};
+      } else {
+        return {type: `[${value.objName}]`, defaultValue: 'null'};
+      }
+      break;
+    default:
+      return {type: 'String', defaultValue: `""`};
+  }
+};
 
 const typeDef = (pathway) => {
   const { name, objName, defaultInputParameters, inputParameters, format } = pathway;
@@ -31,20 +48,15 @@ const typeDef = (pathway) => {
 
   const paramsStr = Object.entries(params)
     .map(([key, value]) => {
-      if (typeof value === 'object' && Array.isArray(value)) {
-        return `${key}: [Message] = []`;
-      } else {
-        return `${key}: ${GRAPHQL_TYPE_MAP[typeof value]} = ${
-          typeof value === 'string' ? `"${value}"` : value
-        }`;
-      }
+      const { type, defaultValue } = getGraphQlType(value);
+      return `${key}: ${type} = ${defaultValue}`;
     })
     .join('\n');
 
   const restDefinition = Object.entries(params).map(([key, value]) => {
     return {
       name: key,
-      type: `${GRAPHQL_TYPE_MAP[typeof value]}${typeof value === 'object' && Array.isArray(value) ? '[]' : ''}`,
+      type: `${getGraphQlType(value).type}`,
     };
   });
 

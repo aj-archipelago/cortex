@@ -1,6 +1,6 @@
 // test/ModelPlugin.test.js
 import test from 'ava';
-import ModelPlugin from '../graphql/plugins/modelPlugin.js';
+import ModelPlugin from '../server/plugins/modelPlugin.js';
 import HandleBars from '../lib/handleBars.js';
 import { mockConfig, mockPathwayString, mockPathwayFunction, mockPathwayMessages } from './mocks.js';
 
@@ -79,19 +79,7 @@ test('requestUrl', (t) => {
     t.is(modelPlugin.requestUrl(), expectedUrl, 'requestUrl should return the correct URL');
 });
 
-test('parseResponse - single choice', (t) => {
-    const { modelPlugin } = t.context;
-    const singleChoiceResponse = {
-        choices: [{
-            text: '42'
-        }]
-    };
-
-    const result = modelPlugin.parseResponse(singleChoiceResponse);
-    t.is(result, '42', 'parseResponse should return the correct value for a single choice response');
-});
-
-test('parseResponse - multiple choices', (t) => {
+test('default parseResponse', (t) => {
     const { modelPlugin } = t.context;
     const multipleChoicesResponse = {
         choices: [
@@ -101,7 +89,7 @@ test('parseResponse - multiple choices', (t) => {
     };
 
     const result = modelPlugin.parseResponse(multipleChoicesResponse);
-    t.deepEqual(result, multipleChoicesResponse.choices, 'parseResponse should return the choices array for multiple choices response');
+    t.deepEqual(result, multipleChoicesResponse, 'default parseResponse should return the entire multiple choices response object');
 });
 
 test('truncateMessagesToTargetLength', (t) => {

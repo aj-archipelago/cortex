@@ -3,6 +3,7 @@ import convict from 'convict';
 import HandleBars from './lib/handleBars.js';
 import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
+import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -57,7 +58,8 @@ var config = convict({
     cortexApiKey: {
         format: String,
         default: null,
-        env: 'CORTEX_API_KEY'
+        env: 'CORTEX_API_KEY',
+        sensitive: true
     },
     defaultModelName: {
         format: String,
@@ -67,19 +69,21 @@ var config = convict({
     models: {
         format: Object,
         default: {
-            "oai-td3": {
-                "type": "OPENAI-COMPLETION",
-                "url": "{{openaiApiUrl}}",
+            "oai-gpturbo": {
+                "type": "OPENAI-CHAT",
+                "url": "https://api.openai.com/v1/chat/completions",
                 "headers": {
-                    "Authorization": "Bearer {{openaiApiKey}}",
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
                     "Content-Type": "application/json"
                 },
                 "params": {
-                    "model": "{{openaiDefaultModel}}"
+                    "model": "gpt-3.5-turbo"
                 },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 8192
             },
             "oai-whisper": {
-                "type": "OPENAI_WHISPER",
+                "type": "OPENAI-WHISPER",
                 "url": "https://api.openai.com/v1/audio/transcriptions",
                 "headers": {
                     "Authorization": "Bearer {{OPENAI_API_KEY}}"
@@ -93,7 +97,7 @@ var config = convict({
     },
     openaiDefaultModel: {
         format: String,
-        default: 'text-davinci-003',
+        default: 'gpt-3.5-turbo',
         env: 'OPENAI_DEFAULT_MODEL'
     },
     openaiApiKey: {
@@ -117,6 +121,17 @@ var config = convict({
         default: 'null',
         env: 'WHISPER_MEDIA_API_URL'
     },
+    whisperTSApiUrl: {
+        format: String,
+        default: 'null',
+        env: 'WHISPER_TS_API_URL'
+    },
+    gcpServiceAccountKey: {
+        format: String,
+        default: null,
+        env: 'GCP_SERVICE_ACCOUNT_KEY',
+        sensitive: true
+    },
 });
 
 // Read in environment variables and set up service configuration
@@ -133,6 +148,11 @@ if (configFile && fs.existsSync(configFile)) {
     }else {
         console.log(`Using default model with OPENAI_API_KEY environment variable`)
     }
+}
+
+if (config.get('gcpServiceAccountKey')) {
+    const gcpAuthTokenHelper = new GcpAuthTokenHelper(config.getProperties());
+    config.set('gcpAuthTokenHelper', gcpAuthTokenHelper);
 }
 
 // Build and load pathways to config

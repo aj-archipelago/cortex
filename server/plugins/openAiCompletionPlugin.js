@@ -1,7 +1,6 @@
 // OpenAICompletionPlugin.js
 
 import ModelPlugin from './modelPlugin.js';
-
 import { encode } from 'gpt-3-encoder';
 
 // Helper function to truncate the prompt if it is too long
@@ -52,7 +51,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
                 frequency_penalty: 0,
                 presence_penalty: 0,
                 stop: ["<|im_end|>"],
-                stream
+                ...(stream !== undefined ? { stream } : {}),
             };
         } else {
 
@@ -83,7 +82,44 @@ class OpenAICompletionPlugin extends ModelPlugin {
         const data = { ...(this.model.params || {}), ...requestParameters };
         const params = {};
         const headers = this.model.headers || {};
+        
         return this.executeRequest(url, data, params, headers, prompt);
+    }
+
+    // Parse the response from the OpenAI Completion API
+    parseResponse(data) {
+        const { choices } = data;
+        if (!choices || !choices.length) {
+            return data;
+        }
+
+        // if we got a choices array back with more than one choice, return the whole array
+        if (choices.length > 1) {
+            return choices;
+        }
+
+        // otherwise, return the first choice
+        const textResult = choices[0].text && choices[0].text.trim();
+        return textResult ?? null;
+    }
+
+    // Override the logging function to log the prompt and response
+    logRequestData(data, responseData, prompt) {
+        const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
+        console.log(separator);
+    
+        const stream = data.stream;
+        const modelInput = data.prompt;
+    
+        console.log(`\x1b[36m${modelInput}\x1b[0m`);
+
+        if (stream) {
+            console.log(`\x1b[34m> Response is streaming...\x1b[0m`);
+        } else {
+            console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+        }
+    
+        prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
     }
 }
 

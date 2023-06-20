@@ -3,10 +3,13 @@ import chat from './chat.js';
 import bias from './bias.js';
 import complete from './complete.js';
 import entities from './entities.js';
-import lc_test from './lc_test.mjs';
 import paraphrase from './paraphrase.js';
 import sentiment from './sentiment.js';
 import summary from './summary.js';
+import sys_openai_chat from './sys_openai_chat.js';
+import sys_openai_completion from './sys_openai_completion.js';
+import test_langchain from './test_langchain.mjs';
+import test_palm_chat from './test_palm_chat.js';
 import transcribe from './transcribe.js';
 import translate from './translate.js';
 
@@ -16,10 +19,13 @@ export {
     bias,
     complete,
     entities,
-    lc_test,
     paraphrase,
     sentiment,
     summary,
+    sys_openai_chat,
+    sys_openai_completion,
+    test_langchain,
+    test_palm_chat,
     transcribe,
     translate
 };

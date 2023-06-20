@@ -1,5 +1,5 @@
 import test from 'ava';
-import { getSemanticChunks, determineTextFormat } from '../graphql/chunker.js';
+import { getSemanticChunks, determineTextFormat } from '../server/chunker.js';
 
 import { encode } from 'gpt-3-encoder';
 

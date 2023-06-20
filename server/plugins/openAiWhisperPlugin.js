@@ -14,10 +14,33 @@ import http from 'http';
 import https from 'https';
 import url from 'url';
 import { promisify } from 'util';
+import subsrt from 'subsrt';
 const pipeline = promisify(stream.pipeline);
 
 
 const API_URL = config.get('whisperMediaApiUrl');
+const WHISPER_TS_API_URL  = config.get('whisperTSApiUrl');
+
+function alignSubtitles(subtitles) {
+    const result = [];
+    const offset = 1000 * 60 * 10; // 10 minutes for each chunk
+
+    function preprocessStr(str) {
+        return str.trim().replace(/(\n\n)(?!\n)/g, '\n\n\n');
+    }
+
+    function shiftSubtitles(subtitle, shiftOffset) {
+        const captions = subsrt.parse(preprocessStr(subtitle));
+        const resynced = subsrt.resync(captions, { offset: shiftOffset });
+        return resynced;
+    }
+
+    for (let i = 0; i < subtitles.length; i++) {
+        const subtitle = subtitles[i];
+        result.push(...shiftSubtitles(subtitle, i * offset));
+    }
+    return subsrt.build(result);
+}
 
 function generateUniqueFilename(extension) {
     return `${uuidv4()}.${extension}`;
@@ -93,17 +116,37 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, pathwayResolver) {
+        const { responseFormat, wordTimestamped } = parameters;
         const url = this.requestUrl(text);
         const params = {};
         const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
 
+        const processTS = async (uri) => {
+            if (wordTimestamped) {
+                if (!WHISPER_TS_API_URL) {
+                    throw new Error(`WHISPER_TS_API_URL not set for word timestamped processing`);
+                }
+
+                try {
+                    // const res = await axios.post(WHISPER_TS_API_URL, { params: { fileurl: uri } });
+                    const res = await this.executeRequest(WHISPER_TS_API_URL, {fileurl:uri},{},{});
+                    return res;
+                } catch (err) {
+                    console.log(`Error getting word timestamped data from api:`, err);
+                    throw err;
+                }
+            }
+        }
+
         const processChunk = async (chunk) => {
             try {
-                const { language } = parameters;
+                const { language, responseFormat } = parameters;
+                const response_format = responseFormat || 'text';
+
                 const formData = new FormData();
                 formData.append('file', fs.createReadStream(chunk));
                 formData.append('model', this.model.params.model);
-                formData.append('response_format', 'text');
+                formData.append('response_format', response_format);
                 language && formData.append('language', language);
                 modelPromptText && formData.append('prompt', modelPromptText);
 
@@ -114,7 +157,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             }
         }
 
-        let result = ``;
+        let result = [];
         let { file } = parameters;
         let totalCount = 0;
         let completedCount = 0;
@@ -134,7 +177,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         let chunks = []; // array of local file paths
         try {
-
             const uris = await this.getMediaChunks(file, requestId); // array of remote file uris
             if (!uris || !uris.length) {
                 throw new Error(`Error in getting chunks from media helper for file ${file}`);
@@ -144,14 +186,20 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
             // sequential download of chunks
             for (const uri of uris) {
-                chunks.push(await downloadFile(uri));
+                if (wordTimestamped) { // get word timestamped data 
+                    sendProgress(); // no download needed auto progress 
+                    const ts = await processTS(uri);
+                    result.push(ts);
+                } else {
+                    chunks.push(await downloadFile(uri));
+                }
                 sendProgress();
             }
 
 
             // sequential processing of chunks
             for (const chunk of chunks) {
-                result += await processChunk(chunk);
+                result.push(await processChunk(chunk));
                 sendProgress();
             }
 
@@ -184,7 +232,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 console.error("An error occurred while deleting:", error);
             }
         }
-        return result;
+
+        if (['srt','vtt'].includes(responseFormat) || wordTimestamped) { // align subtitles for formats
+            return alignSubtitles(result);
+        }
+        return result.join(` `);
     }
 }
 

@@ -1,5 +1,5 @@
-import { rootResolver, resolver } from '../graphql/resolver.js';
-import { typeDef } from '../graphql/typeDef.js';
+import { rootResolver, resolver } from '../server/resolver.js';
+import { typeDef } from '../server/typeDef.js';
 
 // all default definitions of a single pathway
 export default {

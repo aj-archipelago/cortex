@@ -17,7 +17,7 @@ Just about anything! It's kind of an LLM swiss army knife.  Here are some ideas:
 ## Features
 
 * Simple architecture to build custom functional endpoints (called `pathways`), that implement common NL AI tasks. Default pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, sentiment analysis, and bias analysis.
-* Allows for building multi-model, multi-tool, multi-vendor, and model-agnostic pathways (choose the right model or combination of models and tools for the job, implement redundancy) with built-in support for OpenAI GPT-3, GPT-3.5 (chatGPT), and GPT-4 models - both from OpenAI directly and through Azure OpenAI, OpenAI Whisper, Azure Translator, LangChain.js and more.
+* Allows for building multi-model, multi-tool, multi-vendor, and model-agnostic pathways (choose the right model or combination of models and tools for the job, implement redundancy) with built-in support for OpenAI GPT-3, GPT-3.5 (chatGPT), and GPT-4 models - both from OpenAI directly and through Azure OpenAI, PaLM Text and PaLM Chat from Google, OpenAI Whisper, Azure Translator, LangChain.js and more.
 * Easy, templatized prompt definition with flexible support for most prompt engineering techniques and strategies ranging from simple single prompts to complex custom prompt chains with context continuity.
 * Built in support for long-running, asynchronous operations with progress updates or streaming responses
 * Integrated context persistence: have your pathways "remember" whatever you want and use it on the next request to the model
@@ -198,8 +198,8 @@ The core pathway `summary.js` below is implemented using custom pathway logic an
 // This module exports a prompt that takes an input text and generates a summary using a custom resolver.
 
 // Import required modules
-import { semanticTruncate } from '../graphql/chunker.js';
-import { PathwayResolver } from '../graphql/pathwayResolver.js';
+import { semanticTruncate } from '../server/chunker.js';
+import { PathwayResolver } from '../server/pathwayResolver.js';
 
 export default {
     // The main prompt function that takes the input text and asks to generate a summary.
