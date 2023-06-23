@@ -11,7 +11,12 @@ const getGraphQlType = (value) => {
       break;
     case 'object':
       if (Array.isArray(value)) {
-        return {type: '[Message]', defaultValue: '[]'};
+        if (value.length > 0 && typeof(value[0]) === 'string') {
+          return {type: '[String]', defaultValue: '[]'};
+        }
+        else {
+          return {type: '[Message]', defaultValue: '[]'};
+        }
       } else {
         return {type: `[${value.objName}]`, defaultValue: 'null'};
       }
