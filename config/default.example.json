@@ -58,7 +58,8 @@
                 "Content-Type": "application/json"
             },
             "requestsPerSecond": 10,
-            "maxTokenLength": 2048
+            "maxTokenLength": 2048,
+            "maxReturnTokens": 1024
         },
         "palm-chat": {
             "type": "PALM-CHAT",
@@ -67,7 +68,8 @@
                 "Content-Type": "application/json"
             },
             "requestsPerSecond": 10,
-            "maxTokenLength": 2048
+            "maxTokenLength": 2048,
+            "maxReturnTokens": 1024   
         },
         "local-llama13B": {
             "type": "LOCAL-CPP-MODEL",

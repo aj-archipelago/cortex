@@ -6,6 +6,7 @@ import { encode } from 'gpt-3-encoder';
 import { getFirstNToken } from '../chunker.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
+const DEFAULT_MAX_RETURN_TOKENS = 256;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
 class ModelPlugin {
@@ -141,6 +142,10 @@ class ModelPlugin {
 
     getModelMaxTokenLength() {
         return (this.promptParameters.maxTokenLength ?? this.model.maxTokenLength ?? DEFAULT_MAX_TOKENS);
+    }
+
+    getModelMaxReturnTokens() {
+        return (this.promptParameters.maxReturnTokens ?? this.model.maxReturnTokens ?? DEFAULT_MAX_RETURN_TOKENS);
     }
 
     getPromptTokenRatio() {

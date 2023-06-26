@@ -92,10 +92,8 @@ class PalmChatPlugin extends ModelPlugin {
         const context = this.getCompiledContext(text, parameters, prompt.context || palmMessages.context || '');
         const examples = this.getCompiledExamples(text, parameters, prompt.examples || []);
         
-        // For PaLM right now, the max return tokens is 1024, regardless of the max context length
-        // I can't think of a time you'd want to constrain it to fewer at the moment.
-        const max_tokens = 1024//this.getModelMaxTokenLength() - tokenLength;
-    
+        const max_tokens = this.getModelMaxReturnTokens();
+        
         if (max_tokens < 0) {
             throw new Error(`Prompt is too long to successfully call the model at ${tokenLength} tokens.  The model will not be called.`);
         }

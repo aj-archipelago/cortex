@@ -2,23 +2,21 @@
 
 import ModelPlugin from './modelPlugin.js';
 
-// Helper function to truncate the prompt if it is too long
-const truncatePromptIfNecessary = (text, textTokenCount, modelMaxTokenCount, targetTextTokenCount, pathwayResolver) => {
-    const maxAllowedTokens = textTokenCount + ((modelMaxTokenCount - targetTextTokenCount) * 0.5);
-
-    if (textTokenCount > maxAllowedTokens) {
-        pathwayResolver.logWarning(`Prompt is too long at ${textTokenCount} tokens (this target token length for this pathway is ${targetTextTokenCount} tokens because the response is expected to take up the rest of the model's max tokens (${modelMaxTokenCount}). Prompt will be truncated.`);
-        return pathwayResolver.truncate(text, maxAllowedTokens);
-    }
-    return text;
-}
-
 // PalmCompletionPlugin class for handling requests and responses to the PaLM API Text Completion API
 class PalmCompletionPlugin extends ModelPlugin {
     constructor(config, pathway) {
         super(config, pathway);
     }
 
+    truncatePromptIfNecessary (text, textTokenCount, modelMaxTokenCount, targetTextTokenCount, pathwayResolver) {
+        const maxAllowedTokens = textTokenCount + ((modelMaxTokenCount - targetTextTokenCount) * 0.5);
+    
+        if (textTokenCount > maxAllowedTokens) {
+            pathwayResolver.logWarning(`Prompt is too long at ${textTokenCount} tokens (this target token length for this pathway is ${targetTextTokenCount} tokens because the response is expected to take up the rest of the model's max tokens (${modelMaxTokenCount}). Prompt will be truncated.`);
+            return pathwayResolver.truncate(text, maxAllowedTokens);
+        }
+        return text;
+    }
     // Set up parameters specific to the PaLM API Text Completion API
     getRequestParameters(text, parameters, prompt, pathwayResolver) {
         const { modelPromptText, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
@@ -26,9 +24,9 @@ class PalmCompletionPlugin extends ModelPlugin {
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
     
-        const truncatedPrompt = truncatePromptIfNecessary(modelPromptText, tokenLength, this.getModelMaxTokenLength(), modelTargetTokenLength, pathwayResolver);
+        const truncatedPrompt = this.truncatePromptIfNecessary(modelPromptText, tokenLength, this.getModelMaxTokenLength(), modelTargetTokenLength, pathwayResolver);
     
-        const max_tokens = 1024//this.getModelMaxTokenLength() - tokenLength;
+        const max_tokens = this.getModelMaxReturnTokens();
     
         if (max_tokens < 0) {
             throw new Error(`Prompt is too long to successfully call the model at ${tokenLength} tokens.  The model will not be called.`);
