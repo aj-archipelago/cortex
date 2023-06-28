@@ -3,8 +3,8 @@ import ModelPlugin from './modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
 
 class OpenAIChatPlugin extends ModelPlugin {
-    constructor(config, pathway) {
-        super(config, pathway);
+    constructor(pathwayResolver) {
+        super(pathwayResolver);
     }
 
     // convert to OpenAI messages array format if necessary

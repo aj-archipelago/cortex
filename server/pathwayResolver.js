@@ -20,9 +20,24 @@ class PathwayResolver {
         this.warnings = [];
         this.requestId = uuidv4();
         this.responseParser = new PathwayResponseParser(pathway);
-        this.pathwayPrompter = new PathwayPrompter({ config, pathway });
+        this.modelName = [
+            pathway.model,
+            args?.model,
+            config.get('defaultModelName')
+            ].find(modelName => modelName && config.get('models').hasOwnProperty(modelName));
+        this.model = config.get('models')[this.modelName];
+
+        if (!this.model) {
+            throw new Error(`Model ${this.modelName} not found in config`);
+        }
+
+        if (this.modelName !== (pathway.model || args?.model)) {
+            this.logWarning(`Model ${pathway.model || args?.model} not found in config, using ${this.modelName} instead.`);
+        }
+
         this.previousResult = '';
         this.prompts = [];
+        this.pathwayPrompter = new PathwayPrompter(this);
 
         Object.defineProperty(this, 'pathwayPrompt', {
             get() {

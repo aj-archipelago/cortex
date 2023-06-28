@@ -4,8 +4,8 @@ import { encode } from 'gpt-3-encoder';
 import HandleBars from '../../lib/handleBars.js';
 
 class PalmChatPlugin extends ModelPlugin {
-    constructor(config, pathway) {
-        super(config, pathway);
+    constructor(pathwayResolver) {
+        super(pathwayResolver);
     }
 
     // Convert to PaLM messages array format if necessary

@@ -4,8 +4,8 @@ import ModelPlugin from './modelPlugin.js';
 
 // PalmCompletionPlugin class for handling requests and responses to the PaLM API Text Completion API
 class PalmCompletionPlugin extends ModelPlugin {
-    constructor(config, pathway) {
-        super(config, pathway);
+    constructor(pathwayResolver) {
+        super(pathwayResolver);
     }
 
     truncatePromptIfNecessary (text, textTokenCount, modelMaxTokenCount, targetTextTokenCount, pathwayResolver) {

@@ -4,8 +4,8 @@ import { execFileSync } from 'child_process';
 import { encode } from 'gpt-3-encoder';
 
 class LocalModelPlugin extends ModelPlugin {
-    constructor(config, pathway) {
-        super(config, pathway);
+    constructor(pathwayResolver) {
+        super(pathwayResolver);
     }
 
     // if the input starts with a chatML response, just return that

@@ -2,8 +2,8 @@
 import ModelPlugin from './modelPlugin.js';
 
 class AzureTranslatePlugin extends ModelPlugin {
-    constructor(config, pathway) {
-        super(config, pathway);
+    constructor(pathwayResolver) {
+        super(pathwayResolver);
     }
     
     // Set up parameters specific to the Azure Translate API
