@@ -32,7 +32,11 @@ class PathwayResolver {
         }
 
         if (this.modelName !== (pathway.model || args?.model)) {
-            this.logWarning(`Model ${pathway.model || args?.model} not found in config, using ${this.modelName} instead.`);
+            if (pathway.model || args?.model) {
+                this.logWarning(`Specified model ${pathway.model || args?.model} not found in config, using ${this.modelName} instead.`);
+            } else {
+                this.logWarning(`No model specified in the pathway, using ${this.modelName}.`);
+            }
         }
 
         this.previousResult = '';
