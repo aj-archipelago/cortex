@@ -23,6 +23,7 @@ class PathwayResolver {
         this.modelName = [
             pathway.model,
             args?.model,
+            pathway.inputParameters?.model,
             config.get('defaultModelName')
             ].find(modelName => modelName && config.get('models').hasOwnProperty(modelName));
         this.model = config.get('models')[this.modelName];
@@ -31,9 +32,11 @@ class PathwayResolver {
             throw new Error(`Model ${this.modelName} not found in config`);
         }
 
-        if (this.modelName !== (pathway.model || args?.model)) {
-            if (pathway.model || args?.model) {
-                this.logWarning(`Specified model ${pathway.model || args?.model} not found in config, using ${this.modelName} instead.`);
+        const specifiedModelName = pathway.model || args?.model || pathway.inputParameters?.model;
+
+        if (this.modelName !== (specifiedModelName)) {
+            if (specifiedModelName) {
+                this.logWarning(`Specified model ${specifiedModelName} not found in config, using ${this.modelName} instead.`);
             } else {
                 this.logWarning(`No model specified in the pathway, using ${this.modelName}.`);
             }
