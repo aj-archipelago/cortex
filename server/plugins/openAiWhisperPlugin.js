@@ -75,7 +75,7 @@ const downloadFile = async (fileUrl) => {
             fs.unlink(localFilePath, () => {
                 reject(error);
             });
-            throw error;
+            //throw error;
         }
     });
 };

@@ -164,7 +164,13 @@ const build = async (config) => {
     const cortexApiKey = config.get('cortexApiKey');
     if (cortexApiKey) {
         app.use((req, res, next) => {
-            if (cortexApiKey && req.headers['Cortex-Api-Key'] !== cortexApiKey && req.query['Cortex-Api-Key'] !== cortexApiKey) {
+            let providedApiKey = req.headers['cortex-api-key'] || req.query['cortex-api-key'];
+            if (!providedApiKey) {
+                providedApiKey = req.headers['authorization'];
+                providedApiKey = providedApiKey?.startsWith('Bearer ') ? providedApiKey.slice(7) : providedApiKey;
+            }
+
+            if (cortexApiKey && cortexApiKey !== providedApiKey) {
                 if (req.baseUrl === '/graphql' || req.headers['content-type'] === 'application/graphql') {
                     res.status(401)
                     .set('WWW-Authenticate', 'Cortex-Api-Key')
