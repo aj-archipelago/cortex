@@ -20,9 +20,31 @@ class PathwayResolver {
         this.warnings = [];
         this.requestId = uuidv4();
         this.responseParser = new PathwayResponseParser(pathway);
-        this.pathwayPrompter = new PathwayPrompter({ config, pathway });
+        this.modelName = [
+            pathway.model,
+            args?.model,
+            pathway.inputParameters?.model,
+            config.get('defaultModelName')
+            ].find(modelName => modelName && config.get('models').hasOwnProperty(modelName));
+        this.model = config.get('models')[this.modelName];
+
+        if (!this.model) {
+            throw new Error(`Model ${this.modelName} not found in config`);
+        }
+
+        const specifiedModelName = pathway.model || args?.model || pathway.inputParameters?.model;
+
+        if (this.modelName !== (specifiedModelName)) {
+            if (specifiedModelName) {
+                this.logWarning(`Specified model ${specifiedModelName} not found in config, using ${this.modelName} instead.`);
+            } else {
+                this.logWarning(`No model specified in the pathway, using ${this.modelName}.`);
+            }
+        }
+
         this.previousResult = '';
         this.prompts = [];
+        this.pathwayPrompter = new PathwayPrompter(this.config, this.pathway, this.modelName, this.model);
 
         Object.defineProperty(this, 'pathwayPrompt', {
             get() {
@@ -56,37 +78,41 @@ class PathwayResolver {
                 }
             });
         } else { // stream
-            const incomingMessage = Array.isArray(responseData) && responseData.length > 0 ? responseData[0] : responseData;
-            incomingMessage.on('data', data => {
-                const events = data.toString().split('\n');
-        
-                events.forEach(event => {
-                    if (event.trim() === '') return; // Skip empty lines
-        
-                    const message = event.replace(/^data: /, '');
-                    
-                    //console.log(`====================================`);
-                    //console.log(`STREAM EVENT: ${event}`);
-                    //console.log(`MESSAGE: ${message}`);
-        
-                    const requestProgress = {
-                        requestId: this.requestId,
-                        data: message,
-                    }
-        
-                    if (message.trim() === '[DONE]') {
-                        requestProgress.progress = 1;
-                    }
-        
-                    try {
-                        pubsub.publish('REQUEST_PROGRESS', {
-                            requestProgress: requestProgress
-                        });
-                    } catch (error) {
-                        console.error('Could not JSON parse stream message', message, error);
-                    }
+            try {
+                const incomingMessage = Array.isArray(responseData) && responseData.length > 0 ? responseData[0] : responseData;
+                incomingMessage.on('data', data => {
+                    const events = data.toString().split('\n');
+            
+                    events.forEach(event => {
+                        if (event.trim() === '') return; // Skip empty lines
+            
+                        const message = event.replace(/^data: /, '');
+                        
+                        //console.log(`====================================`);
+                        //console.log(`STREAM EVENT: ${event}`);
+                        //console.log(`MESSAGE: ${message}`);
+            
+                        const requestProgress = {
+                            requestId: this.requestId,
+                            data: message,
+                        }
+            
+                        if (message.trim() === '[DONE]') {
+                            requestProgress.progress = 1;
+                        }
+            
+                        try {
+                            pubsub.publish('REQUEST_PROGRESS', {
+                                requestProgress: requestProgress
+                            });
+                        } catch (error) {
+                            console.error('Could not JSON parse stream message', message, error);
+                        }
+                    });
                 });
-            });
+            } catch (error) {
+                console.error('Could not subscribe to stream', error);
+            }
         }
     }
 

@@ -1,17 +1,17 @@
 import test from 'ava';
 import OpenAIChatPlugin from '../server/plugins/openAiChatPlugin.js';
-import { mockConfig, mockPathwayString, mockPathwayFunction, mockPathwayMessages } from './mocks.js';
+import { mockPathwayResolverMessages } from './mocks.js';
 
 // Test the constructor
 test('constructor', (t) => {
-    const plugin = new OpenAIChatPlugin(mockConfig, mockPathwayString);
-    t.is(plugin.config, mockConfig);
-    t.is(plugin.pathwayPrompt, mockPathwayString.prompt);
+    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
+    t.is(plugin.config, mockPathwayResolverMessages.config);
+    t.is(plugin.pathwayPrompt, mockPathwayResolverMessages.pathway.prompt);
 });
 
 // Test the convertPalmToOpenAIMessages function
 test('convertPalmToOpenAIMessages', (t) => {
-    const plugin = new OpenAIChatPlugin(mockConfig, mockPathwayString);
+    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
     const context = 'This is a test context.';
     const examples = [
         {
@@ -35,14 +35,21 @@ test('convertPalmToOpenAIMessages', (t) => {
 
 // Test the getRequestParameters function
 test('getRequestParameters', async (t) => {
-    const plugin = new OpenAIChatPlugin(mockConfig, mockPathwayString);
+    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
     const text = 'Help me';
     const parameters = { name: 'John', age: 30 };
-    const prompt = mockPathwayString.prompt;
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
     const result = await plugin.getRequestParameters(text, parameters, prompt);
     t.deepEqual(result, {
         messages: [
-            { role: 'user', content: 'User: Help me\nAssistant: Please help John who is 30 years old.' },
+            {
+                content: 'Translate this: Help me',
+                role: 'user',
+            },
+            {
+                content: 'Translating: Help me',
+                role: 'assistant',
+            },
         ],
         temperature: 0.7,
     });
@@ -50,10 +57,10 @@ test('getRequestParameters', async (t) => {
 
 // Test the execute function
 test('execute', async (t) => {
-    const plugin = new OpenAIChatPlugin(mockConfig, mockPathwayString);
+    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
     const text = 'Help me';
     const parameters = { name: 'John', age: 30 };
-    const prompt = mockPathwayString.prompt;
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
 
     // Mock the executeRequest function
     plugin.executeRequest = () => {
@@ -82,7 +89,7 @@ test('execute', async (t) => {
 
 // Test the parseResponse function
 test('parseResponse', (t) => {
-    const plugin = new OpenAIChatPlugin(mockConfig, mockPathwayString);
+    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
     const data = {
         choices: [
             {
@@ -98,7 +105,7 @@ test('parseResponse', (t) => {
 
 // Test the logRequestData function
 test('logRequestData', (t) => {
-    const plugin = new OpenAIChatPlugin(mockConfig, mockPathwayString);
+    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
     const data = {
         messages: [
             { role: 'user', content: 'User: Help me\nAssistant: Please help John who is 30 years old.' },
@@ -113,7 +120,7 @@ test('logRequestData', (t) => {
             },
         ],
     };
-    const prompt = mockPathwayString.prompt;
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
 
     // Mock console.log function
     const originalConsoleLog = console.log;

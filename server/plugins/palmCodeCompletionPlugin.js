@@ -4,8 +4,8 @@ import PalmCompletionPlugin from './palmCompletionPlugin.js';
 
 // PalmCodeCompletionPlugin class for handling requests and responses to the PaLM API Code Completion API
 class PalmCodeCompletionPlugin extends PalmCompletionPlugin {
-    constructor(config, pathway) {
-        super(config, pathway);
+    constructor(config, pathway, modelName, model) {
+        super(config, pathway, modelName, model);
     }
 
     // Set up parameters specific to the PaLM API Code Completion API

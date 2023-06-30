@@ -81,8 +81,8 @@ const downloadFile = async (fileUrl) => {
 };
 
 class OpenAIWhisperPlugin extends ModelPlugin {
-    constructor(config, pathway) {
-        super(config, pathway);
+    constructor(config, pathway, modelName, model) {
+        super(config, pathway, modelName, model);
     }
 
     async getMediaChunks(file, requestId) {

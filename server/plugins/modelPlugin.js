@@ -10,16 +10,9 @@ const DEFAULT_MAX_RETURN_TOKENS = 256;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
 class ModelPlugin {
-    constructor(config, pathway) {
-        // If the pathway specifies a model, use that, otherwise use the default
-        this.modelName = pathway.model || config.get('defaultModelName');
-        // Get the model from the config
-        this.model = config.get('models')[this.modelName];
-        // If the model doesn't exist, throw an exception
-        if (!this.model) {
-            throw new Error(`Model ${this.modelName} not found in config`);
-        }
-
+    constructor(config, pathway, modelName, model) {
+        this.modelName = modelName;
+        this.model = model;
         this.config = config;
         this.environmentVariables = config.getEnv();
         this.temperature = pathway.temperature;

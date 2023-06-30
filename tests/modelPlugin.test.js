@@ -2,7 +2,7 @@
 import test from 'ava';
 import ModelPlugin from '../server/plugins/modelPlugin.js';
 import HandleBars from '../lib/handleBars.js';
-import { mockConfig, mockPathwayString, mockPathwayFunction, mockPathwayMessages } from './mocks.js';
+import { mockConfig, mockPathwayString, mockPathwayFunction, mockPathwayMessages, mockPathwayResolverString } from './mocks.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
@@ -12,7 +12,7 @@ const config = mockConfig;
 const pathway = mockPathwayString;
 
 test('ModelPlugin constructor', (t) => {
-    const modelPlugin = new ModelPlugin(config, pathway);
+    const modelPlugin = new ModelPlugin(mockPathwayResolverString);
 
     t.is(modelPlugin.modelName, pathway.model, 'modelName should be set from pathway');
     t.deepEqual(modelPlugin.model, config.get('models')[pathway.model], 'model should be set from config');
@@ -21,7 +21,7 @@ test('ModelPlugin constructor', (t) => {
 });
 
 test.beforeEach((t) => {
-  t.context.modelPlugin = new ModelPlugin(mockConfig, mockPathwayString);
+  t.context.modelPlugin = new ModelPlugin(mockPathwayResolverString);
 });
 
 test('getCompiledPrompt - text and parameters', (t) => {

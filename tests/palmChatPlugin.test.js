@@ -1,11 +1,10 @@
 // test_palmChatPlugin.js
 import test from 'ava';
 import PalmChatPlugin from '../server/plugins/palmChatPlugin.js';
-import { mockConfig } from './mocks.js';
+import { mockPathwayResolverMessages } from './mocks.js';
 
 test.beforeEach((t) => {
-  const pathway = 'testPathway';
-  const palmChatPlugin = new PalmChatPlugin(mockConfig, pathway);
+  const palmChatPlugin = new PalmChatPlugin(mockPathwayResolverMessages);
   t.context = { palmChatPlugin };
 });
 

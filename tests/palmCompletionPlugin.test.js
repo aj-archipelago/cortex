@@ -2,11 +2,10 @@
 
 import test from 'ava';
 import PalmCompletionPlugin from '../server/plugins/palmCompletionPlugin.js';
-import { mockConfig } from './mocks.js';
+import { mockPathwayResolverString } from './mocks.js';
 
 test.beforeEach((t) => {
-  const pathway = 'testPathway';
-  const palmCompletionPlugin = new PalmCompletionPlugin(mockConfig, pathway);
+  const palmCompletionPlugin = new PalmCompletionPlugin(mockPathwayResolverString);
   t.context = { palmCompletionPlugin };
 });
 

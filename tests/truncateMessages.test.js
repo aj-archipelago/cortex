@@ -2,12 +2,11 @@
 import test from 'ava';
 import ModelPlugin from '../server/plugins/modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
-import { mockConfig, mockPathwayString } from './mocks.js';
+import { mockPathwayResolverString } from './mocks.js';
 
-const config = mockConfig;
-const pathway = mockPathwayString;
+const { config, pathway } = mockPathwayResolverString;
 
-const modelPlugin = new ModelPlugin(config, pathway);
+const modelPlugin = new ModelPlugin(mockPathwayResolverString);
 
 const generateMessage = (role, content) => ({ role, content });
 
