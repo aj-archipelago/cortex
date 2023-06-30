@@ -78,37 +78,41 @@ class PathwayResolver {
                 }
             });
         } else { // stream
-            const incomingMessage = Array.isArray(responseData) && responseData.length > 0 ? responseData[0] : responseData;
-            incomingMessage.on('data', data => {
-                const events = data.toString().split('\n');
-        
-                events.forEach(event => {
-                    if (event.trim() === '') return; // Skip empty lines
-        
-                    const message = event.replace(/^data: /, '');
-                    
-                    //console.log(`====================================`);
-                    //console.log(`STREAM EVENT: ${event}`);
-                    //console.log(`MESSAGE: ${message}`);
-        
-                    const requestProgress = {
-                        requestId: this.requestId,
-                        data: message,
-                    }
-        
-                    if (message.trim() === '[DONE]') {
-                        requestProgress.progress = 1;
-                    }
-        
-                    try {
-                        pubsub.publish('REQUEST_PROGRESS', {
-                            requestProgress: requestProgress
-                        });
-                    } catch (error) {
-                        console.error('Could not JSON parse stream message', message, error);
-                    }
+            try {
+                const incomingMessage = Array.isArray(responseData) && responseData.length > 0 ? responseData[0] : responseData;
+                incomingMessage.on('data', data => {
+                    const events = data.toString().split('\n');
+            
+                    events.forEach(event => {
+                        if (event.trim() === '') return; // Skip empty lines
+            
+                        const message = event.replace(/^data: /, '');
+                        
+                        //console.log(`====================================`);
+                        //console.log(`STREAM EVENT: ${event}`);
+                        //console.log(`MESSAGE: ${message}`);
+            
+                        const requestProgress = {
+                            requestId: this.requestId,
+                            data: message,
+                        }
+            
+                        if (message.trim() === '[DONE]') {
+                            requestProgress.progress = 1;
+                        }
+            
+                        try {
+                            pubsub.publish('REQUEST_PROGRESS', {
+                                requestProgress: requestProgress
+                            });
+                        } catch (error) {
+                            console.error('Could not JSON parse stream message', message, error);
+                        }
+                    });
                 });
-            });
+            } catch (error) {
+                console.error('Could not subscribe to stream', error);
+            }
         }
     }
 
