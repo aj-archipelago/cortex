@@ -15,8 +15,8 @@ const truncatePromptIfNecessary = (text, textTokenCount, modelMaxTokenCount, tar
 }
 
 class OpenAICompletionPlugin extends ModelPlugin {
-    constructor(pathwayResolver) {
-        super(pathwayResolver);
+    constructor(config, pathway, modelName, model) {
+        super(config, pathway, modelName, model);
     }
 
     // Set up parameters specific to the OpenAI Completion API

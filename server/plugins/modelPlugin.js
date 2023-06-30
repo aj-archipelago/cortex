@@ -10,8 +10,7 @@ const DEFAULT_MAX_RETURN_TOKENS = 256;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
 class ModelPlugin {
-    constructor(pathwayResolver) {
-        const { config, pathway, modelName, model } = pathwayResolver;
+    constructor(config, pathway, modelName, model) {
         this.modelName = modelName;
         this.model = model;
         this.config = config;

@@ -9,37 +9,34 @@ import PalmCompletionPlugin from './plugins/palmCompletionPlugin.js';
 import PalmCodeCompletionPlugin from './plugins/palmCodeCompletionPlugin.js';
 
 class PathwayPrompter {
-    constructor(pathwayResolver) {
-
-        this.pathwayResolver = pathwayResolver;
-        const { model } = pathwayResolver;
+    constructor(config, pathway, modelName, model) {
         
         let plugin;
 
         switch (model.type) {
             case 'OPENAI-CHAT':
-                plugin = new OpenAIChatPlugin(this.pathwayResolver);
+                plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
                 break;
             case 'AZURE-TRANSLATE':
-                plugin = new AzureTranslatePlugin(this.pathwayResolver);
+                plugin = new AzureTranslatePlugin(config, pathway, modelName, model);
                 break;
             case 'OPENAI-COMPLETION':
-                plugin = new OpenAICompletionPlugin(this.pathwayResolver);
+                plugin = new OpenAICompletionPlugin(config, pathway, modelName, model);
                 break;
             case 'OPENAI-WHISPER':
-                plugin = new OpenAIWhisperPlugin(this.pathwayResolver);
+                plugin = new OpenAIWhisperPlugin(config, pathway, modelName, model);
                 break;
             case 'LOCAL-CPP-MODEL':
-                plugin = new LocalModelPlugin(this.pathwayResolver);
+                plugin = new LocalModelPlugin(config, pathway, modelName, model);
                 break;
             case 'PALM-CHAT':
-                plugin = new PalmChatPlugin(this.pathwayResolver);
+                plugin = new PalmChatPlugin(config, pathway, modelName, model);
                 break;
             case 'PALM-COMPLETION':
-                plugin = new PalmCompletionPlugin(this.pathwayResolver);
+                plugin = new PalmCompletionPlugin(config, pathway, modelName, model);
                 break;
             case 'PALM-CODE-COMPLETION':
-                plugin = new PalmCodeCompletionPlugin(this.pathwayResolver);
+                plugin = new PalmCodeCompletionPlugin(config, pathway, modelName, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);

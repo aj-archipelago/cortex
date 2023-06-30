@@ -44,7 +44,7 @@ class PathwayResolver {
 
         this.previousResult = '';
         this.prompts = [];
-        this.pathwayPrompter = new PathwayPrompter(this);
+        this.pathwayPrompter = new PathwayPrompter(this.config, this.pathway, this.modelName, this.model);
 
         Object.defineProperty(this, 'pathwayPrompt', {
             get() {
