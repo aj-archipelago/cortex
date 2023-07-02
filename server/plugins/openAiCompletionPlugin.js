@@ -1,5 +1,6 @@
 // OpenAICompletionPlugin.js
 
+import { request } from 'https';
 import ModelPlugin from './modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
 
@@ -78,12 +79,13 @@ class OpenAICompletionPlugin extends ModelPlugin {
     async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
         const requestParameters = this.getRequestParameters(text, parameters, prompt, pathwayResolver);
-    
+        const requestId = pathwayResolver?.requestId;
+
         const data = { ...(this.model.params || {}), ...requestParameters };
         const params = {};
         const headers = this.model.headers || {};
         
-        return this.executeRequest(url, data, params, headers, prompt);
+        return this.executeRequest(url, data, params, headers, prompt, requestId);
     }
 
     // Parse the response from the OpenAI Completion API
@@ -105,8 +107,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
 
     // Override the logging function to log the prompt and response
     logRequestData(data, responseData, prompt) {
-        const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
-        console.log(separator);
+        this.logAIRequestFinished();
     
         const stream = data.stream;
         const modelInput = data.prompt;

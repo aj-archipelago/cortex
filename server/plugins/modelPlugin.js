@@ -30,7 +30,8 @@ class ModelPlugin {
             }
         }
 
-        this.requestCount = 1;
+        this.requestCount = 0;
+        this.lastRequestStartTime = new Date();
         this.shouldCache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
     }
 
@@ -199,10 +200,24 @@ class ModelPlugin {
     parseResponse(data) { return data; };
 
     // Default simple logging
+    logRequestStart(url, data) {
+        this.requestCount++;
+        const logMessage = `>>> [${this.requestId}: ${this.pathwayName}.${this.requestCount}] request`;
+        const header = '>'.repeat(logMessage.length);
+        console.log(`\n${header}\n${logMessage}`);
+        console.log(`>>> Making API request to ${url}`);
+    };
+
+    logAIRequestFinished() {
+        const currentTime = new Date();
+        const timeElapsed = (currentTime - this.lastRequestStartTime) / 1000;
+        const logMessage = `<<< [${this.requestId}: ${this.pathwayName}.${this.requestCount}] response - complete in ${timeElapsed}s - data:`;
+        const header = '<'.repeat(logMessage.length);
+        console.log(`\n${header}\n${logMessage}\n`);
+    };
+
     logRequestData(data, responseData, prompt) {
-        const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
-        console.log(separator);
-    
+        this.logAIRequestFinished(); 
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
     
         if (modelInput) {
@@ -214,7 +229,10 @@ class ModelPlugin {
         prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
     }
     
-    async executeRequest(url, data, params, headers, prompt) {
+    async executeRequest(url, data, params, headers, prompt, requestId) {
+        this.aiRequestStartTime = new Date();
+        this.requestId = requestId;
+        this.logRequestStart(url, data);
         const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName);
         
         if (responseData.error) {
