@@ -76,14 +76,15 @@ class OpenAIChatPlugin extends ModelPlugin {
     }
 
     // Execute the request to the OpenAI Chat API
-    async execute(text, parameters, prompt) {
+    async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
+        const requestId = pathwayResolver?.requestId;
 
         const data = { ...(this.model.params || {}), ...requestParameters };
         const params = {};
         const headers = this.model.headers || {};
-        return this.executeRequest(url, data, params, headers, prompt);
+        return this.executeRequest(url, data, params, headers, prompt, requestId);
     }
 
     // Parse the response from the OpenAI Chat API
@@ -105,8 +106,7 @@ class OpenAIChatPlugin extends ModelPlugin {
 
     // Override the logging function to display the messages and responses
     logRequestData(data, responseData, prompt) {
-        const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
-        console.log(separator);
+        this.logAIRequestFinished();
     
         const { stream, messages } = data;
         if (messages && messages.length > 1) {

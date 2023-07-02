@@ -3,8 +3,10 @@ import test from 'ava';
 import PalmChatPlugin from '../server/plugins/palmChatPlugin.js';
 import { mockPathwayResolverMessages } from './mocks.js';
 
+const { config, pathway, modelName, model } = mockPathwayResolverMessages;
+
 test.beforeEach((t) => {
-  const palmChatPlugin = new PalmChatPlugin(mockPathwayResolverMessages);
+  const palmChatPlugin = new PalmChatPlugin(config, pathway, modelName, model);
   t.context = { palmChatPlugin };
 });
 

@@ -55,6 +55,7 @@ class PalmCompletionPlugin extends ModelPlugin {
     async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
         const requestParameters = this.getRequestParameters(text, parameters, prompt, pathwayResolver);
+        const requestId = pathwayResolver?.requestId;
 
         const data = { ...requestParameters };
         const params = {};
@@ -62,7 +63,7 @@ class PalmCompletionPlugin extends ModelPlugin {
         const gcpAuthTokenHelper = this.config.get('gcpAuthTokenHelper');
         const authToken = await gcpAuthTokenHelper.getAccessToken();
         headers.Authorization = `Bearer ${authToken}`;
-        return this.executeRequest(url, data, params, headers, prompt);
+        return this.executeRequest(url, data, params, headers, prompt, requestId);
     }
 
     // Parse the response from the PaLM API Text Completion API
@@ -105,8 +106,7 @@ class PalmCompletionPlugin extends ModelPlugin {
 
     // Override the logging function to log the prompt and response
     logRequestData(data, responseData, prompt) {
-        const separator = `\n=== ${this.pathwayName}.${this.requestCount++} ===\n`;
-        console.log(separator);
+        this.logAIRequestFinished();
 
         const safetyAttributes = this.getSafetyAttributes(responseData);
 

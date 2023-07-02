@@ -2,16 +2,18 @@ import test from 'ava';
 import OpenAIChatPlugin from '../server/plugins/openAiChatPlugin.js';
 import { mockPathwayResolverMessages } from './mocks.js';
 
+const { config, pathway, modelName, model } = mockPathwayResolverMessages;
+
 // Test the constructor
 test('constructor', (t) => {
-    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
+    const plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
     t.is(plugin.config, mockPathwayResolverMessages.config);
     t.is(plugin.pathwayPrompt, mockPathwayResolverMessages.pathway.prompt);
 });
 
 // Test the convertPalmToOpenAIMessages function
 test('convertPalmToOpenAIMessages', (t) => {
-    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
+    const plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
     const context = 'This is a test context.';
     const examples = [
         {
@@ -35,7 +37,7 @@ test('convertPalmToOpenAIMessages', (t) => {
 
 // Test the getRequestParameters function
 test('getRequestParameters', async (t) => {
-    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
+    const plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
     const text = 'Help me';
     const parameters = { name: 'John', age: 30 };
     const prompt = mockPathwayResolverMessages.pathway.prompt;
@@ -57,7 +59,7 @@ test('getRequestParameters', async (t) => {
 
 // Test the execute function
 test('execute', async (t) => {
-    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
+    const plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
     const text = 'Help me';
     const parameters = { name: 'John', age: 30 };
     const prompt = mockPathwayResolverMessages.pathway.prompt;
@@ -89,7 +91,7 @@ test('execute', async (t) => {
 
 // Test the parseResponse function
 test('parseResponse', (t) => {
-    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
+    const plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
     const data = {
         choices: [
             {
@@ -105,7 +107,7 @@ test('parseResponse', (t) => {
 
 // Test the logRequestData function
 test('logRequestData', (t) => {
-    const plugin = new OpenAIChatPlugin(mockPathwayResolverMessages);
+    const plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
     const data = {
         messages: [
             { role: 'user', content: 'User: Help me\nAssistant: Please help John who is 30 years old.' },

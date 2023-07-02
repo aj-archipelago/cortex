@@ -4,9 +4,9 @@ import ModelPlugin from '../server/plugins/modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
 import { mockPathwayResolverString } from './mocks.js';
 
-const { config, pathway } = mockPathwayResolverString;
+const { config, pathway, modelName, model } = mockPathwayResolverString;
 
-const modelPlugin = new ModelPlugin(mockPathwayResolverString);
+const modelPlugin = new ModelPlugin(config, pathway, modelName, model);
 
 const generateMessage = (role, content) => ({ role, content });
 

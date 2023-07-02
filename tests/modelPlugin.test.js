@@ -8,11 +8,10 @@ const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
 // Mock configuration and pathway objects
-const config = mockConfig;
-const pathway = mockPathwayString;
+const { config, pathway, modelName, model } = mockPathwayResolverString;
 
 test('ModelPlugin constructor', (t) => {
-    const modelPlugin = new ModelPlugin(mockPathwayResolverString);
+    const modelPlugin = new ModelPlugin(config, pathway, modelName, model);
 
     t.is(modelPlugin.modelName, pathway.model, 'modelName should be set from pathway');
     t.deepEqual(modelPlugin.model, config.get('models')[pathway.model], 'model should be set from config');
@@ -21,7 +20,7 @@ test('ModelPlugin constructor', (t) => {
 });
 
 test.beforeEach((t) => {
-  t.context.modelPlugin = new ModelPlugin(mockPathwayResolverString);
+  t.context.modelPlugin = new ModelPlugin(config, pathway, modelName, model);
 });
 
 test('getCompiledPrompt - text and parameters', (t) => {
