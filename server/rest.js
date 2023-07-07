@@ -83,6 +83,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     
         //console.log(`REST SEND: data: [DONE]\n\n`);
         res.write(`data: [DONE]\n\n`);
+        res.end();
     }
 
     const sendStreamData = (data) => {
