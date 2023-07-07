@@ -3,6 +3,7 @@ import OpenAIChatPlugin from './plugins/openAiChatPlugin.js';
 import OpenAICompletionPlugin from './plugins/openAiCompletionPlugin.js';
 import AzureTranslatePlugin from './plugins/azureTranslatePlugin.js';
 import OpenAIWhisperPlugin from './plugins/openAiWhisperPlugin.js';
+import OpenAIChatExtensionPlugin from './plugins/openAiChatExtensionPlugin.js';
 import LocalModelPlugin from './plugins/localModelPlugin.js';
 import PalmChatPlugin from './plugins/palmChatPlugin.js';
 import PalmCompletionPlugin from './plugins/palmCompletionPlugin.js';
@@ -16,6 +17,9 @@ class PathwayPrompter {
         switch (model.type) {
             case 'OPENAI-CHAT':
                 plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
+                break;
+            case 'OPENAI-CHAT-EXTENSION':
+                plugin = new OpenAIChatExtensionPlugin(config, pathway, modelName, model);
                 break;
             case 'AZURE-TRANSLATE':
                 plugin = new AzureTranslatePlugin(config, pathway, modelName, model);

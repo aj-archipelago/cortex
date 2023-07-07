@@ -91,6 +91,31 @@ var config = convict({
                 "params": {
                     "model": "whisper-1"
                 },
+            },
+            "azure-extension": {
+                "type": "OPENAI-CHAT-EXTENSION",
+                "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-turbo-16/extensions/chat/completions?api-version=2023-06-01-preview",
+                "headers": {
+                    "api-key": "{{ARCHIPELAGO_OPENAI_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "requestsPerSecond": 2,
+                "maxTokenLength": 8192,
+                "dataSources": [
+                    {
+                        "type": "AzureCognitiveSearch",
+                        "parameters": {
+                            "endpoint": "https://mlconginitive.search.windows.net",
+                            "key": "{{MY_SAMPLE_DATASOURCE_KEY}}",
+                            "indexName": "ajeindexsmall",
+                            "semanticConfiguration": "",
+                            "queryType": "simple",
+                            "fieldsMapping": null,
+                            "inScope": false,
+                            "roleInformation": "You are an AI assistant that helps people find information."
+                        }
+                    }
+                ],
             }
         },
         env: 'CORTEX_MODELS'

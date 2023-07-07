@@ -4,6 +4,7 @@ import bias from './bias.js';
 import complete from './complete.js';
 import entities from './entities.js';
 import paraphrase from './paraphrase.js';
+import retrieval from './retrieval.js';
 import sentiment from './sentiment.js';
 import summary from './summary.js';
 import sys_openai_chat from './sys_openai_chat.js';
@@ -20,6 +21,7 @@ export {
     complete,
     entities,
     paraphrase,
+    retrieval,
     sentiment,
     summary,
     sys_openai_chat,
