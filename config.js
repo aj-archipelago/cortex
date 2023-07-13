@@ -94,7 +94,7 @@ var config = convict({
             },
             "azure-extension": {
                 "type": "OPENAI-CHAT-EXTENSION",
-                "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-turbo-16/extensions/chat/completions?api-version=2023-06-01-preview",
+                "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-gpt-4/extensions/chat/completions?api-version=2023-06-01-preview",
                 "headers": {
                     "api-key": "{{ARCHIPELAGO_OPENAI_KEY}}",
                     "Content-Type": "application/json"
@@ -105,9 +105,9 @@ var config = convict({
                     {
                         "type": "AzureCognitiveSearch",
                         "parameters": {
-                            "endpoint": "https://mlconginitive.search.windows.net",
-                            "key": "{{MY_SAMPLE_DATASOURCE_KEY}}",
-                            "indexName": "ajeindexsmall",
+                            "endpoint": "https://archipelago-cognitive-search.search.windows.net",
+                            "key": "{{AZURECOGNITIVE_API_KEY}}",
+                            "indexName": "indexucmsaje",
                             "semanticConfiguration": "",
                             "queryType": "simple",
                             "fieldsMapping": null,
