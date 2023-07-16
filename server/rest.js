@@ -61,9 +61,6 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     }
     
     const finishStream = (res, jsonResponse) => {
-    
-        // Unsubscribe from the pubsub channel
-        unsubscribe();
 
         // If we haven't sent the stop message yet, do it now
         if (jsonResponse.choices?.[0]?.finish_reason !== "stop") {
@@ -112,17 +109,18 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
 
     let subscription;
 
-    const unsubscribe = async () => {
-        if (subscription) {
-            try {
-                pubsub.unsubscribe(await subscription);
-            } catch (error) {
-                console.error(`Error unsubscribing from pubsub: ${error}`);
+    subscription = pubsub.subscribe('REQUEST_PROGRESS', (data) => {
+        
+        const safeUnsubscribe = async () => {
+            if (subscription) {
+                try {
+                    pubsub.unsubscribe(subscription);
+                } catch (error) {
+                    console.error(`Error unsubscribing from pubsub: ${error}`);
+                }
             }
         }
-    }
 
-    subscription = pubsub.subscribe('REQUEST_PROGRESS', (data) => {
         if (data.requestProgress.requestId === requestId) {
             //console.log(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
             
@@ -133,6 +131,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
                 const messageJson = JSON.parse(progressData);
                 if (messageJson.error) {
                     console.error(`Stream error REST:`, messageJson?.error?.message);
+                    safeUnsubscribe();
                     finishStream(res, jsonResponse);
                     return;
                 } else if (messageJson.choices) {
@@ -151,12 +150,15 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
                 fillJsonResponse(jsonResponse, progressData, "stop");
             }
             if (progress === 1 && progressData.trim() === "[DONE]") {
+                safeUnsubscribe();
                 finishStream(res, jsonResponse);
                 return;
             }
+
             sendStreamData(jsonResponse);
 
             if (progress === 1) {
+                safeUnsubscribe();
                 finishStream(res, jsonResponse);
             }
         }
