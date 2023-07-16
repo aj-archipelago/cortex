@@ -233,7 +233,7 @@ class ModelPlugin {
         this.aiRequestStartTime = new Date();
         this.requestId = requestId;
         this.logRequestStart(url, data);
-        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName);
+        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId);
         
         if (responseData.error) {
             throw new Error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);

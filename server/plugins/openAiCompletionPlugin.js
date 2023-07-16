@@ -115,7 +115,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
         console.log(`\x1b[36m${modelInput}\x1b[0m`);
 
         if (stream) {
-            console.log(`\x1b[34m> Response is streaming...\x1b[0m`);
+            console.log(`\x1b[34m> [response is an SSE stream]\x1b[0m`);
         } else {
             console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
         }

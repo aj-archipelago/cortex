@@ -1,13 +1,8 @@
-import { parseNumberedList, parseNumberedObjectList, parseCommaSeparatedList } from './parser.js';
+import { parseNumberedList, parseNumberedObjectList, parseCommaSeparatedList, isCommaSeparatedList, isNumberedList } from './parser.js';
 
 class PathwayResponseParser {
     constructor(pathway) {
         this.pathway = pathway;
-    }
-
-    isCommaSeparatedList(data) {
-        const commaSeparatedPattern = /^([^,\n]+,)+[^,\n]+$/;
-        return commaSeparatedPattern.test(data.trim());
     }
 
     parse(data) {
@@ -16,14 +11,15 @@ class PathwayResponseParser {
         }
 
         if (this.pathway.list) {
-            if (this.isCommaSeparatedList(data)) {
-                return parseCommaSeparatedList(data);
-            } else {
+            if (isNumberedList(data)) {
                 if (this.pathway.format) {
                     return parseNumberedObjectList(data, this.pathway.format);
                 }
                 return parseNumberedList(data);
+            } else if (isCommaSeparatedList(data)) {
+                return parseCommaSeparatedList(data);
             }
+            return [data];
         }
 
         return data;

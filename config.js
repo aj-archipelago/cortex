@@ -80,7 +80,8 @@ var config = convict({
                     "model": "gpt-3.5-turbo"
                 },
                 "requestsPerSecond": 10,
-                "maxTokenLength": 8192
+                "maxTokenLength": 8192,
+                "supportsStreaming": true,
             },
             "oai-whisper": {
                 "type": "OPENAI-WHISPER",

@@ -9,6 +9,7 @@ import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 import { callPathway } from '../lib/pathwayTools.js';
+import { response } from 'express';
 
 class PathwayResolver {
     constructor({ config, pathway, args }) {
@@ -63,57 +64,111 @@ class PathwayResolver {
         this.pathwayPrompt = pathway.prompt;
     }
 
+    // This code handles async and streaming responses.  In either case, we use
+    // the graphql subscription to send progress updates to the client.  Most of 
+    // the time the client will be an external client, but it could also be the
+    // Cortex REST api code.
     async asyncResolve(args) {
-        const responseData = await this.promptAndParse(args);
+        const MAX_RETRY_COUNT = 3;
+        let attempt = 0;
+        let streamErrorOccurred = false;
 
-        // Either we're dealing with an async request or a stream
-        if(args.async || typeof responseData === 'string') {
-            const { completedCount, totalCount } = requestState[this.requestId];
-            requestState[this.requestId].data = responseData;
-            pubsub.publish('REQUEST_PROGRESS', {
-                requestProgress: {
-                    requestId: this.requestId,
-                    progress: completedCount / totalCount,
-                    data: JSON.stringify(responseData),
-                }
-            });
-        } else { // stream
-            try {
-                const incomingMessage = Array.isArray(responseData) && responseData.length > 0 ? responseData[0] : responseData;
-                incomingMessage.on('data', data => {
-                    const events = data.toString().split('\n');
-            
-                    events.forEach(event => {
-                        if (event.trim() === '') return; // Skip empty lines
-            
-                        const message = event.replace(/^data: /, '');
-                        
-                        //console.log(`====================================`);
-                        //console.log(`STREAM EVENT: ${event}`);
-                        //console.log(`MESSAGE: ${message}`);
-            
-                        const requestProgress = {
-                            requestId: this.requestId,
-                            data: message,
-                        }
-            
-                        if (message.trim() === '[DONE]') {
-                            requestProgress.progress = 1;
-                        }
-            
-                        try {
-                            pubsub.publish('REQUEST_PROGRESS', {
-                                requestProgress: requestProgress
-                            });
-                        } catch (error) {
-                            console.error('Could not JSON parse stream message', message, error);
-                        }
-                    });
+        while (attempt < MAX_RETRY_COUNT) {
+            const responseData = await this.promptAndParse(args);
+
+            if (args.async || typeof responseData === 'string') {
+                const { completedCount, totalCount } = requestState[this.requestId];
+                requestState[this.requestId].data = responseData;
+                pubsub.publish('REQUEST_PROGRESS', {
+                    requestProgress: {
+                        requestId: this.requestId,
+                        progress: completedCount / totalCount,
+                        data: JSON.stringify(responseData),
+                    }
                 });
-            } catch (error) {
-                console.error('Could not subscribe to stream', error);
+            } else {
+                try {
+                    const incomingMessage = responseData;
+
+                    const processData = (data) => {
+                        try {
+                            let events = data.toString().split('\n');
+                            
+                            //events = "data: {\"id\":\"chatcmpl-20bf1895-2fa7-4ef9-abfe-4d142aba5817\",\"object\":\"chat.completion.chunk\",\"created\":1689303423723,\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":{\"error\":{\"message\":\"The server had an error while processing your request. Sorry about that!\",\"type\":\"server_error\",\"param\":null,\"code\":null}}},\"finish_reason\":null}]}\n\n".split("\n");
+
+                            for (let event of events) {
+                                if (streamErrorOccurred) break;
+
+                                if (event.trim() === '') return; // Skip empty lines
+                                let message = event.replace(/^data: /, '');
+
+                                const requestProgress = {
+                                    requestId: this.requestId,
+                                    data: message,
+                                }
+
+                                // check for end of stream or in-stream errors
+                                if (message.trim() === '[DONE]') {
+                                    requestProgress.progress = 1;
+                                } else {
+                                    let parsedMessage;
+                                    try {
+                                        parsedMessage = JSON.parse(message);
+                                    } catch (error) {
+                                        console.error('Could not JSON parse stream message', message, error);
+                                        return;
+                                    }
+
+                                    const streamError = parsedMessage.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
+                                    if (streamError) {
+                                        streamErrorOccurred = true;
+                                        console.error(`Stream error: ${streamError.message}`);
+                                        incomingMessage.off('data', processData); // Stop listening to 'data'
+                                        return;
+                                    }
+                                }
+
+                                try {
+                                    //console.log(`Publishing stream message to requestId ${this.requestId}`, message);
+                                    pubsub.publish('REQUEST_PROGRESS', {
+                                        requestProgress: requestProgress
+                                    });
+                                } catch (error) {
+                                    console.error('Could not publish the stream message', message, error);
+                                }
+                            };
+                        } catch (error) {
+                            console.error('Could not process stream data', error);
+                        }
+                    };
+
+                    await new Promise((resolve, reject) => {
+                        incomingMessage.on('data', processData);
+                        incomingMessage.on('end', resolve);
+                        incomingMessage.on('error', reject);
+                    });
+
+                } catch (error) {
+                    console.error('Could not subscribe to stream', error);
+                }
+            }
+
+            if (streamErrorOccurred) {
+                attempt++;
+                console.error(`Stream attempt ${attempt} failed. Retrying...`);
+                streamErrorOccurred = false; // Reset the flag for the next attempt
+            } else {
+                return;
             }
         }
+        // if all retries failed, publish the stream end message
+        pubsub.publish('REQUEST_PROGRESS', {
+            requestProgress: {
+                requestId: this.requestId,
+                progress: 1,
+                data: '[DONE]',
+            }
+        });
     }
 
     async resolve(args) {
@@ -275,8 +330,11 @@ class PathwayResolver {
                     previousResult = this.truncate(previousResult, this.chunkMaxTokenLength);
                     result = await Promise.all(chunks.map(chunk =>
                         this.applyPrompt(this.prompts[i], chunk, currentParameters)));
-                    if (!currentParameters.stream) {
-                        result = result.join("\n\n")
+
+                    if (result.length === 1) {
+                        result = result[0];
+                    } else if (!currentParameters.stream) {
+                        result = result.join("\n\n");
                     }
                 }
 
