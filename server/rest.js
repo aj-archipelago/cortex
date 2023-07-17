@@ -114,7 +114,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
         const safeUnsubscribe = async () => {
             if (subscription) {
                 try {
-                    pubsub.unsubscribe(subscription);
+                    pubsub.unsubscribe(await subscription);
                 } catch (error) {
                     console.error(`Error unsubscribing from pubsub: ${error}`);
                 }

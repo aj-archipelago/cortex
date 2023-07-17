@@ -211,7 +211,7 @@ class ModelPlugin {
     logAIRequestFinished() {
         const currentTime = new Date();
         const timeElapsed = (currentTime - this.lastRequestStartTime) / 1000;
-        const logMessage = `<<< [${this.requestId}: ${this.pathwayName}.${this.requestCount}] response - complete in ${timeElapsed}s - data:`;
+        const logMessage = `<<< [${this.requestId}: ${this.pathwayName}] response - complete in ${timeElapsed}s - data:`;
         const header = '<'.repeat(logMessage.length);
         console.log(`\n${header}\n${logMessage}\n`);
     };
