@@ -79,13 +79,13 @@ class OpenAICompletionPlugin extends ModelPlugin {
     async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
         const requestParameters = this.getRequestParameters(text, parameters, prompt, pathwayResolver);
-        const requestId = pathwayResolver?.requestId;
+        const { requestId, pathway} = pathwayResolver;
 
         const data = { ...(this.model.params || {}), ...requestParameters };
         const params = {};
         const headers = this.model.headers || {};
         
-        return this.executeRequest(url, data, params, headers, prompt, requestId);
+        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
     }
 
     // Parse the response from the OpenAI Completion API

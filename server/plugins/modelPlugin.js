@@ -202,6 +202,7 @@ class ModelPlugin {
     // Default simple logging
     logRequestStart(url, data) {
         this.requestCount++;
+        this.lastRequestStartTime = new Date();
         const logMessage = `>>> [${this.requestId}: ${this.pathwayName}.${this.requestCount}] request`;
         const header = '>'.repeat(logMessage.length);
         console.log(`\n${header}\n${logMessage}`);
@@ -229,11 +230,11 @@ class ModelPlugin {
         prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
     }
     
-    async executeRequest(url, data, params, headers, prompt, requestId) {
+    async executeRequest(url, data, params, headers, prompt, requestId, pathway) {
         this.aiRequestStartTime = new Date();
         this.requestId = requestId;
         this.logRequestStart(url, data);
-        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId);
+        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId, pathway);
         
         if (responseData.error) {
             throw new Error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);

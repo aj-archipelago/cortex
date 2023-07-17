@@ -8,6 +8,7 @@ export default {
         wordTimestamped: false,
     },
     timeout: 3600, // in seconds
+    enableDuplicateRequests: false,
 };
 
 

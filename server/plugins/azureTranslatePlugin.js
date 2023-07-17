@@ -26,7 +26,7 @@ class AzureTranslatePlugin extends ModelPlugin {
     // Execute the request to the Azure Translate API
     async execute(text, parameters, prompt, pathwayResolver) {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
-        const requestId = pathwayResolver?.requestId;
+        const { requestId, pathway} = pathwayResolver;
 
         const url = this.requestUrl(text);
 
@@ -34,7 +34,7 @@ class AzureTranslatePlugin extends ModelPlugin {
         const params = requestParameters.params;
         const headers = this.model.headers || {};
 
-        return this.executeRequest(url, data, params, headers, prompt, requestId);
+        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
     }
     
     // Parse the response from the Azure Translate API

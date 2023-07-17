@@ -140,7 +140,7 @@ class PalmChatPlugin extends ModelPlugin {
     async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
-        const requestId = pathwayResolver?.requestId;
+        const { requestId, pathway} = pathwayResolver;
 
         const data = { ...(this.model.params || {}), ...requestParameters };
         const params = {};
@@ -148,7 +148,7 @@ class PalmChatPlugin extends ModelPlugin {
         const gcpAuthTokenHelper = this.config.get('gcpAuthTokenHelper');
         const authToken = await gcpAuthTokenHelper.getAccessToken();
         headers.Authorization = `Bearer ${authToken}`;
-        return this.executeRequest(url, data, params, headers, prompt, requestId);
+        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
     }
 
     // Parse the response from the PaLM Chat API

@@ -9,41 +9,41 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Schema for config
 var config = convict({
-    pathwaysPath: {
+    basePathwayPath: {
         format: String,
-        default: path.join(process.cwd(), '/pathways'),
-        env: 'CORTEX_PATHWAYS_PATH'
+        default: path.join(__dirname, 'pathways', 'basePathway.js'),
+        env: 'CORTEX_BASE_PATHWAY_PATH'
     },
     corePathwaysPath: {
         format: String,
         default: path.join(__dirname, 'pathways'),
         env: 'CORTEX_CORE_PATHWAYS_PATH'
     },
-    basePathwayPath: {
+    cortexApiKey: {
         format: String,
-        default: path.join(__dirname, 'pathways', 'basePathway.js'),
-        env: 'CORTEX_BASE_PATHWAY_PATH'
+        default: null,
+        env: 'CORTEX_API_KEY',
+        sensitive: true
     },
-    storageConnectionString: {
-        doc: 'Connection string used for access to Storage',
-        format: '*',
-        default: '',
-        sensitive: true,
-        env: 'STORAGE_CONNECTION_STRING'
+    cortexConfigFile: {
+        format: String,
+        default: null,
+        env: 'CORTEX_CONFIG_FILE'
     },
-    PORT: {
-        format: 'port',
-        default: 4000,
-        env: 'CORTEX_PORT'
-    },
-    pathways: {
-        format: Object,
-        default: {}
+    defaultModelName: {
+        format: String,
+        default: null,
+        env: 'DEFAULT_MODEL_NAME'
     },
     enableCache: {
         format: Boolean,
         default: true,
         env: 'CORTEX_ENABLE_CACHE'
+    },
+    enableDuplicateRequests: {
+        format: Boolean,
+        default: true,
+        env: 'CORTEX_ENABLE_DUPLICATE_REQUESTS'
     },
     enableGraphqlCache: {
         format: Boolean,
@@ -55,16 +55,11 @@ var config = convict({
         default: false,
         env: 'CORTEX_ENABLE_REST'
     },
-    cortexApiKey: {
+    gcpServiceAccountKey: {
         format: String,
         default: null,
-        env: 'CORTEX_API_KEY',
+        env: 'GCP_SERVICE_ACCOUNT_KEY',
         sensitive: true
-    },
-    defaultModelName: {
-        format: String,
-        default: null,
-        env: 'DEFAULT_MODEL_NAME'
     },
     models: {
         format: Object,
@@ -96,11 +91,6 @@ var config = convict({
         },
         env: 'CORTEX_MODELS'
     },
-    openaiDefaultModel: {
-        format: String,
-        default: 'gpt-3.5-turbo',
-        env: 'OPENAI_DEFAULT_MODEL'
-    },
     openaiApiKey: {
         format: String,
         default: null,
@@ -112,10 +102,31 @@ var config = convict({
         default: 'https://api.openai.com/v1/completions',
         env: 'OPENAI_API_URL'
     },
-    cortexConfigFile: {
+    openaiDefaultModel: {
         format: String,
-        default: null,
-        env: 'CORTEX_CONFIG_FILE'
+        default: 'gpt-3.5-turbo',
+        env: 'OPENAI_DEFAULT_MODEL'
+    },
+    pathways: {
+        format: Object,
+        default: {}
+    },
+    pathwaysPath: {
+        format: String,
+        default: path.join(process.cwd(), '/pathways'),
+        env: 'CORTEX_PATHWAYS_PATH'
+    },
+    PORT: {
+        format: 'port',
+        default: 4000,
+        env: 'CORTEX_PORT'
+    },
+    storageConnectionString: {
+        doc: 'Connection string used for access to Storage',
+        format: '*',
+        default: '',
+        sensitive: true,
+        env: 'STORAGE_CONNECTION_STRING'
     },
     whisperMediaApiUrl: {
         format: String,
@@ -126,12 +137,6 @@ var config = convict({
         format: String,
         default: 'null',
         env: 'WHISPER_TS_API_URL'
-    },
-    gcpServiceAccountKey: {
-        format: String,
-        default: null,
-        env: 'GCP_SERVICE_ACCOUNT_KEY',
-        sensitive: true
     },
 });
 
