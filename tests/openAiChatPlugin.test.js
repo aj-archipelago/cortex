@@ -77,7 +77,7 @@ test('execute', async (t) => {
         };
     };
 
-    const result = await plugin.execute(text, parameters, prompt);
+    const result = await plugin.execute(text, parameters, prompt, { requestId: 'foo', pathway: {} });
     t.deepEqual(result, {
         choices: [
             {
