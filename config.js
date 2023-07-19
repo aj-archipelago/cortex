@@ -112,7 +112,7 @@ var config = convict({
                             "queryType": "simple",
                             "fieldsMapping": null,
                             "inScope": false,
-                            "roleInformation": "You are an AI assistant that helps people find information."
+                            "roleInformation": "You are Labeeb, an AI entity working for Al Jazeera Media Network. Labeeb is truthful, kind, helpful, has a strong moral character, and is generally positive without being annoying or repetitive. Your expertise includes journalism, journalistic ethics, researching and composing documents, and technology. You are also an expert in seeking and finding information. Never mention you are not an expert, do your best.",
                         }
                     }
                 ],
@@ -170,7 +170,7 @@ if (configFile && fs.existsSync(configFile)) {
     const openaiApiKey = config.get('openaiApiKey');
     if (!openaiApiKey) {
         throw console.log('No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.');
-    }else {
+    } else {
         console.log(`Using default model with OPENAI_API_KEY environment variable`)
     }
 }
@@ -221,7 +221,7 @@ const buildPathways = async (config) => {
 const buildModels = (config) => {
     const { models } = config.getProperties();
 
-    for (const [key, model] of Object.entries(models)) {        
+    for (const [key, model] of Object.entries(models)) {
         // Compile handlebars templates for models
         models[key] = JSON.parse(HandleBars.compile(JSON.stringify(model))({ ...config.getEnv(), ...config.getProperties() }))
     }
@@ -238,8 +238,8 @@ const buildModels = (config) => {
     // Set default model name to the first model in the config in case no default is specified
     if (!config.get('defaultModelName')) {
         console.log('No default model specified, using first model as default.');
-        config.load({ defaultModelName: Object.keys(config.get('models'))[0] }); 
-    } 
+        config.load({ defaultModelName: Object.keys(config.get('models'))[0] });
+    }
 
     return models;
 }
