@@ -121,7 +121,18 @@ class ModelPlugin {
 
     // compile the Prompt    
     getCompiledPrompt(text, parameters, prompt) {
-        const combinedParameters = { ...this.promptParameters, ...parameters };
+        
+        // Helper function to merge promptParameters and parameters
+        const mergeParameters = (promptParameters, parameters) => {
+            let result = { ...promptParameters }; // Start with promptParameters values
+            for (let key in parameters) {
+                // If parameters value is not null, use it. Otherwise keep the promptParameters value
+                if (parameters[key] !== null) result[key] = parameters[key];
+            }
+            return result;
+        }
+
+        const combinedParameters = mergeParameters(this.promptParameters, parameters);
         const modelPrompt = this.getModelPrompt(prompt, parameters);
         const modelPromptText = modelPrompt.prompt ? HandleBars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
         const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
