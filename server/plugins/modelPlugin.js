@@ -122,11 +122,9 @@ class ModelPlugin {
     // compile the Prompt    
     getCompiledPrompt(text, parameters, prompt) {
         
-        // Helper function to merge promptParameters and parameters
         const mergeParameters = (promptParameters, parameters) => {
-            let result = { ...promptParameters }; // Start with promptParameters values
+            let result = { ...promptParameters };
             for (let key in parameters) {
-                // If parameters value is not null, use it. Otherwise keep the promptParameters value
                 if (parameters[key] !== null) result[key] = parameters[key];
             }
             return result;
