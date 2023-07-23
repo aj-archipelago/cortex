@@ -7,7 +7,7 @@ const getGraphQlType = (value) => {
       return {type: 'String', defaultValue: `""`};
       break;
     case 'number':
-      return {type: 'Int', defaultValue: '0'};
+      return {type: 'Int', defaultValue: 'null'};
       break;
     case 'object':
       if (Array.isArray(value)) {

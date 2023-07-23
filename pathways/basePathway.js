@@ -14,11 +14,12 @@ export default {
     typeDef,
     rootResolver,
     resolver,
-    inputFormat: 'text',
-    useInputChunking: true,
-    useParallelChunkProcessing: false,
-    useInputSummarization: false,    
-    truncateFromFront: false,
-    timeout: 120, // in seconds
+    inputFormat: 'text', // text or html - changes the behavior of the input chunking
+    useInputChunking: true, // true or false - enables input to be split into multiple chunks to meet context window size
+    useParallelChunkProcessing: false, // true or false - enables parallel processing of chunks
+    useInputSummarization: false, // true or false - instead of chunking, summarize the input and act on the summary    
+    truncateFromFront: false, // true or false - if true, truncate from the front of the input instead of the back
+    timeout: 120, // seconds, cancels the pathway after this many seconds
+    duplicateRequestAfter: 10, // seconds, if the request is not completed after this many seconds, a backup request is sent
 };
 

@@ -16,5 +16,6 @@ export default {
     // Set the timeout for the translation process, in seconds.
     timeout: 400,
     inputChunkSize: 500,
+    enableDuplicateRequests: false,
 };
 

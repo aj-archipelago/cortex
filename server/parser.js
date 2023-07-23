@@ -37,9 +37,21 @@ const parseCommaSeparatedList = (str) => {
     return str.split(',').map(s => s.trim()).filter(s => s.length);
 }
 
+const isCommaSeparatedList = (data) => {
+    const commaSeparatedPattern = /^([^,\n]+,)+[^,\n]+$/;
+    return commaSeparatedPattern.test(data.trim());
+}
+
+const isNumberedList = (data) => {
+    const numberedListPattern = /^\s*[\[\{\(]*\d+[\s.=\-:,;\]\)\}]/gm;
+    return numberedListPattern.test(data.trim());
+}
+
 export {
     regexParser,
     parseNumberedList,
     parseNumberedObjectList,
     parseCommaSeparatedList,
+    isCommaSeparatedList,
+    isNumberedList,
 };

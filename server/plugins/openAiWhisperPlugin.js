@@ -129,7 +129,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
                 try {
                     // const res = await axios.post(WHISPER_TS_API_URL, { params: { fileurl: uri } });
-                    const res = await this.executeRequest(WHISPER_TS_API_URL, {fileurl:uri},{},{});
+                    const res = await this.executeRequest(WHISPER_TS_API_URL, {fileurl:uri}, {}, {}, {}, requestId, pathway);
                     return res;
                 } catch (err) {
                     console.log(`Error getting word timestamped data from api:`, err);
@@ -150,7 +150,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 language && formData.append('language', language);
                 modelPromptText && formData.append('prompt', modelPromptText);
 
-                return this.executeRequest(url, formData, params, { ...this.model.headers, ...formData.getHeaders() });
+                return this.executeRequest(url, formData, params, { ...this.model.headers, ...formData.getHeaders() }, {}, requestId, pathway);
             } catch (err) {
                 console.log(err);
                 throw err;
@@ -161,7 +161,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         let { file } = parameters;
         let totalCount = 0;
         let completedCount = 0;
-        const { requestId } = pathwayResolver;
+        const { requestId, pathway } = pathwayResolver;
 
         const sendProgress = () => {
             completedCount++;

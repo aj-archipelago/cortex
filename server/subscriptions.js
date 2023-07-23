@@ -14,9 +14,9 @@ const subscriptions = {
                 const { requestIds } = args;
                 for (const requestId of requestIds) {
                     if (!requestState[requestId]) {
-                        console.log(`requestProgress, requestId: ${requestId} not found`);
+                        console.error(`Subscription requestId: ${requestId} not found`);
                     } else {
-                        console.log(`starting async requestProgress, requestId: ${requestId}`);
+                        console.log(`Subscription starting async requestProgress, requestId: ${requestId}`);
                         const { resolver, args } = requestState[requestId];
                         resolver(args);
                     }

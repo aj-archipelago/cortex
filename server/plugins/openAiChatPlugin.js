@@ -79,12 +79,12 @@ class OpenAIChatPlugin extends ModelPlugin {
     async execute(text, parameters, prompt, pathwayResolver) {
         const url = this.requestUrl(text);
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
-        const requestId = pathwayResolver?.requestId;
+        const { requestId, pathway} = pathwayResolver;
 
         const data = { ...(this.model.params || {}), ...requestParameters };
-        const params = {};
+        const params = {}; // query params
         const headers = this.model.headers || {};
-        return this.executeRequest(url, data, params, headers, prompt, requestId);
+        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
     }
 
     // Parse the response from the OpenAI Chat API
@@ -122,7 +122,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         }
     
         if (stream) {
-            console.log(`\x1b[34m> Response is streaming...\x1b[0m`);
+            console.log(`\x1b[34m> [response is an SSE stream]\x1b[0m`);
         } else {
             console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
         }

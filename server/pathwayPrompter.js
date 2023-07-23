@@ -7,6 +7,8 @@ import LocalModelPlugin from './plugins/localModelPlugin.js';
 import PalmChatPlugin from './plugins/palmChatPlugin.js';
 import PalmCompletionPlugin from './plugins/palmCompletionPlugin.js';
 import PalmCodeCompletionPlugin from './plugins/palmCodeCompletionPlugin.js';
+import CohereGeneratePlugin from './plugins/cohereGeneratePlugin.js';
+import CohereSummarizePlugin from './plugins/cohereSummarizePlugin.js';
 
 class PathwayPrompter {
     constructor(config, pathway, modelName, model) {
@@ -37,6 +39,12 @@ class PathwayPrompter {
                 break;
             case 'PALM-CODE-COMPLETION':
                 plugin = new PalmCodeCompletionPlugin(config, pathway, modelName, model);
+                break;
+            case 'COHERE-GENERATE':
+                plugin = new CohereGeneratePlugin(config, pathway, modelName, model);
+                break;
+            case 'COHERE-SUMMARIZE':
+                plugin = new CohereSummarizePlugin(config, pathway, modelName, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);

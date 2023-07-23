@@ -121,7 +121,16 @@ class ModelPlugin {
 
     // compile the Prompt    
     getCompiledPrompt(text, parameters, prompt) {
-        const combinedParameters = { ...this.promptParameters, ...parameters };
+        
+        const mergeParameters = (promptParameters, parameters) => {
+            let result = { ...promptParameters };
+            for (let key in parameters) {
+                if (parameters[key] !== null) result[key] = parameters[key];
+            }
+            return result;
+        }
+
+        const combinedParameters = mergeParameters(this.promptParameters, parameters);
         const modelPrompt = this.getModelPrompt(prompt, parameters);
         const modelPromptText = modelPrompt.prompt ? HandleBars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
         const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
@@ -202,6 +211,7 @@ class ModelPlugin {
     // Default simple logging
     logRequestStart(url, data) {
         this.requestCount++;
+        this.lastRequestStartTime = new Date();
         const logMessage = `>>> [${this.requestId}: ${this.pathwayName}.${this.requestCount}] request`;
         const header = '>'.repeat(logMessage.length);
         console.log(`\n${header}\n${logMessage}`);
@@ -211,7 +221,7 @@ class ModelPlugin {
     logAIRequestFinished() {
         const currentTime = new Date();
         const timeElapsed = (currentTime - this.lastRequestStartTime) / 1000;
-        const logMessage = `<<< [${this.requestId}: ${this.pathwayName}.${this.requestCount}] response - complete in ${timeElapsed}s - data:`;
+        const logMessage = `<<< [${this.requestId}: ${this.pathwayName}] response - complete in ${timeElapsed}s - data:`;
         const header = '<'.repeat(logMessage.length);
         console.log(`\n${header}\n${logMessage}\n`);
     };
@@ -229,11 +239,11 @@ class ModelPlugin {
         prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
     }
     
-    async executeRequest(url, data, params, headers, prompt, requestId) {
+    async executeRequest(url, data, params, headers, prompt, requestId, pathway) {
         this.aiRequestStartTime = new Date();
         this.requestId = requestId;
         this.logRequestStart(url, data);
-        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName);
+        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId, pathway);
         
         if (responseData.error) {
             throw new Error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
