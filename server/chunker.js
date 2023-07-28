@@ -152,7 +152,7 @@ const getSemanticChunks = (text, chunkSize, inputFormat = 'text') => {
       }
     });
 
-    if (chunks.some(chunk => encode(chunk).length > chunkSize)) {
+    if (chunks.filter(c => determineTextFormat(c) === 'html').some(chunk => encode(chunk).length > chunkSize)) {
       throw new Error('The HTML contains elements that are larger than the chunk size. Please try again with HTML that has smaller elements.');
     }
 
