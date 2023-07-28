@@ -20,6 +20,7 @@ import { cancelRequestResolver } from './resolver.js';
 import { buildPathways, buildModels } from '../config.js';
 import { requestState } from './requestState.js';
 import { buildRestEndpoints } from './rest.js';
+import { startTestServer } from '../tests/server.js'
 
 // Utility functions
 // Server plugins
@@ -222,7 +223,7 @@ const build = async (config) => {
         });
     };
 
-    return { server, startServer, cache, plugins, typeDefs, resolvers }
+    return { server, startServer, startTestServer, cache, plugins, typeDefs, resolvers }
 }
 
 
