@@ -12,6 +12,8 @@ export default {
     inputParameters: {
         chatHistory: [],
         contextId: ``,
+        indexName: ``,
+        roleInformation: ``,
     },
     model: `azure-extension`,
     useInputChunking: false,
