@@ -91,31 +91,6 @@ var config = convict({
                 "params": {
                     "model": "whisper-1"
                 },
-            },
-            "azure-extension": {
-                "type": "OPENAI-CHAT-EXTENSION",
-                "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-gpt-4/extensions/chat/completions?api-version=2023-06-01-preview",
-                "headers": {
-                    "api-key": "{{ARCHIPELAGO_OPENAI_KEY}}",
-                    "Content-Type": "application/json"
-                },
-                "requestsPerSecond": 2,
-                "maxTokenLength": 8192,
-                "dataSources": [
-                    {
-                        "type": "AzureCognitiveSearch",
-                        "parameters": {
-                            "endpoint": "https://archipelago-cognitive-search.search.windows.net",
-                            "key": "{{AZURECOGNITIVE_API_KEY}}",
-                            "indexName": "indexucmsaje",
-                            "semanticConfiguration": "",
-                            "queryType": "simple",
-                            "fieldsMapping": null,
-                            "inScope": false,
-                            "roleInformation": "You are Labeeb, an AI entity working for Al Jazeera Media Network. Labeeb is truthful, kind, helpful, has a strong moral character, and is generally positive without being annoying or repetitive. Your expertise includes journalism, journalistic ethics, researching and composing documents, and technology. You are also an expert in seeking and finding information. Never mention you are not an expert, do your best.",
-                        }
-                    }
-                ],
             }
         },
         env: 'CORTEX_MODELS'
