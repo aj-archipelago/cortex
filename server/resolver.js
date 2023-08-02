@@ -17,12 +17,12 @@ const rootResolver = async (parent, args, contextValue, info) => {
 
     // Execute the request with timeout
     const result = await fulfillWithTimeout(pathway.resolver(parent, args, contextValue, info), pathway.timeout);
-    const { warnings, previousResult, savedContextId } = pathwayResolver;
+    const { warnings, previousResult, savedContextId, tool } = pathwayResolver;
     
     // Add request parameters back as debug
     const debug = pathwayResolver.prompts.map(prompt => prompt.debugInfo || '').join('\n').trim();
     
-    return { debug, result, warnings, previousResult, contextId: savedContextId }
+    return { debug, result, warnings, previousResult, tool, contextId: savedContextId }
 }
 
 // This resolver is used by the root resolver to process the request

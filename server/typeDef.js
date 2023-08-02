@@ -47,6 +47,7 @@ const typeDef = (pathway) => {
         previousResult: String
         warnings: [String]
         contextId: String
+        tool: String
 }`;
 
   const params = { ...defaultInputParameters, ...inputParameters };
