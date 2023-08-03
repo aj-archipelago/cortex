@@ -25,6 +25,6 @@ export default {
     // callback signature: excuteOverride({args: object, runAllPrompts: function})
     // args: the input arguments to the pathway
     // runAllPrompts: a function that runs all prompts in the pathway and returns the result
-    executeOverride: undefined,
+    executePathway: undefined,
 };
 
