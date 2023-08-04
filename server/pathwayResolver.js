@@ -74,7 +74,7 @@ class PathwayResolver {
         let streamErrorOccurred = false;
 
         while (attempt < MAX_RETRY_COUNT) {
-            const responseData = await this.promptAndParse(args);
+            const responseData = await this.executePathway(args);
 
             if (args.async || typeof responseData === 'string') {
                 const { completedCount, totalCount } = requestState[this.requestId];
@@ -187,6 +187,15 @@ class PathwayResolver {
         }
         else {
             // Syncronously process the request
+            return await this.executePathway(args);
+        }
+    }
+
+    async executePathway(args) {
+        if (this.pathway.executePathway && typeof this.pathway.executePathway === 'function') {
+            return await this.pathway.executePathway({ args, runAllPrompts: this.promptAndParse.bind(this) });
+        }
+        else {
             return await this.promptAndParse(args);
         }
     }

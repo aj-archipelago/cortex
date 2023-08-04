@@ -21,5 +21,10 @@ export default {
     truncateFromFront: false, // true or false - if true, truncate from the front of the input instead of the back
     timeout: 120, // seconds, cancels the pathway after this many seconds
     duplicateRequestAfter: 10, // seconds, if the request is not completed after this many seconds, a backup request is sent
+    // override the default execution of the pathway
+    // callback signature: excuteOverride({args: object, runAllPrompts: function})
+    // args: the input arguments to the pathway
+    // runAllPrompts: a function that runs all prompts in the pathway and returns the result
+    executePathway: undefined,
 };
 
