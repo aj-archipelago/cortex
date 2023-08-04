@@ -120,7 +120,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
             console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
         }
     
-        prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
+        prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
 }
 

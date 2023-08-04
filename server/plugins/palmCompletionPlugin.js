@@ -124,7 +124,7 @@ class PalmCompletionPlugin extends ModelPlugin {
         }
 
         if (prompt && prompt.debugInfo) {
-            prompt.debugInfo += `${separator}${JSON.stringify(data)}`;
+            prompt.debugInfo += `\n${JSON.stringify(data)}`;
         }
     }
 }
