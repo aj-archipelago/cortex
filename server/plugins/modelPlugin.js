@@ -22,11 +22,11 @@ class ModelPlugin {
 
         // Make all of the parameters defined on the pathway itself available to the prompt
         for (const [k, v] of Object.entries(pathway)) {
-            this.promptParameters[k] = v.default ?? v;
+            this.promptParameters[k] = v?.default ?? v;
         }
         if (pathway.inputParameters) {
             for (const [k, v] of Object.entries(pathway.inputParameters)) {
-                this.promptParameters[k] = v.default ?? v;
+                this.promptParameters[k] = v?.default ?? v;
             }
         }
 
