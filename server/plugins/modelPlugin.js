@@ -206,17 +206,17 @@ class ModelPlugin {
     }
 
     // Default response parsing
-    parseResponse(data) { return data; };
+    parseResponse(data) { return data; }
 
     // Default simple logging
-    logRequestStart(url, data) {
+    logRequestStart(url, _data) {
         this.requestCount++;
         this.lastRequestStartTime = new Date();
         const logMessage = `>>> [${this.requestId}: ${this.pathwayName}.${this.requestCount}] request`;
         const header = '>'.repeat(logMessage.length);
         console.log(`\n${header}\n${logMessage}`);
         console.log(`>>> Making API request to ${url}`);
-    };
+    }
 
     logAIRequestFinished() {
         const currentTime = new Date();
@@ -224,7 +224,7 @@ class ModelPlugin {
         const logMessage = `<<< [${this.requestId}: ${this.pathwayName}] response - complete in ${timeElapsed}s - data:`;
         const header = '<'.repeat(logMessage.length);
         console.log(`\n${header}\n${logMessage}\n`);
-    };
+    }
 
     logRequestData(data, responseData, prompt) {
         this.logAIRequestFinished(); 
@@ -236,21 +236,26 @@ class ModelPlugin {
     
         console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
     
-        prompt && prompt.debugInfo && (prompt.debugInfo += `${separator}${JSON.stringify(data)}`);
+        prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
     
     async executeRequest(url, data, params, headers, prompt, requestId, pathway) {
-        this.aiRequestStartTime = new Date();
-        this.requestId = requestId;
-        this.logRequestStart(url, data);
-        const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId, pathway);
+        try {
+            this.aiRequestStartTime = new Date();
+            this.requestId = requestId;
+            this.logRequestStart(url, data);
+            const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId, pathway);
+            
+            if (responseData.error) {
+                throw new Error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
+            }
         
-        if (responseData.error) {
-            throw new Error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
+            this.logRequestData(data, responseData, prompt);
+            return this.parseResponse(responseData);
+        } catch (error) {
+            // Log the error and continue
+            console.error(error);
         }
-    
-        this.logRequestData(data, responseData, prompt);
-        return this.parseResponse(responseData);
     }
 
 }

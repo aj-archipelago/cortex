@@ -9,7 +9,6 @@ import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 import { callPathway } from '../lib/pathwayTools.js';
-import { response } from 'express';
 
 class PathwayResolver {
     constructor({ config, pathway, args }) {
@@ -26,7 +25,7 @@ class PathwayResolver {
             args?.model,
             pathway.inputParameters?.model,
             config.get('defaultModelName')
-            ].find(modelName => modelName && config.get('models').hasOwnProperty(modelName));
+            ].find(modelName => modelName && Object.prototype.hasOwnProperty.call(config.get('models'), modelName));
         this.model = config.get('models')[this.modelName];
 
         if (!this.model) {
@@ -140,18 +139,20 @@ class PathwayResolver {
                                     } catch (error) {
                                         console.error('Could not publish the stream message', message, error);
                                     }
-                                };
-                            };
+                                }
+                            }
                         } catch (error) {
                             console.error('Could not process stream data', error);
                         }
                     };
 
-                    await new Promise((resolve, reject) => {
-                        incomingMessage.on('data', processData);
-                        incomingMessage.on('end', resolve);
-                        incomingMessage.on('error', reject);
-                    });
+                    if (incomingMessage) {
+                        await new Promise((resolve, reject) => {
+                            incomingMessage.on('data', processData);
+                            incomingMessage.on('end', resolve);
+                            incomingMessage.on('error', reject);
+                        });
+                    }
 
                 } catch (error) {
                     console.error('Could not subscribe to stream', error);
