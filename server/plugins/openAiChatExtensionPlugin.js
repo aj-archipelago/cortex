@@ -35,12 +35,14 @@ class OpenAIChatExtensionPlugin extends OpenAIChatPlugin {
     getRequestParameters(text, parameters, prompt) {
         const reqParams = super.getRequestParameters(text, parameters, prompt);
         reqParams.dataSources = this.model.dataSources || reqParams.dataSources || []; // add dataSources to the request parameters
-        const {roleInformation, indexName } = parameters; // add roleInformation and indexName to the dataSource if given
+        const {roleInformation, indexName, semanticConfiguration } = parameters; // add roleInformation and indexName to the dataSource if given
         for(const dataSource of reqParams.dataSources) {
             if(!dataSource) continue;
             if(!dataSource.parameters) dataSource.parameters = {};
             roleInformation && (dataSource.parameters.roleInformation = roleInformation);
             indexName && (dataSource.parameters.indexName = indexName);
+            semanticConfiguration && (dataSource.parameters.semanticConfiguration = semanticConfiguration);
+            dataSource.parameters.queryType = semanticConfiguration ? 'semantic' : 'simple';
         }
         return reqParams;
     }
