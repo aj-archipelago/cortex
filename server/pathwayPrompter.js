@@ -10,6 +10,8 @@ import PalmCompletionPlugin from './plugins/palmCompletionPlugin.js';
 import PalmCodeCompletionPlugin from './plugins/palmCodeCompletionPlugin.js';
 import CohereGeneratePlugin from './plugins/cohereGeneratePlugin.js';
 import CohereSummarizePlugin from './plugins/cohereSummarizePlugin.js';
+import AzureCognitivePlugin from './plugins/azureCognitivePlugin.js';
+import OpenAiEmbeddingsPlugin from './plugins/openAiEmbeddingsPlugin.js';
 
 class PathwayPrompter {
     constructor(config, pathway, modelName, model) {
@@ -25,6 +27,12 @@ class PathwayPrompter {
                 break;
             case 'AZURE-TRANSLATE':
                 plugin = new AzureTranslatePlugin(config, pathway, modelName, model);
+                break;
+            case 'AZURE-COGNITIVE':
+                plugin = new AzureCognitivePlugin(config, pathway, modelName, model);
+                break;
+            case 'OPENAI-EMBEDDINGS':
+                plugin = new OpenAiEmbeddingsPlugin(config, pathway, modelName, model);
                 break;
             case 'OPENAI-COMPLETION':
                 plugin = new OpenAICompletionPlugin(config, pathway, modelName, model);
