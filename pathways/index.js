@@ -1,6 +1,7 @@
 import edit from './edit.js';
 import chat from './chat.js';
 import bias from './bias.js';
+import cognitive_delete from './cognitive_delete.js';
 import cognitive_insert from './cognitive_insert.js';
 import cognitive_search from './cognitive_search.js';
 import complete from './complete.js';
@@ -21,6 +22,7 @@ export {
     edit,
     chat,
     bias,
+    cognitive_delete,
     cognitive_insert,
     cognitive_search,
     complete,

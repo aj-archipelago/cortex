@@ -3,18 +3,37 @@ import { callPathway } from '../../lib/pathwayTools.js';
 import ModelPlugin from './modelPlugin.js';
 import { v4 as uuidv4 } from 'uuid';
 
+const TOP = 1000;
+
 class AzureCognitivePlugin extends ModelPlugin {
     constructor(config, pathway, modelName, model) {
         super(config, pathway, modelName, model);
     }
 
     // Set up parameters specific to the Azure Cognitive API
-    async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId) {
+    async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId,  {headers, requestId, pathway, url}) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
         const { inputVector, filter } = combinedParameters;
         const data = {};
 
+        if (mode == 'delete') {
+            const searchUrl = this.ensureMode(this.requestUrl(text), 'search');
+            const docsToDelete = JSON.parse(await this.executeRequest(searchUrl,
+                { search: `owner:${savedContextId}`, select: 'id', top: TOP },
+                {}, headers, prompt, requestId, pathway));
+
+            const value = docsToDelete.value.map(({id}) => ({
+                id,
+                "@search.action": "delete"
+            }));
+
+            return {
+                data: {
+                    value
+                }
+            };
+        }
 
         if (mode == 'index') {
             const calculateInputVector = async () => {
@@ -82,14 +101,19 @@ class AzureCognitivePlugin extends ModelPlugin {
     async execute(text, parameters, prompt, pathwayResolver) {
         const { requestId, pathway, savedContextId } = pathwayResolver;
         const mode = this.promptParameters.mode || 'search';
-        let url = this.ensureMode(this.requestUrl(text), mode);
+        let url = this.ensureMode(this.requestUrl(text), mode == 'delete' ? 'index' : mode);
         const indexName = parameters.indexName || 'indexcortex';
         url = this.ensureIndex(url, indexName);
-
-        const { data, params } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId);
         const headers = this.model.headers;
 
-        return this.executeRequest(url, data || {}, params || {}, headers || {}, prompt, requestId, pathway);
+        const { data, params } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, {headers, requestId, pathway, url});
+
+        const result = await this.executeRequest(url, data || {}, params || {}, headers || {}, prompt, requestId, pathway);
+
+        if (mode === 'delete' && data.value.length == TOP) { // if still has more to delete
+            return await this.execute(text, parameters, prompt, pathwayResolver);
+        }
+        return result;
     }
 
     parseResponse(data) {

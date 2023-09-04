@@ -1,8 +1,12 @@
-import { processYoutubeUrl, splitMediaFile } from './fileChunker.js';
+import { downloadFile, processYoutubeUrl, splitMediaFile } from './fileChunker.js';
 import { saveFileToBlob, deleteBlob, uploadBlob } from './blobHandler.js';
 import { publishRequestProgress } from './redis.js';
 import { deleteTempPath, ensureEncoded, isValidYoutubeUrl } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder } from './localFileHandler.js';
+import { documentToText, easyChunker } from './docHelper.js';
+import path from 'path';
+import os from 'os';
+import { v4 as uuidv4 } from 'uuid';
 
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
 console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
@@ -59,42 +63,51 @@ async function main(context, req) {
         await publishRequestProgress({ requestId, progress, completedCount, totalCount, numberOfChunks, data });
     }
 
+    const isDocument = ['.pdf', '.txt', '.docx', '.xlsx'].some(ext => uri.toLowerCase().endsWith(ext));
+
     try {
-        if (isYoutubeUrl) {
-            // totalCount += 1; // extra 1 step for youtube download
-            file = await processYoutubeUrl(file);
+        if (isDocument) {
+            const extension = path.extname(uri).toLowerCase();
+            const file = path.join(os.tmpdir(), `${uuidv4()}${extension}`);
+            await downloadFile(uri,file)
+            result.push(...easyChunker(await documentToText(file)));
+        }else{
+
+            if (isYoutubeUrl) {
+                // totalCount += 1; // extra 1 step for youtube download
+                file = await processYoutubeUrl(file);
+            }
+
+            const { chunkPromises, uniqueOutputPath } = await splitMediaFile(file);
+            folder = uniqueOutputPath;
+
+            numberOfChunks = chunkPromises.length; // for progress reporting
+            totalCount += chunkPromises.length * 4; // 4 steps for each chunk (download and upload)
+            // isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
+
+            // sequential download of chunks
+            const chunks = [];
+            for (const chunkPromise of chunkPromises) {
+                chunks.push(await chunkPromise);
+                sendProgress();
+            }
+
+            // sequential processing of chunks
+            for (const chunk of chunks) {
+                const blobName = useAzure ? await saveFileToBlob(chunk, requestId) : await moveFileToPublicFolder(chunk, requestId);
+                result.push(blobName);
+                context.log(`Saved chunk as: ${blobName}`);
+                sendProgress();
+            }
+
+            // parallel processing, dropped 
+            // result = await Promise.all(mediaSplit.chunks.map(processChunk));
         }
-
-        const { chunkPromises, uniqueOutputPath } = await splitMediaFile(file);
-        folder = uniqueOutputPath;
-
-        numberOfChunks = chunkPromises.length; // for progress reporting
-        totalCount += chunkPromises.length * 4; // 4 steps for each chunk (download and upload)
-        // isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
-
-        // sequential download of chunks
-        const chunks = [];
-        for (const chunkPromise of chunkPromises) {
-            chunks.push(await chunkPromise);
-            sendProgress();
-        }
-
-        // sequential processing of chunks
-        for (const chunk of chunks) {
-            const blobName = useAzure ? await saveFileToBlob(chunk, requestId) : await moveFileToPublicFolder(chunk, requestId);
-            result.push(blobName);
-            context.log(`Saved chunk as: ${blobName}`);
-            sendProgress();
-        }
-
-        // parallel processing, dropped 
-        // result = await Promise.all(mediaSplit.chunks.map(processChunk));
-
     } catch (error) {
         console.error("An error occurred:", error);
     } finally {
         try {
-            isYoutubeUrl && (await deleteTempPath(file));
+            (isYoutubeUrl||isDocument) && (await deleteTempPath(file));
             folder && (await deleteTempPath(folder));
         } catch (error) {
             console.error("An error occurred while deleting:", error);
