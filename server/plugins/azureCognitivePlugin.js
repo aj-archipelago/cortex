@@ -14,20 +14,30 @@ class AzureCognitivePlugin extends ModelPlugin {
     async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId,  {headers, requestId, pathway, url}) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
-        const { inputVector, filter } = combinedParameters;
+        const { inputVector, filter, docId } = combinedParameters;
         const data = {};
 
         if (mode == 'delete') {
             const searchUrl = this.ensureMode(this.requestUrl(text), 'search');
-            const docsToDelete = JSON.parse(await this.executeRequest(searchUrl,
-                { search: `owner:${savedContextId}`, select: 'id', top: TOP },
-                {}, headers, prompt, requestId, pathway));
+            let searchQuery = `owner:${savedContextId}`;
+            
+            if (docId) {
+                searchQuery += ` AND docId:'${docId}'`;
+            }
 
+            const docsToDelete = JSON.parse(await this.executeRequest(searchUrl,
+                { search: searchQuery,  
+                    "searchMode": "all",
+                    "queryType": "full",
+                    select: 'id', top: TOP 
+                },
+                {}, headers, prompt, requestId, pathway));
+        
             const value = docsToDelete.value.map(({id}) => ({
                 id,
                 "@search.action": "delete"
             }));
-
+        
             return {
                 data: {
                     value
@@ -44,7 +54,8 @@ class AzureCognitivePlugin extends ModelPlugin {
                 id: uuidv4(),
                 content: text,
                 contentVector: inputVector || (await calculateInputVector()),
-                owner: savedContextId
+                owner: savedContextId,
+                docId: docId || uuidv4()
             }
             // if(!privateData){
             //     delete doc.owner;
@@ -108,11 +119,18 @@ class AzureCognitivePlugin extends ModelPlugin {
 
         const { data, params } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, {headers, requestId, pathway, url});
 
+        if (mode === 'delete' && data.value.length == 0){
+            return; // nothing to delete
+        }
+
+        // execute the request
         const result = await this.executeRequest(url, data || {}, params || {}, headers || {}, prompt, requestId, pathway);
 
-        if (mode === 'delete' && data.value.length == TOP) { // if still has more to delete
+        // if still has more to delete
+        if (mode === 'delete' && data?.value?.length == TOP) { 
             return await this.execute(text, parameters, prompt, pathwayResolver);
         }
+        
         return result;
     }
 

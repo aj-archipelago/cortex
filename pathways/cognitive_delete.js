@@ -2,7 +2,7 @@ export default {
     // prompt: `{{text}}`,
     model: 'azure-cognitive',
     inputParameters: {
-        referenceId: ``
+        docId: ``
     },
     mode: 'delete', 
 };
