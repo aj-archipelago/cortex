@@ -8,4 +8,6 @@ export default {
         indexName: ``,
         semanticConfiguration: ``,
     },
+    enableDuplicateRequests: false,
+    timeout: 300,
 };

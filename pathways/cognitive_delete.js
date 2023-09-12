@@ -5,4 +5,6 @@ export default {
         docId: ``
     },
     mode: 'delete', 
+    enableDuplicateRequests: false,
+    timeout: 300,
 };
