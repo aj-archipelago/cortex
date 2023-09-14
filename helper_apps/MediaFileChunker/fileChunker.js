@@ -163,5 +163,5 @@ const processYoutubeUrl = async (url) => {
 }
 
 export {
-    splitMediaFile, processYoutubeUrl
+    splitMediaFile, processYoutubeUrl, downloadFile
 };
