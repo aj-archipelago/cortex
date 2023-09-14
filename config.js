@@ -87,7 +87,27 @@ var config = convict({
                 "params": {
                     "model": "whisper-1"
                 },
-            }
+            },
+            "azure-cognitive": {
+                "type": "AZURE-COGNITIVE",
+                "url": "https://archipelago-cognitive-search.search.windows.net/indexes/indexcortex/docs/search?api-version=2023-07-01-Preview",
+                "headers": {
+                    "api-key": "{{AZURE_COGNITIVE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
+            "oai-embeddings": {
+                "type": "OPENAI-EMBEDDINGS",
+                "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-embedding/embeddings?api-version=2023-05-15",
+                "headers": {
+                    "api-key": "{{ARCHIPELAGO_OPENAI_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "text-embedding-ada-002"
+                },
+                "maxTokenLength": 8192,
+            },
         },
         env: 'CORTEX_MODELS'
     },

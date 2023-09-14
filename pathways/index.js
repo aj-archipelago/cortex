@@ -1,6 +1,9 @@
 import edit from './edit.js';
 import chat from './chat.js';
 import bias from './bias.js';
+import cognitive_delete from './cognitive_delete.js';
+import cognitive_insert from './cognitive_insert.js';
+import cognitive_search from './cognitive_search.js';
 import complete from './complete.js';
 import entities from './entities.js';
 import paraphrase from './paraphrase.js';
@@ -13,12 +16,17 @@ import test_langchain from './test_langchain.mjs';
 import test_palm_chat from './test_palm_chat.js';
 import transcribe from './transcribe.js';
 import translate from './translate.js';
+import embeddings from './embeddings.js';
 
 export {
     edit,
     chat,
     bias,
+    cognitive_delete,
+    cognitive_insert,
+    cognitive_search,
     complete,
+    embeddings,
     entities,
     paraphrase,
     sentiment,
