@@ -6,10 +6,9 @@ COPY package*.json ./
 
 RUN npm install
 
-## following 3 lines are for installing ffmepg
-RUN apk update
-RUN apk add
-RUN apk add ffmpeg
+## installing ffmepg
+RUN apk update && \
+    apk add ffmpeg=6.0-r15
 
 COPY . .
 
