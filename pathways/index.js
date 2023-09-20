@@ -6,6 +6,7 @@ import cognitive_insert from './cognitive_insert.js';
 import cognitive_search from './cognitive_search.js';
 import complete from './complete.js';
 import entities from './entities.js';
+import language from './language.js';
 import paraphrase from './paraphrase.js';
 import sentiment from './sentiment.js';
 import summary from './summary.js';
@@ -28,6 +29,7 @@ export {
     complete,
     embeddings,
     entities,
+    language,
     paraphrase,
     sentiment,
     summary,
