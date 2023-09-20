@@ -55,7 +55,8 @@ class AzureCognitivePlugin extends ModelPlugin {
                 content: text,
                 contentVector: inputVector || (await calculateInputVector()),
                 owner: savedContextId,
-                docId: docId || uuidv4()
+                docId: docId || uuidv4(),
+                createdAt: new Date().toISOString()
             }
             // if(!privateData){
             //     delete doc.owner;
@@ -110,7 +111,7 @@ class AzureCognitivePlugin extends ModelPlugin {
 
     // Execute the request to the Azure Cognitive API
     async execute(text, parameters, prompt, pathwayResolver) {
-        const { requestId, pathway, savedContextId } = pathwayResolver;
+        const { requestId, pathway, savedContextId, savedContext } = pathwayResolver;
         const mode = this.promptParameters.mode || 'search';
         let url = this.ensureMode(this.requestUrl(text), mode == 'delete' ? 'index' : mode);
         const indexName = parameters.indexName || 'indexcortex';
@@ -118,6 +119,9 @@ class AzureCognitivePlugin extends ModelPlugin {
         const headers = this.model.headers;
 
         const { data, params } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, {headers, requestId, pathway, url});
+
+        // update contextid last used
+        savedContext["lastUsed"] = new Date().toISOString();
 
         if (mode === 'delete' && data.value.length == 0){
             return; // nothing to delete
