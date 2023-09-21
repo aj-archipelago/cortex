@@ -7,6 +7,7 @@ import { documentToText, easyChunker } from './docHelper.js';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
 
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
 console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
@@ -38,7 +39,7 @@ async function main(context, req) {
         return
     }
 
-    const { uri, requestId } = req.body?.params || req.query;
+    const { uri, requestId, save } = req.body?.params || req.query;
     if (!uri || !requestId) {
         context.res = {
             status: 400,
@@ -63,14 +64,29 @@ async function main(context, req) {
         await publishRequestProgress({ requestId, progress, completedCount, totalCount, numberOfChunks, data });
     }
 
-    const isDocument = ['.pdf', '.txt', '.docx', '.xlsx'].some(ext => uri.toLowerCase().endsWith(ext));
+    const isDocument = ['.pdf', '.txt', '.docx', '.xlsx', '.csv'].some(ext => uri.toLowerCase().endsWith(ext));
 
     try {
         if (isDocument) {
             const extension = path.extname(uri).toLowerCase();
             const file = path.join(os.tmpdir(), `${uuidv4()}${extension}`);
-            await downloadFile(uri,file)
-            result.push(...easyChunker(await documentToText(file)));
+            await downloadFile(uri, file)
+            const text = await documentToText(file);
+            if (save) {
+                const fileName = `${uuidv4()}.txt`; // generate unique file name
+                const filePath = path.join(os.tmpdir(), fileName);
+                const tmpPath = filePath;
+                fs.writeFileSync(filePath, text); // write text to file
+        
+                // save file to the cloud or local file system
+                const saveResult = useAzure ? await saveFileToBlob(filePath, requestId) : await moveFileToPublicFolder(filePath, requestId);
+                result.push(saveResult);
+        
+                // delete temporary file
+                fs.unlinkSync(tmpPath);
+            } else {
+                result.push(...easyChunker(text));
+            }
         }else{
 
             if (isYoutubeUrl) {
