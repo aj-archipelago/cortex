@@ -2,6 +2,11 @@
 import { callPathway } from '../../lib/pathwayTools.js';
 import ModelPlugin from './modelPlugin.js';
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+import { config } from '../../config.js';
+import { axios } from '../../lib/request.js';
+
+const API_URL = config.get('whisperMediaApiUrl');
 
 const TOP = 1000;
 
@@ -109,6 +114,19 @@ class AzureCognitivePlugin extends ModelPlugin {
         }
     }
 
+    async markCompletedForCleanUp(requestId) {
+        try {
+            if (API_URL) {
+                //call helper api to mark processing as completed
+                const res = await axios.delete(API_URL, { params: { requestId } });
+                console.log(`Marked request ${requestId} as completed:`, res.data);
+                return res.data;
+            }
+        } catch (err) {
+            console.log(`Error marking request ${requestId} as completed:`, err);
+        }
+    }
+
     // Execute the request to the Azure Cognitive API
     async execute(text, parameters, prompt, pathwayResolver) {
         const { requestId, pathway, savedContextId, savedContext } = pathwayResolver;
@@ -117,6 +135,28 @@ class AzureCognitivePlugin extends ModelPlugin {
         const indexName = parameters.indexName || 'indexcortex';
         url = this.ensureIndex(url, indexName);
         const headers = this.model.headers;
+
+        const { file } = parameters;
+        if(file){ 
+            let url = file;
+            //if not txt file, use helper app to convert to txt
+            const extension = path.extname(file).toLowerCase();
+            if (extension !== '.txt') {
+                try {
+                    const {data} = await axios.get(API_URL, { params: { uri: file, requestId, save: true } });
+                    url = data[0]
+                } catch (error) {
+                    console.log(`Error converting file ${file} to txt:`, error);
+                    throw error;
+                }
+            }
+ 
+            const { data } = await axios.get(url);
+            await this.markCompletedForCleanUp(requestId);
+
+            //return await this.execute(data, {...parameters, file:null}, prompt, pathwayResolver); 
+            return await callPathway(this.config, 'cognitive_insert', {...parameters, file:null, text:data });
+        }
 
         const { data, params } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, {headers, requestId, pathway, url});
 

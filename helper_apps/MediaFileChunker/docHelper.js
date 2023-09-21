@@ -2,6 +2,7 @@ import pdfjsLib from 'pdfjs-dist';
 import fs from 'fs/promises';
 import mammoth from 'mammoth';
 import XLSX from 'xlsx';
+import Papa from 'papaparse';
 
 export async function txtToText(filePath) {
     const text = await fs.readFile(filePath, 'utf-8');
@@ -43,6 +44,18 @@ export async function pdfToText(filePath) {
     return finalText;
 }
 
+export async function csvToText(filePath) {
+    const text = await fs.readFile(filePath, 'utf-8');
+    const results = Papa.parse(text);
+    let finalText = '';
+
+    results.data.forEach(row => {
+        finalText += row.join(' ') + '\n';
+    });
+
+    return finalText;
+}
+
 export async function documentToText(filePath) {
     const fileExtension = filePath.split('.').pop();
 
@@ -55,6 +68,8 @@ export async function documentToText(filePath) {
             return docxToText(filePath);
         case 'xlsx':
             return xlsxToText(filePath);
+        case 'csv':
+            return csvToText(filePath);
         default:
             throw new Error(`Unsupported file type: ${fileExtension}`);
     }
