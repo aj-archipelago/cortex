@@ -144,6 +144,7 @@ const build = async (config) => {
 
     const server = new ApolloServer({
         schema,
+        introspection: process.env.NODE_ENV === 'development',
         csrfPrevention: true,
         plugins: plugins.concat([// Proper shutdown for the HTTP server.
             ApolloServerPluginDrainHttpServer({ httpServer }),
