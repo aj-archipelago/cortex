@@ -10,6 +10,8 @@ const API_URL = config.get('whisperMediaApiUrl');
 
 const TOP = 1000;
 
+let DIRECT_FILE_EXTENSIONS = [".txt", ".json", ".csv", ".md", ".xml", ".js", ".html", ".css"];
+
 class AzureCognitivePlugin extends ModelPlugin {
     constructor(config, pathway, modelName, model) {
         super(config, pathway, modelName, model);
@@ -141,7 +143,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             let url = file;
             //if not txt file, use helper app to convert to txt
             const extension = path.extname(file).toLowerCase();
-            if (extension !== '.txt') {
+            if (!DIRECT_FILE_EXTENSIONS.includes(extension)) {
                 try {
                     const {data} = await axios.get(API_URL, { params: { uri: file, requestId, save: true } });
                     url = data[0]
