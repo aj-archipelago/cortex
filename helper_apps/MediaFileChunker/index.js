@@ -9,6 +9,8 @@ import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 
+const DOC_EXTENSIONS =  [".txt", ".json", ".csv", ".md", ".xml", ".js", ".html", ".css", '.pdf', '.docx', '.xlsx', '.csv'];
+
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
 console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
 
@@ -64,7 +66,7 @@ async function main(context, req) {
         await publishRequestProgress({ requestId, progress, completedCount, totalCount, numberOfChunks, data });
     }
 
-    const isDocument = ['.pdf', '.txt', '.docx', '.xlsx', '.csv'].some(ext => uri.toLowerCase().endsWith(ext));
+    const isDocument = DOC_EXTENSIONS.some(ext => uri.toLowerCase().endsWith(ext));
 
     try {
         if (isDocument) {
@@ -72,20 +74,47 @@ async function main(context, req) {
             const file = path.join(os.tmpdir(), `${uuidv4()}${extension}`);
             await downloadFile(uri, file)
             const text = await documentToText(file);
-            if (save) {
-                const fileName = `${uuidv4()}.txt`; // generate unique file name
-                const filePath = path.join(os.tmpdir(), fileName);
-                const tmpPath = filePath;
-                fs.writeFileSync(filePath, text); // write text to file
-        
-                // save file to the cloud or local file system
-                const saveResult = useAzure ? await saveFileToBlob(filePath, requestId) : await moveFileToPublicFolder(filePath, requestId);
-                result.push(saveResult);
-        
-                // delete temporary file
-                fs.unlinkSync(tmpPath);
-            } else {
-                result.push(...easyChunker(text));
+            let tmpPath;
+
+            try{
+                if (save) {
+                    const fileName = `${uuidv4()}.txt`; // generate unique file name
+                    const filePath = path.join(os.tmpdir(), fileName);
+                    tmpPath = filePath;
+                    fs.writeFileSync(filePath, text); // write text to file
+            
+                    // save file to the cloud or local file system
+                    const saveResult = useAzure ? await saveFileToBlob(filePath, requestId) : await moveFileToPublicFolder(filePath, requestId);
+                    result.push(saveResult);
+
+                } else {
+                    result.push(...easyChunker(text));
+                }
+            }catch(err){
+                console.log(`Error saving file ${uri} with request id ${requestId}:`, err);
+            }finally{
+                try{
+                    // delete temporary files
+                    tmpPath && fs.unlinkSync(tmpPath);
+                    file && fs.unlinkSync(file);
+                    console.log(`Cleaned temp files ${tmpPath}, ${file}`);
+                }catch(err){
+                    console.log(`Error cleaning temp files ${tmpPath}, ${file}:`, err);
+                }
+                
+                try{
+                    //delete uploaded prev nontext file
+                    //check cleanup for whisper temp uploaded files url
+                    const regex = /whispertempfiles\/([a-z0-9-]+)/;
+                    const match = uri.match(regex);
+                    if (match && match[1]) {
+                        const extractedValue = match[1];
+                        useAzure ? await deleteBlob(extractedValue) : await deleteFolder(extractedValue);
+                        console.log(`Cleaned temp file ${uri} with request id ${extractedValue}`);
+                    }
+                }catch(err){
+                    console.log(`Error cleaning temp file ${uri}:`, err);
+                }
             }
         }else{
 
@@ -123,7 +152,7 @@ async function main(context, req) {
         console.error("An error occurred:", error);
     } finally {
         try {
-            (isYoutubeUrl||isDocument) && (await deleteTempPath(file));
+            (isYoutubeUrl) && (await deleteTempPath(file));
             folder && (await deleteTempPath(folder));
         } catch (error) {
             console.error("An error occurred while deleting:", error);
