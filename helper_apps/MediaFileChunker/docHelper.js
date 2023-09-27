@@ -38,10 +38,10 @@ export async function pdfToText(filePath) {
         const page = await pdf.getPage(i);
         const textContent = await page.getTextContent();
         const strings = textContent.items.map(item => item.str);
-        finalText += strings.join(' ');
+        finalText += strings.join(' ') + '\n';
     }
 
-    return finalText;
+    return finalText.trim();
 }
 
 export async function csvToText(filePath) {
