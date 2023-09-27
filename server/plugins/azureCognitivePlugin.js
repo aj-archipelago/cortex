@@ -156,6 +156,10 @@ class AzureCognitivePlugin extends ModelPlugin {
             const { data } = await axios.get(url);
             await this.markCompletedForCleanUp(requestId);
 
+            if(!data){
+                throw Error(`No data can be extracted out of file!`);
+            }
+
             //return await this.execute(data, {...parameters, file:null}, prompt, pathwayResolver); 
             return await callPathway(this.config, 'cognitive_insert', {...parameters, file:null, text:data });
         }
