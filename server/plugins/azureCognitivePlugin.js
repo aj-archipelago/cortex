@@ -54,7 +54,14 @@ class AzureCognitivePlugin extends ModelPlugin {
 
         if (mode == 'index') {
             const calculateInputVector = async () => {
-                return JSON.parse(await callPathway(this.config, 'embeddings', { text }))[0];
+                try{
+                    if(!text || !text.trim()){
+                        return;
+                    }
+                    return JSON.parse(await callPathway(this.config, 'embeddings', { text }))[0];
+                }catch(err){
+                    console.log(`Error in calculating input vector for text: ${text}, error: ${err}`);
+                }
             }
 
             const doc = {
@@ -162,6 +169,10 @@ class AzureCognitivePlugin extends ModelPlugin {
 
             //return await this.execute(data, {...parameters, file:null}, prompt, pathwayResolver); 
             return await callPathway(this.config, 'cognitive_insert', {...parameters, file:null, text:data });
+        }
+
+        if (mode === 'index' && (!text || !text.trim()) ){
+            return; // nothing to index
         }
 
         const { data, params } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, {headers, requestId, pathway, url});
