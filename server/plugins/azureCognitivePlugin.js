@@ -53,6 +53,8 @@ class AzureCognitivePlugin extends ModelPlugin {
         }
 
         if (mode == 'index') {
+
+            /*
             const calculateInputVector = async () => {
                 try{
                     if(!text || !text.trim()){
@@ -63,11 +65,12 @@ class AzureCognitivePlugin extends ModelPlugin {
                     console.log(`Error in calculating input vector for text: ${text}, error: ${err}`);
                 }
             }
+            */
 
             const doc = {
                 id: uuidv4(),
                 content: text,
-                contentVector: inputVector || (await calculateInputVector()),
+                //contentVector: inputVector || (await calculateInputVector()),
                 owner: savedContextId,
                 docId: docId || uuidv4(),
                 createdAt: new Date().toISOString()
