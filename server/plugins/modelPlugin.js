@@ -197,6 +197,13 @@ class ModelPlugin {
             }
         });
      
+        // Clean up any null messages if they exist
+        expandedMessages.forEach((message) => {
+            if (typeof message === 'object' && message.content === null) {
+                message.content = '';
+            }
+        });
+        
         return expandedMessages;
     }
 
