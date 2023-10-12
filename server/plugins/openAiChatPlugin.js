@@ -115,7 +115,7 @@ class OpenAIChatPlugin extends ModelPlugin {
                 const tokenCount = encode(message.content).length;
                 const preview = words.length < 41 ? message.content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
-                console.log(`\x1b[36mMessage ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${message.content}"\x1b[0m`);
+                console.log(`\x1b[36mMessage ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"\x1b[0m`);
             });
         } else {
             console.log(`\x1b[36m${messages[0].content}\x1b[0m`);
