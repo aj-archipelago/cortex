@@ -204,7 +204,7 @@ class PathwayResolver {
     async promptAndParse(args) {
         // Get saved context from contextId or change contextId if needed
         const { contextId } = args;
-        this.savedContextId = contextId ? contextId : null;
+        this.savedContextId = contextId ? contextId : uuidv4();
         this.savedContext = contextId ? (getv && (await getv(contextId)) || {}) : {};
 
         // Save the context before processing the request

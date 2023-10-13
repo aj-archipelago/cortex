@@ -57,7 +57,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         if (isPalmFormat) {
             const context = modelPrompt.context || '';
             const examples = modelPrompt.examples || [];
-            requestMessages = this.convertPalmToOpenAIMessages(context, examples, expandedMessages);
+            requestMessages = this.convertPalmToOpenAIMessages(context, examples, modelPromptMessages);
         }
     
         // Check if the token length exceeds the model's max token length
