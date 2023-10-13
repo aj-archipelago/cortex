@@ -1,5 +1,5 @@
 export default {
-    prompt: `{{text}}`,
+    prompt: `{{{text}}}`,
     model: 'azure-cognitive',
     inputParameters: {
         inputVector: ``,
