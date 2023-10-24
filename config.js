@@ -95,6 +95,7 @@ var config = convict({
                     "api-key": "{{AZURE_COGNITIVE_API_KEY}}",
                     "Content-Type": "application/json"
                 },
+                "requestsPerSecond": 6
             },
             "oai-embeddings": {
                 "type": "OPENAI-EMBEDDINGS",
