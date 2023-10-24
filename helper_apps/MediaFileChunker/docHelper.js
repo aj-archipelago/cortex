@@ -30,15 +30,47 @@ export async function xlsxToText(filePath) {
     return finalText;
 }
 
-export async function pdfToText(filePath) {
+async function pdfToText(filePath) {
     const pdf = await pdfjsLib.getDocument(filePath).promise;
-    let finalText = '';
+    const meta = await pdf.getMetadata();
 
-    for(let i = 1; i <= pdf.numPages; i++) {
+    // Check if pdf is scanned
+    if (meta && meta.metadata && meta.metadata._metadataMap && meta.metadata._metadataMap.has('dc:format')) {
+        const format = meta.metadata._metadataMap.get('dc:format');
+        if (format && format._value && format._value.toLowerCase() === 'application/pdf; version=1.3') {
+            throw new Error('Scanned PDFs are not supported');
+        }
+    }
+
+    // Check if pdf is encrypted
+    if (pdf._pdfInfo && pdf._pdfInfo.encrypt) {
+        throw new Error('Encrypted PDFs are not supported');
+    }
+
+    // Check if pdf is password protected
+    if (pdf._passwordNeeded) {
+        throw new Error('Password protected PDFs are not supported');
+    }
+
+    let finalText = '';
+    let ocrNeeded = true; // Initialize the variable as true
+
+    for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
+        const operatorList = await page.getOperatorList();
+
+        // Check if there are any fonts used in the PDF
+        if (operatorList.fnArray.some(fn => fn === pdfjsLib.OPS.setFont)) {
+            ocrNeeded = false; // Set ocrNeeded to false if fonts are found
+        }
+
         const textContent = await page.getTextContent();
         const strings = textContent.items.map(item => item.str);
         finalText += strings.join(' ') + '\n';
+    }
+
+    if (ocrNeeded) {
+        throw new Error('OCR might be needed for this document!');
     }
 
     return finalText.trim();
