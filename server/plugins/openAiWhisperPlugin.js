@@ -21,7 +21,7 @@ const pipeline = promisify(stream.pipeline);
 const API_URL = config.get('whisperMediaApiUrl');
 const WHISPER_TS_API_URL  = config.get('whisperTSApiUrl');
 
-function alignSubtitles(subtitles) {
+function alignSubtitles(subtitles, format) {
     const result = [];
     const offset = 1000 * 60 * 10; // 10 minutes for each chunk
 
@@ -39,7 +39,7 @@ function alignSubtitles(subtitles) {
         const subtitle = subtitles[i];
         result.push(...shiftSubtitles(subtitle, i * offset));
     }
-    return subsrt.build(result);
+    return subsrt.build(result, { format: format === 'vtt' ? 'vtt' : 'srt' });
 }
 
 function generateUniqueFilename(extension) {
@@ -234,7 +234,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         }
 
         if (['srt','vtt'].includes(responseFormat) || wordTimestamped) { // align subtitles for formats
-            return alignSubtitles(result);
+            return alignSubtitles(result, responseFormat);
         }
         return result.join(` `);
     }
