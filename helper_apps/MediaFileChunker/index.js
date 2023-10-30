@@ -150,6 +150,9 @@ async function main(context, req) {
         }
     } catch (error) {
         console.error("An error occurred:", error);
+        context.res.status(500);
+        context.res.body = error.message || error;
+        return;
     } finally {
         try {
             (isYoutubeUrl) && (await deleteTempPath(file));
@@ -159,13 +162,11 @@ async function main(context, req) {
         }
     }
 
-
     console.log(`result: ${result}`);
-
     context.res = {
-        // status: 200, /* Defaults to 200 */
         body: result
     };
+
 }
 
 

@@ -155,11 +155,12 @@ class AzureCognitivePlugin extends ModelPlugin {
             const extension = path.extname(file).toLowerCase();
             if (!DIRECT_FILE_EXTENSIONS.includes(extension)) {
                 try {
-                    const {data} = await axios.get(API_URL, { params: { uri: file, requestId, save: true } });
-                    url = data[0]
+                    const { data }  = await axios.get(API_URL, { params: { uri: file, requestId, save: true } });
+                    url = data[0];
                 } catch (error) {
-                    console.log(`Error converting file ${file} to txt:`, error);
-                    throw error;
+                    console.error(`Error converting file ${file} to txt:`, error);
+                    await this.markCompletedForCleanUp(requestId);
+                    throw Error(error?.response?.data || error?.message || error);
                 }
             }
  
