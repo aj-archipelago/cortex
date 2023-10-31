@@ -26,5 +26,7 @@ export default {
     // args: the input arguments to the pathway
     // runAllPrompts: a function that runs all prompts in the pathway and returns the result
     executePathway: undefined,
+    // Set the temperature to 0 to favor more deterministic output when generating entity extraction.
+    temperature: undefined,
 };
 
