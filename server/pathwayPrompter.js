@@ -12,15 +12,19 @@ import CohereGeneratePlugin from './plugins/cohereGeneratePlugin.js';
 import CohereSummarizePlugin from './plugins/cohereSummarizePlugin.js';
 import AzureCognitivePlugin from './plugins/azureCognitivePlugin.js';
 import OpenAiEmbeddingsPlugin from './plugins/openAiEmbeddingsPlugin.js';
+import OpenAIImagePlugin from './plugins/openAiImagePlugin.js';
 
 class PathwayPrompter {
     constructor(config, pathway, modelName, model) {
-        
+
         let plugin;
 
         switch (model.type) {
             case 'OPENAI-CHAT':
                 plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
+                break;
+            case 'OPENAI-IMAGE':
+                plugin = new OpenAIImagePlugin(config, pathway, modelName, model);
                 break;
             case 'OPENAI-CHAT-EXTENSION':
                 plugin = new OpenAIChatExtensionPlugin(config, pathway, modelName, model);

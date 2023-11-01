@@ -10,6 +10,8 @@ import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 import { callPathway } from '../lib/pathwayTools.js';
 
+const modelTypesExcludedFromProgressUpdates = ['OPENAI-IMAGE'];
+
 class PathwayResolver {
     constructor({ config, pathway, args }) {
         this.config = config;
@@ -78,13 +80,17 @@ class PathwayResolver {
             if (args.async || typeof responseData === 'string') {
                 const { completedCount, totalCount } = requestState[this.requestId];
                 requestState[this.requestId].data = responseData;
-                pubsub.publish('REQUEST_PROGRESS', {
-                    requestProgress: {
-                        requestId: this.requestId,
-                        progress: completedCount / totalCount,
-                        data: JSON.stringify(responseData),
-                    }
-                });
+                
+                // if model type is OPENAI-IMAGE
+                if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
+                    pubsub.publish('REQUEST_PROGRESS', {
+                        requestProgress: {
+                            requestId: this.requestId,
+                            progress: completedCount / totalCount,
+                            data: JSON.stringify(responseData),
+                        }
+                    });
+                }
             } else {
                 try {
                     const incomingMessage = responseData;
@@ -290,7 +296,7 @@ class PathwayResolver {
         text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
         const chunks = this.processInputText(text);
 
-        const anticipatedRequestCount = chunks.length * this.prompts.length;
+        let anticipatedRequestCount = chunks.length * this.prompts.length   
 
         if ((requestState[this.requestId] || {}).canceled) {
             throw new Error('Request canceled');
