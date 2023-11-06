@@ -72,6 +72,7 @@ const getTypedefs = (pathways) => {
     type RequestSubscription {
         requestId: String
         progress: Float
+        status: String
         data: String
     }
 

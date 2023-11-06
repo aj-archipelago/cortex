@@ -149,6 +149,11 @@ var config = convict({
         sensitive: true,
         env: 'STORAGE_CONNECTION_STRING'
     },
+    dalleImageApiUrl: {
+        format: String,
+        default: 'null',
+        env: 'DALLE_IMAGE_API_URL'
+    },
     whisperMediaApiUrl: {
         format: String,
         default: 'null',
