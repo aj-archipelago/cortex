@@ -17,11 +17,22 @@ class AzureCognitivePlugin extends ModelPlugin {
         super(config, pathway, modelName, model);
     }
 
+    async getInputVector (text) {
+        try{
+            if(!text || !text.trim()){
+                return;
+            }
+            return JSON.parse(await callPathway(this.config, 'embeddings', { text }))[0];
+        }catch(err){
+            console.log(`Error in calculating input vector for text: ${text}, error: ${err}`);
+        }
+    }
+
     // Set up parameters specific to the Azure Cognitive API
     async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId,  {headers, requestId, pathway, url}) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
-        const { inputVector, filter, docId } = combinedParameters;
+        const { inputVector, calculateInputVector, privateData, filter, docId } = combinedParameters;
         const data = {};
 
         if (mode == 'delete') {
@@ -54,30 +65,22 @@ class AzureCognitivePlugin extends ModelPlugin {
 
         if (mode == 'index') {
 
-            /*
-            const calculateInputVector = async () => {
-                try{
-                    if(!text || !text.trim()){
-                        return;
-                    }
-                    return JSON.parse(await callPathway(this.config, 'embeddings', { text }))[0];
-                }catch(err){
-                    console.log(`Error in calculating input vector for text: ${text}, error: ${err}`);
-                }
-            }
-            */
-
             const doc = {
                 id: uuidv4(),
                 content: text,
-                //contentVector: inputVector || (await calculateInputVector()),
                 owner: savedContextId,
                 docId: docId || uuidv4(),
                 createdAt: new Date().toISOString()
             }
-            // if(!privateData){
-            //     delete doc.owner;
-            // }
+
+            if(inputVector || calculateInputVector){ //if input vector is provided or needs to be calculated
+                doc.contentVector = inputVector ? inputVector : await this.getInputVector(text);
+            }
+
+            if(!privateData){ //if public, remove owner
+                delete doc.owner;
+            }
+            
             data.value = [doc];
             return { data };
         }
