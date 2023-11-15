@@ -1,6 +1,4 @@
 import fs from 'fs';
-import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
-import { path as ffprobePath } from '@ffprobe-installer/ffprobe';
 import path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import { v4 as uuidv4 } from 'uuid';
@@ -10,10 +8,6 @@ import { promisify } from 'util';
 import axios from 'axios';
 import { ensureEncoded } from './helper.js';
 
-ffmpeg.setFfmpegPath(ffmpegPath);
-ffmpeg.setFfprobePath(ffprobePath);
-console.log(`ffmpegPath: ${ffmpegPath}`);
-console.log(`ffprobePath: ${ffprobePath}`);
 
 const ffmpegProbe = promisify(ffmpeg.ffprobe);
 
