@@ -13,6 +13,7 @@ import CohereSummarizePlugin from './plugins/cohereSummarizePlugin.js';
 import AzureCognitivePlugin from './plugins/azureCognitivePlugin.js';
 import OpenAiEmbeddingsPlugin from './plugins/openAiEmbeddingsPlugin.js';
 import OpenAIImagePlugin from './plugins/openAiImagePlugin.js';
+import OpenAIAssistantsPlugin from './plugins/openAiAssistantsPlugin.js';
 
 class PathwayPrompter {
     constructor(config, pathway, modelName, model) {
@@ -40,6 +41,9 @@ class PathwayPrompter {
                 break;
             case 'OPENAI-COMPLETION':
                 plugin = new OpenAICompletionPlugin(config, pathway, modelName, model);
+                break;
+            case 'OPENAI-ASSISTANTS-CHAT':
+                plugin = new OpenAIAssistantsPlugin(config, pathway, modelName, model);
                 break;
             case 'OPENAI-WHISPER':
                 plugin = new OpenAIWhisperPlugin(config, pathway, modelName, model);

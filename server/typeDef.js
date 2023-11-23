@@ -47,6 +47,7 @@ const typeDef = (pathway) => {
         previousResult: String
         warnings: [String]
         contextId: String
+        threadId: String
         tool: String
 }`;
 
