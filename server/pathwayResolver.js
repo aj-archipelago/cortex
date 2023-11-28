@@ -10,7 +10,7 @@ import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 import { callPathway } from '../lib/pathwayTools.js';
 
-const modelTypesExcludedFromProgressUpdates = ['OPENAI-IMAGE'];
+const modelTypesExcludedFromProgressUpdates = ['OPENAI-DALLE2', 'OPENAI-DALLE3'];
 
 class PathwayResolver {
     constructor({ config, pathway, args }) {

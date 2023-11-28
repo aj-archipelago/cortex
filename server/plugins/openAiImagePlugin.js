@@ -6,7 +6,6 @@ import pubsub from '../pubsub.js';
 import axios from 'axios';
 import RequestDurationEstimator from '../../lib/requestDurationEstimator.js';
 
-const API_URL = config.get('dalleImageApiUrl'); // URL for the DALL-E API
 const requestDurationEstimator = new RequestDurationEstimator(10);
 
 class OpenAIImagePlugin extends ModelPlugin {
