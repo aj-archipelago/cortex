@@ -21,10 +21,9 @@ class OpenAIDallE3Plugin extends ModelPlugin {
         const url = this.requestUrl(text);
         const data = JSON.stringify({ prompt: text });
 
-        let id;
         const { requestId, pathway } = pathwayResolver;
 
-        const makeRequest = () => this.executeRequest(url, data, {}, { ...this.model.headers }, {}, requestId, pathway);
+        const makeRequest = () => this.executeRequest(url, data, {}, this.model.headers, {}, requestId, pathway);
 
         if (!parameters.async) {
             // synchronous request
@@ -74,7 +73,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
             });
         });
 
-        // publish an update every 5 seconds, using the request duration estimator to calculate
+        // publish an update every 2 seconds, using the request duration estimator to calculate
         // the percent complete
         do {
             let progress =
@@ -93,7 +92,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
                 break;
             }
 
-            // sleep for 5 seconds
+            // sleep for 2 seconds
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
         while (state.status !== "succeeded" && attemptCount++ < 30);
