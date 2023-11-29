@@ -13,6 +13,7 @@ import CohereSummarizePlugin from './plugins/cohereSummarizePlugin.js';
 import AzureCognitivePlugin from './plugins/azureCognitivePlugin.js';
 import OpenAiEmbeddingsPlugin from './plugins/openAiEmbeddingsPlugin.js';
 import OpenAIImagePlugin from './plugins/openAiImagePlugin.js';
+import OpenAIDallE3Plugin from './plugins/openAiDalle3Plugin.js';
 
 class PathwayPrompter {
     constructor(config, pathway, modelName, model) {
@@ -23,8 +24,11 @@ class PathwayPrompter {
             case 'OPENAI-CHAT':
                 plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
                 break;
-            case 'OPENAI-IMAGE':
+            case 'OPENAI-DALLE2':
                 plugin = new OpenAIImagePlugin(config, pathway, modelName, model);
+                break;
+            case 'OPENAI-DALLE3':
+                plugin = new OpenAIDallE3Plugin(config, pathway, modelName, model);
                 break;
             case 'OPENAI-CHAT-EXTENSION':
                 plugin = new OpenAIChatExtensionPlugin(config, pathway, modelName, model);
