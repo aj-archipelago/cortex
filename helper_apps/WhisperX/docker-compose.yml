@@ -7,9 +7,4 @@ services:
       context: .
       dockerfile: ./Dockerfile
     ports:
-      - 8000:8000
-
-
-docker tag arc/whisper archipelagoairegistry.azurecr.io/cortex/whisperx
-
-docker push archipelagoairegistry.azurecr.io/cortex/whisperx   
+      - 8000:8000  
