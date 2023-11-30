@@ -141,7 +141,8 @@ const build = async (config) => {
 
     // Hand in the schema we just created and have the
     // WebSocketServer start listening.
-    const serverCleanup = useServer({ schema }, wsServer);
+    const keepAlive = 5000;
+    const serverCleanup = useServer({ schema }, wsServer, keepAlive);
 
     const server = new ApolloServer({
         schema,
@@ -161,9 +162,6 @@ const build = async (config) => {
                 },
             }
         ]),
-        subscriptions: {
-            keepAlive: 1000,
-        }
     });
 
     // If CORTEX_API_KEY is set, we roll our own auth middleware - usually not used if you're being fronted by a proxy
