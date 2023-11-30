@@ -161,6 +161,9 @@ const build = async (config) => {
                 },
             }
         ]),
+        subscriptions: {
+            keepAlive: 1000,
+        }
     });
 
     // If CORTEX_API_KEY is set, we roll our own auth middleware - usually not used if you're being fronted by a proxy
