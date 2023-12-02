@@ -141,7 +141,10 @@ const build = async (config) => {
 
     // Hand in the schema we just created and have the
     // WebSocketServer start listening.
-    const keepAlive = 5000;
+    // Respects the keep alive setting in config in case you want to
+    // turn it off for deployments that don't route the ping/pong frames
+    const keepAlive = config.get('subscriptionKeepAlive');
+    console.log(`Starting web socket server with subscription keep alive: ${keepAlive}`);
     const serverCleanup = useServer({ schema }, wsServer, keepAlive);
 
     const server = new ApolloServer({

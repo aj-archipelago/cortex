@@ -86,5 +86,6 @@
         }
     },
     "enableCache": false,
-    "enableRestEndpoints": false
+    "enableRestEndpoints": false,
+    "subscriptionKeepAlive": 10000
 }
