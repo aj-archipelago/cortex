@@ -13,7 +13,7 @@ import CohereSummarizePlugin from './plugins/cohereSummarizePlugin.js';
 import AzureCognitivePlugin from './plugins/azureCognitivePlugin.js';
 import OpenAiEmbeddingsPlugin from './plugins/openAiEmbeddingsPlugin.js';
 import OpenAIImagePlugin from './plugins/openAiImagePlugin.js';
-import OpenAIDallE3Plugin from './plugins/openAiDalle3Plugin.js';
+import OpenAIDallE3Plugin from './plugins/openAiDallE3Plugin.js';
 
 class PathwayPrompter {
     constructor(config, pathway, modelName, model) {
