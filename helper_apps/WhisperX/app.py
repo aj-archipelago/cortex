@@ -61,6 +61,9 @@ def transcribe(params):
     if 'max_words_per_line' in params: #parse as int
         writer_args['max_words_per_line'] = int(params['max_words_per_line'])
 
+    # if and only if fileurl and word_timestamps=True, max_words_per_line=1
+    if fileurl and word_timestamps and len(params) <= 2:
+        writer_args['max_words_per_line'] = 1
 
     # writer_args = {arg: args.pop(arg) for arg in word_options if arg in args}
     writer(result, srtpath, **writer_args)
