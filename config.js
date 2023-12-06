@@ -164,6 +164,11 @@ var config = convict({
         default: 'null',
         env: 'WHISPER_TS_API_URL'
     },
+    subscriptionKeepAlive: {
+        format: Number,
+        default: 0,
+        env: 'SUBSCRIPTION_KEEP_ALIVE'
+    },
 });
 
 // Read in environment variables and set up service configuration
