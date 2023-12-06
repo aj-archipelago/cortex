@@ -1,6 +1,7 @@
 import RequestDurationEstimator from '../../lib/requestDurationEstimator.js';
 import pubsub from '../pubsub.js';
 import ModelPlugin from './modelPlugin.js';
+import { request } from '../../lib/request.js';
 
 const requestDurationEstimator = new RequestDurationEstimator(10);
 
@@ -17,6 +18,22 @@ class OpenAIDallE3Plugin extends ModelPlugin {
      * we keep the request open and send progress updates to the client 
      * over a websocket.
      */
+
+    async executeRequest(url, data, params, headers, prompt, requestId, pathway) {
+        try {
+            this.aiRequestStartTime = new Date();
+            this.requestId = requestId;
+            this.logRequestStart(url, data);
+            const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId, pathway);
+               
+            this.logRequestData(data, responseData, prompt);
+            return this.parseResponse(responseData);
+        } catch (error) {
+            // Log the error and continue
+            console.error(error);
+        }
+    }
+
     async execute(text, parameters, _, pathwayResolver) {
         const url = this.requestUrl(text);
         const data = JSON.stringify({ prompt: text });
@@ -49,29 +66,25 @@ class OpenAIDallE3Plugin extends ModelPlugin {
         let attemptCount = 0;
         let data = null;
 
-        requestPromise.then((response) => {
-            state.status = "succeeded";
+        requestPromise
+        .then((response) => handleResponse(response))
+        .catch((error) => handleResponse(error));
+
+        function handleResponse(response) {
+            const status = response?.error ? "failed" : "succeeded";
+            const data = JSON.stringify(response?.error ? response : response);
+
+            const requestProgress = {
+                requestId,
+                status,
+                progress: 1,
+                data,
+            };
+
+            state.status = status;
             requestDurationEstimator.endRequest();
-            pubsub.publish('REQUEST_PROGRESS', {
-                requestProgress: {
-                    requestId,
-                    status: "succeeded",
-                    progress: 1,
-                    data: JSON.stringify(response),
-                }
-            });
-        }).catch((error) => {
-            state.status = "failed";
-            requestDurationEstimator.endRequest();
-            pubsub.publish('REQUEST_PROGRESS', {
-                requestProgress: {
-                    requestId,
-                    status: "failed",
-                    progress: 1,
-                    data: JSON.stringify(error),
-                }
-            });
-        });
+            pubsub.publish("REQUEST_PROGRESS", { requestProgress });
+        }
 
         // publish an update every 2 seconds, using the request duration estimator to calculate
         // the percent complete
@@ -96,7 +109,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
         while (state.status !== "succeeded" && attemptCount++ < 30);
-
+        
         return data;
     }
 }

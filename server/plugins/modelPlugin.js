@@ -241,7 +241,7 @@ class ModelPlugin {
             console.log(`\x1b[36m${modelInput}\x1b[0m`);
         }
     
-        console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+        console.log(`\x1b[34m> ${JSON.stringify(this.parseResponse(responseData))}\x1b[0m`);
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
