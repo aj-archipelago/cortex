@@ -2,9 +2,9 @@ version: '3.4'
 
 services:
   cortex:
-    image: cortex
+    image: arc/whisper
     build:
       context: .
       dockerfile: ./Dockerfile
     ports:
-      - 8000:8000
+      - 8000:8000  
