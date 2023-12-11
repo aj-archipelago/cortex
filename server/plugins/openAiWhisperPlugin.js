@@ -39,6 +39,12 @@ function alignSubtitles(subtitles, format) {
         const subtitle = subtitles[i];
         result.push(...shiftSubtitles(subtitle, i * offset));
     }
+    
+    //if content has needed html style tags, keep them
+    for(const obj of result) {
+        obj.text = obj.content;
+    }
+    
     return subsrt.build(result, { format: format === 'vtt' ? 'vtt' : 'srt' });
 }
 
@@ -116,7 +122,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, pathwayResolver) {
-        const { responseFormat, wordTimestamped } = parameters;
+        const { responseFormat,wordTimestamped,highlightWords,maxLineWidth,maxLineCount,maxWordsPerLine } = parameters;
         const url = this.requestUrl(text);
         const params = {};
         const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
@@ -128,8 +134,14 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
 
                 try {
-                    // const res = await axios.post(WHISPER_TS_API_URL, { params: { fileurl: uri } });
-                    const res = await this.executeRequest(WHISPER_TS_API_URL, {fileurl:uri}, {}, {}, {}, requestId, pathway);
+                    const tsparams = { fileurl:uri };
+                    if(highlightWords) tsparams.highlight_words = highlightWords ? "True" : "False";
+                    if(maxLineWidth) tsparams.max_line_width = maxLineWidth;
+                    if(maxLineCount) tsparams.max_line_count = maxLineCount;
+                    if(maxWordsPerLine) tsparams.max_words_per_line = maxWordsPerLine;
+                    if(wordTimestamped!=null) tsparams.word_timestamps = wordTimestamped;
+
+                    const res = await this.executeRequest(WHISPER_TS_API_URL, tsparams, {}, {}, {}, requestId, pathway);
                     return res;
                 } catch (err) {
                     console.log(`Error getting word timestamped data from api:`, err);
