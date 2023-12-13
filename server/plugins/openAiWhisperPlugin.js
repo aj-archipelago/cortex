@@ -12,7 +12,6 @@ import { config } from '../../config.js';
 import { deleteTempPath } from '../../helper_apps/MediaFileChunker/helper.js';
 import http from 'http';
 import https from 'https';
-import url from 'url';
 import { promisify } from 'util';
 import subsrt from 'subsrt';
 const pipeline = promisify(stream.pipeline);
@@ -21,9 +20,10 @@ const pipeline = promisify(stream.pipeline);
 const API_URL = config.get('whisperMediaApiUrl');
 const WHISPER_TS_API_URL  = config.get('whisperTSApiUrl');
 
+const OFFSET_CHUNK = 1000 * 60 * 10; // 10 minutes for each chunk
+
 function alignSubtitles(subtitles, format) {
     const result = [];
-    const offset = 1000 * 60 * 10; // 10 minutes for each chunk
 
     function preprocessStr(str) {
         return str.trim().replace(/(\n\n)(?!\n)/g, '\n\n\n');
@@ -36,9 +36,20 @@ function alignSubtitles(subtitles, format) {
     }
 
     for (let i = 0; i < subtitles.length; i++) {
-        const subtitle = subtitles[i];
-        result.push(...shiftSubtitles(subtitle, i * offset));
+        result.push(...shiftSubtitles(subtitles[i], i * OFFSET_CHUNK));
     }
+    
+    try {
+        //if content has needed html style tags, keep them
+        for(const obj of result) {
+            if(obj && obj.content){ 
+                obj.text = obj.content;
+            }
+        }
+    } catch (error) {
+        console.error("An error occurred in content text parsing: ", error);
+    }
+    
     return subsrt.build(result, { format: format === 'vtt' ? 'vtt' : 'srt' });
 }
 
@@ -55,7 +66,7 @@ const downloadFile = async (fileUrl) => {
     // eslint-disable-next-line no-async-promise-executor
     return new Promise(async (resolve, reject) => {
         try {
-            const parsedUrl = url.parse(fileUrl);
+            const parsedUrl = new URL(fileUrl);
             const protocol = parsedUrl.protocol === 'https:' ? https : http;
 
             const response = await new Promise((resolve, reject) => {
@@ -116,7 +127,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, pathwayResolver) {
-        const { responseFormat, wordTimestamped } = parameters;
+        const { responseFormat,wordTimestamped,highlightWords,maxLineWidth,maxLineCount,maxWordsPerLine } = parameters;
         const url = this.requestUrl(text);
         const params = {};
         const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
@@ -128,8 +139,14 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
 
                 try {
-                    // const res = await axios.post(WHISPER_TS_API_URL, { params: { fileurl: uri } });
-                    const res = await this.executeRequest(WHISPER_TS_API_URL, {fileurl:uri}, {}, {}, {}, requestId, pathway);
+                    const tsparams = { fileurl:uri };
+                    if(highlightWords) tsparams.highlight_words = highlightWords ? "True" : "False";
+                    if(maxLineWidth) tsparams.max_line_width = maxLineWidth;
+                    if(maxLineCount) tsparams.max_line_count = maxLineCount;
+                    if(maxWordsPerLine) tsparams.max_words_per_line = maxWordsPerLine;
+                    if(wordTimestamped!=null) tsparams.word_timestamps = wordTimestamped;
+
+                    const res = await this.executeRequest(WHISPER_TS_API_URL, tsparams, {}, {}, {}, requestId, pathway);
                     return res;
                 } catch (err) {
                     console.log(`Error getting word timestamped data from api:`, err);
