@@ -1,6 +1,7 @@
 // OpenAIChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
+import logger from '../../lib/logger.js';
 
 class OpenAIChatPlugin extends ModelPlugin {
     constructor(config, pathway, modelName, model) {
@@ -110,21 +111,34 @@ class OpenAIChatPlugin extends ModelPlugin {
     
         const { stream, messages } = data;
         if (messages && messages.length > 1) {
+            logger.info(`[chat request sent containing ${messages.length} messages]`);
+            let totalTokens = 0;
             messages.forEach((message, index) => {
-                const words = message.content.split(" ");
-                const tokenCount = encode(message.content).length;
-                const preview = words.length < 41 ? message.content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
+                //message.content string or array
+                const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
+                const words = content.split(" ");
+                const tokenCount = encode(content).length;
+                const preview = words.length < 41 ? content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
-                console.log(`\x1b[36mMessage ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"\x1b[0m`);
+                logger.debug(`Message ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"`);
+                totalTokens += tokenCount;
             });
+            logger.info(`[chat request contained ${totalTokens} tokens]`);
         } else {
-            console.log(`\x1b[36m${messages[0].content}\x1b[0m`);
+            const message = messages[0];
+            const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
+            const tokenCount = encode(content).length;
+            logger.info(`[request sent containing ${tokenCount} tokens]`);
+            logger.debug(`${content}`);
         }
     
         if (stream) {
-            console.log(`\x1b[34m> [response is an SSE stream]\x1b[0m`);
+            logger.info(`[response received as an SSE stream]`);
         } else {
-            console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+            const responseText = this.parseResponse(responseData);
+            const responseTokens = encode(responseText).length;
+            logger.info(`[response received containing ${responseTokens} tokens]`);
+            logger.debug(`${responseText}`);
         }
 
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);

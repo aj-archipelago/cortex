@@ -11,6 +11,7 @@ import { useServer } from 'graphql-ws/lib/use/ws';
 import express from 'express';
 import http from 'http';
 import Keyv from 'keyv';
+// eslint-disable-next-line import/no-extraneous-dependencies
 import cors from 'cors';
 import { KeyvAdapter } from '@apollo/utils.keyvadapter';
 import responseCachePlugin from '@apollo/server-plugin-response-cache';
@@ -21,6 +22,7 @@ import { buildPathways, buildModels } from '../config.js';
 import { requestState } from './requestState.js';
 import { buildRestEndpoints } from './rest.js';
 import { startTestServer } from '../tests/server.js'
+import logger from '../lib/logger.js';
 
 // Utility functions
 // Server plugins
@@ -40,6 +42,7 @@ const getPlugins = (config) => {
         // TODO: custom cache key:
         // https://www.apollographql.com/docs/apollo-server/performance/cache-backends#implementing-your-own-cache-backend
         plugins.push(responseCachePlugin({ cache }));
+        logger.info('Using Redis for GraphQL cache');
     }
 
     return { plugins, cache };
@@ -144,12 +147,12 @@ const build = async (config) => {
     // Respects the keep alive setting in config in case you want to
     // turn it off for deployments that don't route the ping/pong frames
     const keepAlive = config.get('subscriptionKeepAlive');
-    console.log(`Starting web socket server with subscription keep alive: ${keepAlive}`);
+    logger.info(`Starting web socket server with subscription keep alive: ${keepAlive}`);
     const serverCleanup = useServer({ schema }, wsServer, keepAlive);
 
     const server = new ApolloServer({
         schema,
-        introspection: process.env.NODE_ENV === 'development',
+        introspection: config.get('env') === 'development',
         csrfPrevention: true,
         plugins: plugins.concat([// Proper shutdown for the HTTP server.
             ApolloServerPluginDrainHttpServer({ httpServer }),
@@ -165,6 +168,11 @@ const build = async (config) => {
                 },
             }
         ]),
+    });
+
+    // Healthcheck endpoint is valid regardless of auth
+    app.get('/healthcheck', (req, res) => {
+        res.status(200).send('OK');
     });
 
     // If CORTEX_API_KEY is set, we roll our own auth middleware - usually not used if you're being fronted by a proxy
@@ -202,7 +210,7 @@ const build = async (config) => {
                 next();
             }
         });
-    };
+    }
 
     // Parse the body for REST endpoints
     app.use(express.json());
@@ -225,7 +233,7 @@ const build = async (config) => {
 
         // Now that our HTTP server is fully set up, we can listen to it.
         httpServer.listen(config.get('PORT'), () => {
-            console.log(`🚀 Server is now running at http://localhost:${config.get('PORT')}/graphql`);
+            logger.info(`🚀 Server is now running at http://localhost:${config.get('PORT')}/graphql`);
         });
     };
 

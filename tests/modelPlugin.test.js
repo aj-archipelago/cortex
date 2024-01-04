@@ -97,7 +97,7 @@ test('truncateMessagesToTargetLength', (t) => {
         { role: 'user', content: 'What is the meaning of life?' },
         { role: 'assistant', content: 'The meaning of life is a philosophical question regarding the purpose and significance of life or existence in general.' }
     ];
-    const targetTokenLength = 10;
+    const targetTokenLength = 25;
 
     const result = modelPlugin.truncateMessagesToTargetLength(messages, targetTokenLength);
     t.true(Array.isArray(result), 'truncateMessagesToTargetLength should return an array');

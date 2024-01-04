@@ -1,8 +1,8 @@
 import { downloadFile, processYoutubeUrl, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, uploadBlob } from './blobHandler.js';
+import { saveFileToBlob, deleteBlob, uploadBlob, cleanup } from './blobHandler.js';
 import { publishRequestProgress } from './redis.js';
 import { deleteTempPath, ensureEncoded, isValidYoutubeUrl } from './helper.js';
-import { moveFileToPublicFolder, deleteFolder } from './localFileHandler.js';
+import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
 import { documentToText, easyChunker } from './docHelper.js';
 import path from 'path';
 import os from 'os';
@@ -15,8 +15,28 @@ const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
 console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
 
 
+let isCleanupRunning = false;
+async function cleanupInactive(useAzure) {
+    try {
+        if (isCleanupRunning) { return; } //no need to cleanup every call
+        isCleanupRunning = true;
+        if (useAzure) {
+            await cleanup();
+        } else {
+            await cleanupLocal();
+        }
+    } catch (error) {
+        console.log('Error occurred during cleanup:', error);
+    } finally{
+        isCleanupRunning = false;
+    }
+}
+
+  
 async function main(context, req) {
     context.log('Starting req processing..');
+
+    cleanupInactive(useAzure); //trigger & no need to wait for it
 
     // Clean up blob when request delete which means processing marked completed
     if (req.method.toLowerCase() === `delete`) {

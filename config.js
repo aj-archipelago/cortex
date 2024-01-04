@@ -4,11 +4,22 @@ import HandleBars from './lib/handleBars.js';
 import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
+import logger from './lib/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Schema for config
 var config = convict({
+    env: {
+        format: String,
+        default: 'development',
+        env: 'NODE_ENV'
+    },
+    cortexId: {
+        format: String,
+        default: 'local',
+        env: 'CORTEX_ID'
+    },
     basePathwayPath: {
         format: String,
         default: path.join(__dirname, 'pathways', 'basePathway.js'),
@@ -109,6 +120,20 @@ var config = convict({
                 },
                 "maxTokenLength": 8192,
             },
+            "oai-gpt4-vision": {
+                "type": "OPENAI-VISION",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "gpt-4-vision-preview"
+                },
+                "requestsPerSecond": 1,
+                "maxTokenLength": 128000,
+                "supportsStreaming": true
+            },
         },
         env: 'CORTEX_MODELS'
     },
@@ -149,6 +174,12 @@ var config = convict({
         sensitive: true,
         env: 'STORAGE_CONNECTION_STRING'
     },
+    redisEncryptionKey: {
+        format: String,
+        default: null,
+        env: 'REDIS_ENCRYPTION_KEY',
+        sensitive: true
+    },
     dalleImageApiUrl: {
         format: String,
         default: 'null',
@@ -176,14 +207,16 @@ const configFile = config.get('cortexConfigFile');
 
 // Load config file
 if (configFile && fs.existsSync(configFile)) {
-    console.log('Loading config from', configFile);
+    logger.info(`Loading config from ${configFile}`);
     config.loadFile(configFile);
 } else {
     const openaiApiKey = config.get('openaiApiKey');
     if (!openaiApiKey) {
-        throw console.log('No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.');
+        const errorString = 'No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.';
+        logger.error(errorString);
+        throw new Error(errorString);
     } else {
-        console.log(`Using default model with OPENAI_API_KEY environment variable`)
+        logger.info(`Using default model with OPENAI_API_KEY environment variable`)
     }
 }
 
@@ -204,12 +237,12 @@ const buildPathways = async (config) => {
     const basePathway = await import(basePathwayURL).then(module => module.default);
 
     // Load core pathways, default from the Cortex package
-    console.log('Loading core pathways from', corePathwaysPath)
+    logger.info(`Loading core pathways from ${corePathwaysPath}`)
     let loadedPathways = await import(`${corePathwaysURL}/index.js`).then(module => module);
 
     // Load custom pathways and override core pathways if same
     if (pathwaysPath && fs.existsSync(pathwaysPath)) {
-        console.log('Loading custom pathways from', pathwaysPath)
+        logger.info(`Loading custom pathways from ${pathwaysPath}`)
         const customPathways = await import(`${pathwaysURL}/index.js`).then(module => module);
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
@@ -244,12 +277,14 @@ const buildModels = (config) => {
 
     // Check that models are specified, Cortex cannot run without a model
     if (Object.keys(config.get('models')).length <= 0) {
-        throw console.log('No models specified! Please set the models in your config file or via CORTEX_MODELS environment variable to point at the models for your project.');
+        const errorString = 'No models specified! Please set the models in your config file or via CORTEX_MODELS environment variable to point at the models for your project.';
+        logger.error(errorString);
+        throw new Error(errorString);
     }
 
     // Set default model name to the first model in the config in case no default is specified
     if (!config.get('defaultModelName')) {
-        console.log('No default model specified, using first model as default.');
+        logger.warn('No default model specified, using first model as default.');
         config.load({ defaultModelName: Object.keys(config.get('models'))[0] });
     }
 

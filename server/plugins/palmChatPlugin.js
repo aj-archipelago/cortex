@@ -2,6 +2,7 @@
 import ModelPlugin from './modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
 import HandleBars from '../../lib/handleBars.js';
+import logger from '../../lib/logger.js';
 
 class PalmChatPlugin extends ModelPlugin {
     constructor(config, pathway, modelName, model) {
@@ -189,33 +190,40 @@ class PalmChatPlugin extends ModelPlugin {
         const { context, examples } = instances && instances [0] || {};
     
         if (context) {
-            console.log(`\x1b[36mContext: ${context}\x1b[0m`);
+            const contextLength = encode(context).length;
+            logger.info(`[chat request contains context information of length ${contextLength} tokens]`)
+            logger.debug(`Context: ${context}`);
         }
 
         if (examples && examples.length) {
+            logger.info(`[chat request contains ${examples.length} examples]`);
             examples.forEach((example, index) => {
-                console.log(`\x1b[36mExample ${index + 1}: Input: "${example.input.content}", Output: "${example.output.content}"\x1b[0m`);
+                logger.debug(`Example ${index + 1}: Input: "${example.input.content}", Output: "${example.output.content}"`);
             });
         }
         
         if (messages && messages.length > 1) {
+            logger.info(`[chat request contains ${messages.length} messages]`);
             messages.forEach((message, index) => {
                 const words = message.content.split(" ");
                 const tokenCount = encode(message.content).length;
                 const preview = words.length < 41 ? message.content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
-                console.log(`\x1b[36mMessage ${index + 1}: Author: ${message.author}, Tokens: ${tokenCount}, Content: "${preview}"\x1b[0m`);
+                logger.debug(`Message ${index + 1}: Author: ${message.author}, Tokens: ${tokenCount}, Content: "${preview}"`);
             });
         } else if (messages && messages.length === 1) {
-            console.log(`\x1b[36m${messages[0].content}\x1b[0m`);
+            logger.debug(`${messages[0].content}`);
         }
 
         const safetyAttributes = this.getSafetyAttributes(responseData);
 
-        console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+        const responseText = this.parseResponse(responseData);
+        const responseTokens = encode(responseText).length;
+        logger.info(`[response received containing ${responseTokens} tokens]`);
+        logger.debug(`${responseText}`);
 
         if (safetyAttributes) {
-            console.log(`\x1b[33mSafety Attributes: ${JSON.stringify(safetyAttributes, null, 2)}\x1b[0m`);
+            logger.warn(`[response contains safety attributes: ${JSON.stringify(safetyAttributes, null, 2)}]`);
         }
     
         if (prompt && prompt.debugInfo) {

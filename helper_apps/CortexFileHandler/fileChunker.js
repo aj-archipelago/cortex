@@ -3,7 +3,6 @@ import path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
-import ytdl from 'ytdl-core';
 import { promisify } from 'util';
 import axios from 'axios';
 import { ensureEncoded } from './helper.js';

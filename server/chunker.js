@@ -11,12 +11,52 @@ const getLastNToken = (text, maxTokenLen) => {
 }
 
 const getFirstNToken = (text, maxTokenLen) => {
-    const encoded = encode(text);
-    if (encoded.length > maxTokenLen) {
-        text = decode(encoded.slice(0, maxTokenLen + 1));
-        text = text.slice(0,text.search(/\s[^\s]*$/)); // skip potential partial word
-    }
-    return text;
+  if (Array.isArray(text)) {
+    return getFirstNTokenArray(text, maxTokenLen);
+  } else {
+    return getFirstNTokenSingle(text, maxTokenLen);
+  }
+}
+
+const getFirstNTokenSingle = (text, maxTokenLen) => {
+  const encoded = encode(text);
+  if (encoded.length > maxTokenLen) {
+      text = decode(encoded.slice(0, maxTokenLen + 1));
+      text = text.slice(0,text.search(/\s[^\s]*$/)); // skip potential partial word
+  }
+  return text;
+}
+
+
+function getFirstNTokenArray(content, tokensToKeep) {
+  let totalTokens = 0;
+  let result = [];
+
+  for (let i = content.length - 1; i >= 0; i--) {
+      const message = content[i];
+      const messageTokens = encode(message).length;
+
+      if (totalTokens + messageTokens <= tokensToKeep) {
+          totalTokens += messageTokens;
+          result.unshift(message); // Add message to the start
+      } else {
+          try{
+            const messageObj = JSON.parse(message);
+            if(messageObj.type === "image_url"){
+              break;
+            }
+          }catch(e){
+            // ignore
+          }
+
+          const remainingTokens = tokensToKeep - totalTokens;
+          const truncatedMessage = getFirstNToken(message, remainingTokens);
+          result.unshift(truncatedMessage); // Add truncated message to the start
+          break;
+      }
+  }
+
+  return result;
 }
 
 const determineTextFormat = (text) => {

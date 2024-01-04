@@ -1,3 +1,5 @@
+import logger from '../lib/logger.js';
+
 //simply trim and parse with given regex
 const regexParser = (text, regex) => {
     return text.trim().split(regex).map(s => s.trim()).filter(s => s.length);
@@ -25,7 +27,7 @@ const parseNumberedObjectList = (text, format) => {
             }
             result.push(obj);
         } catch (e) {
-            console.warn(`Failed to parse value in parseNumberedObjectList, value: ${value}, fields: ${fields}`);
+            logger.warn(`Failed to parse value in parseNumberedObjectList, value: ${value}, fields: ${fields}`);
         }
     }
 

@@ -145,6 +145,32 @@ async function uploadBlob(context, req, saveToLocal = false) {
     });
 }
 
+// Function to delete files that haven't been used in more than a month
+async function cleanup() {
+    const { containerClient } = getBlobClient();
+  
+    // List all the blobs in the container
+    const blobs = containerClient.listBlobsFlat();
+  
+    // Calculate the date that is x month ago
+    const xMonthAgo = new Date();
+    xMonthAgo.setMonth(xMonthAgo.getMonth() - 1);
+  
+    // Iterate through the blobs
+    for await (const blob of blobs) {
+      // Get the last modified date of the blob
+      const lastModified = blob.properties.lastModified;
+  
+      // Compare the last modified date with one month ago
+      if (lastModified < xMonthAgo) {
+        // Delete the blob
+        const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
+        await blockBlobClient.delete();
+        console.log(`Cleaned blob: ${blob.name}`);
+      }
+    }
+}
+
 export {
-    saveFileToBlob, deleteBlob, uploadBlob
+    saveFileToBlob, deleteBlob, uploadBlob, cleanup
 }

@@ -5,6 +5,7 @@ import { json } from 'express';
 import pubsub from './pubsub.js';
 import { requestState } from './requestState.js';
 import { v4 as uuidv4 } from 'uuid';
+import logger from '../lib/logger.js';
 
 
 const processRestRequest = async (server, req, pathway, name, parameterMap = {}) => {
@@ -85,7 +86,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     }
 
     const sendStreamData = (data) => {
-        //console.log(`REST SEND: data: ${JSON.stringify(data)}`);
+        //logger.info(`REST SEND: data: ${JSON.stringify(data)}`);
         const dataString = (data==='[DONE]') ? data : JSON.stringify(data);
 
         if (!res.writableEnded) {
@@ -116,13 +117,13 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
                 try {
                     pubsub.unsubscribe(await subscription);
                 } catch (error) {
-                    console.error(`Error unsubscribing from pubsub: ${error}`);
+                    logger.error(`Error unsubscribing from pubsub: ${error}`);
                 }
             }
         }
 
         if (data.requestProgress.requestId === requestId) {
-            //console.log(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
+            //logger.info(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
             
             const progress = data.requestProgress.progress;
             const progressData = data.requestProgress.data;
@@ -130,7 +131,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
             try {
                 const messageJson = JSON.parse(progressData);
                 if (messageJson.error) {
-                    console.error(`Stream error REST:`, messageJson?.error?.message);
+                    logger.error(`Stream error REST: ${messageJson?.error?.message || 'unknown error'}`);
                     safeUnsubscribe();
                     finishStream(res, jsonResponse);
                     return;
@@ -146,7 +147,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
                     fillJsonResponse(jsonResponse, messageJson, null);
                 }
             } catch (error) {
-                //console.log(`progressData not JSON: ${progressData}`);
+                //logger.info(`progressData not JSON: ${progressData}`);
                 fillJsonResponse(jsonResponse, progressData, "stop");
             }
             if (progress === 1 && progressData.trim() === "[DONE]") {
@@ -165,7 +166,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     });
 
     // Fire the resolver for the async requestProgress
-    console.log(`Rest Endpoint starting async requestProgress, requestId: ${requestId}`);
+    logger.info(`Rest Endpoint starting async requestProgress, requestId: ${requestId}`);
     const { resolver, args } = requestState[requestId];
     resolver(args);
 
