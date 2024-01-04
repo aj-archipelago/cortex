@@ -1,6 +1,5 @@
 // openAiWhisperPlugin.js
 import ModelPlugin from './modelPlugin.js';
-import FormData from 'form-data';
 import fs from 'fs';
 import pubsub from '../pubsub.js';
 import { axios } from '../../lib/request.js';
@@ -21,6 +20,14 @@ const API_URL = config.get('whisperMediaApiUrl');
 const WHISPER_TS_API_URL  = config.get('whisperTSApiUrl');
 
 const OFFSET_CHUNK = 1000 * 60 * 10; // 10 minutes for each chunk
+
+// convert srt format to text
+function convertToText(str) {
+    return str
+      .split('\n')
+      .filter(line => !line.match(/^\d+$/) && !line.match(/^\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}$/) && line !== '')
+      .join(' ');
+}
 
 function alignSubtitles(subtitles, format) {
     const result = [];
@@ -53,43 +60,6 @@ function alignSubtitles(subtitles, format) {
     return subsrt.build(result, { format: format === 'vtt' ? 'vtt' : 'srt' });
 }
 
-function generateUniqueFilename(extension) {
-    return `${uuidv4()}.${extension}`;
-}
-
-const downloadFile = async (fileUrl) => {
-    const fileExtension = path.extname(fileUrl).slice(1);
-    const uniqueFilename = generateUniqueFilename(fileExtension);
-    const tempDir = os.tmpdir();
-    const localFilePath = `${tempDir}/${uniqueFilename}`;
-
-    // eslint-disable-next-line no-async-promise-executor
-    return new Promise(async (resolve, reject) => {
-        try {
-            const parsedUrl = new URL(fileUrl);
-            const protocol = parsedUrl.protocol === 'https:' ? https : http;
-
-            const response = await new Promise((resolve, reject) => {
-                protocol.get(parsedUrl, (res) => {
-                    if (res.statusCode === 200) {
-                        resolve(res);
-                    } else {
-                        reject(new Error(`HTTP request failed with status code ${res.statusCode}`));
-                    }
-                }).on('error', reject);
-            });
-
-            await pipeline(response, fs.createWriteStream(localFilePath));
-            console.log(`Downloaded file to ${localFilePath}`);
-            resolve(localFilePath);
-        } catch (error) {
-            fs.unlink(localFilePath, () => {
-                reject(error);
-            });
-            //throw error;
-        }
-    });
-};
 
 class OpenAIWhisperPlugin extends ModelPlugin {
     constructor(config, pathway, modelName, model) {
@@ -128,48 +98,35 @@ class OpenAIWhisperPlugin extends ModelPlugin {
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, pathwayResolver) {
         const { responseFormat,wordTimestamped,highlightWords,maxLineWidth,maxLineCount,maxWordsPerLine } = parameters;
-        const url = this.requestUrl(text);
-        const params = {};
-        const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
 
         const processTS = async (uri) => {
-            if (wordTimestamped) {
-                if (!WHISPER_TS_API_URL) {
-                    throw new Error(`WHISPER_TS_API_URL not set for word timestamped processing`);
-                }
-
-                try {
-                    const tsparams = { fileurl:uri };
-                    if(highlightWords) tsparams.highlight_words = highlightWords ? "True" : "False";
-                    if(maxLineWidth) tsparams.max_line_width = maxLineWidth;
-                    if(maxLineCount) tsparams.max_line_count = maxLineCount;
-                    if(maxWordsPerLine) tsparams.max_words_per_line = maxWordsPerLine;
-                    if(wordTimestamped!=null) tsparams.word_timestamps = wordTimestamped;
-
-                    const res = await this.executeRequest(WHISPER_TS_API_URL, tsparams, {}, {}, {}, requestId, pathway);
-                    return res;
-                } catch (err) {
-                    console.log(`Error getting word timestamped data from api:`, err);
-                    throw err;
-                }
+            if (!WHISPER_TS_API_URL) {
+                throw new Error(`WHISPER_TS_API_URL not set for word timestamped processing`);
             }
-        }
 
-        const processChunk = async (chunk) => {
             try {
-                const { language, responseFormat } = parameters;
-                const response_format = responseFormat || 'text';
+                const tsparams = { fileurl:uri };
+                if(highlightWords) tsparams.highlight_words = highlightWords ? "True" : "False";
+                if(maxLineWidth) tsparams.max_line_width = maxLineWidth;
+                if(maxLineCount) tsparams.max_line_count = maxLineCount;
+                if(maxWordsPerLine) tsparams.max_words_per_line = maxWordsPerLine;
+                if(wordTimestamped!=null) {
+                    if(!wordTimestamped) {
+                        tsparams.word_timestamps = "False";
+                    }else{
+                        tsparams.word_timestamps = wordTimestamped;    
+                    }
+                }
 
-                const formData = new FormData();
-                formData.append('file', fs.createReadStream(chunk));
-                formData.append('model', this.model.params.model);
-                formData.append('response_format', response_format);
-                language && formData.append('language', language);
-                modelPromptText && formData.append('prompt', modelPromptText);
+                const res = await this.executeRequest(WHISPER_TS_API_URL, tsparams, {}, {}, {}, requestId, pathway);
 
-                return this.executeRequest(url, formData, params, { ...this.model.headers, ...formData.getHeaders() }, {}, requestId, pathway);
+                if(!wordTimestamped && !responseFormat){ 
+                    //if no response format, convert to text
+                    return convertToText(res);
+                }
+                return res;
             } catch (err) {
-                console.log(err);
+                console.log(`Error getting word timestamped data from api:`, err);
                 throw err;
             }
         }
@@ -178,18 +135,41 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         let { file } = parameters;
         let totalCount = 0;
         let completedCount = 0;
+        let partialCount = 0;
         const { requestId, pathway } = pathwayResolver;
 
-        const sendProgress = () => {
-            completedCount++;
+        const MAXPARTIALCOUNT = 60;
+        const sendProgress = (partial=false) => {
+            if(partial){
+                partialCount = Math.min(partialCount + 1, MAXPARTIALCOUNT-1);
+            }else {
+                partialCount = 0;
+                completedCount++;
+            }
             if (completedCount >= totalCount) return;
+
+            const progress = (partialCount / MAXPARTIALCOUNT + completedCount) / totalCount;
+            console.log(`Progress: ${progress}`);
+
             pubsub.publish('REQUEST_PROGRESS', {
                 requestProgress: {
                     requestId,
-                    progress: completedCount / totalCount,
+                    progress,
                     data: null,
                 }
             });
+        }
+
+        async function processURI(uri) {
+            let result = null;
+            processTS(uri).then((ts) => { result = ts;});
+
+            //send updates while waiting for result
+            while(!result) {
+                sendProgress(true);
+                await new Promise(r => setTimeout(r, 3000));
+            }
+            return result;
         }
 
         let chunks = []; // array of local file paths
@@ -198,30 +178,14 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             if (!uris || !uris.length) {
                 throw new Error(`Error in getting chunks from media helper for file ${file}`);
             }
-            totalCount = uris.length * 4; // 4 steps for each chunk (download and upload)
-            API_URL && (completedCount = uris.length); // api progress is already calculated
+            totalCount = uris.length + 1; // total number of chunks that will be processed
 
-            // sequential download of chunks
+            // sequential process of chunks
             for (const uri of uris) {
-                if (wordTimestamped) { // get word timestamped data 
-                    sendProgress(); // no download needed auto progress 
-                    const ts = await processTS(uri);
-                    result.push(ts);
-                } else {
-                    chunks.push(await downloadFile(uri));
-                }
-                sendProgress();
+                sendProgress(); 
+                const ts = await processURI(uri);
+                result.push(ts);
             }
-
-
-            // sequential processing of chunks
-            for (const chunk of chunks) {
-                result.push(await processChunk(chunk));
-                sendProgress();
-            }
-
-            // parallel processing, dropped 
-            // result = await Promise.all(mediaSplit.chunks.map(processChunk));
 
         } catch (error) {
             const errMsg = `Transcribe error: ${error?.message || JSON.stringify(error)}`;
