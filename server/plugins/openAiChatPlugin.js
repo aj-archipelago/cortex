@@ -111,9 +111,11 @@ class OpenAIChatPlugin extends ModelPlugin {
         const { stream, messages } = data;
         if (messages && messages.length > 1) {
             messages.forEach((message, index) => {
-                const words = message.content.split(" ");
-                const tokenCount = encode(message.content).length;
-                const preview = words.length < 41 ? message.content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
+                //message.content string or array
+                const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
+                const words = content.split(" ");
+                const tokenCount = encode(content).length;
+                const preview = words.length < 41 ? content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
                 console.log(`\x1b[36mMessage ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"\x1b[0m`);
             });

@@ -14,6 +14,7 @@ import AzureCognitivePlugin from './plugins/azureCognitivePlugin.js';
 import OpenAiEmbeddingsPlugin from './plugins/openAiEmbeddingsPlugin.js';
 import OpenAIImagePlugin from './plugins/openAiImagePlugin.js';
 import OpenAIDallE3Plugin from './plugins/openAiDallE3Plugin.js';
+import OpenAIVisionPlugin from './plugins/openAiVisionPlugin.js';
 
 class PathwayPrompter {
     constructor(config, pathway, modelName, model) {
@@ -65,6 +66,9 @@ class PathwayPrompter {
                 break;
             case 'COHERE-SUMMARIZE':
                 plugin = new CohereSummarizePlugin(config, pathway, modelName, model);
+                break;
+            case 'OPENAI-VISION':
+                plugin = new OpenAIVisionPlugin(config, pathway, modelName, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);
