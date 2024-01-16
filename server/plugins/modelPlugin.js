@@ -80,7 +80,7 @@ class ModelPlugin {
                     tokenLengths.splice(index, 1);
                 } else {
                     // Otherwise, update the message and token length
-                    const truncatedContent = getFirstNToken(message.content, tokensToKeep);
+                    const truncatedContent = getFirstNToken(message?.content ?? message, tokensToKeep);
                     const truncatedMessage = { ...message, content: truncatedContent };
 
                     tokenLengths[index] = {
