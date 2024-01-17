@@ -120,7 +120,7 @@ var config = convict({
                     "model": "gpt-4-vision-preview"
                 },
                 "requestsPerSecond": 1,
-                "maxTokenLength": 4096,
+                "maxTokenLength": 128000,
                 "supportsStreaming": true
             },
         },

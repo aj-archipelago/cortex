@@ -12,6 +12,7 @@ export default {
     },
     max_tokens: 1024,
     model: 'oai-gpt4-vision',
+    tokenRatio: 0.96,
     useInputChunking: false,
     enableDuplicateRequests: false,
 }
