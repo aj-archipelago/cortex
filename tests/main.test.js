@@ -451,12 +451,12 @@ test('vision multi long text', async t => {
 
           variables: {
             "chatHistory": [
-                ...Array.from(new Array(10),()=> testRow),
+              ...Array.from(new Array(10),()=> testRow),
               { 
                 "role": "user",
                 "content": [
                   "{\"type\": \"text\", \"text\": \"first tell me your name then describe the image shortly:\"}",
-                  ...Array.from(new Array(1),()=> base64ImgRow),
+                  ...Array.from(new Array(10),()=> base64ImgRow),
                 ],
             }],
         },
