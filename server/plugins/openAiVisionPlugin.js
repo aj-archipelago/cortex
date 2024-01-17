@@ -18,7 +18,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         return messages;
     }
 
-    truncateMessagesToTargetLength(messages, targetLength) {
+    _truncateMessagesToTargetLength(messages, targetLength) {
         this.tryParseMessages(messages);
 
         const messagesList = [];

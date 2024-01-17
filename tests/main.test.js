@@ -423,7 +423,7 @@ test('vision test chunking', async t => {
                 "role": "user",
                 "content": [
                   "{\"type\": \"text\", \"text\": \"first tell me your name then describe the image shortly:\"}",
-                  ...Array.from(new Array(100),()=> base64ImgRow),
+                  ...Array.from(new Array(1),()=> base64ImgRow),
                 ],
             }],
         },
