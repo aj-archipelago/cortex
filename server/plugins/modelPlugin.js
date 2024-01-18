@@ -74,10 +74,13 @@ class ModelPlugin {
                 const otherMessageTokens = totalTokenLength - currentTokenLength;
                 const tokensToKeep = targetTokenLength - (otherMessageTokens + emptyContentLength);
 
-                if (tokensToKeep <= 0) {
+                if (tokensToKeep <= 0 || Array.isArray(message?.content)) {  
                     // If the message needs to be empty to make the target, remove it entirely
                     totalTokenLength -= currentTokenLength;
                     tokenLengths.splice(index, 1);
+                    if(tokenLengths.length == 0){
+                        throw new Error(`Unable to process your request as your single message content is too long. Please try again with a shorter message.`);
+                    }
                 } else {
                     // Otherwise, update the message and token length
                     const truncatedContent = getFirstNToken(message?.content ?? message, tokensToKeep);
