@@ -9,6 +9,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Schema for config
 var config = convict({
+    cortexId: {
+        format: String,
+        default: 'local',
+        env: 'CORTEX_ID'
+    },
     basePathwayPath: {
         format: String,
         default: path.join(__dirname, 'pathways', 'basePathway.js'),

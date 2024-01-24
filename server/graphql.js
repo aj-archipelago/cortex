@@ -11,6 +11,7 @@ import { useServer } from 'graphql-ws/lib/use/ws';
 import express from 'express';
 import http from 'http';
 import Keyv from 'keyv';
+// eslint-disable-next-line import/no-extraneous-dependencies
 import cors from 'cors';
 import { KeyvAdapter } from '@apollo/utils.keyvadapter';
 import responseCachePlugin from '@apollo/server-plugin-response-cache';
@@ -40,6 +41,7 @@ const getPlugins = (config) => {
         // TODO: custom cache key:
         // https://www.apollographql.com/docs/apollo-server/performance/cache-backends#implementing-your-own-cache-backend
         plugins.push(responseCachePlugin({ cache }));
+        console.log('Using Redis for GraphQL cache');
     }
 
     return { plugins, cache };
@@ -202,7 +204,7 @@ const build = async (config) => {
                 next();
             }
         });
-    };
+    }
 
     // Parse the body for REST endpoints
     app.use(express.json());
