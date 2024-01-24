@@ -95,6 +95,8 @@ class PathwayResolver {
                 try {
                     const incomingMessage = responseData;
 
+                    let messageBuffer = '';
+
                     const processData = (data) => {
                         try {
                             //console.log(`\n\nReceived stream data for requestId ${this.requestId}`, data.toString());
@@ -108,27 +110,27 @@ class PathwayResolver {
                                 // skip empty events
                                 if (!(event.trim() === '')) {
                                     //console.log(`Processing stream event for requestId ${this.requestId}`, event);
-
-                                    let message = event.replace(/^data: /, '');
+                                    messageBuffer += event.replace(/^data: /, '');
 
                                     const requestProgress = {
                                         requestId: this.requestId,
-                                        data: message,
+                                        data: messageBuffer,
                                     }
 
                                     // check for end of stream or in-stream errors
-                                    if (message.trim() === '[DONE]') {
+                                    if (messageBuffer.trim() === '[DONE]') {
                                         requestProgress.progress = 1;
                                     } else {
                                         let parsedMessage;
                                         try {
-                                            parsedMessage = JSON.parse(message);
+                                            parsedMessage = JSON.parse(messageBuffer);
+                                            messageBuffer = '';
                                         } catch (error) {
-                                            console.error('Could not JSON parse stream message', message, error);
+                                            // incomplete stream message, try to buffer more data
                                             return;
                                         }
 
-                                        const streamError = parsedMessage.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
+                                        const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
                                         if (streamError) {
                                             streamErrorOccurred = true;
                                             console.error(`Stream error: ${streamError.message}`);
@@ -143,7 +145,7 @@ class PathwayResolver {
                                             requestProgress: requestProgress
                                         });
                                     } catch (error) {
-                                        console.error('Could not publish the stream message', message, error);
+                                        console.error('Could not publish the stream message', messageBuffer, error);
                                     }
                                 }
                             }
