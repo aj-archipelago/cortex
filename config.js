@@ -109,6 +109,20 @@ var config = convict({
                 },
                 "maxTokenLength": 8192,
             },
+            "oai-gpt4-vision": {
+                "type": "OPENAI-VISION",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "gpt-4-vision-preview"
+                },
+                "requestsPerSecond": 1,
+                "maxTokenLength": 128000,
+                "supportsStreaming": true
+            },
         },
         env: 'CORTEX_MODELS'
     },

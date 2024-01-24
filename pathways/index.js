@@ -18,6 +18,7 @@ import test_palm_chat from './test_palm_chat.js';
 import transcribe from './transcribe.js';
 import translate from './translate.js';
 import embeddings from './embeddings.js';
+import vision from './vision.js';
 
 export {
     edit,
@@ -39,5 +40,6 @@ export {
     test_langchain,
     test_palm_chat,
     transcribe,
-    translate
+    translate,
+    vision,
 };

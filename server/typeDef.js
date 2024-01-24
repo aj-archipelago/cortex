@@ -33,7 +33,7 @@ const typeDef = (pathway) => {
   const fieldsStr = !fields ? `` : fields.map((f) => `${f}: String`).join('\n    ');
 
   const typeName = fields ? `${objName}Result` : `String`;
-  const messageType = `input Message { role: String, content: String }`;
+  const messageType = `input Message { role: String, content: [String] }`;
 
   const type = fields ? `type ${typeName} {
     ${fieldsStr}
