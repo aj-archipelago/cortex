@@ -169,6 +169,11 @@ const build = async (config) => {
         ]),
     });
 
+    // Healthcheck endpoint is valid regardless of auth
+    app.get('/healthcheck', (req, res) => {
+        res.status(200).send('OK');
+    });
+
     // If CORTEX_API_KEY is set, we roll our own auth middleware - usually not used if you're being fronted by a proxy
     const cortexApiKey = config.get('cortexApiKey');
     if (cortexApiKey) {
