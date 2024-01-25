@@ -1,8 +1,8 @@
 import { downloadFile, processYoutubeUrl, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, uploadBlob } from './blobHandler.js';
+import { saveFileToBlob, deleteBlob, uploadBlob, cleanup } from './blobHandler.js';
 import { publishRequestProgress } from './redis.js';
 import { deleteTempPath, ensureEncoded, isValidYoutubeUrl } from './helper.js';
-import { moveFileToPublicFolder, deleteFolder } from './localFileHandler.js';
+import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
 import { documentToText, easyChunker } from './docHelper.js';
 import path from 'path';
 import os from 'os';
@@ -14,9 +14,20 @@ const DOC_EXTENSIONS =  [".txt", ".json", ".csv", ".md", ".xml", ".js", ".html",
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
 console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
 
+async function cleanupInactive(useAzure) {
+    if (useAzure) {
+        await cleanup();
+    } else {
+        await cleanupLocal();
+    }
+}
 
+  
 async function main(context, req) {
     context.log('Starting req processing..');
+
+    //TODO whats the best place/way?
+    await cleanupInactive(useAzure);
 
     // Clean up blob when request delete which means processing marked completed
     if (req.method.toLowerCase() === `delete`) {
