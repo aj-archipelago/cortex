@@ -14,11 +14,21 @@ const DOC_EXTENSIONS =  [".txt", ".json", ".csv", ".md", ".xml", ".js", ".html",
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
 console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
 
+
+let isCleanupRunning = false;
 async function cleanupInactive(useAzure) {
-    if (useAzure) {
-        await cleanup();
-    } else {
-        await cleanupLocal();
+    try {
+        if (isCleanupRunning) { return; } //no need to cleanup every call
+        isCleanupRunning = true;
+        if (useAzure) {
+            await cleanup();
+        } else {
+            await cleanupLocal();
+        }
+    } catch (error) {
+        console.log('Error occurred during cleanup:', error);
+    } finally{
+        isCleanupRunning = false;
     }
 }
 
@@ -26,8 +36,7 @@ async function cleanupInactive(useAzure) {
 async function main(context, req) {
     context.log('Starting req processing..');
 
-    //TODO whats the best place/way?
-    await cleanupInactive(useAzure);
+    cleanupInactive(useAzure); //trigger & no need to wait for it
 
     // Clean up blob when request delete which means processing marked completed
     if (req.method.toLowerCase() === `delete`) {
