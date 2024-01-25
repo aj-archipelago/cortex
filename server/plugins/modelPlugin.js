@@ -250,11 +250,12 @@ class ModelPlugin {
     }
     
     async executeRequest(url, data, params, headers, prompt, requestId, pathway) {
+        let responseData;
         try {
             this.aiRequestStartTime = new Date();
             this.requestId = requestId;
             this.logRequestStart(url, data);
-            const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId, pathway);
+            responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId, pathway);
             
             if (responseData.error) {
                 throw new Error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
@@ -265,6 +266,9 @@ class ModelPlugin {
         } catch (error) {
             // Log the error and continue
             console.error(error);
+            if(responseData?.error?.response?.status == 400){
+                throw error;
+            }
         }
     }
 
