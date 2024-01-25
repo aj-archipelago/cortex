@@ -352,7 +352,7 @@ test('test translate endpoint with huge arabic text english translation and chec
 
 test('vision test image', async t => {
     const response = await testServer.executeOperation({
-        query: `query($text: String, $chatHistory: [Message]){
+        query: `query($text: String, $chatHistory: [MultiMessage]){
             vision(text: $text, chatHistory: $chatHistory) {
               result
             }
@@ -377,7 +377,7 @@ test('vision test image', async t => {
 
 test('vision test base64 image', async t => {
     const response = await testServer.executeOperation({
-        query: `query($text: String, $chatHistory: [Message]){
+        query: `query($text: String, $chatHistory: [MultiMessage]){
             vision(text: $text, chatHistory: $chatHistory) {
               result
             }
@@ -411,7 +411,7 @@ test('vision test chunking', async t => {
     const base64ImgRow = `{"type":"image_url","image_url":{"url":"${base64Img}"}}`;
 
     const response = await testServer.executeOperation({
-        query: `query($text: String, $chatHistory: [Message]){
+        query: `query($text: String, $chatHistory: [MultiMessage]){
             vision(text: $text, chatHistory: $chatHistory) {
               result
             }
@@ -443,7 +443,7 @@ test('vision multi single long text', async t => {
     const base64ImgRow = `{"type":"image_url","image_url":{"url":"${base64Img}"}}`;
 
     const response = await testServer.executeOperation({
-        query: `query($text: String, $chatHistory: [Message]){
+        query: `query($text: String, $chatHistory: [MultiMessage]){
             vision(text: $text, chatHistory: $chatHistory) {
               result
             }
@@ -476,7 +476,7 @@ test('vision multi long text', async t => {
     const base64ImgRow = `{"type":"image_url","image_url":{"url":"${base64Img}"}}`;
 
     const response = await testServer.executeOperation({
-        query: `query($text: String, $chatHistory: [Message]){
+        query: `query($text: String, $chatHistory: [MultiMessage]){
             vision(text: $text, chatHistory: $chatHistory) {
               result
             }

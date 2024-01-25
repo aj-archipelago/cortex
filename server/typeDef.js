@@ -2,25 +2,27 @@ const getGraphQlType = (value) => {
   switch (typeof value) {
     case 'boolean':
       return {type: 'Boolean', defaultValue: 'false'};
-      break;
     case 'string':
       return {type: 'String', defaultValue: `""`};
-      break;
     case 'number':
       return {type: 'Int', defaultValue: 'null'};
-      break;
     case 'object':
       if (Array.isArray(value)) {
         if (value.length > 0 && typeof(value[0]) === 'string') {
           return {type: '[String]', defaultValue: '[]'};
         }
         else {
-          return {type: '[Message]', defaultValue: '[]'};
+          // New case for MultiMessage type
+          if (Array.isArray(value[0]?.content)) {
+            return {type: '[MultiMessage]', defaultValue: '[]'};
+          }
+          else {
+            return {type: '[Message]', defaultValue: '[]'};
+          }
         }
       } else {
         return {type: `[${value.objName}]`, defaultValue: 'null'};
       }
-      break;
     default:
       return {type: 'String', defaultValue: `""`};
   }
@@ -33,7 +35,9 @@ const typeDef = (pathway) => {
   const fieldsStr = !fields ? `` : fields.map((f) => `${f}: String`).join('\n    ');
 
   const typeName = fields ? `${objName}Result` : `String`;
-  const messageType = `input Message { role: String, content: [String] }`;
+
+  const messageType = `input Message { role: String, content: String }`;
+  const multiMessageType = `input MultiMessage { role: String, content: [String] }`;
 
   const type = fields ? `type ${typeName} {
     ${fieldsStr}
@@ -66,7 +70,7 @@ const typeDef = (pathway) => {
     };
   });
 
-  const gqlDefinition = `${messageType}\n\n${type}\n\n${responseType}\n\nextend type Query {${name}(${paramsStr}): ${objName}}`;
+  const gqlDefinition = `${messageType}\n\n${multiMessageType}\n\n${type}\n\n${responseType}\n\nextend type Query {${name}(${paramsStr}): ${objName}}`;
 
   return {
     gqlDefinition,

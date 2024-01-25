@@ -7,7 +7,7 @@ export default {
         ]}),
     ],
     inputParameters: {
-        chatHistory: [],
+        chatHistory: [{role: '', content: []}],
         contextId: ``,
     },
     max_tokens: 1024,
