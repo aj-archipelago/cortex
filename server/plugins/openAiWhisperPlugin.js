@@ -9,7 +9,7 @@ import os from 'os';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { config } from '../../config.js';
-import { deleteTempPath } from '../../helper_apps/MediaFileChunker/helper.js';
+import { deleteTempPath } from '../../helper_apps/CortexFileHandler/helper.js';
 import http from 'http';
 import https from 'https';
 import { promisify } from 'util';
