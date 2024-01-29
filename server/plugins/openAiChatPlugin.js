@@ -126,9 +126,10 @@ class OpenAIChatPlugin extends ModelPlugin {
             logger.info(`[chat request contained ${totalTokens} tokens]`);
         } else {
             const message = messages[0];
-            const tokenCount = encode(message.content).length;
+            const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
+            const tokenCount = encode(content).length;
             logger.info(`[request sent containing ${tokenCount} tokens]`);
-            logger.debug(`${messages[0].content}`);
+            logger.debug(`${content}`);
         }
     
         if (stream) {

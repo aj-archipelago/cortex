@@ -31,7 +31,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
             return this.parseResponse(responseData);
         } catch (error) {
             // Log the error and continue
-            logger.error(error);
+            logger.error(error.message || error);
         }
     }
 
