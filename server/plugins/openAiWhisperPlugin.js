@@ -332,4 +332,3 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 }
 
 export default OpenAIWhisperPlugin;
-
