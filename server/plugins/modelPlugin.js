@@ -273,6 +273,7 @@ class ModelPlugin {
         } catch (error) {
             // Log the error and continue
             logger.error(error.message || error);
+            throw error;
         }
     }
 
