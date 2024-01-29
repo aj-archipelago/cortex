@@ -1,25 +1,69 @@
 // openAiWhisperPlugin.js
 import ModelPlugin from './modelPlugin.js';
-import fs from 'fs';
 import pubsub from '../pubsub.js';
 import { axios } from '../../lib/request.js';
-import stream from 'stream';
-import os from 'os';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
 import { config } from '../../config.js';
 import { deleteTempPath } from '../../helper_apps/MediaFileChunker/helper.js';
+import subsrt from 'subsrt';
+import FormData from 'form-data';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import http from 'http';
 import https from 'https';
+import { URL } from 'url';
+import { v4 as uuidv4 } from 'uuid';
+import stream from 'stream';
 import { promisify } from 'util';
-import subsrt from 'subsrt';
 const pipeline = promisify(stream.pipeline);
-
 
 const API_URL = config.get('whisperMediaApiUrl');
 const WHISPER_TS_API_URL  = config.get('whisperTSApiUrl');
+if(WHISPER_TS_API_URL){
+    console.info(`WHISPER API URL using ${WHISPER_TS_API_URL}`);
+}else{
+    console.warn(`WHISPER API URL not set using default OpenAI API Whisper`);
+}
 
 const OFFSET_CHUNK = 1000 * 60 * 10; // 10 minutes for each chunk
+
+function generateUniqueFilename(extension) {
+    return `${uuidv4()}.${extension}`;
+}
+
+const downloadFile = async (fileUrl) => {
+    const fileExtension = path.extname(fileUrl).slice(1);
+    const uniqueFilename = generateUniqueFilename(fileExtension);
+    const tempDir = os.tmpdir();
+    const localFilePath = `${tempDir}/${uniqueFilename}`;
+
+    // eslint-disable-next-line no-async-promise-executor
+    return new Promise(async (resolve, reject) => {
+        try {
+            const parsedUrl = new URL(fileUrl);
+            const protocol = parsedUrl.protocol === 'https:' ? https : http;
+
+            const response = await new Promise((resolve, reject) => {
+                protocol.get(parsedUrl, (res) => {
+                    if (res.statusCode === 200) {
+                        resolve(res);
+                    } else {
+                        reject(new Error(`HTTP request failed with status code ${res.statusCode}`));
+                    }
+                }).on('error', reject);
+            });
+
+            await pipeline(response, fs.createWriteStream(localFilePath));
+            console.log(`Downloaded file to ${localFilePath}`);
+            resolve(localFilePath);
+        } catch (error) {
+            fs.unlink(localFilePath, () => {
+                reject(error);
+            });
+            //throw error;
+        }
+    });
+};
 
 // convert srt format to text
 function convertToText(str) {
@@ -99,11 +143,34 @@ class OpenAIWhisperPlugin extends ModelPlugin {
     async execute(text, parameters, prompt, pathwayResolver) {
         const { responseFormat,wordTimestamped,highlightWords,maxLineWidth,maxLineCount,maxWordsPerLine } = parameters;
 
-        const processTS = async (uri) => {
-            if (!WHISPER_TS_API_URL) {
-                throw new Error(`WHISPER_TS_API_URL not set for word timestamped processing`);
-            }
+        const chunks = [];
+        const processChunk = async (uri) => {
+            try {
+                const reqUrl = this.requestUrl(text);
+                const params = {};
+                const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
+                const { requestId, pathway } = pathwayResolver;
 
+                const chunk = await downloadFile(uri)
+                chunks.push(chunk);
+                const { language, responseFormat } = parameters;
+                const response_format = responseFormat || 'text';
+
+                const formData = new FormData();
+                formData.append('file', fs.createReadStream(chunk));
+                formData.append('model', this.model.params.model);
+                formData.append('response_format', response_format);
+                language && formData.append('language', language);
+                modelPromptText && formData.append('prompt', modelPromptText);
+
+                return this.executeRequest(reqUrl, formData, params, { ...this.model.headers, ...formData.getHeaders() }, {}, requestId, pathway);
+            } catch (err) {
+                console.log(err);
+                throw err;
+            }
+        }
+
+        const processTS = async (uri) => {
             try {
                 const tsparams = { fileurl:uri };
                 if(highlightWords) tsparams.highlight_words = highlightWords ? "True" : "False";
@@ -162,7 +229,13 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         async function processURI(uri) {
             let result = null;
-            processTS(uri).then((ts) => { result = ts;});
+            let _promise = null;
+            if(WHISPER_TS_API_URL){
+                _promise = processTS
+            }else {
+                _promise = processChunk;
+            }
+            _promise(uri).then((ts) => { result = ts;});
 
             //send updates while waiting for result
             while(!result) {
@@ -172,7 +245,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             return result;
         }
 
-        let chunks = []; // array of local file paths
         try {
             const uris = await this.getMediaChunks(file, requestId); // array of remote file uris
             if (!uris || !uris.length) {
@@ -195,7 +267,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         finally {
             try {
                 for (const chunk of chunks) {
-                    await deleteTempPath(chunk);
+                    try {
+                        await deleteTempPath(chunk);
+                    } catch (error) {
+                        //ignore error
+                    } 
                 }
 
                 await this.markCompletedForCleanUp(requestId);
