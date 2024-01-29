@@ -4,6 +4,7 @@ import HandleBars from '../../lib/handleBars.js';
 import { request } from '../../lib/request.js';
 import { encode } from 'gpt-3-encoder';
 import { getFirstNToken } from '../chunker.js';
+import logger from '../../lib/logger.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETURN_TOKENS = 256;
@@ -224,8 +225,9 @@ class ModelPlugin {
         this.lastRequestStartTime = new Date();
         const logMessage = `>>> [${this.requestId}: ${this.pathwayName}.${this.requestCount}] request`;
         const header = '>'.repeat(logMessage.length);
-        console.log(`\n${header}\n${logMessage}`);
-        console.log(`>>> Making API request to ${url}`);
+        logger.info(`${header}`);
+        logger.info(`${logMessage}`);
+        logger.info(`>>> Making API request to ${url}`);
     }
 
     logAIRequestFinished() {
@@ -233,7 +235,8 @@ class ModelPlugin {
         const timeElapsed = (currentTime - this.lastRequestStartTime) / 1000;
         const logMessage = `<<< [${this.requestId}: ${this.pathwayName}] response - complete in ${timeElapsed}s - data:`;
         const header = '<'.repeat(logMessage.length);
-        console.log(`\n${header}\n${logMessage}\n`);
+        logger.info(`${header}`);
+        logger.info(`${logMessage}`);
     }
 
     logRequestData(data, responseData, prompt) {
@@ -241,10 +244,15 @@ class ModelPlugin {
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
     
         if (modelInput) {
-            console.log(`\x1b[36m${modelInput}\x1b[0m`);
+            const inputTokens = encode(modelInput).length;
+            logger.info(`[request sent containing ${inputTokens} tokens]`);
+            logger.debug(`${modelInput}`);
         }
     
-        console.log(`\x1b[34m> ${JSON.stringify(this.parseResponse(responseData))}\x1b[0m`);
+        const responseText = JSON.stringify(this.parseResponse(responseData));
+        const responseTokens = encode(responseText).length;
+        logger.info(`[response received containing ${responseTokens} tokens]`);
+        logger.debug(`${responseText}`);
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
@@ -264,7 +272,7 @@ class ModelPlugin {
             return this.parseResponse(responseData);
         } catch (error) {
             // Log the error and continue
-            console.error(error);
+            logger.error(error);
         }
     }
 

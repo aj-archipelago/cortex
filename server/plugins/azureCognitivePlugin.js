@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { config } from '../../config.js';
 import { axios } from '../../lib/request.js';
+import logger from '../../lib/logger.js';
 
 const API_URL = config.get('whisperMediaApiUrl');
 
@@ -24,7 +25,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             }
             return JSON.parse(await callPathway(this.config, 'embeddings', { text }))[0];
         }catch(err){
-            console.log(`Error in calculating input vector for text: ${text}, error: ${err}`);
+            logger.info(`Error in calculating input vector for text: ${text}, error: ${err}`);
         }
     }
 
@@ -134,11 +135,11 @@ class AzureCognitivePlugin extends ModelPlugin {
             if (API_URL) {
                 //call helper api to mark processing as completed
                 const res = await axios.delete(API_URL, { params: { requestId } });
-                console.log(`Marked request ${requestId} as completed:`, res.data);
+                logger.info(`Marked request ${requestId} as completed: ${res.data}`);
                 return res.data;
             }
         } catch (err) {
-            console.log(`Error marking request ${requestId} as completed:`, err);
+            logger.info(`Error marking request ${requestId} as completed: ${err}`);
         }
     }
 
@@ -161,7 +162,7 @@ class AzureCognitivePlugin extends ModelPlugin {
                     const { data }  = await axios.get(API_URL, { params: { uri: file, requestId, save: true } });
                     url = data[0];
                 } catch (error) {
-                    console.error(`Error converting file ${file} to txt:`, error);
+                    logger.error(`Error converting file ${file} to txt: ${error}`);
                     await this.markCompletedForCleanUp(requestId);
                     throw Error(error?.response?.data || error?.message || error);
                 }

@@ -14,8 +14,9 @@ import http from 'http';
 import https from 'https';
 import { promisify } from 'util';
 import subsrt from 'subsrt';
-const pipeline = promisify(stream.pipeline);
+import logger from '../../lib/logger.js';
 
+const pipeline = promisify(stream.pipeline);
 
 const API_URL = config.get('whisperMediaApiUrl');
 const WHISPER_TS_API_URL  = config.get('whisperTSApiUrl');
@@ -47,7 +48,7 @@ function alignSubtitles(subtitles, format) {
             }
         }
     } catch (error) {
-        console.error("An error occurred in content text parsing: ", error);
+        logger.error(`An error occurred in content text parsing: ${error}`);
     }
     
     return subsrt.build(result, { format: format === 'vtt' ? 'vtt' : 'srt' });
@@ -80,7 +81,7 @@ const downloadFile = async (fileUrl) => {
             });
 
             await pipeline(response, fs.createWriteStream(localFilePath));
-            console.log(`Downloaded file to ${localFilePath}`);
+            logger.info(`Downloaded file to ${localFilePath}`);
             resolve(localFilePath);
         } catch (error) {
             fs.unlink(localFilePath, () => {
@@ -103,11 +104,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 const res = await axios.get(API_URL, { params: { uri: file, requestId } });
                 return res.data;
             } else {
-                console.log(`No API_URL set, returning file as chunk`);
+                logger.info(`No API_URL set, returning file as chunk`);
                 return [file];
             }
         } catch (err) {
-            console.log(`Error getting media chunks list from api:`, err);
+            logger.error(`Error getting media chunks list from api:`, err);
             throw err;
         }
     }
@@ -117,11 +118,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             if (API_URL) {
                 //call helper api to mark processing as completed
                 const res = await axios.delete(API_URL, { params: { requestId } });
-                console.log(`Marked request ${requestId} as completed:`, res.data);
+                logger.info(`Marked request ${requestId} as completed: ${res.data}`);
                 return res.data;
             }
         } catch (err) {
-            console.log(`Error marking request ${requestId} as completed:`, err);
+            logger.error(`Error marking request ${requestId} as completed: ${err}`);
         }
     }
 
@@ -149,7 +150,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                     const res = await this.executeRequest(WHISPER_TS_API_URL, tsparams, {}, {}, {}, requestId, pathway);
                     return res;
                 } catch (err) {
-                    console.log(`Error getting word timestamped data from api:`, err);
+                    logger.error(`Error getting word timestamped data from api: ${err}`);
                     throw err;
                 }
             }
@@ -169,7 +170,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
                 return this.executeRequest(url, formData, params, { ...this.model.headers, ...formData.getHeaders() }, {}, requestId, pathway);
             } catch (err) {
-                console.log(err);
+                logger.error(err);
                 throw err;
             }
         }
@@ -225,7 +226,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         } catch (error) {
             const errMsg = `Transcribe error: ${error?.message || JSON.stringify(error)}`;
-            console.error(errMsg);
+            logger.error(errMsg);
             return errMsg;
         }
         finally {
@@ -242,11 +243,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 if (match && match[1]) {
                     const extractedValue = match[1];
                     await this.markCompletedForCleanUp(extractedValue);
-                    console.log(`Cleaned temp whisper file ${file} with request id ${extractedValue}`);
+                    logger.info(`Cleaned temp whisper file ${file} with request id ${extractedValue}`);
                 }
 
             } catch (error) {
-                console.error("An error occurred while deleting:", error);
+                logger.error(`An error occurred while deleting: ${error}`);
             }
         }
 

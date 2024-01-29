@@ -4,11 +4,17 @@ import HandleBars from './lib/handleBars.js';
 import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
+import logger from './lib/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Schema for config
 var config = convict({
+    env: {
+        format: String,
+        default: 'development',
+        env: 'NODE_ENV'
+    },
     cortexId: {
         format: String,
         default: 'local',
@@ -195,14 +201,14 @@ const configFile = config.get('cortexConfigFile');
 
 // Load config file
 if (configFile && fs.existsSync(configFile)) {
-    console.log('Loading config from', configFile);
+    logger.info(`Loading config from ${configFile}`);
     config.loadFile(configFile);
 } else {
     const openaiApiKey = config.get('openaiApiKey');
     if (!openaiApiKey) {
-        throw console.log('No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.');
+        throw logger.info('No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.');
     } else {
-        console.log(`Using default model with OPENAI_API_KEY environment variable`)
+        logger.info(`Using default model with OPENAI_API_KEY environment variable`)
     }
 }
 
@@ -223,12 +229,12 @@ const buildPathways = async (config) => {
     const basePathway = await import(basePathwayURL).then(module => module.default);
 
     // Load core pathways, default from the Cortex package
-    console.log('Loading core pathways from', corePathwaysPath)
+    logger.info(`Loading core pathways from ${corePathwaysPath}`)
     let loadedPathways = await import(`${corePathwaysURL}/index.js`).then(module => module);
 
     // Load custom pathways and override core pathways if same
     if (pathwaysPath && fs.existsSync(pathwaysPath)) {
-        console.log('Loading custom pathways from', pathwaysPath)
+        logger.info(`Loading custom pathways from ${pathwaysPath}`)
         const customPathways = await import(`${pathwaysURL}/index.js`).then(module => module);
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
@@ -263,12 +269,12 @@ const buildModels = (config) => {
 
     // Check that models are specified, Cortex cannot run without a model
     if (Object.keys(config.get('models')).length <= 0) {
-        throw console.log('No models specified! Please set the models in your config file or via CORTEX_MODELS environment variable to point at the models for your project.');
+        throw logger.info('No models specified! Please set the models in your config file or via CORTEX_MODELS environment variable to point at the models for your project.');
     }
 
     // Set default model name to the first model in the config in case no default is specified
     if (!config.get('defaultModelName')) {
-        console.log('No default model specified, using first model as default.');
+        logger.info('No default model specified, using first model as default.');
         config.load({ defaultModelName: Object.keys(config.get('models'))[0] });
     }
 

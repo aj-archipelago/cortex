@@ -3,6 +3,7 @@
 import { request } from 'https';
 import ModelPlugin from './modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
+import logger from '../../lib/logger.js';
 
 // Helper function to truncate the prompt if it is too long
 const truncatePromptIfNecessary = (text, textTokenCount, modelMaxTokenCount, targetTextTokenCount, pathwayResolver) => {
@@ -112,12 +113,17 @@ class OpenAICompletionPlugin extends ModelPlugin {
         const stream = data.stream;
         const modelInput = data.prompt;
     
-        console.log(`\x1b[36m${modelInput}\x1b[0m`);
+        const modelInputTokens = encode(modelInput).length;
+        logger.info(`[request sent containing ${modelInputTokens} tokens]`);
+        logger.debug(`${modelInput}`);
 
         if (stream) {
-            console.log(`\x1b[34m> [response is an SSE stream]\x1b[0m`);
+            logger.info(`[response received as an SSE stream]`);
         } else {
-            console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+            const responseText = this.parseResponse(responseData);
+            const responseTokens = encode(responseText).length;
+            logger.info(`[response received containing ${responseTokens} tokens]`);
+            logger.debug(`${responseText}`);
         }
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);

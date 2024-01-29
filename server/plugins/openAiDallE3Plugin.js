@@ -2,6 +2,7 @@ import RequestDurationEstimator from '../../lib/requestDurationEstimator.js';
 import pubsub from '../pubsub.js';
 import ModelPlugin from './modelPlugin.js';
 import { request } from '../../lib/request.js';
+import logger from '../../lib/logger.js';
 
 const requestDurationEstimator = new RequestDurationEstimator(10);
 
@@ -30,7 +31,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
             return this.parseResponse(responseData);
         } catch (error) {
             // Log the error and continue
-            console.error(error);
+            logger.error(error);
         }
     }
 

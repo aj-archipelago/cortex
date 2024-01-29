@@ -22,6 +22,7 @@ import { buildPathways, buildModels } from '../config.js';
 import { requestState } from './requestState.js';
 import { buildRestEndpoints } from './rest.js';
 import { startTestServer } from '../tests/server.js'
+import logger from '../lib/logger.js';
 
 // Utility functions
 // Server plugins
@@ -41,7 +42,7 @@ const getPlugins = (config) => {
         // TODO: custom cache key:
         // https://www.apollographql.com/docs/apollo-server/performance/cache-backends#implementing-your-own-cache-backend
         plugins.push(responseCachePlugin({ cache }));
-        console.log('Using Redis for GraphQL cache');
+        logger.info('Using Redis for GraphQL cache');
     }
 
     return { plugins, cache };
@@ -146,12 +147,12 @@ const build = async (config) => {
     // Respects the keep alive setting in config in case you want to
     // turn it off for deployments that don't route the ping/pong frames
     const keepAlive = config.get('subscriptionKeepAlive');
-    console.log(`Starting web socket server with subscription keep alive: ${keepAlive}`);
+    logger.info(`Starting web socket server with subscription keep alive: ${keepAlive}`);
     const serverCleanup = useServer({ schema }, wsServer, keepAlive);
 
     const server = new ApolloServer({
         schema,
-        introspection: process.env.NODE_ENV === 'development',
+        introspection: config.get('env') === 'development',
         csrfPrevention: true,
         plugins: plugins.concat([// Proper shutdown for the HTTP server.
             ApolloServerPluginDrainHttpServer({ httpServer }),
@@ -232,7 +233,7 @@ const build = async (config) => {
 
         // Now that our HTTP server is fully set up, we can listen to it.
         httpServer.listen(config.get('PORT'), () => {
-            console.log(`🚀 Server is now running at http://localhost:${config.get('PORT')}/graphql`);
+            logger.info(`🚀 Server is now running at http://localhost:${config.get('PORT')}/graphql`);
         });
     };
 

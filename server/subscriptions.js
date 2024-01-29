@@ -3,7 +3,7 @@
 // See https://www.apollographql.com/docs/apollo-server/v3/data/subscriptions/#resolving-a-subscription
 
 import pubsub from './pubsub.js';
-
+import logger from '../lib/logger.js';
 import { withFilter } from 'graphql-subscriptions';
 import { requestState } from './requestState.js';
 
@@ -15,7 +15,7 @@ const subscriptions = {
                 for (const requestId of requestIds) {
                     if (requestState[requestId] && !requestState[requestId].started) {
                         requestState[requestId].started = true;
-                        console.log(`Subscription starting async requestProgress, requestId: ${requestId}`);
+                        logger.info(`Subscription starting async requestProgress, requestId: ${requestId}`);
                         const { resolver, args } = requestState[requestId];
                         resolver(args);
                     }
