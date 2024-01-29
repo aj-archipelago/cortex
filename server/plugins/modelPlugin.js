@@ -265,6 +265,7 @@ class ModelPlugin {
         } catch (error) {
             // Log the error and continue
             console.error(error);
+            throw error;
         }
     }
 
