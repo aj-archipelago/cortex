@@ -139,9 +139,7 @@ class PathwayResolver {
 
                                     try {
                                         //console.log(`Publishing stream message to requestId ${this.requestId}`, message);
-                                        publishRequestProgress({
-                                            requestProgress: requestProgress
-                                        });
+                                        publishRequestProgress(requestProgress);
                                     } catch (error) {
                                         console.error('Could not publish the stream message', messageBuffer, error);
                                     }
