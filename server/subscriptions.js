@@ -1,7 +1,3 @@
-// TODO: Replace PubSub class with PubSub engine to support
-//       multi-server instance
-// See https://www.apollographql.com/docs/apollo-server/v3/data/subscriptions/#resolving-a-subscription
-
 import pubsub from './pubsub.js';
 
 import { withFilter } from 'graphql-subscriptions';
