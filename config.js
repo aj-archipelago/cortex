@@ -206,7 +206,9 @@ if (configFile && fs.existsSync(configFile)) {
 } else {
     const openaiApiKey = config.get('openaiApiKey');
     if (!openaiApiKey) {
-        throw logger.info('No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.');
+        const errorString = 'No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.';
+        logger.error(errorString);
+        throw new Error(errorString);
     } else {
         logger.info(`Using default model with OPENAI_API_KEY environment variable`)
     }
@@ -269,12 +271,14 @@ const buildModels = (config) => {
 
     // Check that models are specified, Cortex cannot run without a model
     if (Object.keys(config.get('models')).length <= 0) {
-        throw logger.info('No models specified! Please set the models in your config file or via CORTEX_MODELS environment variable to point at the models for your project.');
+        const errorString = 'No models specified! Please set the models in your config file or via CORTEX_MODELS environment variable to point at the models for your project.';
+        logger.error(errorString);
+        throw new Error(errorString);
     }
 
     // Set default model name to the first model in the config in case no default is specified
     if (!config.get('defaultModelName')) {
-        logger.info('No default model specified, using first model as default.');
+        logger.warn('No default model specified, using first model as default.');
         config.load({ defaultModelName: Object.keys(config.get('models'))[0] });
     }
 

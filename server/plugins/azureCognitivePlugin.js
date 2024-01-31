@@ -25,7 +25,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             }
             return JSON.parse(await callPathway(this.config, 'embeddings', { text }))[0];
         }catch(err){
-            logger.info(`Error in calculating input vector for text: ${text}, error: ${err}`);
+            logger.error(`Error in calculating input vector for text: ${text}, error: ${err}`);
         }
     }
 
@@ -139,7 +139,7 @@ class AzureCognitivePlugin extends ModelPlugin {
                 return res.data;
             }
         } catch (err) {
-            logger.info(`Error marking request ${requestId} as completed: ${err}`);
+            logger.error(`Error marking request ${requestId} as completed: ${err}`);
         }
     }
 
