@@ -174,6 +174,12 @@ var config = convict({
         sensitive: true,
         env: 'STORAGE_CONNECTION_STRING'
     },
+    redisEncryptionKey: {
+        format: String,
+        default: null,
+        env: 'REDIS_ENCRYPTION_KEY',
+        sensitive: true
+    },
     dalleImageApiUrl: {
         format: String,
         default: 'null',
