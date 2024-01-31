@@ -3,6 +3,7 @@ import ModelPlugin from './modelPlugin.js';
 import axios from 'axios';
 import RequestDurationEstimator from '../../lib/requestDurationEstimator.js';
 import { publishRequestProgress } from '../../lib/redisSubscription.js';
+import logger from '../../lib/logger.js';
 
 const requestDurationEstimator = new RequestDurationEstimator(10);
 
@@ -24,7 +25,7 @@ class OpenAIImagePlugin extends ModelPlugin {
             id = (await this.executeRequest(url, data, {}, { ...this.model.headers }, {}, requestId, pathway))?.id;
         } catch (error) {
             const errMsg = `Error generating image: ${error?.message || JSON.stringify(error)}`;
-            console.error(errMsg);
+            logger.error(errMsg);
             return errMsg;
         }
 

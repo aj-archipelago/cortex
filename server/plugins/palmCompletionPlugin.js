@@ -1,6 +1,8 @@
 // palmCompletionPlugin.js
 
 import ModelPlugin from './modelPlugin.js';
+import { encode } from 'gpt-3-encoder';
+import logger from '../../lib/logger.js';
 
 // PalmCompletionPlugin class for handling requests and responses to the PaLM API Text Completion API
 class PalmCompletionPlugin extends ModelPlugin {
@@ -114,13 +116,18 @@ class PalmCompletionPlugin extends ModelPlugin {
         const modelInput = instances && instances[0] && instances[0].prompt;
 
         if (modelInput) {
-            console.log(`\x1b[36m${modelInput}\x1b[0m`);
+            const inputTokens = encode(modelInput).length;
+            logger.info(`[request sent containing ${inputTokens} tokens]`);
+            logger.debug(`${modelInput}`);
         }
 
-        console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+        const responseText = this.parseResponse(responseData);
+        const responseTokens = encode(responseText).length;
+        logger.info(`[response received containing ${responseTokens} tokens]`);
+        logger.debug(`${responseText}`);
 
         if (safetyAttributes) {
-            console.log(`\x1b[33mSafety Attributes: ${JSON.stringify(safetyAttributes, null, 2)}\x1b[0m`);
+            logger.warn(`[response contains safety attributes: ${JSON.stringify(safetyAttributes, null, 2)}]`);
         }
 
         if (prompt && prompt.debugInfo) {

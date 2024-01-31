@@ -56,33 +56,3 @@ test('getSafetyAttributes', (t) => {
 
   t.deepEqual(palmCompletionPlugin.getSafetyAttributes(responseData), expectedResult);
 });
-
-test('logRequestData', (t) => {
-  const { palmCompletionPlugin } = t.context;
-  const data = {
-    instances: [
-      {
-        prompt: 'Hello, how can I help you?',
-      },
-    ],
-  };
-  const responseData = {
-    predictions: [
-      {
-        content: 'Hello, how can I help you today?',
-      },
-    ],
-  };
-  const prompt = { debugInfo: '' };
-
-  const consoleLog = console.log;
-  let logOutput = '';
-  console.log = (msg) => (logOutput += msg + '\n');
-
-  palmCompletionPlugin.logRequestData(data, responseData, prompt);
-
-  console.log = consoleLog;
-
-  t.true(logOutput.includes('Hello, how can I help you?'));
-  t.true(logOutput.includes('> Hello, how can I help you today?'));
-});

@@ -54,6 +54,7 @@
     "langchain": "^0.0.47",
     "subsrt": "^1.1.1",
     "uuid": "^9.0.0",
+    "winston": "^3.11.0",
     "ws": "^8.12.0"
   },
   "devDependencies": {
@@ -62,7 +63,7 @@
     "eslint": "^8.38.0",
     "eslint-plugin-import": "^2.27.5",
     "got": "^13.0.0",
-    "sinon": "^15.0.3"
+    "sinon": "^17.0.1"
   },
   "publishConfig": {
     "access": "restricted"

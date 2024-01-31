@@ -52,8 +52,8 @@ class AzureTranslatePlugin extends ModelPlugin {
     
         const modelInput = data[0].Text;
     
-        console.log(`\x1b[36m${modelInput}\x1b[0m`);
-        console.log(`\x1b[34m> ${this.parseResponse(responseData)}\x1b[0m`);
+        logger.debug(`${modelInput}`);
+        logger.debug(`${this.parseResponse(responseData)}`);
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }

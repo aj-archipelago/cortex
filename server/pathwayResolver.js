@@ -9,6 +9,7 @@ import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 import { callPathway } from '../lib/pathwayTools.js';
 import { publishRequestProgress } from '../lib/redisSubscription.js';
+import logger from '../lib/logger.js';
 
 const modelTypesExcludedFromProgressUpdates = ['OPENAI-DALLE2', 'OPENAI-DALLE3'];
 
@@ -97,7 +98,7 @@ class PathwayResolver {
 
                     const processData = (data) => {
                         try {
-                            //console.log(`\n\nReceived stream data for requestId ${this.requestId}`, data.toString());
+                            //logger.info(`\n\nReceived stream data for requestId ${this.requestId}: ${data.toString()}`);
                             let events = data.toString().split('\n');
                             
                             //events = "data: {\"id\":\"chatcmpl-20bf1895-2fa7-4ef9-abfe-4d142aba5817\",\"object\":\"chat.completion.chunk\",\"created\":1689303423723,\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":{\"error\":{\"message\":\"The server had an error while processing your request. Sorry about that!\",\"type\":\"server_error\",\"param\":null,\"code\":null}}},\"finish_reason\":null}]}\n\n".split("\n");
@@ -107,7 +108,7 @@ class PathwayResolver {
                                 
                                 // skip empty events
                                 if (!(event.trim() === '')) {
-                                    //console.log(`Processing stream event for requestId ${this.requestId}`, event);
+                                    //logger.info(`Processing stream event for requestId ${this.requestId}: ${event}`);
                                     messageBuffer += event.replace(/^data: /, '');
 
                                     const requestProgress = {
@@ -131,22 +132,22 @@ class PathwayResolver {
                                         const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
                                         if (streamError) {
                                             streamErrorOccurred = true;
-                                            console.error(`Stream error: ${streamError.message}`);
+                                            logger.error(`Stream error: ${streamError.message}`);
                                             incomingMessage.off('data', processData); // Stop listening to 'data'
                                             return;
                                         }
                                     }
 
                                     try {
-                                        //console.log(`Publishing stream message to requestId ${this.requestId}`, message);
+                                        //logger.info(`Publishing stream message to requestId ${this.requestId}: ${message}`);
                                         publishRequestProgress(requestProgress);
                                     } catch (error) {
-                                        console.error('Could not publish the stream message', messageBuffer, error);
+                                        logger.error(`Could not publish the stream message: "${messageBuffer}", ${error}`);
                                     }
                                 }
                             }
                         } catch (error) {
-                            console.error('Could not process stream data', error);
+                            logger.error(`Could not process stream data: ${error}`);
                         }
                     };
 
@@ -159,13 +160,13 @@ class PathwayResolver {
                     }
 
                 } catch (error) {
-                    console.error('Could not subscribe to stream', error);
+                    logger.error(`Could not subscribe to stream: ${error}`);
                 }
             }
 
             if (streamErrorOccurred) {
                 attempt++;
-                console.error(`Stream attempt ${attempt} failed. Retrying...`);
+                logger.error(`Stream attempt ${attempt} failed. Retrying...`);
                 streamErrorOccurred = false; // Reset the flag for the next attempt
             } else {
                 return;
