@@ -4,7 +4,7 @@ import HandleBars from '../../lib/handleBars.js';
 import { request } from '../../lib/request.js';
 import { encode } from 'gpt-3-encoder';
 import { getFirstNToken } from '../chunker.js';
-import logger from '../../lib/logger.js';
+import logger, { obscureUrlParams } from '../../lib/logger.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETURN_TOKENS = 256;
@@ -227,7 +227,7 @@ class ModelPlugin {
         const header = '>'.repeat(logMessage.length);
         logger.info(`${header}`);
         logger.info(`${logMessage}`);
-        logger.info(`>>> Making API request to ${url}`);
+        logger.info(`>>> Making API request to ${obscureUrlParams(url)}`);
     }
 
     logAIRequestFinished() {
