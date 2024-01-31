@@ -2,7 +2,6 @@
 import ModelPlugin from './modelPlugin.js';
 import FormData from 'form-data';
 import fs from 'fs';
-import pubsub from '../pubsub.js';
 import { axios } from '../../lib/request.js';
 import stream from 'stream';
 import os from 'os';
@@ -14,6 +13,7 @@ import http from 'http';
 import https from 'https';
 import { promisify } from 'util';
 import subsrt from 'subsrt';
+import { publishRequestProgress } from '../../lib/redisSubscription.js';
 import logger from '../../lib/logger.js';
 
 const pipeline = promisify(stream.pipeline);
@@ -184,13 +184,12 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         const sendProgress = () => {
             completedCount++;
             if (completedCount >= totalCount) return;
-            pubsub.publish('REQUEST_PROGRESS', {
-                requestProgress: {
+            publishRequestProgress({
                     requestId,
                     progress: completedCount / totalCount,
                     data: null,
-                }
             });
+            
         }
 
         let chunks = []; // array of local file paths

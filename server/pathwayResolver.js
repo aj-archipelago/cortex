@@ -1,7 +1,6 @@
 import { PathwayPrompter } from './pathwayPrompter.js';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { v4 as uuidv4 } from 'uuid';
-import pubsub from './pubsub.js';
 import { encode } from 'gpt-3-encoder';
 import { getFirstNToken, getLastNToken, getSemanticChunks } from './chunker.js';
 import { PathwayResponseParser } from './pathwayResponseParser.js';
@@ -9,6 +8,7 @@ import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 import { callPathway } from '../lib/pathwayTools.js';
+import { publishRequestProgress } from '../lib/redisSubscription.js';
 import logger from '../lib/logger.js';
 
 const modelTypesExcludedFromProgressUpdates = ['OPENAI-DALLE2', 'OPENAI-DALLE3'];
@@ -84,12 +84,10 @@ class PathwayResolver {
                 
                 // if model type is OPENAI-IMAGE
                 if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
-                    pubsub.publish('REQUEST_PROGRESS', {
-                        requestProgress: {
+                    await publishRequestProgress({
                             requestId: this.requestId,
                             progress: completedCount / totalCount,
                             data: JSON.stringify(responseData),
-                        }
                     });
                 }
             } else {
@@ -142,9 +140,7 @@ class PathwayResolver {
 
                                     try {
                                         //logger.info(`Publishing stream message to requestId ${this.requestId}: ${message}`);
-                                        pubsub.publish('REQUEST_PROGRESS', {
-                                            requestProgress: requestProgress
-                                        });
+                                        publishRequestProgress(requestProgress);
                                     } catch (error) {
                                         logger.error(`Could not publish the stream message: "${messageBuffer}", ${error}`);
                                     }
@@ -177,12 +173,10 @@ class PathwayResolver {
             }
         }
         // if all retries failed, publish the stream end message
-        pubsub.publish('REQUEST_PROGRESS', {
-            requestProgress: {
+        publishRequestProgress({
                 requestId: this.requestId,
                 progress: 1,
                 data: '[DONE]',
-            }
         });
     }
 
@@ -402,11 +396,9 @@ class PathwayResolver {
         const { completedCount, totalCount } = requestState[this.requestId];
 
         if (completedCount < totalCount) {
-            pubsub.publish('REQUEST_PROGRESS', {
-                requestProgress: {
+            await publishRequestProgress({
                     requestId: this.requestId,
                     progress: completedCount / totalCount,
-                }
             });
         }
 

@@ -1,10 +1,8 @@
 // OpenAIImagePlugin.js
-import FormData from 'form-data';
-import { config } from '../../config.js';
 import ModelPlugin from './modelPlugin.js';
-import pubsub from '../pubsub.js';
 import axios from 'axios';
 import RequestDurationEstimator from '../../lib/requestDurationEstimator.js';
+import { publishRequestProgress } from '../../lib/redisSubscription.js';
 import logger from '../../lib/logger.js';
 
 const requestDurationEstimator = new RequestDurationEstimator(10);
@@ -60,13 +58,11 @@ class OpenAIImagePlugin extends ModelPlugin {
                 data = JSON.stringify(response);
             }
 
-            pubsub.publish('REQUEST_PROGRESS', {
-                requestProgress: {
+            await publishRequestProgress({
                     requestId,
                     status,
                     progress,
                     data,
-                }
             });
 
             if (status === "succeeded") {

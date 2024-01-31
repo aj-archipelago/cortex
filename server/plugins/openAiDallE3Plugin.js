@@ -1,7 +1,7 @@
 import RequestDurationEstimator from '../../lib/requestDurationEstimator.js';
-import pubsub from '../pubsub.js';
 import ModelPlugin from './modelPlugin.js';
 import { request } from '../../lib/request.js';
+import { publishRequestProgress } from '../../lib/redisSubscription.js';
 import logger from '../../lib/logger.js';
 
 const requestDurationEstimator = new RequestDurationEstimator(10);
@@ -84,7 +84,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
 
             state.status = status;
             requestDurationEstimator.endRequest();
-            pubsub.publish("REQUEST_PROGRESS", { requestProgress });
+            publishRequestProgress(requestProgress);
         }
 
         // publish an update every 2 seconds, using the request duration estimator to calculate
@@ -93,14 +93,12 @@ class OpenAIDallE3Plugin extends ModelPlugin {
             let progress =
                 requestDurationEstimator.calculatePercentComplete();
 
-            pubsub.publish('REQUEST_PROGRESS', {
-                requestProgress: {
+                await publishRequestProgress({
                     requestId,
                     status: "pending",
                     progress,
                     data,
-                }
-            });
+                });
 
             if (state.status !== "pending") {
                 break;
