@@ -229,7 +229,7 @@ class PathwayResolver {
     // Add a warning and log it
     logWarning(warning) {
         this.warnings.push(warning);
-        console.warn(warning);
+        logger.warn(warning);
     }
 
     // Here we choose how to handle long input - either summarize or chunk
