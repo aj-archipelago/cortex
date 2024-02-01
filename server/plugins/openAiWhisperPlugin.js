@@ -46,7 +46,7 @@ async function deleteTempPath(path) {
             logger.info(`Temporary folder ${path} and its contents deleted successfully.`);
         }
     } catch (err) {
-        logger.error('Error occurred while deleting the temporary path:', err);
+        logger.error(`Error occurred while deleting the temporary path: ${err}`);
     }
 }
 
@@ -121,7 +121,7 @@ function alignSubtitles(subtitles, format) {
             }
         }
     } catch (error) {
-        logger.error("An error occurred in content text parsing: ", error);
+        logger.error(`An error occurred in content text parsing: ${error}`);
     }
     
     return subsrt.build(result, { format: format === 'vtt' ? 'vtt' : 'srt' });
@@ -144,7 +144,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 return [file];
             }
         } catch (err) {
-            logger.error(`Error getting media chunks list from api:`, err);
+            logger.error(`Error getting media chunks list from api: ${err}`);
             throw err;
         }
     }
@@ -158,7 +158,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 return res.data;
             }
         } catch (err) {
-            logger.error(`Error marking request ${requestId} as completed:`, err);
+            logger.error(`Error marking request ${requestId} as completed: ${err}`);
         }
     }
 
@@ -189,7 +189,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
                 return this.executeRequest(reqUrl, formData, params, { ...this.model.headers, ...formData.getHeaders() }, {}, requestId, pathway);
             } catch (err) {
-                logger.error(`Error getting word timestamped data from api:`, err);
+                logger.error(`Error getting word timestamped data from api: ${err}`);
                 throw err;
             }
         }
@@ -217,7 +217,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
                 return res;
             } catch (err) {
-                logger.error(`Error getting word timestamped data from api:`, err);
+                logger.error(`Error getting word timestamped data from api: ${err}`);
                 throw err;
             }
         }
@@ -294,7 +294,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             }
 
         } catch (error) {
-            const errMsg = `Transcribe error: ${error?.message || JSON.stringify(error)}`;
+            const errMsg = `Transcribe error: ${error?.message || error}`;
             logger.error(errMsg);
             return errMsg;
         }
@@ -320,7 +320,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
 
             } catch (error) {
-                logger.error("An error occurred while deleting:", error);
+                logger.error(`An error occurred while deleting: ${error}`);
             }
         }
 
