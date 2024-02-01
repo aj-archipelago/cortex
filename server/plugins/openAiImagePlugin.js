@@ -24,7 +24,7 @@ class OpenAIImagePlugin extends ModelPlugin {
             requestDurationEstimator.startRequest(requestId);
             id = (await this.executeRequest(url, data, {}, { ...this.model.headers }, {}, requestId, pathway))?.id;
         } catch (error) {
-            const errMsg = `Error generating image: ${error?.message || JSON.stringify(error)}`;
+            const errMsg = `Error generating image: ${error?.message || error}`;
             logger.error(errMsg);
             return errMsg;
         }

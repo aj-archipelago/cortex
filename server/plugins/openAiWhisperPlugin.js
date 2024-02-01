@@ -224,7 +224,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             // result = await Promise.all(mediaSplit.chunks.map(processChunk));
 
         } catch (error) {
-            const errMsg = `Transcribe error: ${error?.message || JSON.stringify(error)}`;
+            const errMsg = `Transcribe error: ${error?.message || error}`;
             logger.error(errMsg);
             return errMsg;
         }
