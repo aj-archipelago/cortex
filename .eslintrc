@@ -16,8 +16,9 @@
     ],
     "rules": {
         "import/no-unresolved": "error",
-        "import/no-extraneous-dependencies": ["error", {"devDependencies": true, "dependencies": true}],
-        "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }]
+        "import/no-extraneous-dependencies": ["error", {"devDependencies": true}],
+        "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+        "no-useless-escape": "off"
     },
     "settings": {
         "import/resolver": {

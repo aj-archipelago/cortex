@@ -1,5 +1,4 @@
 import pubsub from './pubsub.js';
-import logger from '../lib/logger.js';
 import { withFilter } from 'graphql-subscriptions';
 import { publishRequestProgressSubscription } from '../lib/redisSubscription.js';
 

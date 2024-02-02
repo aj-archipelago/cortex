@@ -1,6 +1,5 @@
 // OpenAICompletionPlugin.js
 
-import { request } from 'https';
 import ModelPlugin from './modelPlugin.js';
 import { encode } from 'gpt-3-encoder';
 import logger from '../../lib/logger.js';

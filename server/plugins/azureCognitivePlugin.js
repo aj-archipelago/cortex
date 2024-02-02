@@ -30,7 +30,7 @@ class AzureCognitivePlugin extends ModelPlugin {
     }
 
     // Set up parameters specific to the Azure Cognitive API
-    async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId,  {headers, requestId, pathway, url}) {
+    async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId,  {headers, requestId, pathway, _url}) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
         const { inputVector, calculateInputVector, privateData, filter, docId } = combinedParameters;
