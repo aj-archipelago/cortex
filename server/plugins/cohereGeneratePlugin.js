@@ -8,7 +8,7 @@ class CohereGeneratePlugin extends ModelPlugin {
 
     // Set up parameters specific to the Cohere API
     getRequestParameters(text, parameters, prompt) {
-        const { modelPromptText, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
+        let { modelPromptText, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
 
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();

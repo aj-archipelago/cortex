@@ -2,6 +2,7 @@
 import ModelPlugin from './modelPlugin.js';
 import { execFileSync } from 'child_process';
 import { encode } from 'gpt-3-encoder';
+import logger from '../../lib/logger.js';
 
 class LocalModelPlugin extends ModelPlugin {
     constructor(config, pathway, modelName, model) {

@@ -18,6 +18,12 @@
 # Ignore documentation
 /docs
 
+# Ignore helper apps
+/helper_apps
+
+# Ignore tests
+/tests
+
 # Ignore any generated or bundled files
 *.min.js
 *.bundle.js

@@ -1,7 +1,6 @@
 // rest.js
 // Implement the REST endpoints for the pathways
 
-import { json } from 'express';
 import pubsub from './pubsub.js';
 import { requestState } from './requestState.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -168,7 +167,11 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     // Fire the resolver for the async requestProgress
     logger.info(`Rest Endpoint starting async requestProgress, requestId: ${requestId}`);
     const { resolver, args } = requestState[requestId];
-    resolver(args);
+    // The false here means never use a Redis subscription channel
+    // to handle these streaming messages. This is because we are
+    // guaranteed in this case that the stream is going to the same
+    // client.
+    resolver(args, false);
 
     return subscription;
   
@@ -236,17 +239,18 @@ function buildRestEndpoints(pathways, app, server, config) {
                 ],
             };
 
+            // eslint-disable-next-line no-extra-boolean-cast
             if (Boolean(req.body.stream)) {
                 jsonResponse.id = `cmpl-${resultText}`;
                 jsonResponse.choices[0].finish_reason = null;
                 //jsonResponse.object = "text_completion.chunk";
 
-                const subscription = processIncomingStream(resultText, res, jsonResponse);
+                processIncomingStream(resultText, res, jsonResponse);
             } else {
                 const requestId = uuidv4();
                 jsonResponse.id = `cmpl-${requestId}`;
                 res.json(jsonResponse);
-            };
+            }
         });
         
         app.post('/v1/chat/completions', async (req, res) => {
@@ -281,6 +285,7 @@ function buildRestEndpoints(pathways, app, server, config) {
                 ],
             };
 
+            // eslint-disable-next-line no-extra-boolean-cast
             if (Boolean(req.body.stream)) {
                 jsonResponse.id = `chatcmpl-${resultText}`;
                 jsonResponse.choices[0] = {
@@ -292,7 +297,7 @@ function buildRestEndpoints(pathways, app, server, config) {
                 }
                 jsonResponse.object = "chat.completion.chunk";
 
-                const subscription = processIncomingStream(resultText, res, jsonResponse);
+                processIncomingStream(resultText, res, jsonResponse);
             } else {
                 const requestId = uuidv4();
                 jsonResponse.id = `chatcmpl-${requestId}`;
@@ -330,6 +335,6 @@ function buildRestEndpoints(pathways, app, server, config) {
         });
 
     }
-};
+}
 
 export { buildRestEndpoints };

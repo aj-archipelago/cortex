@@ -22,7 +22,7 @@ class PalmCompletionPlugin extends ModelPlugin {
     // Set up parameters specific to the PaLM API Text Completion API
     getRequestParameters(text, parameters, prompt, pathwayResolver) {
         const { modelPromptText, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
-        const { stream } = parameters;
+        
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
     
