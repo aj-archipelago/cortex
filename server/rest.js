@@ -167,11 +167,10 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     // Fire the resolver for the async requestProgress
     logger.info(`Rest Endpoint starting async requestProgress, requestId: ${requestId}`);
     const { resolver, args } = requestState[requestId];
-    // The false here means never use a Redis subscription channel
-    // to handle these streaming messages. This is because we are
-    // guaranteed in this case that the stream is going to the same
-    // client.
-    resolver(args, false);
+    requestState[requestId].useRedis = false;
+    requestState[requestId].started = true;
+
+    resolver(args);
 
     return subscription;
   
