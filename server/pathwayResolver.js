@@ -70,7 +70,7 @@ class PathwayResolver {
     // the graphql subscription to send progress updates to the client.  Most of 
     // the time the client will be an external client, but it could also be the
     // Cortex REST api code.
-    async asyncResolve(args, useRedis = true) {
+    async asyncResolve(args) {
         const MAX_RETRY_COUNT = 3;
         let attempt = 0;
         let streamErrorOccurred = false;
@@ -88,7 +88,7 @@ class PathwayResolver {
                             requestId: this.requestId,
                             progress: completedCount / totalCount,
                             data: JSON.stringify(responseData),
-                    }, useRedis);
+                    });
                 }
             } else {
                 try {
@@ -140,7 +140,7 @@ class PathwayResolver {
 
                                     try {
                                         //logger.info(`Publishing stream message to requestId ${this.requestId}: ${message}`);
-                                        publishRequestProgress(requestProgress, useRedis);
+                                        publishRequestProgress(requestProgress);
                                     } catch (error) {
                                         logger.error(`Could not publish the stream message: "${messageBuffer}", ${error}`);
                                     }
