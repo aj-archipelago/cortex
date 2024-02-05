@@ -8,7 +8,7 @@ RUN npm install
 
 ## installing ffmepg
 RUN apk update && \
-    apk add ffmpeg=6.0-r15
+    apk add ffmpeg
 
 COPY . .
 

@@ -6,6 +6,7 @@ import os from 'os';
 import { promisify } from 'util';
 import axios from 'axios';
 import { ensureEncoded } from './helper.js';
+import ytdl from 'ytdl-core';
 
 
 const ffmpegProbe = promisify(ffmpeg.ffprobe);
