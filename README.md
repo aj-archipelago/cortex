@@ -440,6 +440,19 @@ The `config` object can be used to access configuration values throughout the pr
 ```js
 config.get('PORT')
 ```
+
+## Helper Apps
+The Cortex project includes a set of utility applications, which are located in the `helper-apps`` directory. Each of these applications comes with a Dockerfile. This Dockerfile can be used to create a Docker image of the application, which in turn allows the application to be run in a standalone manner using Docker.
+
+- cortex-file-handler
+Extends Cortex with several file processing units. Handles file operations (download, split, upload) with local file system or Azure Storage. It can process different file types including documents, files ( .pdf, .docx, .xlsx, .csv .txt, .json, .md, .xml, .js, .html, .css) and additionally YouTube URLs. It also manages deletion requests and cleanup operations, and provides progress reporting for requests.  
+
+- cortex-whisper-wrapper
+The cortex-whisper-wrapper is a custom API wrapper for the Whisper package from OpenAI. Designed as a FastAPI server, it aids in transcribing audio files using the Whisper library. 
+The server provides an HTTP endpoint ("/") that accepts POST requests with a JSON payload containing a "fileurl" parameter specifying the URL of the audio file to transcribe. Upon receiving a request, the server calls the transcribe function to perform the transcription using the Whisper model, saves the transcription as an SRT file, and returns the SRT content as the response.
+It helps Cortex to make use of Whisper OS parameters which currently are not available in OpenAI API. Parameters supported are: 'word_timestamps', 'highlight_words', 'max_line_count', 'max_line_width', 'max_words_per_line'. These parameters customizes transcription output, for more info on the parameters see open source Whisper package https://github.com/openai/whisper 
+
+
 ## Troubleshooting
 If you encounter any issues while using Cortex, there are a few things you can do. First, check the Cortex documentation for any common errors and their solutions. If that does not help, you can also open an issue on the Cortex GitHub repository.
 
