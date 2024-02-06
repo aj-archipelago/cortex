@@ -251,18 +251,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         async function processURI(uri) {
             let result = null;
-            processTS(uri).then((ts) => { result = ts;});
-
-            //send updates while waiting for result
-            while(!result) {
-                sendProgress(true);
-                await new Promise(r => setTimeout(r, 3000));
-            }
-            return result;
-        }
-
-        async function processURI(uri) {
-            let result = null;
             let _promise = null;
             if(WHISPER_TS_API_URL){
                 _promise = processTS
