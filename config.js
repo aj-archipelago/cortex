@@ -101,7 +101,7 @@ var config = convict({
             },
             "azure-cognitive": {
                 "type": "AZURE-COGNITIVE",
-                "url": "https://archipelago-cognitive-search.search.windows.net/indexes/indexcortex/docs/search?api-version=2023-12-01-Preview",
+                "url": "{{AZURE_COGNITIVE_API_URL}}",
                 "headers": {
                     "api-key": "{{AZURE_COGNITIVE_API_KEY}}",
                     "Content-Type": "application/json"
