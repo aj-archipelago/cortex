@@ -1,5 +1,6 @@
 // AzureTranslatePlugin.js
 import ModelPlugin from './modelPlugin.js';
+import logger from '../../lib/logger.js';
 
 class AzureTranslatePlugin extends ModelPlugin {
     constructor(config, pathway, modelName, model) {
