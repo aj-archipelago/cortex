@@ -2,7 +2,7 @@
 import ModelPlugin from './modelPlugin.js';
 import FormData from 'form-data';
 import fs from 'fs';
-import { axios } from '../../lib/request.js';
+import { axios } from '../../lib/requestExecutor.js';
 import stream from 'stream';
 import os from 'os';
 import path from 'path';
@@ -93,8 +93,8 @@ const downloadFile = async (fileUrl) => {
 };
 
 class OpenAIWhisperPlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     async getMediaChunks(file, requestId) {
@@ -127,9 +127,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
     }
 
     // Execute the request to the OpenAI Whisper API
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const { responseFormat,wordTimestamped,highlightWords,maxLineWidth,maxLineCount,maxWordsPerLine } = parameters;
-        const url = this.requestUrl(text);
+    async execute(text, parameters, prompt, cortexRequest) {
+        const { pathwayResolver } = cortexRequest;
+        const { responseFormat, wordTimestamped, highlightWords, maxLineWidth, maxLineCount, maxWordsPerLine } = parameters;
+        cortexRequest.url = this.requestUrl(text);
+
         const params = {};
         const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
 
@@ -147,7 +149,10 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                     if(maxWordsPerLine) tsparams.max_words_per_line = maxWordsPerLine;
                     if(wordTimestamped!=null) tsparams.word_timestamps = wordTimestamped;
 
-                    const res = await this.executeRequest(WHISPER_TS_API_URL, tsparams, {}, {}, {}, requestId, pathway);
+                    cortexRequest.url = WHISPER_TS_API_URL;
+                    cortexRequest.data = tsparams;
+
+                    const res = await this.executeRequest(cortexRequest);
                     return res;
                 } catch (err) {
                     logger.error(`Error getting word timestamped data from api: ${err}`);
@@ -168,7 +173,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 language && formData.append('language', language);
                 modelPromptText && formData.append('prompt', modelPromptText);
 
-                return this.executeRequest(url, formData, params, { ...this.model.headers, ...formData.getHeaders() }, {}, requestId, pathway);
+                cortexRequest.data = formData;
+                cortexRequest.params = params;
+                cortexRequest.headers = { ...cortexRequest.headers, ...formData.getHeaders() };
+
+                return this.executeRequest(cortexRequest);
             } catch (err) {
                 logger.error(err);
                 throw err;
@@ -179,7 +188,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         let { file } = parameters;
         let totalCount = 0;
         let completedCount = 0;
-        const { requestId, pathway } = pathwayResolver;
+        const { requestId } = pathwayResolver;
 
         const sendProgress = () => {
             completedCount++;

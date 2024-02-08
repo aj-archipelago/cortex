@@ -6,6 +6,7 @@ export const mockConfig = {
         defaultModelName: 'testModel',
         models: {
           testModel: {
+            name: 'testModel', 
             url: 'https://api.example.com/testModel',
             type: 'OPENAI-COMPLETION',
           },
@@ -40,6 +41,7 @@ export const mockConfig = {
 
   export const mockPathwayResolverString = {
     model: {
+      name: 'testModel',
       url: 'https://api.example.com/testModel',
       type: 'OPENAI-COMPLETION',
     },
@@ -51,6 +53,7 @@ export const mockConfig = {
 
   export const mockPathwayResolverFunction = {
     model: {
+      name: 'testModel',
       url: 'https://api.example.com/testModel',
       type: 'OPENAI-COMPLETION',
     },
@@ -64,6 +67,7 @@ export const mockConfig = {
 
   export const mockPathwayResolverMessages = {
     model: {
+      name: 'testModel',
       url: 'https://api.example.com/testModel',
       type: 'OPENAI-COMPLETION',
     },
@@ -78,3 +82,4 @@ export const mockConfig = {
       }),
   };
 
+  export const mockModelEndpoints = { testModel: { name: 'testModel', url: 'https://api.example.com/testModel', type: 'OPENAI-COMPLETION' }};

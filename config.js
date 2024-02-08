@@ -264,16 +264,40 @@ const buildPathways = async (config) => {
 
 // Build and load models to config
 const buildModels = (config) => {
-    const { models } = config.getProperties();
+    let { models } = config.getProperties();
 
-    for (const [key, model] of Object.entries(models)) {
-        // Compile handlebars templates for models
-        models[key] = JSON.parse(HandleBars.compile(JSON.stringify(model))({ ...config.getEnv(), ...config.getProperties() }))
+    // iterate over each model
+    for (let [key, model] of Object.entries(models)) {
+        if (!model.name) {
+            model.name = key;
+        }
+        
+        // if model is in old format, convert it to new format
+        if (!model.endpoints) {
+            model = {
+                ...model,
+                endpoints: [
+                    {
+                        name: "default",
+                        url: model.url,
+                        headers: model.headers,
+                        params: model.params,
+                        requestsPerSecond: model.requestsPerSecond
+                    }
+                ]
+            };
+        }
+
+        // compile handlebars templates for each endpoint
+        model.endpoints = model.endpoints.map(endpoint => 
+            JSON.parse(HandleBars.compile(JSON.stringify(endpoint))({ ...model, ...config.getEnv(), ...config.getProperties() }))
+        );
+
+        models[key] = model;
     }
 
     // Add constructed models to config
     config.load({ models });
-
 
     // Check that models are specified, Cortex cannot run without a model
     if (Object.keys(config.get('models')).length <= 0) {

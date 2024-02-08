@@ -4,8 +4,8 @@ import { encode } from 'gpt-3-encoder';
 import logger from '../../lib/logger.js';
 
 class OpenAIChatPlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     // convert to OpenAI messages array format if necessary
@@ -76,16 +76,14 @@ class OpenAIChatPlugin extends ModelPlugin {
         return requestParameters;
     }
 
-    // Execute the request to the OpenAI Chat API
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const url = this.requestUrl(text);
+    // Assemble and execute the request to the OpenAI Chat API
+    async execute(text, parameters, prompt, cortexRequest) {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
-        const { requestId, pathway} = pathwayResolver;
 
-        const data = { ...(this.model.params || {}), ...requestParameters };
-        const params = {}; // query params
-        const headers = this.model.headers || {};
-        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
+        cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
+        cortexRequest.params = {}; // query params
+
+        return this.executeRequest(cortexRequest);
     }
 
     // Parse the response from the OpenAI Chat API

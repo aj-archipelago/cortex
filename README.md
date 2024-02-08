@@ -212,12 +212,12 @@ export default {
 
     // Custom resolver to generate summaries by reprompting if they are too long or too short.
     resolver: async (parent, args, contextValue, info) => {
-        const { config, pathway, requestState } = contextValue;
+        const { config, pathway } = contextValue;
         const originalTargetLength = args.targetLength;
 
         // If targetLength is not provided, execute the prompt once and return the result.
         if (originalTargetLength === 0) {
-            let pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
+            let pathwayResolver = new PathwayResolver({ config, pathway, args });
             return await pathwayResolver.resolve(args);
         }
 
@@ -232,7 +232,7 @@ export default {
 
         const MAX_ITERATIONS = 5;
         let summary = '';
-        let pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
+        let pathwayResolver = new PathwayResolver({ config, pathway, args });
 
         // Modify the prompt to be words-based instead of characters-based.
         pathwayResolver.pathwayPrompt = `Write a summary of all of the text below. If the text is in a language other than english, make sure the summary is written in the same language. Your summary should be ${targetWords} words in length.\n\nText:\n\n{{{text}}}\n\nSummary:\n\n`

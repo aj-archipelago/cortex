@@ -2,8 +2,8 @@
 import ModelPlugin from './modelPlugin.js';
 
 class CohereSummarizePlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     // Set up parameters specific to the Cohere Summarize API
@@ -23,17 +23,10 @@ class CohereSummarizePlugin extends ModelPlugin {
     }
 
     // Execute the request to the Cohere Summarize API
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const url = this.requestUrl();
+    async execute(text, parameters, prompt, cortexRequest) {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
-        const { requestId, pathway} = pathwayResolver;
-
-        const data = { ...(this.model.params || {}), ...requestParameters };
-        const params = {};
-        const headers = { 
-            ...this.model.headers || {}
-        };
-        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
+        cortexRequest.data = { ...cortexRequest.data, ...requestParameters };
+        return this.executeRequest(cortexRequest);
     }
 
     // Parse the response from the Cohere Summarize API

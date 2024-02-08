@@ -16,7 +16,7 @@ import cors from 'cors';
 import { KeyvAdapter } from '@apollo/utils.keyvadapter';
 import responseCachePlugin from '@apollo/server-plugin-response-cache';
 import subscriptions from './subscriptions.js';
-import { buildLimiters } from '../lib/request.js';
+import { buildModelEndpoints } from '../lib/requestExecutor.js';
 import { cancelRequestResolver } from './resolver.js';
 import { buildPathways, buildModels } from '../config.js';
 import { requestState } from './requestState.js';
@@ -97,7 +97,7 @@ const getResolvers = (config, pathways) => {
             // add shared state to contextValue
             contextValue.pathway = pathway;
             contextValue.config = config;
-            return pathway.rootResolver(parent, args, contextValue, info);
+                        return pathway.rootResolver(parent, args, contextValue, info);
         }
     }
 
@@ -116,8 +116,8 @@ const build = async (config) => {
     await buildPathways(config);
     buildModels(config);
 
-    // build api limiters 
-    buildLimiters(config);
+    // build model API endpoints and limiters
+    buildModelEndpoints(config);
 
     //build api
     const pathways = config.get('pathways');

@@ -6,7 +6,7 @@ import { mockPathwayResolverMessages } from './mocks.js';
 const { config, pathway, modelName, model } = mockPathwayResolverMessages;
 
 test.beforeEach((t) => {
-  const palmChatPlugin = new PalmChatPlugin(config, pathway, modelName, model);
+  const palmChatPlugin = new PalmChatPlugin(pathway, model);
   t.context = { palmChatPlugin };
 });
 

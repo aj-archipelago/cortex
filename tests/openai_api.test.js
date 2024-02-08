@@ -5,7 +5,7 @@ import got from 'got';
 import axios from 'axios';
 import serverFactory from '../index.js';
 
-const API_BASE = 'http://localhost:4000/v1';
+const API_BASE = `http://localhost:${process.env.CORTEX_PORT}/v1`;
 
 let testServer;
 
@@ -110,7 +110,7 @@ test('POST SSE: /v1/completions should send a series of events and a [DONE] even
         stream: true,
     };
     
-    const url = 'http://localhost:4000/v1';
+    const url = `http://localhost:${process.env.CORTEX_PORT}/v1`;
     
     const completionsAssertions = (t, messageJson) => {
         t.truthy(messageJson.id);
@@ -133,7 +133,7 @@ test('POST SSE: /v1/chat/completions should send a series of events and a [DONE]
         stream: true,
     };
     
-    const url = 'http://localhost:4000/v1';
+    const url = `http://localhost:${process.env.CORTEX_PORT}/v1`;
     
     const chatCompletionsAssertions = (t, messageJson) => {
         t.truthy(messageJson.id);

@@ -3,8 +3,8 @@ import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
 
 class AzureTranslatePlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
     
     // Set up parameters specific to the Azure Translate API
@@ -25,17 +25,13 @@ class AzureTranslatePlugin extends ModelPlugin {
     }
 
     // Execute the request to the Azure Translate API
-    async execute(text, parameters, prompt, pathwayResolver) {
+    async execute(text, parameters, prompt, cortexRequest) {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
-        const { requestId, pathway} = pathwayResolver;
 
-        const url = this.requestUrl(text);
+        cortexRequest.data = requestParameters.data;
+        cortexRequest.params = requestParameters.params;
 
-        const data = requestParameters.data;
-        const params = requestParameters.params;
-        const headers = this.model.headers || {};
-
-        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
+        return this.executeRequest(cortexRequest);
     }
     
     // Parse the response from the Azure Translate API

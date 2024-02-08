@@ -4,7 +4,7 @@ import { PathwayResolver } from './pathwayResolver.js';
 // This resolver uses standard parameters required by Apollo server:
 // (parent, args, contextValue, info)
 const rootResolver = async (parent, args, contextValue, info) => {
-    const { config, pathway, requestState } = contextValue;
+    const { config, pathway } = contextValue;
     const { temperature, enableGraphqlCache } = pathway;
 
     // Turn on graphql caching if enableGraphqlCache true and temperature is 0
@@ -12,7 +12,7 @@ const rootResolver = async (parent, args, contextValue, info) => {
         info.cacheControl.setCacheHint({ maxAge: 60 * 60 * 24, scope: 'PUBLIC' });
     }
 
-    const pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
+    const pathwayResolver = new PathwayResolver({ config, pathway, args });
     contextValue.pathwayResolver = pathwayResolver;
 
     // Execute the request with timeout

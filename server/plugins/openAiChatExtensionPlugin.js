@@ -2,8 +2,8 @@
 import OpenAIChatPlugin from './openAiChatPlugin.js';
 
 class OpenAIChatExtensionPlugin extends OpenAIChatPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
         this.tool = '';
     }
 
@@ -47,9 +47,9 @@ class OpenAIChatExtensionPlugin extends OpenAIChatPlugin {
         return reqParams;
     }
 
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const result = await super.execute(text, parameters, prompt, pathwayResolver);
-        pathwayResolver.tool = this.tool; // add tool info back 
+    async execute(text, parameters, prompt, cortexRequest) {
+        const result = await super.execute(text, parameters, prompt, cortexRequest);
+        cortexRequest.pathwayResolver.tool = this.tool; // add tool info back 
         return result;
     }
 

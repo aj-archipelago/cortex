@@ -6,7 +6,7 @@ import { mockPathwayResolverString } from './mocks.js';
 
 const { config, pathway, modelName, model } = mockPathwayResolverString;
 
-const modelPlugin = new ModelPlugin(config, pathway, modelName, model);
+const modelPlugin = new ModelPlugin(pathway, model);
 
 const generateMessage = (role, content) => ({ role, content });
 

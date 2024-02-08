@@ -8,21 +8,23 @@ import logger from '../../lib/logger.js';
 const requestDurationEstimator = new RequestDurationEstimator(10);
 
 class OpenAIImagePlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     // Implement the method to call the DALL-E API
-    async execute(text, parameters, _, pathwayResolver) {
-        const url = this.requestUrl(text);
-        const data = JSON.stringify({ prompt: text });
+    async execute(text, parameters, _, cortexRequest) {
+        const { pathwayResolver } = cortexRequest;
+        cortexRequest.data = JSON.stringify({ prompt: text });
 
         let id;
-        const { requestId, pathway } = pathwayResolver;
+        const { requestId } = pathwayResolver;
 
         try {
             requestDurationEstimator.startRequest(requestId);
-            id = (await this.executeRequest(url, data, {}, { ...this.model.headers }, {}, requestId, pathway))?.id;
+            await this.executeRequest(cortexRequest);
+            id = cortexRequest.requestId;
+
         } catch (error) {
             const errMsg = `Error generating image: ${error?.message || error}`;
             logger.error(errMsg);
