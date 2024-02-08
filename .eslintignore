@@ -15,6 +15,9 @@
 # Ignore coverage reports
 /coverage
 
+# Ignore helper apps
+/helper-apps
+
 # Ignore documentation
 /docs
 

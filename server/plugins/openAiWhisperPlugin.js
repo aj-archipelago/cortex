@@ -1,6 +1,5 @@
 // openAiWhisperPlugin.js
 import ModelPlugin from './modelPlugin.js';
-import { axios } from '../../lib/request.js';
 import { config } from '../../config.js';
 import subsrt from 'subsrt';
 import FormData from 'form-data';
@@ -9,12 +8,10 @@ import { axios } from '../../lib/requestExecutor.js';
 import stream from 'stream';
 import os from 'os';
 import path from 'path';
-import os from 'os';
 import http from 'http';
 import https from 'https';
 import { URL } from 'url';
 import { v4 as uuidv4 } from 'uuid';
-import stream from 'stream';
 import { promisify } from 'util';
 import { publishRequestProgress } from '../../lib/redisSubscription.js';
 import logger from '../../lib/logger.js';
@@ -178,7 +175,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 chunks.push(chunk);
 
                 const { language, responseFormat } = parameters;
-                const reqUrl = this.requestUrl(text);
+                cortexRequest.url = this.requestUrl(text);
                 const params = {};
                 const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
                 const response_format = responseFormat || 'text';
