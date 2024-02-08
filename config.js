@@ -101,7 +101,7 @@ var config = convict({
             },
             "azure-cognitive": {
                 "type": "AZURE-COGNITIVE",
-                "url": "{{AZURE_COGNITIVE_API_URL}}",
+                "url": "{{{AZURE_COGNITIVE_API_URL}}}",
                 "headers": {
                     "api-key": "{{AZURE_COGNITIVE_API_KEY}}",
                     "Content-Type": "application/json"
