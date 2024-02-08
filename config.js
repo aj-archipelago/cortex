@@ -101,7 +101,7 @@ var config = convict({
             },
             "azure-cognitive": {
                 "type": "AZURE-COGNITIVE",
-                "url": "https://archipelago-cognitive-search.search.windows.net/indexes/indexcortex/docs/search?api-version=2023-07-01-Preview",
+                "url": "{{AZURE_COGNITIVE_API_URL}}",
                 "headers": {
                     "api-key": "{{AZURE_COGNITIVE_API_KEY}}",
                     "Content-Type": "application/json"
@@ -110,7 +110,7 @@ var config = convict({
             },
             "oai-embeddings": {
                 "type": "OPENAI-EMBEDDINGS",
-                "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-embedding/embeddings?api-version=2023-05-15",
+                "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-embedding/embeddings?api-version=2023-12-01",
                 "headers": {
                     "api-key": "{{ARCHIPELAGO_OPENAI_KEY}}",
                     "Content-Type": "application/json"
