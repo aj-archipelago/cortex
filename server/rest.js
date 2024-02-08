@@ -170,7 +170,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     requestState[requestId].useRedis = false;
     requestState[requestId].started = true;
 
-    resolver(args);
+    resolver && resolver(args);
 
     return subscription;
   
