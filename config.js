@@ -192,7 +192,7 @@ var config = convict({
     },
     whisperTSApiUrl: {
         format: String,
-        default: 'null',
+        default: null,
         env: 'WHISPER_TS_API_URL'
     },
     subscriptionKeepAlive: {

@@ -18,9 +18,6 @@
 # Ignore documentation
 /docs
 
-# Ignore helper apps
-/helper_apps
-
 # Ignore tests
 /tests
 
