@@ -1,8 +1,8 @@
-import RequestDurationEstimator from '../../lib/requestDurationEstimator.js';
+import RequestMonitor from '../../lib/requestMonitor.js';
 import ModelPlugin from './modelPlugin.js';
 import { publishRequestProgress } from '../../lib/redisSubscription.js';
 
-const requestDurationEstimator = new RequestDurationEstimator(10);
+const requestDurationEstimator = new RequestMonitor(10);
 
 /**
  * @description This plugin is for the OpenAI DALL-E 3 model.
@@ -32,9 +32,9 @@ class OpenAIDallE3Plugin extends ModelPlugin {
         }
         else {
             // async request
-            requestDurationEstimator.startRequest(requestId);
+            const callid = requestDurationEstimator.startCall();
             const requestPromise = makeRequest();
-            this.#sendRequestUpdates(requestId, requestPromise);
+            this.#sendRequestUpdates(requestId, requestPromise, callid);
         }
     }
 
@@ -45,7 +45,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
      * @param {*} requestPromise 
      * @returns 
      */
-    async #sendRequestUpdates(requestId, requestPromise) {
+    async #sendRequestUpdates(requestId, requestPromise, callid) {
         let state = { status: "pending" };
         let attemptCount = 0;
         let data = null;
@@ -66,7 +66,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
             };
 
             state.status = status;
-            requestDurationEstimator.endRequest();
+            requestDurationEstimator.endCall(callid);
             publishRequestProgress(requestProgress);
         }
 
@@ -74,7 +74,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
         // the percent complete
         do {
             let progress =
-                requestDurationEstimator.calculatePercentComplete();
+                requestDurationEstimator.calculatePercentComplete(callid);
 
                 await publishRequestProgress({
                     requestId,
