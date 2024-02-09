@@ -270,7 +270,8 @@ class ModelPlugin {
             const responseData = await executeRequest(cortexRequest);
             
             if (responseData.error) {
-                throw new Error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
+                logger.error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
+                throw responseData;
             }
         
             this.logRequestData(data, responseData, prompt);

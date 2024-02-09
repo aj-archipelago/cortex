@@ -396,13 +396,15 @@ class PathwayResolver {
         
         requestState[this.requestId].completedCount++;
 
-        const { completedCount, totalCount } = requestState[this.requestId];
+        if (parameters.async) {
+            const { completedCount, totalCount } = requestState[this.requestId];
 
-        if (completedCount < totalCount) {
-            await publishRequestProgress({
-                    requestId: this.requestId,
-                    progress: completedCount / totalCount,
-            });
+            if (completedCount < totalCount) {
+                await publishRequestProgress({
+                        requestId: this.requestId,
+                        progress: completedCount / totalCount,
+                });
+            }
         }
 
         if (prompt.saveResultTo) {
