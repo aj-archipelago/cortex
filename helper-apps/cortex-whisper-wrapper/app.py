@@ -8,6 +8,8 @@ from whisper.utils import get_writer
 from fastapi.encoders import jsonable_encoder
 import time
 
+print("cortex-whisper-wrapper app starting...", flush=True)
+
 model_download_root = './models'
 model = whisper.load_model("large", download_root=model_download_root) #large, tiny
 
