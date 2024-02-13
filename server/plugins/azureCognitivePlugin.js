@@ -4,7 +4,7 @@ import ModelPlugin from './modelPlugin.js';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { config } from '../../config.js';
-import { axios } from '../../lib/request.js';
+import { axios } from '../../lib/requestExecutor.js';
 import logger from '../../lib/logger.js';
 
 const API_URL = config.get('whisperMediaApiUrl');
@@ -14,8 +14,8 @@ const TOP = 1000;
 let DIRECT_FILE_EXTENSIONS = [".txt", ".json", ".csv", ".md", ".xml", ".js", ".html", ".css"];
 
 class AzureCognitivePlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     async getInputVector (text) {
@@ -23,14 +23,14 @@ class AzureCognitivePlugin extends ModelPlugin {
             if(!text || !text.trim()){
                 return;
             }
-            return JSON.parse(await callPathway(this.config, 'embeddings', { text }))[0];
+            return JSON.parse(await callPathway('embeddings', { text }))[0];
         }catch(err){
             logger.error(`Error in calculating input vector for text: ${text}, error: ${err}`);
         }
     }
 
     // Set up parameters specific to the Azure Cognitive API
-    async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId,  {headers, requestId, pathway, _url}) {
+    async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
         const { inputVector, calculateInputVector, privateData, filter, docId } = combinedParameters;
@@ -44,13 +44,15 @@ class AzureCognitivePlugin extends ModelPlugin {
                 searchQuery += ` AND docId:'${docId}'`;
             }
 
-            const docsToDelete = JSON.parse(await this.executeRequest(searchUrl,
-                { search: searchQuery,  
-                    "searchMode": "all",
-                    "queryType": "full",
-                    select: 'id', top: TOP 
-                },
-                {}, headers, prompt, requestId, pathway));
+            cortexRequest.url = searchUrl;
+            cortexRequest.data =
+            { search: searchQuery,  
+                "searchMode": "all",
+                "queryType": "full",
+                select: 'id', top: TOP 
+            };
+
+            const docsToDelete = JSON.parse(await this.executeRequest(cortexRequest));
         
             const value = docsToDelete.value.map(({id}) => ({
                 id,
@@ -144,13 +146,13 @@ class AzureCognitivePlugin extends ModelPlugin {
     }
 
     // Execute the request to the Azure Cognitive API
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const { requestId, pathway, savedContextId, savedContext } = pathwayResolver;
+    async execute(text, parameters, prompt, cortexRequest) {
+        const { requestId, savedContextId, savedContext } = cortexRequest.pathwayResolver;
         const mode = this.promptParameters.mode || 'search';
         let url = this.ensureMode(this.requestUrl(text), mode == 'delete' ? 'index' : mode);
         const indexName = parameters.indexName || 'indexcortex';
         url = this.ensureIndex(url, indexName);
-        const headers = this.model.headers;
+        const headers = cortexRequest.headers;
 
         const { file } = parameters;
         if(file){ 
@@ -175,15 +177,14 @@ class AzureCognitivePlugin extends ModelPlugin {
                 throw Error(`No data can be extracted out of file!`);
             }
 
-            //return await this.execute(data, {...parameters, file:null}, prompt, pathwayResolver); 
-            return await callPathway(this.config, 'cognitive_insert', {...parameters, file:null, text:data });
+            return await callPathway('cognitive_insert', {...parameters, file:null, text:data });
         }
 
         if (mode === 'index' && (!text || !text.trim()) ){
             return; // nothing to index
         }
 
-        const { data, params } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, {headers, requestId, pathway, url});
+        const { data, params } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest);
 
         // update contextid last used
         savedContext["lastUsed"] = new Date().toISOString();
@@ -193,11 +194,15 @@ class AzureCognitivePlugin extends ModelPlugin {
         }
 
         // execute the request
-        const result = await this.executeRequest(url, data || {}, params || {}, headers || {}, prompt, requestId, pathway);
+        cortexRequest.url = url;
+        cortexRequest.data = data;
+        cortexRequest.params = params;
+        cortexRequest.headers = headers;
+        const result = await this.executeRequest(cortexRequest);
 
         // if still has more to delete
         if (mode === 'delete' && data?.value?.length == TOP) { 
-            return await this.execute(text, parameters, prompt, pathwayResolver);
+            return await this.execute(text, parameters, prompt, cortexRequest);
         }
         
         return result;

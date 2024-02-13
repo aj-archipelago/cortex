@@ -1,17 +1,17 @@
 // openAiWhisperPlugin.js
 import ModelPlugin from './modelPlugin.js';
-import { axios } from '../../lib/request.js';
 import { config } from '../../config.js';
 import subsrt from 'subsrt';
 import FormData from 'form-data';
 import fs from 'fs';
-import path from 'path';
+import { axios } from '../../lib/requestExecutor.js';
+import stream from 'stream';
 import os from 'os';
+import path from 'path';
 import http from 'http';
 import https from 'https';
 import { URL } from 'url';
 import { v4 as uuidv4 } from 'uuid';
-import stream from 'stream';
 import { promisify } from 'util';
 import { publishRequestProgress } from '../../lib/redisSubscription.js';
 import logger from '../../lib/logger.js';
@@ -129,8 +129,8 @@ function alignSubtitles(subtitles, format) {
 
 
 class OpenAIWhisperPlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     async getMediaChunks(file, requestId) {
@@ -163,8 +163,10 @@ class OpenAIWhisperPlugin extends ModelPlugin {
     }
 
     // Execute the request to the OpenAI Whisper API
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const { responseFormat,wordTimestamped,highlightWords,maxLineWidth,maxLineCount,maxWordsPerLine } = parameters;
+    async execute(text, parameters, prompt, cortexRequest) {
+        const { pathwayResolver } = cortexRequest;
+        const { responseFormat, wordTimestamped, highlightWords, maxLineWidth, maxLineCount, maxWordsPerLine } = parameters;
+        cortexRequest.url = this.requestUrl(text);
 
         const chunks = [];
         const processChunk = async (uri) => {
@@ -173,7 +175,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 chunks.push(chunk);
 
                 const { language, responseFormat } = parameters;
-                const reqUrl = this.requestUrl(text);
+                cortexRequest.url = this.requestUrl(text);
                 const params = {};
                 const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
                 const response_format = responseFormat || 'text';
@@ -185,9 +187,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 language && formData.append('language', language);
                 modelPromptText && formData.append('prompt', modelPromptText);
 
+                cortexRequest.data = formData;
+                cortexRequest.params = params;
+                cortexRequest.headers = { ...cortexRequest.headers, ...formData.getHeaders() };
 
-
-                return this.executeRequest(reqUrl, formData, params, { ...this.model.headers, ...formData.getHeaders() }, {}, requestId, pathway);
+                return this.executeRequest(cortexRequest);
             } catch (err) {
                 logger.error(`Error getting word timestamped data from api: ${err}`);
                 throw err;
@@ -209,7 +213,10 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                     }
                 }
 
-                const res = await this.executeRequest(WHISPER_TS_API_URL, tsparams, {}, {}, {}, requestId, pathway);
+                cortexRequest.url = WHISPER_TS_API_URL;
+                cortexRequest.data = tsparams;
+
+                const res = await this.executeRequest(cortexRequest);
 
                 if(!wordTimestamped && !responseFormat){ 
                     //if no response format, convert to text
@@ -227,7 +234,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         let totalCount = 0;
         let completedCount = 0;
         let partialCount = 0;
-        const { requestId, pathway } = pathwayResolver;
+        const { requestId } = pathwayResolver;
 
         const MAXPARTIALCOUNT = 60;
         const sendProgress = (partial=false) => {

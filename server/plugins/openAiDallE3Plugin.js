@@ -1,17 +1,15 @@
-import RequestDurationEstimator from '../../lib/requestDurationEstimator.js';
+import RequestMonitor from '../../lib/requestMonitor.js';
 import ModelPlugin from './modelPlugin.js';
-import { request } from '../../lib/request.js';
 import { publishRequestProgress } from '../../lib/redisSubscription.js';
-import logger from '../../lib/logger.js';
 
-const requestDurationEstimator = new RequestDurationEstimator(10);
+const requestDurationEstimator = new RequestMonitor(10);
 
 /**
  * @description This plugin is for the OpenAI DALL-E 3 model.
  */
 class OpenAIDallE3Plugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     /**
@@ -20,28 +18,13 @@ class OpenAIDallE3Plugin extends ModelPlugin {
      * over a websocket.
      */
 
-    async executeRequest(url, data, params, headers, prompt, requestId, pathway) {
-        try {
-            this.aiRequestStartTime = new Date();
-            this.requestId = requestId;
-            this.logRequestStart(url, data);
-            const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId, pathway);
-               
-            this.logRequestData(data, responseData, prompt);
-            return this.parseResponse(responseData);
-        } catch (error) {
-            // Log the error and continue
-            logger.error(error.message || error);
-        }
-    }
+    async execute(text, parameters, _, cortexRequest) {
+        const { pathwayResolver } = cortexRequest;
+        cortexRequest.data = JSON.stringify({ prompt: text });
 
-    async execute(text, parameters, _, pathwayResolver) {
-        const url = this.requestUrl(text);
-        const data = JSON.stringify({ prompt: text });
+        const { requestId } = pathwayResolver;
 
-        const { requestId, pathway } = pathwayResolver;
-
-        const makeRequest = () => this.executeRequest(url, data, {}, this.model.headers, {}, requestId, pathway);
+        const makeRequest = () => this.executeRequest(cortexRequest);
 
         if (!parameters.async) {
             // synchronous request
@@ -49,9 +32,9 @@ class OpenAIDallE3Plugin extends ModelPlugin {
         }
         else {
             // async request
-            requestDurationEstimator.startRequest(requestId);
+            const callid = requestDurationEstimator.startCall();
             const requestPromise = makeRequest();
-            this.#sendRequestUpdates(requestId, requestPromise);
+            this.#sendRequestUpdates(requestId, requestPromise, callid);
         }
     }
 
@@ -62,7 +45,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
      * @param {*} requestPromise 
      * @returns 
      */
-    async #sendRequestUpdates(requestId, requestPromise) {
+    async #sendRequestUpdates(requestId, requestPromise, callid) {
         let state = { status: "pending" };
         let attemptCount = 0;
         let data = null;
@@ -83,7 +66,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
             };
 
             state.status = status;
-            requestDurationEstimator.endRequest();
+            requestDurationEstimator.endCall(callid);
             publishRequestProgress(requestProgress);
         }
 
@@ -91,7 +74,7 @@ class OpenAIDallE3Plugin extends ModelPlugin {
         // the percent complete
         do {
             let progress =
-                requestDurationEstimator.calculatePercentComplete();
+                requestDurationEstimator.calculatePercentComplete(callid);
 
                 await publishRequestProgress({
                     requestId,

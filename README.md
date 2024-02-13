@@ -212,12 +212,12 @@ export default {
 
     // Custom resolver to generate summaries by reprompting if they are too long or too short.
     resolver: async (parent, args, contextValue, info) => {
-        const { config, pathway, requestState } = contextValue;
+        const { config, pathway } = contextValue;
         const originalTargetLength = args.targetLength;
 
         // If targetLength is not provided, execute the prompt once and return the result.
         if (originalTargetLength === 0) {
-            let pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
+            let pathwayResolver = new PathwayResolver({ config, pathway, args });
             return await pathwayResolver.resolve(args);
         }
 
@@ -232,7 +232,7 @@ export default {
 
         const MAX_ITERATIONS = 5;
         let summary = '';
-        let pathwayResolver = new PathwayResolver({ config, pathway, args, requestState });
+        let pathwayResolver = new PathwayResolver({ config, pathway, args });
 
         // Modify the prompt to be words-based instead of characters-based.
         pathwayResolver.pathwayPrompt = `Write a summary of all of the text below. If the text is in a language other than english, make sure the summary is written in the same language. Your summary should be ${targetWords} words in length.\n\nText:\n\n{{{text}}}\n\nSummary:\n\n`
@@ -422,7 +422,7 @@ Configuration of Cortex is done via a [convict](https://github.com/mozilla/node-
 - `enableCache`: A boolean flag indicating whether to enable Axios-level request caching. Default is true. The value can be set using the `CORTEX_ENABLE_CACHE` environment variable.
 - `enableGraphqlCache`: A boolean flag indicating whether to enable GraphQL query caching. Default is false. The value can be set using the `CORTEX_ENABLE_GRAPHQL_CACHE` environment variable.
 - `enableRestEndpoints`: A boolean flag indicating whether create REST endpoints for pathways as well as GraphQL queries. Default is false. The value can be set using the `CORTEX_ENABLE_REST` environment variable.
-- `cortexApiKey`: A string containing an API key that the client must pass to Cortex for authorization. Default is null in which case Cortex is unprotected. The value can be set using the `CORTEX_API_KEY` environment variable
+- `cortexApiKeys`: A string containing one or more comma separated API keys that the client must pass to Cortex for authorization. Default is null in which case Cortex is unprotected. The value can be set using the `CORTEX_API_KEY` environment variable
 - `models`: An object containing the different models used by the project. The value can be set using the `CORTEX_MODELS` environment variable. Cortex is model and vendor agnostic - you can use this config to set up models of any type from any vendor.
 - `openaiApiKey`: The API key used for accessing the OpenAI API. This is sensitive information and has no default value. The value can be set using the `OPENAI_API_KEY` environment variable.
 - `openaiApiUrl`: The URL used for accessing the OpenAI API. Default is https://api.openai.com/v1/completions. The value can be set using the `OPENAI_API_URL` environment variable.

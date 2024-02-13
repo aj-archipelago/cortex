@@ -1,18 +1,18 @@
 // ModelPlugin.js
 import HandleBars from '../../lib/handleBars.js';
-
-import { request } from '../../lib/request.js';
+import { executeRequest } from '../../lib/requestExecutor.js';
 import { encode } from 'gpt-3-encoder';
 import { getFirstNToken } from '../chunker.js';
 import logger, { obscureUrlParams } from '../../lib/logger.js';
+import { config } from '../../config.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETURN_TOKENS = 256;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
 class ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        this.modelName = modelName;
+    constructor(pathway, model) {
+        this.modelName = model.name;
         this.model = model;
         this.config = config;
         this.environmentVariables = config.getEnv();
@@ -33,7 +33,6 @@ class ModelPlugin {
 
         this.requestCount = 0;
         this.lastRequestStartTime = new Date();
-        this.shouldCache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
     }
 
     truncateMessagesToTargetLength(messages, targetTokenLength) {
@@ -220,14 +219,14 @@ class ModelPlugin {
     parseResponse(data) { return data; }
 
     // Default simple logging
-    logRequestStart(url, _data) {
+    logRequestStart() {
         this.requestCount++;
         this.lastRequestStartTime = new Date();
         const logMessage = `>>> [${this.requestId}: ${this.pathwayName}.${this.requestCount}] request`;
         const header = '>'.repeat(logMessage.length);
         logger.info(`${header}`);
         logger.info(`${logMessage}`);
-        logger.info(`>>> Making API request to ${obscureUrlParams(url)}`);
+        logger.info(`>>> Making API request to ${obscureUrlParams(this.url)}`);
     }
 
     logAIRequestFinished() {
@@ -257,15 +256,22 @@ class ModelPlugin {
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
     
-    async executeRequest(url, data, params, headers, prompt, requestId, pathway) {
+    async executeRequest(cortexRequest) {
         try {
-            this.aiRequestStartTime = new Date();
+            const { url, data, pathway, requestId, prompt } = cortexRequest;
+            this.url = url;
             this.requestId = requestId;
-            this.logRequestStart(url, data);
-            const responseData = await request({ url, data, params, headers, cache: this.shouldCache }, this.modelName, this.requestId, pathway);
+            this.pathwayName = pathway.name;
+            this.pathwayPrompt = pathway.prompt;
+
+            cortexRequest.cache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
+            this.logRequestStart();
+
+            const responseData = await executeRequest(cortexRequest);
             
             if (responseData.error) {
-                throw new Error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
+                logger.error(`An error was returned from the server: ${JSON.stringify(responseData.error)}`);
+                throw responseData;
             }
         
             this.logRequestData(data, responseData, prompt);

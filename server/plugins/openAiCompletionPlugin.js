@@ -16,8 +16,8 @@ const truncatePromptIfNecessary = (text, textTokenCount, modelMaxTokenCount, tar
 }
 
 class OpenAICompletionPlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     // Set up parameters specific to the OpenAI Completion API
@@ -76,16 +76,13 @@ class OpenAICompletionPlugin extends ModelPlugin {
     }
 
     // Execute the request to the OpenAI Completion API
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const url = this.requestUrl(text);
-        const requestParameters = this.getRequestParameters(text, parameters, prompt, pathwayResolver);
-        const { requestId, pathway} = pathwayResolver;
+    async execute(text, parameters, prompt, cortexRequest) {
+        const requestParameters = this.getRequestParameters(text, parameters, prompt, cortexRequest.pathwayResolver);
 
-        const data = { ...(this.model.params || {}), ...requestParameters };
-        const params = {};
-        const headers = this.model.headers || {};
-        
-        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
+        cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
+        cortexRequest.params = {};
+
+        return this.executeRequest(cortexRequest);
     }
 
     // Parse the response from the OpenAI Completion API

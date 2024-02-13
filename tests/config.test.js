@@ -25,7 +25,7 @@ test('config basePathwayPath', (t) => {
 });
 
 test('config PORT', (t) => {
-    const expectedDefault = 4000;
+    const expectedDefault = parseInt(process.env.CORTEX_PORT) || 4000;
     t.is(config.get('PORT'), expectedDefault);
 });
 

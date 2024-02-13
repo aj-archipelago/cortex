@@ -8,10 +8,10 @@ const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 
 // Mock configuration and pathway objects
-const { config, pathway, modelName, model } = mockPathwayResolverString;
+const { config, pathway, model } = mockPathwayResolverString;
 
 test('ModelPlugin constructor', (t) => {
-    const modelPlugin = new ModelPlugin(config, pathway, modelName, model);
+    const modelPlugin = new ModelPlugin(pathway, model);
 
     t.is(modelPlugin.modelName, pathway.model, 'modelName should be set from pathway');
     t.deepEqual(modelPlugin.model, config.get('models')[pathway.model], 'model should be set from config');
@@ -20,7 +20,7 @@ test('ModelPlugin constructor', (t) => {
 });
 
 test.beforeEach((t) => {
-  t.context.modelPlugin = new ModelPlugin(config, pathway, modelName, model);
+  t.context.modelPlugin = new ModelPlugin(pathway, model);
 });
 
 test('getCompiledPrompt - text and parameters', (t) => {
@@ -69,13 +69,6 @@ test('getModelMaxTokenLength', (t) => {
 test('getPromptTokenRatio', (t) => {
     const { modelPlugin } = t.context;
     t.is(modelPlugin.getPromptTokenRatio(), DEFAULT_PROMPT_TOKEN_RATIO, 'getPromptTokenRatio should return default prompt token ratio');
-});
-
-test('requestUrl', (t) => {
-    const { modelPlugin } = t.context;
-
-    const expectedUrl = HandleBars.compile(modelPlugin.model.url)({ ...modelPlugin.model, ...config.getEnv(), ...config });
-    t.is(modelPlugin.requestUrl(), expectedUrl, 'requestUrl should return the correct URL');
 });
 
 test('default parseResponse', (t) => {

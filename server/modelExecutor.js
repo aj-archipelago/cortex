@@ -1,4 +1,6 @@
-// PathwayPrompter.js
+// ModelExecutor.js
+import CortexRequest from '../lib/cortexRequest.js';
+
 import OpenAIChatPlugin from './plugins/openAiChatPlugin.js';
 import OpenAICompletionPlugin from './plugins/openAiCompletionPlugin.js';
 import AzureTranslatePlugin from './plugins/azureTranslatePlugin.js';
@@ -16,59 +18,59 @@ import OpenAIImagePlugin from './plugins/openAiImagePlugin.js';
 import OpenAIDallE3Plugin from './plugins/openAiDallE3Plugin.js';
 import OpenAIVisionPlugin from './plugins/openAiVisionPlugin.js';
 
-class PathwayPrompter {
-    constructor(config, pathway, modelName, model) {
+class ModelExecutor {
+    constructor(pathway, model) {
 
         let plugin;
 
         switch (model.type) {
             case 'OPENAI-CHAT':
-                plugin = new OpenAIChatPlugin(config, pathway, modelName, model);
+                plugin = new OpenAIChatPlugin(pathway, model);
                 break;
             case 'OPENAI-DALLE2':
-                plugin = new OpenAIImagePlugin(config, pathway, modelName, model);
+                plugin = new OpenAIImagePlugin(pathway, model);
                 break;
             case 'OPENAI-DALLE3':
-                plugin = new OpenAIDallE3Plugin(config, pathway, modelName, model);
+                plugin = new OpenAIDallE3Plugin(pathway, model);
                 break;
             case 'OPENAI-CHAT-EXTENSION':
-                plugin = new OpenAIChatExtensionPlugin(config, pathway, modelName, model);
+                plugin = new OpenAIChatExtensionPlugin(pathway, model);
                 break;
             case 'AZURE-TRANSLATE':
-                plugin = new AzureTranslatePlugin(config, pathway, modelName, model);
+                plugin = new AzureTranslatePlugin(pathway, model);
                 break;
             case 'AZURE-COGNITIVE':
-                plugin = new AzureCognitivePlugin(config, pathway, modelName, model);
+                plugin = new AzureCognitivePlugin(pathway, model);
                 break;
             case 'OPENAI-EMBEDDINGS':
-                plugin = new OpenAiEmbeddingsPlugin(config, pathway, modelName, model);
+                plugin = new OpenAiEmbeddingsPlugin(pathway, model);
                 break;
             case 'OPENAI-COMPLETION':
-                plugin = new OpenAICompletionPlugin(config, pathway, modelName, model);
+                plugin = new OpenAICompletionPlugin(pathway, model);
                 break;
             case 'OPENAI-WHISPER':
-                plugin = new OpenAIWhisperPlugin(config, pathway, modelName, model);
+                plugin = new OpenAIWhisperPlugin(pathway, model);
                 break;
             case 'LOCAL-CPP-MODEL':
-                plugin = new LocalModelPlugin(config, pathway, modelName, model);
+                plugin = new LocalModelPlugin(pathway, model);
                 break;
             case 'PALM-CHAT':
-                plugin = new PalmChatPlugin(config, pathway, modelName, model);
+                plugin = new PalmChatPlugin(pathway, model);
                 break;
             case 'PALM-COMPLETION':
-                plugin = new PalmCompletionPlugin(config, pathway, modelName, model);
+                plugin = new PalmCompletionPlugin(pathway, model);
                 break;
             case 'PALM-CODE-COMPLETION':
-                plugin = new PalmCodeCompletionPlugin(config, pathway, modelName, model);
+                plugin = new PalmCodeCompletionPlugin(pathway, model);
                 break;
             case 'COHERE-GENERATE':
-                plugin = new CohereGeneratePlugin(config, pathway, modelName, model);
+                plugin = new CohereGeneratePlugin(pathway, model);
                 break;
             case 'COHERE-SUMMARIZE':
-                plugin = new CohereSummarizePlugin(config, pathway, modelName, model);
+                plugin = new CohereSummarizePlugin(pathway, model);
                 break;
             case 'OPENAI-VISION':
-                plugin = new OpenAIVisionPlugin(config, pathway, modelName, model);
+                plugin = new OpenAIVisionPlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);
@@ -78,10 +80,11 @@ class PathwayPrompter {
     }
 
     async execute(text, parameters, prompt, pathwayResolver) {
-        return await this.plugin.execute(text, parameters, prompt, pathwayResolver);
+        const cortexRequest = new CortexRequest({ pathwayResolver });
+        return await this.plugin.execute(text, parameters, prompt, cortexRequest);
     }
 }
 
 export {
-    PathwayPrompter
+    ModelExecutor
 };

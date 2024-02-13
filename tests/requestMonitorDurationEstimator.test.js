@@ -1,14 +1,14 @@
 import test from 'ava';
-import RequestDurationEstimator from '../lib/requestDurationEstimator.js';
+import RequestMonitor from '../lib/requestMonitor.js';
 
 test('add and get average request duration', async (t) => {
-    const estimator = new RequestDurationEstimator(5);
+    const estimator = new RequestMonitor(5);
 
-    estimator.startRequest('req1');
+    const callid = estimator.startCall();
     await new Promise(resolve => setTimeout(() => {
-        estimator.endRequest();
+        estimator.endCall(callid);
 
-        const average = estimator.calculatePercentComplete();
+        const average = estimator.calculatePercentComplete(callid);
 
         // An average should be calculated after the first completed request  
         t.not(average, 0);
@@ -17,31 +17,31 @@ test('add and get average request duration', async (t) => {
 });
 
 test('add more requests than size of durations array', (t) => {
-    const estimator = new RequestDurationEstimator(5);
+    const estimator = new RequestMonitor(5);
 
     for (let i = 0; i < 10; i++) {
-        estimator.startRequest(`req${i}`);
-        estimator.endRequest();
+        const callid = estimator.startCall();
+        estimator.endCall(callid);
     }
 
     // Array size should not exceed maximum length (5 in this case)
-    t.is(estimator.durations.length, 5);
+    t.is(estimator.callDurations.size(), 5);
 });
 
 test('calculate percent complete of current request based on average of past durations', async (t) => {
-    const estimator = new RequestDurationEstimator(5);
+    const estimator = new RequestMonitor(5);
 
     for (let i = 0; i < 4; i++) {
-        estimator.startRequest(`req${i}`);
+        const callid = estimator.startCall();
         // wait 1 second
         await new Promise(resolve => setTimeout(resolve, 1000));
-        estimator.endRequest();
+        estimator.endCall(callid);
     }
 
-    estimator.startRequest('req5');
+    const callid = estimator.startCall();
 
     await new Promise(resolve => setTimeout(() => {
-        const percentComplete = estimator.calculatePercentComplete();
+        const percentComplete = estimator.calculatePercentComplete(callid);
 
         // Depending on how fast the operations are,
         // the percentage may not be exactly 50%, but
@@ -52,8 +52,12 @@ test('calculate percent complete of current request based on average of past dur
 });
 
 test('calculate percent complete based on average of past durations', async (t) => {
-    const estimator = new RequestDurationEstimator(5);
-    estimator.durations = [1000, 2000, 3000];
-    const average = estimator.getAverage();
+    const estimator = new RequestMonitor(5);
+    estimator.callDurations.clear;
+    estimator.callDurations.pushBack({endTime: new Date(), callDuration: 1000});
+    estimator.callDurations.pushBack({endTime: new Date(), callDuration: 2000});
+    estimator.callDurations.pushBack({endTime: new Date(), callDuration: 3000});
+
+    const average = estimator.getAverageCallDuration();
     t.is(average, 2000);
 });

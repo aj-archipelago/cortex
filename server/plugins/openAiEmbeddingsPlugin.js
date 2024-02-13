@@ -2,8 +2,8 @@
 import ModelPlugin from './modelPlugin.js';
 
 class OpenAiEmbeddingsPlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     getRequestParameters(text, parameters, prompt) {
@@ -17,16 +17,13 @@ class OpenAiEmbeddingsPlugin extends ModelPlugin {
         return requestParameters;
     }
 
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const { requestId, pathway} = pathwayResolver;
+    async execute(text, parameters, prompt, cortexRequest) {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
-        const url = this.requestUrl();
 
-        const data = requestParameters.data || {};
-        const params = requestParameters.params || {};
-        const headers = this.model.headers || {};
+        cortexRequest.data = requestParameters.data || {};
+        cortexRequest.params = requestParameters.params || {};
 
-        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
+        return this.executeRequest(cortexRequest);
     }
 
     parseResponse(data) {

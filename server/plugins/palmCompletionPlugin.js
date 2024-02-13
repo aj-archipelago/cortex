@@ -6,8 +6,8 @@ import logger from '../../lib/logger.js';
 
 // PalmCompletionPlugin class for handling requests and responses to the PaLM API Text Completion API
 class PalmCompletionPlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     truncatePromptIfNecessary (text, textTokenCount, modelMaxTokenCount, targetTextTokenCount, pathwayResolver) {
@@ -54,18 +54,17 @@ class PalmCompletionPlugin extends ModelPlugin {
     }
 
     // Execute the request to the PaLM API Text Completion API
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const url = this.requestUrl(text);
-        const requestParameters = this.getRequestParameters(text, parameters, prompt, pathwayResolver);
-        const { requestId, pathway} = pathwayResolver;
+    async execute(text, parameters, prompt, cortexRequest) {
+        const requestParameters = this.getRequestParameters(text, parameters, prompt, cortexRequest.pathwayResolver);
 
-        const data = { ...requestParameters };
-        const params = {};
-        const headers = this.model.headers || {};
+        cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
+        cortexRequest.params = {}; // query params
+
         const gcpAuthTokenHelper = this.config.get('gcpAuthTokenHelper');
         const authToken = await gcpAuthTokenHelper.getAccessToken();
-        headers.Authorization = `Bearer ${authToken}`;
-        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
+        cortexRequest.headers.Authorization = `Bearer ${authToken}`;
+
+        return this.executeRequest(cortexRequest);
     }
 
     // Parse the response from the PaLM API Text Completion API

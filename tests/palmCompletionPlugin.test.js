@@ -7,7 +7,7 @@ import { mockPathwayResolverString } from './mocks.js';
 const { config, pathway, modelName, model } = mockPathwayResolverString;
 
 test.beforeEach((t) => {
-  const palmCompletionPlugin = new PalmCompletionPlugin(config, pathway, modelName, model);
+  const palmCompletionPlugin = new PalmCompletionPlugin(pathway, model);
   t.context = { palmCompletionPlugin };
 });
 

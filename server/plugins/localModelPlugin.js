@@ -5,8 +5,8 @@ import { encode } from 'gpt-3-encoder';
 import logger from '../../lib/logger.js';
 
 class LocalModelPlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     // if the input starts with a chatML response, just return that
@@ -47,7 +47,7 @@ class LocalModelPlugin extends ModelPlugin {
         };
     }
 
-    async execute(text, parameters, prompt, _pathwayResolver) {
+    async execute(text, parameters, prompt, _cortexRequest) {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
         const { executablePath, args } = this.model;
         args.push("--prompt", requestParameters.prompt);

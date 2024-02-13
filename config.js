@@ -8,6 +8,18 @@ import logger from './lib/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+convict.addFormat({
+    name: 'string-array',
+    validate: function(val) {
+      if (!Array.isArray(val)) {
+        throw new Error('must be of type Array');
+      }
+    },
+    coerce: function(val) {
+      return val.split(',');
+    },
+});
+
 // Schema for config
 var config = convict({
     env: {
@@ -30,8 +42,8 @@ var config = convict({
         default: path.join(__dirname, 'pathways'),
         env: 'CORTEX_CORE_PATHWAYS_PATH'
     },
-    cortexApiKey: {
-        format: String,
+    cortexApiKeys: {
+        format: 'string-array',
         default: null,
         env: 'CORTEX_API_KEY',
         sensitive: true
@@ -101,7 +113,7 @@ var config = convict({
             },
             "azure-cognitive": {
                 "type": "AZURE-COGNITIVE",
-                "url": "{{AZURE_COGNITIVE_API_URL}}",
+                "url": "{{{AZURE_COGNITIVE_API_URL}}}",
                 "headers": {
                     "api-key": "{{AZURE_COGNITIVE_API_KEY}}",
                     "Content-Type": "application/json"
@@ -266,14 +278,38 @@ const buildPathways = async (config) => {
 const buildModels = (config) => {
     const { models } = config.getProperties();
 
-    for (const [key, model] of Object.entries(models)) {
-        // Compile handlebars templates for models
-        models[key] = JSON.parse(HandleBars.compile(JSON.stringify(model))({ ...config.getEnv(), ...config.getProperties() }))
+    // iterate over each model
+    for (let [key, model] of Object.entries(models)) {
+        if (!model.name) {
+            model.name = key;
+        }
+        
+        // if model is in old format, convert it to new format
+        if (!model.endpoints) {
+            model = {
+                ...model,
+                endpoints: [
+                    {
+                        name: "default",
+                        url: model.url,
+                        headers: model.headers,
+                        params: model.params,
+                        requestsPerSecond: model.requestsPerSecond
+                    }
+                ]
+            };
+        }
+
+        // compile handlebars templates for each endpoint
+        model.endpoints = model.endpoints.map(endpoint => 
+            JSON.parse(HandleBars.compile(JSON.stringify(endpoint))({ ...model, ...config.getEnv(), ...config.getProperties() }))
+        );
+
+        models[key] = model;
     }
 
     // Add constructed models to config
     config.load({ models });
-
 
     // Check that models are specified, Cortex cannot run without a model
     if (Object.keys(config.get('models')).length <= 0) {

@@ -5,8 +5,8 @@ import HandleBars from '../../lib/handleBars.js';
 import logger from '../../lib/logger.js';
 
 class PalmChatPlugin extends ModelPlugin {
-    constructor(config, pathway, modelName, model) {
-        super(config, pathway, modelName, model);
+    constructor(pathway, model) {
+        super(pathway, model);
     }
 
     // Convert to PaLM messages array format if necessary
@@ -137,18 +137,17 @@ class PalmChatPlugin extends ModelPlugin {
     }
 
     // Execute the request to the PaLM Chat API
-    async execute(text, parameters, prompt, pathwayResolver) {
-        const url = this.requestUrl(text);
+    async execute(text, parameters, prompt, cortexRequest) {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
-        const { requestId, pathway} = pathwayResolver;
 
-        const data = { ...(this.model.params || {}), ...requestParameters };
-        const params = {};
-        const headers = this.model.headers || {};
+        cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
+        cortexRequest.params = {}; // query params
+
         const gcpAuthTokenHelper = this.config.get('gcpAuthTokenHelper');
         const authToken = await gcpAuthTokenHelper.getAccessToken();
-        headers.Authorization = `Bearer ${authToken}`;
-        return this.executeRequest(url, data, params, headers, prompt, requestId, pathway);
+        cortexRequest.headers.Authorization = `Bearer ${authToken}`;
+
+        return this.executeRequest(cortexRequest);
     }
 
     // Parse the response from the PaLM Chat API

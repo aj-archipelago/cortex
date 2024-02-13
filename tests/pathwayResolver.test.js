@@ -1,7 +1,7 @@
 import test from 'ava';
 import { PathwayResolver } from '../server/pathwayResolver.js';
 import sinon from 'sinon';
-import { mockConfig, mockPathwayString } from './mocks.js';
+import { mockConfig, mockPathwayString, mockModelEndpoints } from './mocks.js';
 
 const mockPathway = mockPathwayString;
 mockPathway.useInputChunking = false;
@@ -16,6 +16,7 @@ test.beforeEach((t) => {
     config: mockConfig,
     pathway: mockPathway,
     args: mockArgs,
+    endpoints: mockModelEndpoints,
   });
 });
 

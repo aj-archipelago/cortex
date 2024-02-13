@@ -1,4 +1,5 @@
-import { PathwayPrompter } from './pathwayPrompter.js';
+import { ModelExecutor } from './modelExecutor.js';
+import { modelEndpoints } from '../lib/requestExecutor.js';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { v4 as uuidv4 } from 'uuid';
 import { encode } from 'gpt-3-encoder';
@@ -14,7 +15,9 @@ import logger from '../lib/logger.js';
 const modelTypesExcludedFromProgressUpdates = ['OPENAI-DALLE2', 'OPENAI-DALLE3'];
 
 class PathwayResolver {
-    constructor({ config, pathway, args }) {
+    // Optional endpoints override parameter is for testing purposes
+    constructor({ config, pathway, args, endpoints }) {
+        this.endpoints = endpoints || modelEndpoints;
         this.config = config;
         this.pathway = pathway;
         this.args = args;
@@ -28,8 +31,8 @@ class PathwayResolver {
             args?.model,
             pathway.inputParameters?.model,
             config.get('defaultModelName')
-            ].find(modelName => modelName && Object.prototype.hasOwnProperty.call(config.get('models'), modelName));
-        this.model = config.get('models')[this.modelName];
+            ].find(modelName => modelName && Object.prototype.hasOwnProperty.call(this.endpoints, modelName));
+        this.model = this.endpoints[this.modelName];
 
         if (!this.model) {
             throw new Error(`Model ${this.modelName} not found in config`);
@@ -47,7 +50,7 @@ class PathwayResolver {
 
         this.previousResult = '';
         this.prompts = [];
-        this.pathwayPrompter = new PathwayPrompter(this.config, this.pathway, this.modelName, this.model);
+        this.modelExecutor = new ModelExecutor(this.pathway, this.model);
 
         Object.defineProperty(this, 'pathwayPrompt', {
             get() {
@@ -255,7 +258,7 @@ class PathwayResolver {
     }
 
     truncate(str, n) {
-        if (this.pathwayPrompter.plugin.promptParameters.truncateFromFront) {
+        if (this.modelExecutor.plugin.promptParameters.truncateFromFront) {
             return getFirstNToken(str, n);
         }
         return getLastNToken(str, n);
@@ -263,7 +266,7 @@ class PathwayResolver {
 
     async summarizeIfEnabled({ text, ...parameters }) {
         if (this.pathway.useInputSummarization) {
-            return await callPathway(this.config, 'summary', { ...this.args, ...parameters, targetLength: 0});
+            return await callPathway('summary', { ...this.args, ...parameters, targetLength: 0});
         }
         return text;
     }
@@ -271,15 +274,15 @@ class PathwayResolver {
     // Calculate the maximum token length for a chunk
     getChunkMaxTokenLength() {
         // find the longest prompt
-        const maxPromptTokenLength = Math.max(...this.prompts.map((promptData) => this.pathwayPrompter.plugin.getCompiledPrompt('', this.args, promptData).tokenLength));
+        const maxPromptTokenLength = Math.max(...this.prompts.map((promptData) => this.modelExecutor.plugin.getCompiledPrompt('', this.args, promptData).tokenLength));
         
         // find out if any prompts use both text input and previous result
         const hasBothProperties = this.prompts.some(prompt => prompt.usesTextInput && prompt.usesPreviousResult);
         
         // the token ratio is the ratio of the total prompt to the result text - both have to be included
         // in computing the max token length
-        const promptRatio = this.pathwayPrompter.plugin.getPromptTokenRatio();
-        let chunkMaxTokenLength = promptRatio * this.pathwayPrompter.plugin.getModelMaxTokenLength() - maxPromptTokenLength - 1;
+        const promptRatio = this.modelExecutor.plugin.getPromptTokenRatio();
+        let chunkMaxTokenLength = promptRatio * this.modelExecutor.plugin.getModelMaxTokenLength() - maxPromptTokenLength - 1;
         
         // if we have to deal with prompts that have both text input
         // and previous result, we need to split the maxChunkToken in half
@@ -386,20 +389,22 @@ class PathwayResolver {
 
         // If this text is empty, skip applying the prompt as it will likely be a nonsensical result
         if (!/^\s*$/.test(text) || parameters?.file || parameters?.inputVector || this?.modelName.includes('cognitive')) {
-            result = await this.pathwayPrompter.execute(text, { ...parameters, ...this.savedContext }, prompt, this);
+            result = await this.modelExecutor.execute(text, { ...parameters, ...this.savedContext }, prompt, this);
         } else {
             result = text;
         }
         
         requestState[this.requestId].completedCount++;
 
-        const { completedCount, totalCount } = requestState[this.requestId];
+        if (parameters.async) {
+            const { completedCount, totalCount } = requestState[this.requestId];
 
-        if (completedCount < totalCount) {
-            await publishRequestProgress({
-                    requestId: this.requestId,
-                    progress: completedCount / totalCount,
-            });
+            if (completedCount < totalCount) {
+                await publishRequestProgress({
+                        requestId: this.requestId,
+                        progress: completedCount / totalCount,
+                });
+            }
         }
 
         if (prompt.saveResultTo) {
