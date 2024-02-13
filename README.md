@@ -422,7 +422,7 @@ Configuration of Cortex is done via a [convict](https://github.com/mozilla/node-
 - `enableCache`: A boolean flag indicating whether to enable Axios-level request caching. Default is true. The value can be set using the `CORTEX_ENABLE_CACHE` environment variable.
 - `enableGraphqlCache`: A boolean flag indicating whether to enable GraphQL query caching. Default is false. The value can be set using the `CORTEX_ENABLE_GRAPHQL_CACHE` environment variable.
 - `enableRestEndpoints`: A boolean flag indicating whether create REST endpoints for pathways as well as GraphQL queries. Default is false. The value can be set using the `CORTEX_ENABLE_REST` environment variable.
-- `cortexApiKey`: A string containing an API key that the client must pass to Cortex for authorization. Default is null in which case Cortex is unprotected. The value can be set using the `CORTEX_API_KEY` environment variable
+- `cortexApiKeys`: A string containing one or more comma separated API keys that the client must pass to Cortex for authorization. Default is null in which case Cortex is unprotected. The value can be set using the `CORTEX_API_KEY` environment variable
 - `models`: An object containing the different models used by the project. The value can be set using the `CORTEX_MODELS` environment variable. Cortex is model and vendor agnostic - you can use this config to set up models of any type from any vendor.
 - `openaiApiKey`: The API key used for accessing the OpenAI API. This is sensitive information and has no default value. The value can be set using the `OPENAI_API_KEY` environment variable.
 - `openaiApiUrl`: The URL used for accessing the OpenAI API. Default is https://api.openai.com/v1/completions. The value can be set using the `OPENAI_API_URL` environment variable.

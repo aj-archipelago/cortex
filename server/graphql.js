@@ -97,7 +97,7 @@ const getResolvers = (config, pathways) => {
             // add shared state to contextValue
             contextValue.pathway = pathway;
             contextValue.config = config;
-                        return pathway.rootResolver(parent, args, contextValue, info);
+            return pathway.rootResolver(parent, args, contextValue, info);
         }
     }
 
@@ -176,8 +176,8 @@ const build = async (config) => {
     });
 
     // If CORTEX_API_KEY is set, we roll our own auth middleware - usually not used if you're being fronted by a proxy
-    const cortexApiKey = config.get('cortexApiKey');
-    if (cortexApiKey) {
+    const cortexApiKeys = config.get('cortexApiKeys');
+    if (cortexApiKeys  && Array.isArray(cortexApiKeys)) {
         app.use((req, res, next) => {
             let providedApiKey = req.headers['cortex-api-key'] || req.query['cortex-api-key'];
             if (!providedApiKey) {
@@ -185,7 +185,7 @@ const build = async (config) => {
                 providedApiKey = providedApiKey?.startsWith('Bearer ') ? providedApiKey.slice(7) : providedApiKey;
             }
 
-            if (cortexApiKey && cortexApiKey !== providedApiKey) {
+            if (!cortexApiKeys.includes(providedApiKey)) {
                 if (req.baseUrl === '/graphql' || req.headers['content-type'] === 'application/graphql') {
                     res.status(401)
                     .set('WWW-Authenticate', 'Cortex-Api-Key')

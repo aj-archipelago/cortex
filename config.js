@@ -8,6 +8,18 @@ import logger from './lib/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+convict.addFormat({
+    name: 'string-array',
+    validate: function(val) {
+      if (!Array.isArray(val)) {
+        throw new Error('must be of type Array');
+      }
+    },
+    coerce: function(val) {
+      return val.split(',');
+    },
+});
+
 // Schema for config
 var config = convict({
     env: {
@@ -30,8 +42,8 @@ var config = convict({
         default: path.join(__dirname, 'pathways'),
         env: 'CORTEX_CORE_PATHWAYS_PATH'
     },
-    cortexApiKey: {
-        format: String,
+    cortexApiKeys: {
+        format: 'string-array',
         default: null,
         env: 'CORTEX_API_KEY',
         sensitive: true
@@ -264,7 +276,7 @@ const buildPathways = async (config) => {
 
 // Build and load models to config
 const buildModels = (config) => {
-    let { models } = config.getProperties();
+    const { models } = config.getProperties();
 
     // iterate over each model
     for (let [key, model] of Object.entries(models)) {
