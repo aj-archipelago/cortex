@@ -113,7 +113,9 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 600) {
 
         return { chunkPromises, uniqueOutputPath };
     } catch (err) {
-        console.error('Error occurred during the splitting process:', err);
+        const msg = `Error processing media file, check if the file is a valid media file or is accessible`;
+        console.error(msg, err);
+        throw new Error(msg);
     }
 }
 
