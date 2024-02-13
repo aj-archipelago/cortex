@@ -282,7 +282,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             }
 
         } catch (error) {
-            const errMsg = `Transcribe error: ${error?.message || error}`;
+            const errMsg = `Transcribe error: ${error?.response?.data || error?.message || error}`;
             logger.error(errMsg);
             return errMsg;
         }
