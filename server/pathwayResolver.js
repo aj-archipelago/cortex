@@ -98,8 +98,9 @@ class PathwayResolver {
                     const incomingMessage = responseData;
 
                     let messageBuffer = '';
+                    let streamEnded = false;
 
-                    const processData = (data) => {
+                    const processStreamSSE = (data) => {
                         try {
                             //logger.info(`\n\nReceived stream data for requestId ${this.requestId}: ${data.toString()}`);
                             let events = data.toString().split('\n');
@@ -132,18 +133,35 @@ class PathwayResolver {
                                             return;
                                         }
 
+                                        // error can be in different places in the message
                                         const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
                                         if (streamError) {
                                             streamErrorOccurred = true;
                                             logger.error(`Stream error: ${streamError.message}`);
-                                            incomingMessage.off('data', processData); // Stop listening to 'data'
+                                            incomingMessage.off('data', processStreamSSE);
                                             return;
+                                        }
+
+                                        // finish reason can be in different places in the message
+                                        const finishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
+                                        if (finishReason?.toLowerCase() === 'stop') {
+                                            requestProgress.progress = 1;
+                                        } else {
+                                            if (finishReason?.toLowerCase() === 'safety') {
+                                                const safetyRatings = JSON.stringify(parsedMessage?.candidates?.[0]?.safetyRatings) || '';
+                                                logger.warn(`Request ${this.requestId} was blocked by the safety filter. ${safetyRatings}`);
+                                                requestProgress.data = `\n\nResponse blocked by safety filter: ${safetyRatings}`;
+                                                requestProgress.progress = 1;
+                                            }
                                         }
                                     }
 
                                     try {
-                                        //logger.info(`Publishing stream message to requestId ${this.requestId}: ${message}`);
-                                        publishRequestProgress(requestProgress);
+                                        if (!streamEnded) {
+                                            //logger.info(`Publishing stream message to requestId ${this.requestId}: ${message}`);
+                                            publishRequestProgress(requestProgress);
+                                            streamEnded = requestProgress.progress === 1;
+                                        }
                                     } catch (error) {
                                         logger.error(`Could not publish the stream message: "${messageBuffer}", ${error}`);
                                     }
@@ -156,7 +174,7 @@ class PathwayResolver {
 
                     if (incomingMessage) {
                         await new Promise((resolve, reject) => {
-                            incomingMessage.on('data', processData);
+                            incomingMessage.on('data', processStreamSSE);
                             incomingMessage.on('end', resolve);
                             incomingMessage.on('error', reject);
                         });

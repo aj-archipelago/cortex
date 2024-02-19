@@ -17,6 +17,8 @@ import OpenAiEmbeddingsPlugin from './plugins/openAiEmbeddingsPlugin.js';
 import OpenAIImagePlugin from './plugins/openAiImagePlugin.js';
 import OpenAIDallE3Plugin from './plugins/openAiDallE3Plugin.js';
 import OpenAIVisionPlugin from './plugins/openAiVisionPlugin.js';
+import GeminiChatPlugin from './plugins/geminiChatPlugin.js';
+import GeminiVisionPlugin from './plugins/geminiVisionPlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -71,6 +73,12 @@ class ModelExecutor {
                 break;
             case 'OPENAI-VISION':
                 plugin = new OpenAIVisionPlugin(pathway, model);
+                break;
+            case 'GEMINI-CHAT':
+                plugin = new GeminiChatPlugin(pathway, model);
+                break;
+            case 'GEMINI-VISION':
+                plugin = new GeminiVisionPlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);

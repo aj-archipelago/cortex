@@ -6,5 +6,6 @@ export default {
     // Uncomment the following line to enable caching for this prompt, if desired.
     // enableCache: true,
     
-    prompt: `{{text}}\n\nIs the above text written objectively?  Why or why not, explain with details:\n`
+    prompt: `{{text}}\n\nIs the above text written objectively?  Why or why not, explain with details:\n`,
+    model: 'gemini-pro-chat',
 };
