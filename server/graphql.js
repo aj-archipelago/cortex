@@ -131,6 +131,8 @@ const build = async (config) => {
 
     const app = express();
 
+    app.use(express.json({ limit: '50mb' }));
+
     const httpServer = http.createServer(app);
 
     // Creating the WebSocket server
