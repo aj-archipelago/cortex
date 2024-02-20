@@ -12,5 +12,5 @@ export default {
     mode: 'index', // 'index' or 'search',
     inputChunkSize:  500,
     enableDuplicateRequests: false,
-    timeout: 300,
+    timeout: 3000,
 };
