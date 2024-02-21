@@ -1,10 +1,12 @@
 import GeminiChatPlugin from './geminiChatPlugin.js';
-// eslint-disable-next-line import/no-extraneous-dependencies
 import mime from 'mime-types';
+import logger from '../../lib/logger.js';
 
 class GeminiVisionPlugin extends GeminiChatPlugin {
 
     // Override the convertMessagesToGemini method to handle multimodal vision messages
+    // This function can operate on messages in Gemini native format or in OpenAI's format
+    // It will convert the messages to the Gemini format
     convertMessagesToGemini(messages) {
         let modifiedMessages = [];
         let lastAuthor = '';
@@ -17,7 +19,7 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
                 const { role, author, content } = message;
     
                 // Right now Gemini API has no direct translation for system messages,
-                // but they work fine as parts of user messages
+                // so we insert them as parts of the first user: role message
                 if (role === 'system') {
                     modifiedMessages.push({
                         role: 'user',
@@ -27,63 +29,60 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
                     return;
                 }
     
-                // Function to handle individual content parts and return the corresponding geminiPart
-                const handleContentPart = (partString) => {
-                    const part = JSON.parse(partString);
-                    if (typeof part === 'string') {
-                        return { text: part };
-                    } else if (part.type === 'text') {
-                        return { text: part.text };
-                    } else if (part.type === 'image_url') {
-                        if (part.image_url.url.startsWith('gs://')) {
-                            return {
-                                fileData: {
-                                    mimeType: mime.lookup(part.image_url.url), // You may want to make this dynamic based on actual image type.
-                                    fileUri: part.image_url.url
-                                }
-                            };
-                        } else {
-                            return {
-                                inlineData: {
-                                    mimeType: 'image/jpeg', // You may want to make this dynamic based on actual image type.
-                                    data: part.image_url.url.split('base64,')[1]
-                                }
-                            };
+                // Convert content to Gemini format, trying to maintain compatibility
+                const convertPartToGemini = (partString) => {
+                    try {
+                        const part = JSON.parse(partString);
+                        if (typeof part === 'string') {
+                            return { text: part };
+                        } else if (part.type === 'text') {
+                            return { text: part.text };
+                        } else if (part.type === 'image_url') {
+                            if (part.image_url.url.startsWith('gs://')) {
+                                return {
+                                    fileData: {
+                                        mimeType: mime.lookup(part.image_url.url),
+                                        fileUri: part.image_url.url
+                                    }
+                                };
+                            } else {
+                                return {
+                                    inlineData: {
+                                        mimeType: 'image/jpeg', // fixed for now as there's no MIME type in the request
+                                        data: part.image_url.url.split('base64,')[1]
+                                    }
+                                };
+                            }
                         }
+                    } catch (e) {
+                        logger.warn(`Unable to parse part - including as string: ${partString}`);
                     }
+                    return { text: partString };
                 };
     
-                // If content is an array, handle each part individually
-                if (Array.isArray(content)) {
-                    content.forEach(part => {
-                        const geminiPart = handleContentPart(part);
-                        
-                        // Aggregate consecutive author messages, appending the content
-                        if ((role === lastAuthor || author === lastAuthor) && modifiedMessages.length > 0) {
-                            modifiedMessages[modifiedMessages.length - 1].parts.push(geminiPart);
-                        }
-                        // Push messages that are role: 'user' or 'assistant', changing 'assistant' to 'model'
-                        else if (role === 'user' || role === 'assistant' || author) {
-                            modifiedMessages.push({
-                                role: author || role,
-                                parts: [geminiPart],
-                            });
-                            lastAuthor = author || role;
-                        }
-                    });
-                } 
-                // If content is not an array, handle it directly
-                else {
-                    const geminiPart = handleContentPart(content);
-                    
-                    // Push messages that are role: 'user' or 'assistant', changing 'assistant' to 'model'
-                    if (role === 'user' || role === 'assistant' || author) {
+                const addPartToMessages = (geminiPart) => {
+                    // Gemini requires alternating user: and model: messages
+                    if ((role === lastAuthor || author === lastAuthor) && modifiedMessages.length > 0) {
+                        modifiedMessages[modifiedMessages.length - 1].parts.push(geminiPart);
+                    }
+                    // Gemini only supports user: and model: roles
+                    else if (role === 'user' || role === 'assistant' || author) {
                         modifiedMessages.push({
                             role: author || role,
                             parts: [geminiPart],
                         });
                         lastAuthor = author || role;
                     }
+                };
+
+                // Content can either be in the "vision" format (array) or in the "chat" format (string)
+                if (Array.isArray(content)) {
+                    content.forEach(part => {
+                        addPartToMessages(convertPartToGemini(part));
+                    });
+                } 
+                else {
+                    addPartToMessages(convertPartToGemini(content));
                 }
             });
         }
