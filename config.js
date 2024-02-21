@@ -122,9 +122,9 @@ var config = convict({
             },
             "oai-embeddings": {
                 "type": "OPENAI-EMBEDDINGS",
-                "url": "https://archipelago-openai.openai.azure.com/openai/deployments/archipelago-embedding/embeddings?api-version=2023-12-01",
+                "url": "https://api.openai.com/v1/embeddings",
                 "headers": {
-                    "api-key": "{{ARCHIPELAGO_OPENAI_KEY}}",
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
                     "Content-Type": "application/json"
                 },
                 "params": {

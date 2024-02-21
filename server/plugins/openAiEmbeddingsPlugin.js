@@ -7,11 +7,13 @@ class OpenAiEmbeddingsPlugin extends ModelPlugin {
     }
 
     getRequestParameters(text, parameters, prompt) {
-        const combinedParameters = { ...this.promptParameters, ...parameters };
+        const combinedParameters = { ...this.promptParameters, ...this.model.params, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
+        const { model } = combinedParameters;
         const requestParameters = {
             data:  {
                 input: combinedParameters?.input?.length ? combinedParameters.input :  modelPromptText || text,
+                model
             }
         };
         return requestParameters;
