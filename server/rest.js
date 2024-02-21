@@ -85,7 +85,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     }
 
     const sendStreamData = (data) => {
-        //logger.info(`REST SEND: data: ${JSON.stringify(data)}`);
+        logger.debug(`REST SEND: data: ${JSON.stringify(data)}`);
         const dataString = (data==='[DONE]') ? data : JSON.stringify(data);
 
         if (!res.writableEnded) {
@@ -93,9 +93,9 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
         }
     }
 
-    const fillJsonResponse = (jsonResponse, inputText, finishReason) => {
+    const fillJsonResponse = (jsonResponse, inputText, _finishReason) => {
 
-        jsonResponse.choices[0].finish_reason = finishReason;
+        jsonResponse.choices[0].finish_reason = null;
         if (jsonResponse.object === 'text_completion') {
             jsonResponse.choices[0].text = inputText;
         } else {
@@ -114,7 +114,10 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
         const safeUnsubscribe = async () => {
             if (subscription) {
                 try {
-                    pubsub.unsubscribe(await subscription);
+                    const subPromiseResult = await subscription;
+                    if (subPromiseResult) {
+                        pubsub.unsubscribe(subPromiseResult);
+                    }
                 } catch (error) {
                     logger.error(`Error unsubscribing from pubsub: ${error}`);
                 }
@@ -122,7 +125,7 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
         }
 
         if (data.requestProgress.requestId === requestId) {
-            //logger.info(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
+            logger.debug(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
             
             const progress = data.requestProgress.progress;
             const progressData = data.requestProgress.data;
@@ -142,6 +145,9 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
                     } else {
                         fillJsonResponse(jsonResponse, delta.content, finish_reason);
                     }
+                } else if (messageJson.candidates) {
+                    const { content, finishReason } = messageJson.candidates[0];
+                    fillJsonResponse(jsonResponse, content.parts[0].text, finishReason);
                 } else {
                     fillJsonResponse(jsonResponse, messageJson, null);
                 }
