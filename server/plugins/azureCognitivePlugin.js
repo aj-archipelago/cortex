@@ -6,6 +6,7 @@ import path from 'path';
 import { config } from '../../config.js';
 import { axios } from '../../lib/requestExecutor.js';
 import logger from '../../lib/logger.js';
+import { getSemanticChunks } from '../chunker.js';
 
 const API_URL = config.get('whisperMediaApiUrl');
 
@@ -37,7 +38,8 @@ class AzureCognitivePlugin extends ModelPlugin {
         const data = {};
 
         if (mode == 'delete') {
-            const searchUrl = this.ensureMode(this.requestUrl(text), 'search');
+            let searchUrl = this.ensureMode(this.requestUrl(text), 'search');
+            searchUrl = this.ensureIndex(searchUrl, indexName);
             let searchQuery = `owner:${savedContextId}`;
             
             if (docId) {
@@ -155,6 +157,7 @@ class AzureCognitivePlugin extends ModelPlugin {
         const headers = cortexRequest.headers;
 
         const { file } = parameters;
+        const fileData = { value: [] };
         if(file){ 
             let url = file;
             //if not txt file, use helper app to convert to txt
@@ -177,11 +180,13 @@ class AzureCognitivePlugin extends ModelPlugin {
                 throw Error(`No data can be extracted out of file!`);
             }
 
-            return await callPathway('cognitive_insert', {...parameters, file:null, text:data });
-        }
+            const chunkTokenLength = this.promptParameters.inputChunkSize || 1000;
+            const chunks = getSemanticChunks(data, chunkTokenLength);
 
-        if (mode === 'index' && (!text || !text.trim()) ){
-            return; // nothing to index
+            for (const text of chunks) {
+                const { data: singleData } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) 
+                fileData.value.push(singleData.value[0]);
+            }
         }
 
         const { data, params } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest);
@@ -195,7 +200,7 @@ class AzureCognitivePlugin extends ModelPlugin {
 
         // execute the request
         cortexRequest.url = url;
-        cortexRequest.data = data;
+        cortexRequest.data = (mode === 'index' && fileData.value.length>0) ? fileData : data;
         cortexRequest.params = params;
         cortexRequest.headers = headers;
         const result = await this.executeRequest(cortexRequest);
