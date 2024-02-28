@@ -2,7 +2,7 @@ import { ModelExecutor } from './modelExecutor.js';
 import { modelEndpoints } from '../lib/requestExecutor.js';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { v4 as uuidv4 } from 'uuid';
-import { encode } from 'gpt-3-encoder';
+import { encode } from '../lib/encodeCache.js';
 import { getFirstNToken, getLastNToken, getSemanticChunks } from './chunker.js';
 import { PathwayResponseParser } from './pathwayResponseParser.js';
 import { Prompt } from './prompt.js';
@@ -339,7 +339,7 @@ class PathwayResolver {
             const data = await Promise.all(chunks.map(chunk =>
                 this.applyPromptsSerially(chunk, parameters)));
             // Join the chunks with newlines
-            return data.join("\n\n");
+            return data.join(this.pathway.joinChunksWith || "\n\n");
         } else {
             // Apply prompts one by one, serially, across all chunks
             // This is the default processing mode and will make previousResult available at the object level
@@ -373,7 +373,7 @@ class PathwayResolver {
                     if (result.length === 1) {
                         result = result[0];
                     } else if (!currentParameters.stream) {
-                        result = result.join("\n\n");
+                        result = result.join(this.pathway.joinChunksWith || "\n\n");
                     }
                 }
 

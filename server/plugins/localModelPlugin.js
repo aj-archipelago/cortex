@@ -1,7 +1,7 @@
 // localModelPlugin.js
 import ModelPlugin from './modelPlugin.js';
 import { execFileSync } from 'child_process';
-import { encode } from 'gpt-3-encoder';
+import { encode } from '../../lib/encodeCache.js';
 import logger from '../../lib/logger.js';
 
 class LocalModelPlugin extends ModelPlugin {

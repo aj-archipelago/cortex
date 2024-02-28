@@ -1,6 +1,5 @@
 // palmChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
-import { encode } from 'gpt-3-encoder';
 import HandleBars from '../../lib/handleBars.js';
 import logger from '../../lib/logger.js';
 
@@ -188,15 +187,15 @@ class PalmChatPlugin extends ModelPlugin {
         const { context, examples } = instances && instances [0] || {};
     
         if (context) {
-            const contextLength = encode(context).length;
-            logger.info(`[chat request contains context information of length ${contextLength} tokens]`)
-            logger.debug(`Context: ${context}`);
+            const { length, units } = this.getLength(context);
+            logger.info(`[chat request contains context information of length ${length} ${units}]`)
+            logger.debug(`context: ${context}`);
         }
 
         if (examples && examples.length) {
             logger.info(`[chat request contains ${examples.length} examples]`);
             examples.forEach((example, index) => {
-                logger.debug(`Example ${index + 1}: Input: "${example.input.content}", Output: "${example.output.content}"`);
+                logger.debug(`example ${index + 1}: input: "${example.input.content}", output: "${example.output.content}"`);
             });
         }
         
@@ -204,10 +203,10 @@ class PalmChatPlugin extends ModelPlugin {
             logger.info(`[chat request contains ${messages.length} messages]`);
             messages.forEach((message, index) => {
                 const words = message.content.split(" ");
-                const tokenCount = encode(message.content).length;
+                const { length, units } = this.getLength(message.content);
                 const preview = words.length < 41 ? message.content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
-                logger.debug(`Message ${index + 1}: Author: ${message.author}, Tokens: ${tokenCount}, Content: "${preview}"`);
+                logger.debug(`message ${index + 1}: author: ${message.author}, ${units}: ${length}, content: "${preview}"`);
             });
         } else if (messages && messages.length === 1) {
             logger.debug(`${messages[0].content}`);
@@ -216,8 +215,8 @@ class PalmChatPlugin extends ModelPlugin {
         const safetyAttributes = this.getSafetyAttributes(responseData);
 
         const responseText = this.parseResponse(responseData);
-        const responseTokens = encode(responseText).length;
-        logger.info(`[response received containing ${responseTokens} tokens]`);
+        const { length, units } = this.getLength(responseText);
+        logger.info(`[response received containing ${length} ${units}]`);
         logger.debug(`${responseText}`);
 
         if (safetyAttributes) {
