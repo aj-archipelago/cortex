@@ -1,6 +1,5 @@
 // OpenAIChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
-import { encode } from 'gpt-3-encoder';
 import logger from '../../lib/logger.js';
 
 class OpenAIChatPlugin extends ModelPlugin {
@@ -110,23 +109,25 @@ class OpenAIChatPlugin extends ModelPlugin {
         const { stream, messages } = data;
         if (messages && messages.length > 1) {
             logger.info(`[chat request sent containing ${messages.length} messages]`);
-            let totalTokens = 0;
+            let totalLength = 0;
+            let totalUnits;
             messages.forEach((message, index) => {
                 //message.content string or array
                 const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
                 const words = content.split(" ");
-                const tokenCount = encode(content).length;
+                const { length, units } = this.getLength(content);
                 const preview = words.length < 41 ? content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
-                logger.debug(`Message ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"`);
-                totalTokens += tokenCount;
+                logger.debug(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
+                totalLength += length;
+                totalUnits = units;
             });
-            logger.info(`[chat request contained ${totalTokens} tokens]`);
+            logger.info(`[chat request contained ${totalLength} ${totalUnits}]`);
         } else {
             const message = messages[0];
             const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
-            const tokenCount = encode(content).length;
-            logger.info(`[request sent containing ${tokenCount} tokens]`);
+            const { length, units } = this.getLength(content);
+            logger.info(`[request sent containing ${length} ${units}]`);
             logger.debug(`${content}`);
         }
     
@@ -134,8 +135,8 @@ class OpenAIChatPlugin extends ModelPlugin {
             logger.info(`[response received as an SSE stream]`);
         } else {
             const responseText = this.parseResponse(responseData);
-            const responseTokens = encode(responseText).length;
-            logger.info(`[response received containing ${responseTokens} tokens]`);
+            const { length, units } = this.getLength(responseText);
+            logger.info(`[response received containing ${length} ${units}]`);
             logger.debug(`${responseText}`);
         }
 

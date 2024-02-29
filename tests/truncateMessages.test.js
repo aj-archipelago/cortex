@@ -1,7 +1,7 @@
 // ModelPlugin.test.js
 import test from 'ava';
 import ModelPlugin from '../server/plugins/modelPlugin.js';
-import { encode } from 'gpt-3-encoder';
+import { encode } from '../lib/encodeCache.js';
 import { mockPathwayResolverString } from './mocks.js';
 
 const { config, pathway, modelName, model } = mockPathwayResolverString;

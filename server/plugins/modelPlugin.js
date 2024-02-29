@@ -1,7 +1,7 @@
 // ModelPlugin.js
 import HandleBars from '../../lib/handleBars.js';
 import { executeRequest } from '../../lib/requestExecutor.js';
-import { encode } from 'gpt-3-encoder';
+import { encode } from '../../lib/encodeCache.js';
 import { getFirstNToken } from '../chunker.js';
 import logger, { obscureUrlParams } from '../../lib/logger.js';
 import { config } from '../../config.js';
@@ -238,19 +238,26 @@ class ModelPlugin {
         logger.info(`${logMessage}`);
     }
 
+    getLength(data) {
+        const isProd = config.get('env') === 'production';
+        const length = isProd ? data.length : encode(data).length;
+        const units = isProd ? 'characters' : 'tokens';
+        return {length, units};
+    }
+
     logRequestData(data, responseData, prompt) {
         this.logAIRequestFinished(); 
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
     
         if (modelInput) {
-            const inputTokens = encode(modelInput).length;
-            logger.info(`[request sent containing ${inputTokens} tokens]`);
+            const { length, units } = this.getLength(modelInput);
+            logger.info(`[request sent containing ${length} ${units}]`);
             logger.debug(`${modelInput}`);
         }
     
         const responseText = JSON.stringify(this.parseResponse(responseData));
-        const responseTokens = encode(responseText).length;
-        logger.info(`[response received containing ${responseTokens} tokens]`);
+        const { length, units } = this.getLength(responseText);
+        logger.info(`[response received containing ${length} ${units}]`);
         logger.debug(`${responseText}`);
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);

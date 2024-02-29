@@ -1,4 +1,4 @@
-import { encode, decode } from 'gpt-3-encoder';
+import { encode, decode } from '../lib/encodeCache.js';
 import cheerio from 'cheerio';
 
 const getLastNToken = (text, maxTokenLen) => { 

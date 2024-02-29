@@ -1,7 +1,7 @@
 // OpenAICompletionPlugin.js
 
 import ModelPlugin from './modelPlugin.js';
-import { encode } from 'gpt-3-encoder';
+import { encode } from '../../lib/encodeCache.js';
 import logger from '../../lib/logger.js';
 
 // Helper function to truncate the prompt if it is too long
@@ -109,16 +109,17 @@ class OpenAICompletionPlugin extends ModelPlugin {
         const stream = data.stream;
         const modelInput = data.prompt;
     
-        const modelInputTokens = encode(modelInput).length;
-        logger.info(`[request sent containing ${modelInputTokens} tokens]`);
+        const { length, units } = this.getLength(modelInput);
+
+        logger.info(`[request sent containing ${length} ${units}]`);
         logger.debug(`${modelInput}`);
 
         if (stream) {
             logger.info(`[response received as an SSE stream]`);
         } else {
             const responseText = this.parseResponse(responseData);
-            const responseTokens = encode(responseText).length;
-            logger.info(`[response received containing ${responseTokens} tokens]`);
+            const { length, units } = this.getLength(responseText);
+            logger.info(`[response received containing ${length} ${units}]`);
             logger.debug(`${responseText}`);
         }
     

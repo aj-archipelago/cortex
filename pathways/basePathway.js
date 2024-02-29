@@ -14,19 +14,21 @@ export default {
     typeDef,
     rootResolver,
     resolver,
-    inputFormat: 'text', // text or html - changes the behavior of the input chunking
+    inputFormat: 'text', // string - 'text' or 'html' - changes the behavior of the input chunking
     useInputChunking: true, // true or false - enables input to be split into multiple chunks to meet context window size
     useParallelChunkProcessing: false, // true or false - enables parallel processing of chunks
+    joinChunksWith: '\n\n', // string - the string to join result chunks with when useInputChunking is 'true'
     useInputSummarization: false, // true or false - instead of chunking, summarize the input and act on the summary    
     truncateFromFront: false, // true or false - if true, truncate from the front of the input instead of the back
     timeout: 120, // seconds, cancels the pathway after this many seconds
+    enableDuplicateRequests: true, // true or false - if true, duplicate requests are sent if the request is not completed after duplicateRequestAfter seconds
     duplicateRequestAfter: 10, // seconds, if the request is not completed after this many seconds, a backup request is sent
     // override the default execution of the pathway
-    // callback signature: excuteOverride({args: object, runAllPrompts: function})
+    // callback signature: executeOverride({args: object, runAllPrompts: function})
     // args: the input arguments to the pathway
     // runAllPrompts: a function that runs all prompts in the pathway and returns the result
     executePathway: undefined,
     // Set the temperature to 0 to favor more deterministic output when generating entity extraction.
-    temperature: undefined,
+    temperature: 0.9,
 };
 

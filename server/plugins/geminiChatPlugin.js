@@ -1,6 +1,5 @@
 // geminiChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
-import { encode } from 'gpt-3-encoder';
 import logger from '../../lib/logger.js';
 
 const mergeResults = (data) => {
@@ -162,10 +161,10 @@ class GeminiChatPlugin extends ModelPlugin {
                     return acc;
                 } , '');
                 const words = messageContent.split(" ");
-                const tokenCount = encode(messageContent).length;
+                const { length, units } = this.getLength(messageContent);
                 const preview = words.length < 41 ? messageContent : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
-                logger.debug(`Message ${index + 1}: Role: ${message.role}, Tokens: ${tokenCount}, Content: "${preview}"`);
+                logger.debug(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
             });
         } else if (messages && messages.length === 1) {
             logger.debug(`${messages[0].parts[0].text}`);
@@ -180,8 +179,8 @@ class GeminiChatPlugin extends ModelPlugin {
                 logger.warn(`!!! response was blocked because the input or response potentially violates policies`);
                 logger.debug(`Safety Ratings: ${JSON.stringify(safetyRatings, null, 2)}`);
             }
-            const responseTokens = encode(mergedResult).length;
-            logger.info(`[response received containing ${responseTokens} tokens]`);
+            const { length, units } = this.getLength(mergedResult);
+            logger.info(`[response received containing ${length} ${units}]`);
             logger.debug(`${mergedResult}`);
         }
 
