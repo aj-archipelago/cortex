@@ -104,8 +104,6 @@ class OpenAIChatPlugin extends ModelPlugin {
 
     // Override the logging function to display the messages and responses
     logRequestData(data, responseData, prompt) {
-        this.logAIRequestFinished();
-    
         const { stream, messages } = data;
         if (messages && messages.length > 1) {
             logger.info(`[chat request sent containing ${messages.length} messages]`);

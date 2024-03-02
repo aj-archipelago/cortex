@@ -45,8 +45,6 @@ class AzureTranslatePlugin extends ModelPlugin {
     
     // Override the logging function to display the request and response
     logRequestData(data, responseData, prompt) {
-        this.logAIRequestFinished();
-    
         const modelInput = data[0].Text;
     
         logger.debug(`${modelInput}`);

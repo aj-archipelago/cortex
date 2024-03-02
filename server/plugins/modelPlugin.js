@@ -32,7 +32,6 @@ class ModelPlugin {
         }
 
         this.requestCount = 0;
-        this.lastRequestStartTime = new Date();
     }
 
     truncateMessagesToTargetLength(messages, targetTokenLength) {
@@ -221,7 +220,6 @@ class ModelPlugin {
     // Default simple logging
     logRequestStart() {
         this.requestCount++;
-        this.lastRequestStartTime = new Date();
         const logMessage = `>>> [${this.requestId}: ${this.pathwayName}.${this.requestCount}] request`;
         const header = '>'.repeat(logMessage.length);
         logger.info(`${header}`);
@@ -229,10 +227,8 @@ class ModelPlugin {
         logger.info(`>>> Making API request to ${obscureUrlParams(this.url)}`);
     }
 
-    logAIRequestFinished() {
-        const currentTime = new Date();
-        const timeElapsed = (currentTime - this.lastRequestStartTime) / 1000;
-        const logMessage = `<<< [${this.requestId}: ${this.pathwayName}] response - complete in ${timeElapsed}s - data:`;
+    logAIRequestFinished(requestDuration) {
+        const logMessage = `<<< [${this.requestId}: ${this.pathwayName}] response - complete in ${requestDuration}ms - data:`;
         const header = '<'.repeat(logMessage.length);
         logger.info(`${header}`);
         logger.info(`${logMessage}`);
@@ -246,7 +242,6 @@ class ModelPlugin {
     }
 
     logRequestData(data, responseData, prompt) {
-        this.logAIRequestFinished(); 
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
     
         if (modelInput) {
@@ -255,7 +250,7 @@ class ModelPlugin {
             logger.debug(`${modelInput}`);
         }
     
-        const responseText = JSON.stringify(this.parseResponse(responseData));
+        const responseText = JSON.stringify(responseData);
         const { length, units } = this.getLength(responseText);
         logger.info(`[response received containing ${length} ${units}]`);
         logger.debug(`${responseText}`);
@@ -274,16 +269,18 @@ class ModelPlugin {
             cortexRequest.cache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
             this.logRequestStart();
 
-            const responseData = await executeRequest(cortexRequest);
+            const { data: responseData, duration: requestDuration } = await executeRequest(cortexRequest);
             
-            let errorData = Array.isArray(responseData) ? responseData[0] : responseData;
-
+            const errorData = Array.isArray(responseData) ? responseData[0] : responseData;
             if (errorData && errorData.error) {
                 throw new Error(`Server error: ${JSON.stringify(errorData.error)}`);
             }
         
-            this.logRequestData(data, responseData, prompt);
-            return this.parseResponse(responseData);
+            this.logAIRequestFinished(requestDuration);
+            const parsedData = this.parseResponse(responseData);
+            this.logRequestData(data, parsedData, prompt);
+
+            return parsedData;
         } catch (error) {
             // Log the error and continue
             logger.error(error.message || error);

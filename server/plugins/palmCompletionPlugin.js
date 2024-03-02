@@ -106,8 +106,6 @@ class PalmCompletionPlugin extends ModelPlugin {
 
     // Override the logging function to log the prompt and response
     logRequestData(data, responseData, prompt) {
-        this.logAIRequestFinished();
-
         const safetyAttributes = this.getSafetyAttributes(responseData);
 
         const instances = data && data.instances;

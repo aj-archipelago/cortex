@@ -147,8 +147,6 @@ class GeminiChatPlugin extends ModelPlugin {
 
     // Override the logging function to display the messages and responses
     logRequestData(data, responseData, prompt) {
-        this.logAIRequestFinished();
-    
         const messages = data && data.contents;
         
         if (messages && messages.length > 1) {
