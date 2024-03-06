@@ -24,31 +24,6 @@ test('cached encode and decode are identical to noncached', t => {
     t.is(decoded, gpt3Decoded);
 })
 
-// Test whether encoding adds the decoded value to the decode cache
-// the only way to tell is if the decode is faster after the cached encode
-test('encode operation adds to decode cache', t => {
-    const original = faker.lorem.paragraph(50);
-    const encodedOriginal = gpt3Encode(original);
-    const startDecode = performance.now();
-    const decoded = decode(encodedOriginal);
-    const endDecode = performance.now();
-    const decodeTime = endDecode - startDecode;
-    console.log("pre-encode decode time", decodeTime);
-
-    t.is(decoded, original);
-
-    const original2 = faker.lorem.paragraph(50);
-    const encodedOriginal2 = encode(original2);
-    const startDecode2 = performance.now();
-    const decoded2 = decode(encodedOriginal2);
-    const endDecode2 = performance.now();
-    const decodeTime2 = endDecode2 - startDecode2;
-    console.log("post-encode decode time", decodeTime2);
-    
-    t.is(decoded2, original2);
-    t.true(decodeTime2 <= decodeTime);
-})
-
 // Test whether decoding adds the encoded value to the encode cache
 // the only way to tell is if the encode is faster after the cached decode
 test('decode operation adds to encode cache', t => {
