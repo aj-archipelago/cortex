@@ -38,9 +38,14 @@ def transcribe(params):
     if 'word_timestamps' in params: #parse as bool
         word_timestamps = False if params['word_timestamps'] == 'False' else True
 
+    decode_options = {}
+    if 'language' in params:
+        decode_options["language"] = params["language"]
+        print(f"Transcription language set as {decode_options['language']}")
+
     print(f"Transcribing file {fileurl} with word_timestamps={word_timestamps}")
     start_time = time.time()
-    result = model.transcribe(fileurl, word_timestamps=word_timestamps)
+    result = model.transcribe(fileurl, word_timestamps=word_timestamps, **decode_options)
     end_time = time.time()
     execution_time = end_time - start_time
     print("Transcribe execution time:", execution_time, "seconds")
