@@ -37,7 +37,7 @@ test('RequestMonitor: getAverageCallDuration', async t => {
 test('RequestMonitor: incrementError429Count', t => {
   const rm = new RequestMonitor();
 
-  rm.incrementError429Count();
+  rm.incrementErrorCount(null, 429);
 
   t.is(rm.error429Count.size(), 1);
 });
@@ -74,7 +74,7 @@ test('RequestMonitor: getError429Rate', t => {
 
   rm.startCall();
   rm.endCall();
-  rm.incrementError429Count();
+  rm.incrementErrorCount(null, 429);
 
   t.is(rm.getError429Rate(), 1);
 });
@@ -84,7 +84,7 @@ test('RequestMonitor: reset', t => {
 
   rm.startCall();
   rm.endCall();
-  rm.incrementError429Count();
+  rm.incrementErrorCount(null, 429);
 
   rm.reset();
 

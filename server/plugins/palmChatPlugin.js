@@ -180,8 +180,6 @@ class PalmChatPlugin extends ModelPlugin {
 
     // Override the logging function to display the messages and responses
     logRequestData(data, responseData, prompt) {
-        this.logAIRequestFinished();
-    
         const instances = data && data.instances;
         const messages = instances && instances[0] && instances[0].messages;
         const { context, examples } = instances && instances [0] || {};

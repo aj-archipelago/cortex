@@ -104,8 +104,6 @@ class OpenAICompletionPlugin extends ModelPlugin {
 
     // Override the logging function to log the prompt and response
     logRequestData(data, responseData, prompt) {
-        this.logAIRequestFinished();
-    
         const stream = data.stream;
         const modelInput = data.prompt;
     
