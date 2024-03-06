@@ -201,6 +201,9 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         const processTS = async (uri) => {
             try {
                 const tsparams = { fileurl:uri };
+
+                const { language } = parameters;
+                if(language) tsparams.language = language;
                 if(highlightWords) tsparams.highlight_words = highlightWords ? "True" : "False";
                 if(maxLineWidth) tsparams.max_line_width = maxLineWidth;
                 if(maxLineCount) tsparams.max_line_count = maxLineCount;
