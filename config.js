@@ -146,6 +146,16 @@ var config = convict({
                 "maxTokenLength": 128000,
                 "supportsStreaming": true
             },
+            "azure-bing": {
+                "type": "AZURE-BING",
+                "url": "https://api.bing.microsoft.com/v7.0/search",
+                "headers": {
+                    "Ocp-Apim-Subscription-Key": "{{AZURE_BING_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 200000
+            },
         },
         env: 'CORTEX_MODELS'
     },

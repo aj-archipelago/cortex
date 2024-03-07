@@ -19,6 +19,7 @@ import OpenAIDallE3Plugin from './plugins/openAiDallE3Plugin.js';
 import OpenAIVisionPlugin from './plugins/openAiVisionPlugin.js';
 import GeminiChatPlugin from './plugins/geminiChatPlugin.js';
 import GeminiVisionPlugin from './plugins/geminiVisionPlugin.js';
+import AzureBingPlugin from './plugins/azureBingPlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -79,6 +80,9 @@ class ModelExecutor {
                 break;
             case 'GEMINI-VISION':
                 plugin = new GeminiVisionPlugin(pathway, model);
+                break;
+            case 'AZURE-BING':
+                plugin = new AzureBingPlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);
