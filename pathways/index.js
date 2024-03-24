@@ -19,8 +19,10 @@ import transcribe from './transcribe.js';
 import translate from './translate.js';
 import embeddings from './embeddings.js';
 import vision from './vision.js';
+import bing from './bing.js';
 
 export {
+    bing,
     edit,
     chat,
     bias,
