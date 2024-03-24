@@ -52,7 +52,7 @@
     "handlebars": "^4.7.7",
     "ioredis": "^5.3.1",
     "keyv": "^4.5.2",
-    "langchain": "^0.0.47",
+    "langchain": "^0.1.28",
     "mime-types": "^2.1.35",
     "subsrt": "^1.1.1",
     "uuid": "^9.0.0",
