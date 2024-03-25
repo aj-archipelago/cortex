@@ -1,5 +1,6 @@
 import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
+import { config } from '../../config.js';
 
 class AzureBingPlugin extends ModelPlugin {
     constructor(pathway, model) {
@@ -18,6 +19,9 @@ class AzureBingPlugin extends ModelPlugin {
     }
 
     async execute(text, parameters, prompt, cortexRequest) {
+        if(!config.getEnv()["AZURE_BING_KEY"]){
+            throw new Error("AZURE_BING_KEY is not set in the environment variables!");
+        }
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
 
         cortexRequest.data = requestParameters.data;
