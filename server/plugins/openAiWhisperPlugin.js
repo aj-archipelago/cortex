@@ -100,7 +100,13 @@ function alignSubtitles(subtitles, format) {
     const result = [];
 
     function preprocessStr(str) {
-        return str.trim().replace(/(\n\n)(?!\n)/g, '\n\n\n');
+        try{
+            if(!str) return '';
+            return str.trim().replace(/(\n\n)(?!\n)/g, '\n\n\n');
+        }catch(e){
+            logger.error(`An error occurred in content text preprocessing: ${e}`);
+            return '';
+        }
     }
 
     function shiftSubtitles(subtitle, shiftOffset) {

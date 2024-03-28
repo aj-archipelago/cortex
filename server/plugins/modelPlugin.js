@@ -236,7 +236,7 @@ class ModelPlugin {
 
     getLength(data) {
         const isProd = config.get('env') === 'production';
-        const length = isProd ? data.length : encode(data).length;
+        const length = !data ? 0 : (isProd ? data.length : encode(data).length);
         const units = isProd ? 'characters' : 'tokens';
         return {length, units};
     }
