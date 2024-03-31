@@ -236,8 +236,11 @@ class ModelPlugin {
 
     getLength(data) {
         const isProd = config.get('env') === 'production';
-        const length = !data ? 0 : (isProd ? data.length : encode(data).length);
-        const units = isProd ? 'characters' : 'tokens';
+        let length = 0;
+        let units = isProd ? 'characters' : 'tokens';
+        if (data) {
+           length = isProd ? data.length : encode(data).length;
+        }
         return {length, units};
     }
 
@@ -287,6 +290,42 @@ class ModelPlugin {
             throw error;
         }
     }
+
+    processStreamEvent(event, requestProgress) {
+        // check for end of stream or in-stream errors
+        if (event.data.trim() === '[DONE]') {
+            requestProgress.progress = 1;
+        } else {
+            let parsedMessage;
+            try {
+                parsedMessage = JSON.parse(event.data);
+                requestProgress.data = event.data;
+            } catch (error) {
+                throw new Error(`Could not parse stream data: ${error}`);
+            }
+
+            // error can be in different places in the message
+            const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
+            if (streamError) {
+                throw new Error(streamError);
+            }
+
+            // finish reason can be in different places in the message
+            const finishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
+            if (finishReason?.toLowerCase() === 'stop') {
+                requestProgress.progress = 1;
+            } else {
+                if (finishReason?.toLowerCase() === 'safety') {
+                    const safetyRatings = JSON.stringify(parsedMessage?.candidates?.[0]?.safetyRatings) || '';
+                    logger.warn(`Request ${this.requestId} was blocked by the safety filter. ${safetyRatings}`);
+                    requestProgress.data = `\n\nResponse blocked by safety filter: ${safetyRatings}`;
+                    requestProgress.progress = 1;
+                }
+            }
+        }
+        return requestProgress;
+    }
+
 
 }
 

@@ -14,6 +14,9 @@ class PalmChatPlugin extends ModelPlugin {
         let modifiedMessages = [];
         let lastAuthor = '';
     
+        // remove any empty messages
+        messages = messages.filter(message => message.content);
+
         messages.forEach(message => {
             const { role, author, content } = message;
     
@@ -153,7 +156,7 @@ class PalmChatPlugin extends ModelPlugin {
     parseResponse(data) {
         const { predictions } = data;
         if (!predictions || !predictions.length) {
-            return null;
+            return data;
         }
     
         // Get the candidates array from the first prediction

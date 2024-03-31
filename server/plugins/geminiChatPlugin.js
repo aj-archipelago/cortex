@@ -5,8 +5,18 @@ import logger from '../../lib/logger.js';
 const mergeResults = (data) => {
     let output = '';
     let safetyRatings = [];
+    const RESPONSE_BLOCKED = 'The response was blocked because the input or response potentially violates policies. Try rephrasing the prompt or adjusting the parameter settings.';
 
     for (let chunk of data) {
+        const { promptfeedback } = chunk;
+        if (promptfeedback) {
+            const { blockReason } = promptfeedback;
+            if (blockReason) {
+                logger.warn(`Response blocked due to prompt feedback: ${blockReason}`);
+                return {mergedResult: RESPONSE_BLOCKED, safetyRatings: safetyRatings};
+            }
+        }
+
         const { candidates } = chunk;
         if (!candidates || !candidates.length) {
             continue;
@@ -15,7 +25,8 @@ const mergeResults = (data) => {
         // If it was blocked, return the blocked message
         if (candidates[0].safetyRatings.some(rating => rating.blocked)) {
             safetyRatings = candidates[0].safetyRatings;
-            return {mergedResult: 'The response was blocked because the input or response potentially violates policies. Try rephrasing the prompt or adjusting the parameter settings.', safetyRatings: safetyRatings};
+            logger.warn(`Response blocked due to safety ratings: ${JSON.stringify(safetyRatings, null, 2)}`);
+            return {mergedResult: RESPONSE_BLOCKED, safetyRatings: safetyRatings};
         }
 
         // Append the content of the first part of the first candidate to the output

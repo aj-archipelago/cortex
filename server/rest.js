@@ -148,6 +148,10 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
                 } else if (messageJson.candidates) {
                     const { content, finishReason } = messageJson.candidates[0];
                     fillJsonResponse(jsonResponse, content.parts[0].text, finishReason);
+                } else if (messageJson.content) {
+                    const text = messageJson.content?.[0]?.text || '';
+                    const finishReason = messageJson.stop_reason;
+                    fillJsonResponse(jsonResponse, text, finishReason);
                 } else {
                     fillJsonResponse(jsonResponse, messageJson, null);
                 }
