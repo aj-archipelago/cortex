@@ -87,6 +87,7 @@ class OpenAIChatPlugin extends ModelPlugin {
 
     // Parse the response from the OpenAI Chat API
     parseResponse(data) {
+        if(!data) return "";
         const { choices } = data;
         if (!choices || !choices.length) {
             return data;
