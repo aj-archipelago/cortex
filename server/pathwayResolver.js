@@ -1,6 +1,5 @@
 import { ModelExecutor } from './modelExecutor.js';
 import { modelEndpoints } from '../lib/requestExecutor.js';
-// eslint-disable-next-line import/no-extraneous-dependencies
 import { v4 as uuidv4 } from 'uuid';
 import { encode } from '../lib/encodeCache.js';
 import { getFirstNToken, getLastNToken, getSemanticChunks } from './chunker.js';
@@ -11,6 +10,8 @@ import { requestState } from './requestState.js';
 import { callPathway } from '../lib/pathwayTools.js';
 import { publishRequestProgress } from '../lib/redisSubscription.js';
 import logger from '../lib/logger.js';
+// eslint-disable-next-line import/no-extraneous-dependencies
+import { createParser } from 'eventsource-parser';
 
 const modelTypesExcludedFromProgressUpdates = ['OPENAI-DALLE2', 'OPENAI-DALLE3'];
 
@@ -69,136 +70,112 @@ class PathwayResolver {
         this.pathwayPrompt = pathway.prompt;
     }
 
-    // This code handles async and streaming responses.  In either case, we use
-    // the graphql subscription to send progress updates to the client.  Most of 
-    // the time the client will be an external client, but it could also be the
-    // Cortex REST api code.
+    // This code handles async and streaming responses for either long-running
+    // tasks or streaming model responses
     async asyncResolve(args) {
-        const MAX_RETRY_COUNT = 3;
-        let attempt = 0;
         let streamErrorOccurred = false;
+        let responseData = null;
 
-        while (attempt < MAX_RETRY_COUNT) {
-            const responseData = await this.executePathway(args);
+        try {
+            responseData = await this.executePathway(args);
+        }
+        catch (error) {
+            if (!args.async) {
+                publishRequestProgress({
+                    requestId: this.requestId,
+                    progress: 1,
+                    data: '[DONE]',
+                });
+            }
+            return;
+        }
 
-            if (args.async || typeof responseData === 'string') {
-                const { completedCount, totalCount } = requestState[this.requestId];
-                requestState[this.requestId].data = responseData;
-                
-                // if model type is OPENAI-IMAGE
-                if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
-                    await publishRequestProgress({
-                            requestId: this.requestId,
-                            progress: completedCount / totalCount,
-                            data: JSON.stringify(responseData),
-                    });
-                }
-            } else {
-                try {
-                    const incomingMessage = responseData;
+        // If the response is a string, it's a regular long running response
+        if (args.async || typeof responseData === 'string') {
+            const { completedCount, totalCount } = requestState[this.requestId];
+            requestState[this.requestId].data = responseData;
+            
+            // some models don't support progress updates
+            if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
+                await publishRequestProgress({
+                        requestId: this.requestId,
+                        progress: completedCount / totalCount,
+                        data: JSON.stringify(responseData),
+                });
+            }
+        // If the response is an object, it's a streaming response
+        } else {
+            try {
+                const incomingMessage = responseData;
+                let streamEnded = false;
 
-                    let messageBuffer = '';
-                    let streamEnded = false;
-
-                    const processStreamSSE = (data) => {
-                        try {
-                            //logger.info(`\n\nReceived stream data for requestId ${this.requestId}: ${data.toString()}`);
-                            let events = data.toString().split('\n');
-                            
-                            //events = "data: {\"id\":\"chatcmpl-20bf1895-2fa7-4ef9-abfe-4d142aba5817\",\"object\":\"chat.completion.chunk\",\"created\":1689303423723,\"model\":\"gpt-4\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":{\"error\":{\"message\":\"The server had an error while processing your request. Sorry about that!\",\"type\":\"server_error\",\"param\":null,\"code\":null}}},\"finish_reason\":null}]}\n\n".split("\n");
-
-                            for (let event of events) {
-                                if (streamErrorOccurred) break;
-                                
-                                // skip empty events
-                                if (!(event.trim() === '')) {
-                                    //logger.info(`Processing stream event for requestId ${this.requestId}: ${event}`);
-                                    messageBuffer += event.replace(/^data: /, '');
-
-                                    const requestProgress = {
-                                        requestId: this.requestId,
-                                        data: messageBuffer,
-                                    }
-
-                                    // check for end of stream or in-stream errors
-                                    if (messageBuffer.trim() === '[DONE]') {
-                                        requestProgress.progress = 1;
-                                    } else {
-                                        let parsedMessage;
-                                        try {
-                                            parsedMessage = JSON.parse(messageBuffer);
-                                            messageBuffer = '';
-                                        } catch (error) {
-                                            // incomplete stream message, try to buffer more data
-                                            return;
-                                        }
-
-                                        // error can be in different places in the message
-                                        const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
-                                        if (streamError) {
-                                            streamErrorOccurred = true;
-                                            logger.error(`Stream error: ${streamError.message}`);
-                                            incomingMessage.off('data', processStreamSSE);
-                                            return;
-                                        }
-
-                                        // finish reason can be in different places in the message
-                                        const finishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
-                                        if (finishReason?.toLowerCase() === 'stop') {
-                                            requestProgress.progress = 1;
-                                        } else {
-                                            if (finishReason?.toLowerCase() === 'safety') {
-                                                const safetyRatings = JSON.stringify(parsedMessage?.candidates?.[0]?.safetyRatings) || '';
-                                                logger.warn(`Request ${this.requestId} was blocked by the safety filter. ${safetyRatings}`);
-                                                requestProgress.data = `\n\nResponse blocked by safety filter: ${safetyRatings}`;
-                                                requestProgress.progress = 1;
-                                            }
-                                        }
-                                    }
-
-                                    try {
-                                        if (!streamEnded) {
-                                            //logger.info(`Publishing stream message to requestId ${this.requestId}: ${message}`);
-                                            publishRequestProgress(requestProgress);
-                                            streamEnded = requestProgress.progress === 1;
-                                        }
-                                    } catch (error) {
-                                        logger.error(`Could not publish the stream message: "${messageBuffer}", ${error}`);
-                                    }
-                                }
-                            }
-                        } catch (error) {
-                            logger.error(`Could not process stream data: ${error}`);
-                        }
+                const onParse = (event) => {
+                    let requestProgress = {
+                        requestId: this.requestId
                     };
 
-                    if (incomingMessage) {
-                        await new Promise((resolve, reject) => {
-                            incomingMessage.on('data', processStreamSSE);
-                            incomingMessage.on('end', resolve);
-                            incomingMessage.on('error', reject);
-                        });
+                    logger.debug(`Received event: ${event.type}`);
+
+                    if (event.type === 'event') {
+                        logger.debug('Received event!')
+                        logger.debug(`id: ${event.id || '<none>'}`)
+                        logger.debug(`name: ${event.name || '<none>'}`)
+                        logger.debug(`data: ${event.data}`)
+                    } else if (event.type === 'reconnect-interval') {
+                        logger.debug(`We should set reconnect interval to ${event.value} milliseconds`)
                     }
 
-                } catch (error) {
-                    logger.error(`Could not subscribe to stream: ${error}`);
+                    try {
+                        requestProgress = this.modelExecutor.plugin.processStreamEvent(event, requestProgress);
+                    } catch (error) {
+                        streamErrorOccurred = true;
+                        logger.error(`Stream error: ${error.message}`);
+                        incomingMessage.off('data', processStream);
+                        return;
+                    }
+
+                    try {
+                        if (!streamEnded && requestProgress.data) {
+                            //logger.info(`Publishing stream message to requestId ${this.requestId}: ${message}`);
+                            publishRequestProgress(requestProgress);
+                            streamEnded = requestProgress.progress === 1;
+                        }
+                    } catch (error) {
+                        logger.error(`Could not publish the stream message: "${event.data}", ${error}`);
+                    }
+
                 }
+                
+                const sseParser = createParser(onParse);
+
+                const processStream = (data) => {
+                    //logger.warn(`RECEIVED DATA: ${JSON.stringify(data.toString())}`);
+                    sseParser.feed(data.toString());
+                }
+
+                if (incomingMessage) {
+                    await new Promise((resolve, reject) => {
+                        incomingMessage.on('data', processStream);
+                        incomingMessage.on('end', resolve);
+                        incomingMessage.on('error', reject);
+                    });
+                }
+
+            } catch (error) {
+                logger.error(`Could not subscribe to stream: ${error}`);
             }
 
             if (streamErrorOccurred) {
-                attempt++;
-                logger.error(`Stream attempt ${attempt} failed. Retrying...`);
-                streamErrorOccurred = false; // Reset the flag for the next attempt
+                logger.error(`Stream read failed. Finishing stream...`);
+                publishRequestProgress({
+                    requestId: this.requestId,
+                    progress: 1,
+                    data: '[DONE]',
+                });
             } else {
                 return;
             }
         }
-        // if all retries failed, publish the stream end message
-        publishRequestProgress({
-                requestId: this.requestId,
-                progress: 1,
-                data: '[DONE]',
-        });
     }
 
     async resolve(args) {

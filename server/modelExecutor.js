@@ -20,6 +20,7 @@ import OpenAIVisionPlugin from './plugins/openAiVisionPlugin.js';
 import GeminiChatPlugin from './plugins/geminiChatPlugin.js';
 import GeminiVisionPlugin from './plugins/geminiVisionPlugin.js';
 import AzureBingPlugin from './plugins/azureBingPlugin.js';
+import Claude3VertexPlugin from './plugins/claude3VertexPlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -83,6 +84,9 @@ class ModelExecutor {
                 break;
             case 'AZURE-BING':
                 plugin = new AzureBingPlugin(pathway, model);
+                break;
+            case 'CLAUDE-3-VERTEX':
+                plugin = new Claude3VertexPlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);
