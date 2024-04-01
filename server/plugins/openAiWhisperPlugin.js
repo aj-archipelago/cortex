@@ -266,21 +266,24 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         }
 
         async function processURI(uri) {
-            let result = null;
-            let _promise = null;
-            if(WHISPER_TS_API_URL){
-                _promise = processTS
-            }else {
-                _promise = processChunk;
-            }
-            _promise(uri).then((ts) => { result = ts;});
+            try {
+                let result = null;
+                let _promise = null;
 
-            //send updates while waiting for result
-            while(!result) {
-                sendProgress(true);
-                await new Promise(r => setTimeout(r, 3000));
+                const useTS = WHISPER_TS_API_URL && (wordTimestamped || highlightWords);
+        
+                if (useTS) {
+                    _promise = processTS;
+                } else {
+                    _promise = processChunk;
+                }
+        
+                result = await _promise(uri);
+                return result;
+            } catch (err) {
+                logger.error(`Error occurred while processing URI: ${err}`);
+                return err;
             }
-            return result;
         }
 
         try {
