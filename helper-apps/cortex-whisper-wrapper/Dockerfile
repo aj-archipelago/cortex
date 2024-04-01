@@ -1,12 +1,42 @@
 # For more information, please refer to https://aka.ms/vscode-docker-python
-FROM python:3.10-slim
+#FROM python:3.10-slim
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
+
+# Update system and install necessary packages, including python3.10
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    python3.10 \
+    python3-pip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/python3.10 /usr/bin/python
+
+# # Update and install necessary packages.
+# RUN apt-get update && apt-get install -y \
+#     ffmpeg \
+#     nvidia-cuda-toolkit \
+#     && apt-get clean \
+#     && rm -rf /var/lib/apt/lists/*
+
+# Verify that the CUDA toolkit was installed correctly
+RUN nvcc --version
+
+# # Update system and install necessary packages
+# RUN apt-get update && apt-get install -y \
+#     ffmpeg \
+#     && apt-get clean \
+#     && rm -rf /var/lib/apt/lists/*
+
 
 EXPOSE 8000
 
-## following 3 lines are for installing ffmepg
-RUN apt-get -y update
-RUN apt-get -y upgrade
-RUN apt-get install -y ffmpeg
+# ## following 3 lines are for installing ffmepg
+# RUN apt-get -y update
+# RUN apt-get -y upgrade
+# RUN apt-get install -y ffmpeg
+
+# # Install CUDA toolkit
+# RUN apt-get install -y nvidia-cuda-toolkit
 
 # Keeps Python from generating .pyc files in the container
 ENV PYTHONDONTWRITEBYTECODE=1
