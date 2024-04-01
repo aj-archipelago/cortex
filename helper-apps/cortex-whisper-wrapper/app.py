@@ -9,7 +9,11 @@ from fastapi.encoders import jsonable_encoder
 import time
 
 model_download_root = './models'
-model = whisper.load_model("large", download_root=model_download_root) #large, tiny
+try:
+    model = whisper.load_model("large", download_root=model_download_root) #large, tiny
+except Exception as e:
+    print(f"Error loading model: {e}")
+    raise
 
 # Create a semaphore with a limit of 1
 semaphore = asyncio.Semaphore(1)
@@ -26,14 +30,14 @@ def delete_tmp_file(file_path):
         print(f"Temporary file '{file_path}' has been deleted.")
     except OSError as e:
         print(f"Error: {e.strerror}")
-    
+
 def transcribe(params):
     if 'fileurl' not in params:
         raise HTTPException(status_code=400, detail="fileurl parameter is required")
     
     fileurl = params["fileurl"]
 
-    #word_timestamps bool, default True
+    # word_timestamps bool, default True
     word_timestamps = True
     if 'word_timestamps' in params: #parse as bool
         word_timestamps = False if params['word_timestamps'] == 'False' else True
@@ -45,7 +49,11 @@ def transcribe(params):
 
     print(f"Transcribing file {fileurl} with word_timestamps={word_timestamps}")
     start_time = time.time()
-    result = model.transcribe(fileurl, word_timestamps=word_timestamps, **decode_options)
+    try:
+        result = model.transcribe(fileurl, word_timestamps=word_timestamps, **decode_options)
+    except Exception as e:
+        print(f"Error during transcription: {e}")
+        raise
     end_time = time.time()
     execution_time = end_time - start_time
     print("Transcribe execution time:", execution_time, "seconds")
@@ -54,7 +62,6 @@ def transcribe(params):
 
     print(f"Saving transcription as : {srtpath}")
     writer = get_writer("srt", save_directory)
-
 
     writer_args = {'highlight_words': False, 'max_line_count': None, 'max_line_width': None, 'max_words_per_line': None}
     if 'highlight_words' in params: #parse as bool
@@ -70,9 +77,11 @@ def transcribe(params):
     if fileurl and word_timestamps and len(params) <= 2:
         writer_args['max_words_per_line'] = 1
 
-    # writer_args = {arg: args.pop(arg) for arg in word_options if arg in args}
-    writer(result, srtpath, **writer_args)
-
+    try:
+        writer(result, srtpath, **writer_args)
+    except Exception as e:
+        print(f"Error while writing transcription: {e}")
+        raise
 
     with open(srtpath, "r") as f:
         srtstr = f.read()
@@ -101,8 +110,14 @@ async def root(request: Request):
     
     params = await get_params(request)
     async with semaphore:
-        result = await asyncio.to_thread(transcribe, params)
-        return result
+        try:
+            result = await asyncio.to_thread(transcribe, params)
+            return result
+        except HTTPException as e:
+            raise e
+        except Exception as e:
+            print(f"Internal Server Error: {e}")
+            raise HTTPException(status_code=500, detail="Internal Server Error")
 
 if __name__ == "__main__":
     print("Starting APP Whisper server", flush=True)
