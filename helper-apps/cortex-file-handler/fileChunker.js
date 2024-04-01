@@ -66,7 +66,7 @@ async function downloadFile(url, outputPath) {
     }
 }
 
-async function splitMediaFile(inputPath, chunkDurationInSeconds = 600) {
+async function splitMediaFile(inputPath, chunkDurationInSeconds = 600 - 100) {
     try {
         // Create unique folder
         const uniqueOutputPath = generateUniqueFolderName();
