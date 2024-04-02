@@ -66,7 +66,8 @@ async function downloadFile(url, outputPath) {
     }
 }
 
-async function splitMediaFile(inputPath, chunkDurationInSeconds = 600 - 100) {
+// Split a media file into chunks of max 500 seconds
+async function splitMediaFile(inputPath, chunkDurationInSeconds = 500) {
     try {
         // Create unique folder
         const uniqueOutputPath = generateUniqueFolderName();
