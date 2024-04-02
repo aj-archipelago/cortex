@@ -25,7 +25,7 @@ if(WHISPER_TS_API_URL){
     logger.warn(`WHISPER API URL not set using default OpenAI API Whisper`);
 }
 
-const OFFSET_CHUNK = 1000 * 60 * 10; // 10 minutes for each chunk
+const OFFSET_CHUNK = 1000 * 500; // 500 seconds chunk offset
 
 async function deleteTempPath(path) {
     try {
