@@ -205,37 +205,34 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         }
 
         const processTS = async (uri) => {
-            try {
-                const tsparams = { fileurl:uri };
-
-                const { language } = parameters;
-                if(language) tsparams.language = language;
-                if(highlightWords) tsparams.highlight_words = highlightWords ? "True" : "False";
-                if(maxLineWidth) tsparams.max_line_width = maxLineWidth;
-                if(maxLineCount) tsparams.max_line_count = maxLineCount;
-                if(maxWordsPerLine) tsparams.max_words_per_line = maxWordsPerLine;
-                if(wordTimestamped!=null) {
-                    if(!wordTimestamped) {
-                        tsparams.word_timestamps = "False";
-                    }else{
-                        tsparams.word_timestamps = wordTimestamped;    
-                    }
+            const tsparams = { fileurl:uri };
+            const { language } = parameters;
+            if(language) tsparams.language = language;
+            if(highlightWords) tsparams.highlight_words = highlightWords ? "True" : "False";
+            if(maxLineWidth) tsparams.max_line_width = maxLineWidth;
+            if(maxLineCount) tsparams.max_line_count = maxLineCount;
+            if(maxWordsPerLine) tsparams.max_words_per_line = maxWordsPerLine;
+            if(wordTimestamped!=null) {
+                if(!wordTimestamped) {
+                    tsparams.word_timestamps = "False";
+                }else{
+                    tsparams.word_timestamps = wordTimestamped;    
                 }
-
-                cortexRequest.url = WHISPER_TS_API_URL;
-                cortexRequest.data = tsparams;
-
-                const res = await this.executeRequest(cortexRequest);
-
-                if(!wordTimestamped && !responseFormat){ 
-                    //if no response format, convert to text
-                    return convertToText(res);
-                }
-                return res;
-            } catch (err) {
-                logger.error(`Error getting word timestamped data from api: ${err}`);
-                throw err;
             }
+
+            cortexRequest.url = WHISPER_TS_API_URL;
+            cortexRequest.data = tsparams;
+
+            const res = await this.executeRequest(cortexRequest);
+            if (res.statusCode && res.statusCode >= 400) {
+                throw new Error(res.message || 'An error occurred.');
+            }
+
+            if(!wordTimestamped && !responseFormat){ 
+                //if no response format, convert to text
+                return convertToText(res);
+            }
+            return res;
         }
 
         let result = [];
@@ -268,18 +265,32 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         async function processURI(uri) {
             let result = null;
             let _promise = null;
-            if(WHISPER_TS_API_URL){
-                _promise = processTS
-            }else {
+            let errorOccurred = false;
+        
+            const useTS = WHISPER_TS_API_URL && (wordTimestamped || highlightWords);
+        
+            if (useTS) {
+                _promise = processTS;
+            } else {
                 _promise = processChunk;
             }
-            _promise(uri).then((ts) => { result = ts;});
-
-            //send updates while waiting for result
-            while(!result) {
+            
+            _promise(uri).then((ts) => {
+                result = ts;
+            }).catch((err) => {
+                logger.error(`Error occurred while processing URI: ${err}`);
+                errorOccurred = err;
+            });
+        
+            while(result === null && !errorOccurred) {
                 sendProgress(true);
                 await new Promise(r => setTimeout(r, 3000));
             }
+
+            if(errorOccurred) {
+                throw errorOccurred;
+            }
+            
             return result;
         }
 
