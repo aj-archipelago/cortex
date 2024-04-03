@@ -223,7 +223,24 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             cortexRequest.url = WHISPER_TS_API_URL;
             cortexRequest.data = tsparams;
 
-            const res = await this.executeRequest(cortexRequest);
+            const MAX_RETRIES = 3;
+            let attempt = 0;
+            let res = null;
+            while(attempt < MAX_RETRIES){
+                sendProgress(true, true);
+                try {
+                    res = await this.executeRequest(cortexRequest);
+                    if(res.statusCode && res.statusCode >= 400){
+                        throw new Error(res.message || 'An error occurred.');
+                    }
+                    break;
+                }
+                catch(err){
+                    logger.warn(`Error calling timestamped API: ${err}. Retrying ${attempt+1} of ${MAX_RETRIES}...`);
+                    attempt++;
+                }
+            }
+
             if (res.statusCode && res.statusCode >= 400) {
                 throw new Error(res.message || 'An error occurred.');
             }
@@ -241,18 +258,23 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         let completedCount = 0;
         let partialCount = 0;
         const { requestId } = pathwayResolver;
+        let partialRatio = 0;
 
-        const MAXPARTIALCOUNT = 60;
-        const sendProgress = (partial=false) => {
+        const sendProgress = (partial=false, resetCount=false) => {
+            partialCount = resetCount ? 0 : partialCount;
+
             if(partial){
-                partialCount = Math.min(partialCount + 1, MAXPARTIALCOUNT-1);
-            }else {
+                partialCount++;
+                const increment = 0.02 / Math.log2(partialCount + 1); // logarithmic diminishing increment
+                partialRatio = Math.min(partialRatio + increment, 0.99); // limit to 0.99
+            }else{
                 partialCount = 0;
+                partialRatio = 0;
                 completedCount++;
             }
-            if (completedCount >= totalCount) return;
+            if(completedCount >= totalCount) return;
 
-            const progress = (partialCount / MAXPARTIALCOUNT + completedCount) / totalCount;
+            const progress = (completedCount + partialRatio) / totalCount;
             logger.info(`Progress for ${requestId}: ${progress}`);
 
             publishRequestProgress({
@@ -262,57 +284,64 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             });
         }
 
-        async function processURI(uri) {
-            let result = null;
-            let _promise = null;
-            let errorOccurred = false;
-        
-            const useTS = WHISPER_TS_API_URL && (wordTimestamped || highlightWords);
-        
-            if (useTS) {
-                _promise = processTS;
-            } else {
-                _promise = processChunk;
-            }
-            
-            _promise(uri).then((ts) => {
-                result = ts;
-            }).catch((err) => {
-                logger.error(`Error occurred while processing URI: ${err}`);
-                errorOccurred = err;
-            });
-        
-            while(result === null && !errorOccurred) {
-                sendProgress(true);
-                await new Promise(r => setTimeout(r, 3000));
-            }
+async function processURI(uri) {
+    let result = null;
+    let _promise = null;
+    let errorOccurred = false;
 
-            if(errorOccurred) {
-                throw errorOccurred;
-            }
-            
-            return result;
+    const intervalId = setInterval(() => sendProgress(true), 3000);
+
+    const useTS = WHISPER_TS_API_URL && (wordTimestamped || highlightWords);
+
+    if (useTS) {
+        _promise = processTS;
+    } else {
+        _promise = processChunk;
+    }
+
+    await _promise(uri).then((ts) => {
+        result = ts;
+    }).catch((err) => {
+        errorOccurred = err;
+    }).finally(() => {
+        clearInterval(intervalId);
+        sendProgress();
+    });
+
+    if(errorOccurred) {
+        throw errorOccurred;
+    }
+
+    return result;
+}
+
+try {
+    const uris = await this.getMediaChunks(file, requestId);
+    
+    if (!uris || !uris.length) {
+        throw new Error(`Error in getting chunks from media helper for file ${file}`);
+    }
+
+    totalCount = uris.length + 1; // total number of chunks that will be processed
+
+    const batchSize = 2;
+    sendProgress();
+
+    for (let i = 0; i < uris.length; i += batchSize) {
+        const currentBatchURIs = uris.slice(i, i + batchSize);
+        const promisesToProcess = currentBatchURIs.map(uri => processURI(uri));
+        const results = await Promise.all(promisesToProcess); 
+          
+        for(const res of results) {
+            result.push(res);
         }
+    }
 
-        try {
-            const uris = await this.getMediaChunks(file, requestId); // array of remote file uris
-            if (!uris || !uris.length) {
-                throw new Error(`Error in getting chunks from media helper for file ${file}`);
-            }
-            totalCount = uris.length + 1; // total number of chunks that will be processed
-
-            // sequential process of chunks
-            for (const uri of uris) {
-                sendProgress(); 
-                const ts = await processURI(uri);
-                result.push(ts);
-            }
-
-        } catch (error) {
-            const errMsg = `Transcribe error: ${error?.response?.data || error?.message || error}`;
-            logger.error(errMsg);
-            return errMsg;
-        }
+} catch (error) {
+    const errMsg = `Transcribe error: ${error?.response?.data || error?.message || error}`;
+    logger.error(errMsg);
+    return errMsg;
+}
         finally {
             try {
                 for (const chunk of chunks) {
