@@ -174,7 +174,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         const { pathwayResolver } = cortexRequest;
 
         const { responseFormat, wordTimestamped, highlightWords, maxLineWidth, maxLineCount, maxWordsPerLine } = parameters;
-        // cortexRequest.url = this.requestUrl(text);
 
         const chunks = [];
         const processChunk = async (uri) => {
