@@ -143,7 +143,7 @@ async function main(context, req) {
                 file = await processYoutubeUrl(file);
             }
 
-            const { chunkPromises, uniqueOutputPath } = await splitMediaFile(file);
+            const { chunkPromises, chunkOffsets, uniqueOutputPath } = await splitMediaFile(file);
             folder = uniqueOutputPath;
 
             numberOfChunks = chunkPromises.length; // for progress reporting
@@ -158,9 +158,11 @@ async function main(context, req) {
             }
 
             // sequential processing of chunks
-            for (const chunk of chunks) {
+            for (let index = 0; index < chunks.length; index++) {
+                const chunk = chunks[index];
                 const blobName = useAzure ? await saveFileToBlob(chunk, requestId) : await moveFileToPublicFolder(chunk, requestId);
-                result.push(blobName);
+                const chunkOffset = chunkOffsets[index];
+                result.push({ uri:blobName, offset:chunkOffset });
                 context.log(`Saved chunk as: ${blobName}`);
                 sendProgress();
             }
@@ -182,7 +184,10 @@ async function main(context, req) {
         }
     }
 
-    console.log(`result: ${result}`);
+    console.log('result:', result.map(item =>
+        typeof item === 'object' ? JSON.stringify(item, null, 2) : item
+    ).join('\n'));
+    
     context.res = {
         body: result
     };

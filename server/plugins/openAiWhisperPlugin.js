@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { promisify } from 'util';
 import { publishRequestProgress } from '../../lib/redisSubscription.js';
 import logger from '../../lib/logger.js';
+import CortexRequest from '../../lib/cortexRequest.js';
 const pipeline = promisify(stream.pipeline);
 
 const API_URL = config.get('whisperMediaApiUrl');
@@ -25,7 +26,7 @@ if(WHISPER_TS_API_URL){
     logger.warn(`WHISPER API URL not set using default OpenAI API Whisper`);
 }
 
-const OFFSET_CHUNK = 1000 * 500; // 500 seconds chunk offset
+const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
 
 async function deleteTempPath(path) {
     try {
@@ -96,7 +97,7 @@ function convertToText(str) {
       .join(' ');
 }
 
-function alignSubtitles(subtitles, format) {
+function alignSubtitles(subtitles, format, offsets) {
     const result = [];
 
     function preprocessStr(str) {
@@ -116,7 +117,7 @@ function alignSubtitles(subtitles, format) {
     }
 
     for (let i = 0; i < subtitles.length; i++) {
-        result.push(...shiftSubtitles(subtitles[i], i * OFFSET_CHUNK));
+        result.push(...shiftSubtitles(subtitles[i], offsets[i]*1000)); // convert to milliseconds
     }
     
     try {
@@ -171,12 +172,14 @@ class OpenAIWhisperPlugin extends ModelPlugin {
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, cortexRequest) {
         const { pathwayResolver } = cortexRequest;
+
         const { responseFormat, wordTimestamped, highlightWords, maxLineWidth, maxLineCount, maxWordsPerLine } = parameters;
-        cortexRequest.url = this.requestUrl(text);
 
         const chunks = [];
         const processChunk = async (uri) => {
             try {
+                const cortexRequest = new CortexRequest({ pathwayResolver });
+
                 const chunk = await downloadFile(uri);
                 chunks.push(chunk);
 
@@ -205,6 +208,8 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         }
 
         const processTS = async (uri) => {
+            const cortexRequest = new CortexRequest({ pathwayResolver });
+
             const tsparams = { fileurl:uri };
             const { language } = parameters;
             if(language) tsparams.language = language;
@@ -315,14 +320,20 @@ async function processURI(uri) {
     return result;
 }
 
+let offsets = [];
+let uris = []
+
 try {
-    const uris = await this.getMediaChunks(file, requestId);
+    const mediaChunks = await this.getMediaChunks(file, requestId);
     
-    if (!uris || !uris.length) {
+    if (!mediaChunks || !mediaChunks.length) {
         throw new Error(`Error in getting chunks from media helper for file ${file}`);
     }
 
-    totalCount = uris.length + 1; // total number of chunks that will be processed
+    uris = mediaChunks.map((chunk) => chunk?.uri || chunk);
+    offsets = mediaChunks.map((chunk, index) => chunk?.offset || index * OFFSET_CHUNK);
+
+    totalCount = mediaChunks.length + 1; // total number of chunks that will be processed
 
     const batchSize = 2;
     sendProgress();
@@ -369,7 +380,7 @@ try {
         }
 
         if (['srt','vtt'].includes(responseFormat) || wordTimestamped) { // align subtitles for formats
-            return alignSubtitles(result, responseFormat);
+            return alignSubtitles(result, responseFormat, offsets);
         }
         return result.join(` `);
     }

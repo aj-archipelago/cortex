@@ -87,32 +87,24 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 500) {
             inputPath = downloadPath;
         }
 
-        
         const metadata = await ffmpegProbe(inputPath);
         const duration = metadata.format.duration;
         const numChunks = Math.ceil((duration - 1) / chunkDurationInSeconds);
 
         const chunkPromises = [];
-
-
+        const chunkOffsets = [];
 
         for (let i = 0; i < numChunks; i++) {
-            const outputFileName = path.join(
-                uniqueOutputPath,
-                `chunk-${i + 1}-${path.parse(inputPath).name}.mp3`
-            );
+            const outputFileName = path.join(uniqueOutputPath, `chunk-${i + 1}-${path.parse(inputPath).name}.mp3`);
+            const offset = i * chunkDurationInSeconds;
 
-            const chunkPromise = processChunk(
-                inputPath,
-                outputFileName,
-                i * chunkDurationInSeconds,
-                chunkDurationInSeconds
-            );
-
+            const chunkPromise = processChunk(inputPath, outputFileName, offset, chunkDurationInSeconds);
+            
             chunkPromises.push(chunkPromise);
+            chunkOffsets.push(offset);
         }
 
-        return { chunkPromises, uniqueOutputPath };
+        return { chunkPromises, chunkOffsets, uniqueOutputPath }; 
     } catch (err) {
         const msg = `Error processing media file, check if the file is a valid media file or is accessible`;
         console.error(msg, err);
