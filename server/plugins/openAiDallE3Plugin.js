@@ -55,8 +55,12 @@ class OpenAIDallE3Plugin extends ModelPlugin {
         .catch((error) => handleResponse(error));
 
         function handleResponse(response) {
-            const status = response?.error ? "failed" : "succeeded";
-            const data = JSON.stringify(response?.error ? response : response);
+            let status = "succeeded";
+            let data = JSON.stringify(response);
+            if (response.data.error) {
+                status = "failed";
+                data = JSON.stringify(response.data);
+            }
 
             const requestProgress = {
                 requestId,

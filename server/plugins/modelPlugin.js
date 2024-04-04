@@ -276,7 +276,9 @@ class ModelPlugin {
             
             const errorData = Array.isArray(responseData) ? responseData[0] : responseData;
             if (errorData && errorData.error) {
-                throw new Error(`Server error: ${JSON.stringify(errorData.error)}`);
+                const newError = new Error(errorData.error.message);
+                newError.data = errorData;
+                throw newError;
             }
         
             this.logAIRequestFinished(requestDuration);
