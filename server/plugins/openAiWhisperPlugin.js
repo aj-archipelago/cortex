@@ -26,6 +26,8 @@ if(WHISPER_TS_API_URL){
     logger.warn(`WHISPER API URL not set using default OpenAI API Whisper`);
 }
 
+const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
+
 async function deleteTempPath(path) {
     try {
         if (!path) {
@@ -330,7 +332,7 @@ try {
     }
 
     uris = mediaChunks.map((chunk) => chunk?.uri || chunk);
-    offsets = mediaChunks.map((chunk) => chunk?.offset || 0);
+    offsets = mediaChunks.map((chunk, index) => chunk?.offset || index * OFFSET_CHUNK);
 
     totalCount = mediaChunks.length + 1; // total number of chunks that will be processed
 
