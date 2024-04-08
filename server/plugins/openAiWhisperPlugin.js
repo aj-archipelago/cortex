@@ -335,7 +335,7 @@ try {
 
     totalCount = mediaChunks.length + 1; // total number of chunks that will be processed
 
-    const batchSize = 2;
+    const batchSize = 4;
     sendProgress();
 
     for (let i = 0; i < uris.length; i += batchSize) {

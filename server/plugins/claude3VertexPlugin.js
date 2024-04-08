@@ -79,7 +79,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
         cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
         cortexRequest.params = {}; // query params
         cortexRequest.stream = stream;
-        cortexRequest.url = cortexRequest.stream ? `${cortexRequest.url}:streamRawPredict` : `${cortexRequest.url}:rawPredict`;
+        cortexRequest.urlSuffix = cortexRequest.stream ? ':streamRawPredict' : ':rawPredict';
 
         const gcpAuthTokenHelper = this.config.get('gcpAuthTokenHelper');
         const authToken = await gcpAuthTokenHelper.getAccessToken();
