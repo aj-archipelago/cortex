@@ -30,5 +30,7 @@ export default {
     executePathway: undefined,
     // Set the temperature to 0 to favor more deterministic output when generating entity extraction.
     temperature: 0.9,
+    // Require a valid JSON response from the model
+    json: false,
 };
 

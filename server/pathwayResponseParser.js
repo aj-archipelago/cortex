@@ -1,4 +1,4 @@
-import { parseNumberedList, parseNumberedObjectList, parseCommaSeparatedList, isCommaSeparatedList, isNumberedList } from './parser.js';
+import { parseNumberedList, parseNumberedObjectList, parseCommaSeparatedList, isCommaSeparatedList, isNumberedList, parseJson } from './parser.js';
 
 class PathwayResponseParser {
     constructor(pathway) {
@@ -20,6 +20,10 @@ class PathwayResponseParser {
                 return parseCommaSeparatedList(data);
             }
             return [data];
+        }
+
+        if (this.pathway.json) {
+            return parseJson(data);
         }
 
         return data;

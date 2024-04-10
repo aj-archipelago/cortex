@@ -211,8 +211,19 @@ class PathwayResolver {
         // Save the context before processing the request
         const savedContextStr = JSON.stringify(this.savedContext);
 
-        // Process the request
-        const data = await this.processRequest(args);
+        const MAX_RETRIES = 3;
+        let data = null;
+        
+        for (let retries = 0; retries < MAX_RETRIES; retries++) {
+            data = await this.processRequest(args);
+            data = this.responseParser.parse(data);
+
+            if (data) {
+                break;
+            }
+
+            logger.warn(`Bad pathway result - retrying pathway. Attempt ${retries + 1} of ${MAX_RETRIES}`);
+        }
 
         // Update saved context if it has changed, generating a new contextId if necessary
         if (savedContextStr !== JSON.stringify(this.savedContext)) {
@@ -220,8 +231,7 @@ class PathwayResolver {
             setv && setv(this.savedContextId, this.savedContext);
         }
 
-        // Return the result
-        return this.responseParser.parse(data);
+        return data;
     }
 
     // Add a warning and log it
