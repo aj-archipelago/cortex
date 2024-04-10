@@ -218,7 +218,7 @@ class PathwayResolver {
             data = await this.processRequest(args);
             data = this.responseParser.parse(data);
 
-            if (data) {
+            if (data !== null && data !== undefined) {
                 break;
             }
 
