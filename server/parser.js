@@ -49,6 +49,28 @@ const isNumberedList = (data) => {
     return numberedListPattern.test(data.trim());
 }
 
+function parseJson(str) {
+    try {
+      const start = Math.min(
+        str.indexOf('{') !== -1 ? str.indexOf('{') : Infinity,
+        str.indexOf('[') !== -1 ? str.indexOf('[') : Infinity
+      );
+
+      const end = Math.max(
+        str.lastIndexOf('}') !== -1 ? str.lastIndexOf('}') + 1 : 0,
+        str.lastIndexOf(']') !== -1 ? str.lastIndexOf(']') + 1 : 0
+      );
+  
+      const jsonStr = str.slice(start, end);
+      // eslint-disable-next-line no-unused-vars
+      const json = JSON.parse(jsonStr);
+      return jsonStr;
+    } catch (error) {
+      logger.warn(`Pathway requires JSON format result. Failed to parse JSON: ${error.message}`);
+      return null;
+    }
+}
+
 export {
     regexParser,
     parseNumberedList,
@@ -56,4 +78,5 @@ export {
     parseCommaSeparatedList,
     isCommaSeparatedList,
     isNumberedList,
+    parseJson
 };
