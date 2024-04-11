@@ -216,9 +216,12 @@ class PathwayResolver {
         
         for (let retries = 0; retries < MAX_RETRIES; retries++) {
             data = await this.processRequest(args);
-            data = this.responseParser.parse(data);
+            if (!data) {
+                break;
+            }
 
-            if (data !== null && data !== undefined) {
+            data = this.responseParser.parse(data);
+            if (data !== null) {
                 break;
             }
 
