@@ -1,4 +1,5 @@
 import OpenAIVisionPlugin from './openAiVisionPlugin.js';
+import logger from '../../lib/logger.js';
 
 class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
@@ -70,6 +71,51 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
         requestParameters.max_tokens = this.getModelMaxReturnTokens();
         requestParameters.anthropic_version = 'vertex-2023-10-16';
         return requestParameters;
+    }
+
+    // Override the logging function to display the messages and responses
+    logRequestData(data, responseData, prompt) {
+        const { stream, messages, system } = data;
+        if (system) {
+            const { length, units } = this.getLength(system);
+            logger.info(`[system messages sent containing ${length} ${units}]`);
+            logger.debug(`${system}`);
+        }
+        
+        if (messages && messages.length > 1) {
+            logger.info(`[chat request sent containing ${messages.length} messages]`);
+            let totalLength = 0;
+            let totalUnits;
+            messages.forEach((message, index) => {
+                //message.content string or array
+                const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
+                const words = content.split(" ");
+                const { length, units } = this.getLength(content);
+                const preview = words.length < 41 ? content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
+    
+                logger.debug(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
+                totalLength += length;
+                totalUnits = units;
+            });
+            logger.info(`[chat request contained ${totalLength} ${totalUnits}]`);
+        } else {
+            const message = messages[0];
+            const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
+            const { length, units } = this.getLength(content);
+            logger.info(`[request sent containing ${length} ${units}]`);
+            logger.debug(`${content}`);
+        }
+    
+        if (stream) {
+            logger.info(`[response received as an SSE stream]`);
+        } else {
+            const responseText = this.parseResponse(responseData);
+            const { length, units } = this.getLength(responseText);
+            logger.info(`[response received containing ${length} ${units}]`);
+            logger.debug(`${responseText}`);
+        }
+
+        prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
 
     async execute(text, parameters, prompt, cortexRequest) {

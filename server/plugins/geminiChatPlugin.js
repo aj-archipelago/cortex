@@ -23,7 +23,7 @@ const mergeResults = (data) => {
         }
 
         // If it was blocked, return the blocked message
-        if (candidates[0].safetyRatings.some(rating => rating.blocked)) {
+        if (candidates[0].safetyRatings?.some(rating => rating.blocked)) {
             safetyRatings = candidates[0].safetyRatings;
             logger.warn(`Response blocked due to safety ratings: ${JSON.stringify(safetyRatings, null, 2)}`);
             return {mergedResult: RESPONSE_BLOCKED, safetyRatings: safetyRatings};
