@@ -33,7 +33,6 @@
     "@apollo/server-plugin-response-cache": "^4.1.2",
     "@apollo/utils.keyvadapter": "^3.0.0",
     "@datastructures-js/deque": "^1.0.4",
-    "@google-cloud/storage": "^7.9.0",
     "@graphql-tools/schema": "^9.0.12",
     "@keyv/redis": "^2.5.4",
     "@langchain/openai": "^0.0.24",
