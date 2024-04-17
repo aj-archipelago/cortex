@@ -33,9 +33,16 @@ const VIDEO_EXTENSIONS = [
   '.mkv',
 ];
 
-const GCP_SERVICE_ACCOUNT = JSON.parse(
-  process.env.GCP_SERVICE_ACCOUNT_KEY || "{}"
-);
+function isBase64(str) {
+  try {
+      return btoa(atob(str)) == str;
+  } catch (err) {
+      return false;
+  }
+}
+
+const GCP_SERVICE_ACCOUNT_KEY = process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 || process.env.GCP_SERVICE_ACCOUNT_KEY || "{}";
+const GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY) ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, 'base64').toString()) : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
 const { project_id: GCP_PROJECT_ID } = GCP_SERVICE_ACCOUNT;
 
 let gcs;
