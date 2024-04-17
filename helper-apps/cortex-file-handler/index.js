@@ -56,7 +56,8 @@ async function main(context, req) {
     }
 
     if (req.method.toLowerCase() === `post`) {
-        const { url } = await uploadBlob(context, req, !useAzure);
+        const { useGoogle } = req.body?.params || req.query;
+        const { url } = await uploadBlob(context, req, !useAzure, useGoogle);
         context.log(`File url: ${url}`);
         return
     }
