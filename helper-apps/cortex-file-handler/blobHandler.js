@@ -142,12 +142,14 @@ async function uploadBlob(
       });
 
       busboy.on("file", async (fieldname, file, info) => {
-        //set useGoogle if file is image or video
+        //do not use google if file is image or video
         const ext = path.extname(info.filename).toLowerCase();
-        if (IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext)) {
-          useGoogle = true;
+        const canUseGoogle = IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext);
+        if(!canUseGoogle) {
+          useGoogle = false;
         }
 
+        //check if useGoogle is set but no gcs and warn
         if(useGoogle && useGoogle !== "false" && !gcs) {
           context.log.warn("Google Cloud Storage is not initialized reverting google upload ");
           useGoogle = false;
