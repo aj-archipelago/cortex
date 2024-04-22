@@ -1,5 +1,5 @@
 import { downloadFile, processYoutubeUrl, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, uploadBlob, cleanup } from './blobHandler.js';
+import { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS } from './blobHandler.js';
 import { publishRequestProgress } from './redis.js';
 import { deleteTempPath, ensureEncoded, isValidYoutubeUrl } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
@@ -25,6 +25,8 @@ async function cleanupInactive(useAzure) {
         } else {
             await cleanupLocal();
         }
+
+        await cleanupGCS();
     } catch (error) {
         console.log('Error occurred during cleanup:', error);
     } finally{

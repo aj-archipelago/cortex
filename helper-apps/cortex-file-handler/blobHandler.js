@@ -66,6 +66,8 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
   }
 }
 
+const GCS_BUCKETNAME = "cortextempfiles";
+
 import { publicFolder, port, ipAddress } from "./start.js";
 
 const getBlobClient = () => {
@@ -195,9 +197,8 @@ async function uploadBlob(
 
         if (useGoogle && useGoogle !== "false") {
           const { url } = body;
-          const bucketName = "cortextempfiles";
           const filename = `${requestId}/${uuidv4()}_${info.filename}`;
-          const gcsFile = gcs.bucket(bucketName).file(filename);
+          const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(filename);
           const writeStream = gcsFile.createWriteStream();
 
           const response = await axios({
@@ -267,4 +268,47 @@ async function cleanup() {
   }
 }
 
-export { saveFileToBlob, deleteBlob, uploadBlob, cleanup };
+async function cleanupGCS() {
+  // Get a reference to the bucket
+  const bucket = gcs.bucket(GCS_BUCKETNAME);
+
+  // Subtract n days from the current time
+  const daysN = 30;
+  const thirtyDaysAgo = new Date(Date.now() - daysN * 24 * 60 * 60 * 1000);
+
+  // Get all files in the bucket
+  const [files] = await bucket.getFiles();
+
+  // Keep track of the directories
+  const directories = new Set();
+
+  // loop through each file
+  for (const file of files) {
+    // Get file's metadata
+    const [metadata] = await file.getMetadata();
+
+    // Add the directory to the set
+    const directoryPath = path.dirname(file.name);
+    directories.add(directoryPath);
+
+    // If the file hasn't been updated in the last n days, delete it
+    if (metadata.updated) {
+      const updatedTime = new Date(metadata.updated);
+      if (updatedTime.getTime() < thirtyDaysAgo.getTime()) {
+        console.log(`Cleaning file: ${file.name}`);
+        await file.delete();
+      }
+    }
+  }
+
+  // Check for empty directories and delete them
+  for (const directory of directories) {
+    const [files] = await bucket.getFiles({ prefix: directory });
+    if (files.length === 0) {
+      console.log(`Deleting empty directory: ${directory}`);
+      await bucket.deleteFiles({ prefix: directory });
+    }
+  }
+}
+
+export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS };
