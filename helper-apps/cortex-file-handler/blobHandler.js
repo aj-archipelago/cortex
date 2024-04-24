@@ -12,37 +12,42 @@ import { Storage } from "@google-cloud/storage";
 import axios from "axios";
 
 const IMAGE_EXTENSIONS = [
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.gif',
-  '.bmp',
-  '.webp',
-  '.tiff',
-  '.svg'
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".bmp",
+  ".webp",
+  ".tiff",
+  ".svg",
 ];
 
 const VIDEO_EXTENSIONS = [
-  '.mp4',
-  '.webm',
-  '.ogg',
-  '.mov',
-  '.avi',
-  '.flv',
-  '.wmv',
-  '.mkv',
+  ".mp4",
+  ".webm",
+  ".ogg",
+  ".mov",
+  ".avi",
+  ".flv",
+  ".wmv",
+  ".mkv",
 ];
 
 function isBase64(str) {
   try {
-      return btoa(atob(str)) == str;
+    return btoa(atob(str)) == str;
   } catch (err) {
-      return false;
+    return false;
   }
 }
 
-const GCP_SERVICE_ACCOUNT_KEY = process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 || process.env.GCP_SERVICE_ACCOUNT_KEY || "{}";
-const GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY) ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, 'base64').toString()) : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
+const GCP_SERVICE_ACCOUNT_KEY =
+  process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
+  process.env.GCP_SERVICE_ACCOUNT_KEY ||
+  "{}";
+const GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY)
+  ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, "base64").toString())
+  : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
 const { project_id: GCP_PROJECT_ID } = GCP_SERVICE_ACCOUNT;
 
 let gcs;
@@ -150,8 +155,10 @@ async function uploadBlob(
           useGoogle = true;
         }
 
-        if(useGoogle && useGoogle !== "false" && !gcs) {
-          context.log.warn("Google Cloud Storage is not initialized reverting google upload ");
+        if (useGoogle && useGoogle !== "false" && !gcs) {
+          context.log.warn(
+            "Google Cloud Storage is not initialized reverting google upload "
+          );
           useGoogle = false;
         }
 
@@ -215,7 +222,7 @@ async function uploadBlob(
             writeStream.on("error", reject);
           });
 
-          body.gcs = `gs://${bucketName}/${filename}`;
+          body.gcs = `gs://${GCS_BUCKETNAME}/${filename}`;
         }
 
         resolve(body); // Resolve the promise
@@ -246,62 +253,47 @@ async function uploadBlob(
 async function cleanup() {
   const { containerClient } = getBlobClient();
 
-  // List all the blobs in the container
-  const blobs = containerClient.listBlobsFlat();
-
-  // Calculate the date that is x month ago
   const xMonthAgo = new Date();
   xMonthAgo.setMonth(xMonthAgo.getMonth() - 1);
 
-  // Iterate through the blobs
+  const blobs = containerClient.listBlobsFlat();
+  const cleanedURLs = [];
+  
   for await (const blob of blobs) {
-    // Get the last modified date of the blob
     const lastModified = blob.properties.lastModified;
-
-    // Compare the last modified date with one month ago
     if (lastModified < xMonthAgo) {
-      // Delete the blob
       const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
       await blockBlobClient.delete();
       console.log(`Cleaned blob: ${blob.name}`);
+      cleanedURLs.push(blob.name);
     }
   }
+  
+  return cleanedURLs;
 }
 
 async function cleanupGCS() {
-  // Get a reference to the bucket
   const bucket = gcs.bucket(GCS_BUCKETNAME);
-
-  // Subtract n days from the current time
   const daysN = 30;
   const thirtyDaysAgo = new Date(Date.now() - daysN * 24 * 60 * 60 * 1000);
-
-  // Get all files in the bucket
   const [files] = await bucket.getFiles();
-
-  // Keep track of the directories
   const directories = new Set();
+  const cleanedURLs = [];
 
-  // loop through each file
   for (const file of files) {
-    // Get file's metadata
     const [metadata] = await file.getMetadata();
-
-    // Add the directory to the set
     const directoryPath = path.dirname(file.name);
     directories.add(directoryPath);
-
-    // If the file hasn't been updated in the last n days, delete it
     if (metadata.updated) {
       const updatedTime = new Date(metadata.updated);
       if (updatedTime.getTime() < thirtyDaysAgo.getTime()) {
         console.log(`Cleaning file: ${file.name}`);
         await file.delete();
+        cleanedURLs.push(file.name);
       }
     }
   }
 
-  // Check for empty directories and delete them
   for (const directory of directories) {
     const [files] = await bucket.getFiles({ prefix: directory });
     if (files.length === 0) {
@@ -309,6 +301,8 @@ async function cleanupGCS() {
       await bucket.deleteFiles({ prefix: directory });
     }
   }
+
+  return cleanedURLs;
 }
 
 export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS };

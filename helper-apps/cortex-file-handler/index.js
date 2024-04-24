@@ -1,6 +1,6 @@
 import { downloadFile, processYoutubeUrl, splitMediaFile } from './fileChunker.js';
 import { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS } from './blobHandler.js';
-import { publishRequestProgress } from './redis.js';
+import { cleanupRedisFileStoreMap, getFileStoreMap, publishRequestProgress, removeFromFileStoreMap, setFileStoreMap } from './redis.js';
 import { deleteTempPath, ensureEncoded, isValidYoutubeUrl } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
 import { documentToText, easyChunker } from './docHelper.js';
@@ -8,6 +8,8 @@ import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
+import http from 'http';
+import https from 'https';
 
 const DOC_EXTENSIONS =  [".txt", ".json", ".csv", ".md", ".xml", ".js", ".html", ".css", '.pdf', '.docx', '.xlsx', '.csv'];
 
@@ -18,20 +20,52 @@ console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
 let isCleanupRunning = false;
 async function cleanupInactive(useAzure) {
     try {
+        let cleanedUrls = [];
         if (isCleanupRunning) { return; } //no need to cleanup every call
         isCleanupRunning = true;
-        if (useAzure) {
-            await cleanup();
-        } else {
-            await cleanupLocal();
+        try {
+            if (useAzure) {
+                const c =  await cleanup();
+                cleanedUrls.push(...c);
+            } else {
+                const c = await cleanupLocal();
+                cleanedUrls.push(...c);
+            }
+        } catch (error) {
+            console.log('Error occurred during cleanup:', error);
         }
 
-        await cleanupGCS();
+
+        try{
+            const c = await cleanupGCS();
+            cleanedUrls.push(...c);
+        }catch(err){
+            console.log('Error occurred during GCS cleanup:', err);
+        }
+
+        await cleanupRedisFileStoreMap(cleanedUrls);
+         
     } catch (error) {
         console.log('Error occurred during cleanup:', error);
     } finally{
         isCleanupRunning = false;
     }
+}
+
+async function urlExists(url) {
+  if(!url) return false;
+  const httpModule = url.startsWith('https') ? https : http;
+  
+  return new Promise((resolve) => {
+    httpModule
+      .get(url, function (response) {
+        // Check if the response status is OK
+        resolve(response.statusCode === 200);
+      })
+      .on('error', function () {
+        resolve(false);
+      });
+  });
 }
 
   
@@ -57,14 +91,38 @@ async function main(context, req) {
         return;
     }
 
+    const { uri, requestId, save, hash, checkHash } = req.body?.params || req.query;
+
+    if(hash && checkHash){ //check if hash exists
+        context.log(`Checking hash: ${hash}`);
+        const result = await getFileStoreMap(hash);
+
+        const exists = await urlExists(result?.url);
+
+        if(!exists){
+            await removeFromFileStoreMap(hash);
+            return;
+        }
+
+        if(result){
+            context.log(`Hash exists: ${hash}`);
+        }
+        context.res = {
+            body: result
+        };
+        return;
+    }
+
     if (req.method.toLowerCase() === `post`) {
         const { useGoogle } = req.body?.params || req.query;
         const { url } = await uploadBlob(context, req, !useAzure, useGoogle);
         context.log(`File url: ${url}`);
+        if(hash && context?.res?.body){ //save hash after upload
+            await setFileStoreMap(hash, context.res.body);
+        }
         return
     }
 
-    const { uri, requestId, save } = req.body?.params || req.query;
     if (!uri || !requestId) {
         context.res = {
             status: 400,

@@ -30,6 +30,7 @@ async function deleteFolder(requestId) {
 }
 
 async function cleanupLocal() {
+  const cleanedUrls = []; // initialize array for holding cleaned file URLs
   try {
     // Read the directory
     const items = await fs.readdir(publicFolder);
@@ -58,14 +59,19 @@ async function cleanupLocal() {
           // If it's a file, delete it
           await fs.unlink(itemPath);
           console.log(`Cleaned file: ${item}`);
+
+          // Add the URL of the cleaned file to cleanedUrls array
+          cleanedUrls.push(`http://${ipAddress}:${port}/files/${item}`);
         }
       }
     }
   } catch (error) {
     console.error(`Error cleaning up files: ${error}`);
   }
-}
 
+  // Return the array of cleaned file URLs
+  return cleanedUrls;
+}
 
 export {
     moveFileToPublicFolder, deleteFolder, cleanupLocal
