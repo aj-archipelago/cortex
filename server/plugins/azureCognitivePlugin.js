@@ -34,7 +34,7 @@ class AzureCognitivePlugin extends ModelPlugin {
     async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
-        const { inputVector, calculateInputVector, privateData, filter, docId } = combinedParameters;
+        const { inputVector, calculateInputVector, privateData, filter, docId, title } = combinedParameters;
         const data = {};
 
         if (mode == 'delete') {
@@ -80,6 +80,11 @@ class AzureCognitivePlugin extends ModelPlugin {
 
             if(inputVector || calculateInputVector){ //if input vector is provided or needs to be calculated
                 doc.contentVector = inputVector ? inputVector : await this.getInputVector(text);
+            }
+
+
+            if(title){
+                doc.title = title;
             }
 
             if(!privateData){ //if public, remove owner
@@ -182,6 +187,19 @@ class AzureCognitivePlugin extends ModelPlugin {
 
             const chunkTokenLength = this.promptParameters.inputChunkSize || 1000;
             const chunks = getSemanticChunks(data, chunkTokenLength);
+
+
+            //extract filename as the title from file
+            try {
+                // Extract filename from file
+                let filename = file.split("/").pop();
+                // Remove everything before and including first underscore
+                let title = filename.replace(/^.*?_/, "");
+            
+                parameters.title = title;
+            } catch (error) {
+                logger.error(`Error extracting title from file ${file}: ${error}`);
+            }
 
             for (const text of chunks) {
                 const { data: singleData } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) 
