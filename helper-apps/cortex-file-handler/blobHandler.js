@@ -250,47 +250,77 @@ async function uploadBlob(
 }
 
 // Function to delete files that haven't been used in more than a month
-async function cleanup() {
+async function cleanup(urls=null) {
   const { containerClient } = getBlobClient();
 
-  const xMonthAgo = new Date();
-  xMonthAgo.setMonth(xMonthAgo.getMonth() - 1);
+  if(!urls) {
+    const xMonthAgo = new Date();
+    xMonthAgo.setMonth(xMonthAgo.getMonth() - 1);
 
-  const blobs = containerClient.listBlobsFlat();
-  const cleanedURLs = [];
-  
-  for await (const blob of blobs) {
-    const lastModified = blob.properties.lastModified;
-    if (lastModified < xMonthAgo) {
-      const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
-      await blockBlobClient.delete();
-      console.log(`Cleaned blob: ${blob.name}`);
-      cleanedURLs.push(blob.name);
+    const blobs = containerClient.listBlobsFlat();
+    const cleanedURLs = [];
+    
+    for await (const blob of blobs) {
+      const lastModified = blob.properties.lastModified;
+      if (lastModified < xMonthAgo) {
+        const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
+        await blockBlobClient.delete();
+        console.log(`Cleaned blob: ${blob.name}`);
+        cleanedURLs.push(blob.name);
+      }
     }
+    
+    return cleanedURLs;
+  }else{
+    // Delete the blobs with the specified URLs 
+    const cleanedURLs = [];
+    for(const url of urls) {
+      // Remove the base url to get the blob name
+      const blobName = url.replace(containerClient.url, '');
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      await blockBlobClient.delete();
+      console.log(`Cleaned blob: ${blobName}`);
+      cleanedURLs.push(blobName);
+    }
+    return cleanedURLs;
   }
-  
-  return cleanedURLs;
 }
 
-async function cleanupGCS() {
+async function cleanupGCS(urls=null) {
   const bucket = gcs.bucket(GCS_BUCKETNAME);
-  const daysN = 30;
-  const thirtyDaysAgo = new Date(Date.now() - daysN * 24 * 60 * 60 * 1000);
-  const [files] = await bucket.getFiles();
   const directories = new Set();
   const cleanedURLs = [];
 
-  for (const file of files) {
-    const [metadata] = await file.getMetadata();
-    const directoryPath = path.dirname(file.name);
-    directories.add(directoryPath);
-    if (metadata.updated) {
-      const updatedTime = new Date(metadata.updated);
-      if (updatedTime.getTime() < thirtyDaysAgo.getTime()) {
-        console.log(`Cleaning file: ${file.name}`);
-        await file.delete();
-        cleanedURLs.push(file.name);
+  if(!urls){
+    const daysN = 30;
+    const thirtyDaysAgo = new Date(Date.now() - daysN * 24 * 60 * 60 * 1000);
+    const [files] = await bucket.getFiles();
+
+    for (const file of files) {
+      const [metadata] = await file.getMetadata();
+      const directoryPath = path.dirname(file.name);
+      directories.add(directoryPath);
+      if (metadata.updated) {
+        const updatedTime = new Date(metadata.updated);
+        if (updatedTime.getTime() < thirtyDaysAgo.getTime()) {
+          console.log(`Cleaning file: ${file.name}`);
+          await file.delete();
+          cleanedURLs.push(file.name);
+        }
       }
+    }
+  }else{
+    try {
+      for(const url of urls) {
+        const filename = path.join(url.split('/').slice(3).join('/'));
+        const file = bucket.file(filename);
+        const directoryPath = path.dirname(file.name);
+        directories.add(directoryPath);
+        await file.delete();
+        cleanedURLs.push(url);
+      }
+    }catch(error){
+      console.error(`Error cleaning up files: ${error}`);
     }
   }
 

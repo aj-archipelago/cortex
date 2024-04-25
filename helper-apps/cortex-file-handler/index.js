@@ -18,32 +18,57 @@ console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
 
 
 let isCleanupRunning = false;
-async function cleanupInactive(useAzure) {
+async function cleanupInactive() {
     try {
-        let cleanedUrls = [];
         if (isCleanupRunning) { return; } //no need to cleanup every call
         isCleanupRunning = true;
+        const cleaned = await cleanupRedisFileStoreMap();
+
+        const cleanedAzure = [];
+        const cleanedLocal = [];
+        const cleanedGCS = [];
+
+        for(const key in cleaned){
+            const item = cleaned[key];
+            const {url,gcs} = item;
+            if(url){
+                if(url.includes('.blob.core.windows.net/')){ 
+                    cleanedAzure.push(url);
+                }else if(url.startsWith('gs://')){
+                    cleanedGCS.push(url);
+                }else{
+                    cleanedLocal.push(url);
+                }
+            }
+
+            if(item && item.gcs){
+                cleanedGCS.push(gcs);
+            }
+        }
+        
         try {
-            if (useAzure) {
-                const c =  await cleanup();
-                cleanedUrls.push(...c);
-            } else {
-                const c = await cleanupLocal();
-                cleanedUrls.push(...c);
+            if (cleanedAzure && cleanedAzure.length > 0) {
+                await cleanup(cleanedAzure);
             }
         } catch (error) {
-            console.log('Error occurred during cleanup:', error);
+            console.log('Error occurred during azure cleanup:', error);
         }
 
+        try {
+            if (cleanedLocal && cleanedLocal.length > 0) {
+                await cleanupLocal(cleanedLocal);
+            }
+        }catch(err){
+            console.log('Error occurred during local cleanup:', err);
+        }
 
         try{
-            const c = await cleanupGCS();
-            cleanedUrls.push(...c);
+            if(cleanedGCS && cleanedGCS.length > 0){
+                await cleanupGCS(cleanedGCS);
+            }
         }catch(err){
             console.log('Error occurred during GCS cleanup:', err);
         }
-
-        await cleanupRedisFileStoreMap(cleanedUrls);
          
     } catch (error) {
         console.log('Error occurred during cleanup:', error);
@@ -72,7 +97,7 @@ async function urlExists(url) {
 async function main(context, req) {
     context.log('Starting req processing..');
 
-    cleanupInactive(useAzure); //trigger & no need to wait for it
+    cleanupInactive(); //trigger & no need to wait for it
 
     // Clean up blob when request delete which means processing marked completed
     if (req.method.toLowerCase() === `delete`) {
@@ -106,6 +131,8 @@ async function main(context, req) {
 
         if(result){
             context.log(`Hash exists: ${hash}`);
+            //update redis timestamp with current time
+            await setFileStoreMap(hash, result);
         }
         context.res = {
             body: result

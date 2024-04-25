@@ -51,6 +51,7 @@ const getAllFileStoreMap = async () => {
 // Function to set key value in "FileStoreMap" hash map
 const setFileStoreMap = async (key, value) => {
     try {
+        value.timestamp = new Date().toISOString();
         await client.hset("FileStoreMap", key, JSON.stringify(value));
     } catch (error) {
         console.error(`Error setting key in FileStoreMap: ${error}`);
@@ -92,40 +93,36 @@ const removeFromFileStoreMap = async (key) => {
     }
 };
 
-const cleanupRedisFileStoreMap = async (cleanedUrls) => {
+const cleanupRedisFileStoreMap = async (nDays=1) => {
+    let cleaned = [];
     try {
-        if(!cleanedUrls || cleanedUrls.length === 0) {
-            return;
-        }
-        // Convert cleanedUrls array to a Set for quick lookup
-        const cleanedUrlSet = new Set(cleanedUrls);
-
-        try{
-            cleanedUrls.map(url => {
-                cleanedUrlSet.add(url.split('/').slice(-2).join('/'));
-            });
-        }catch(error){
-            console.error(`Error adding cleaned urls to cleanedUrlSet: ${error}`);
-        }
-        
         // Get all key-value pairs from "FileStoreMap"
         const fileStoreMap = await getAllFileStoreMap();
+
+        if(!fileStoreMap){
+            console.log("FileStoreMap is empty");
+            return;
+        }
         
         // Iterate over each key-value pair in the fileStoreMap
         for (const [key, value] of Object.entries(fileStoreMap)) {
-            // Check if the url of the value is in the cleanedUrlSet
-            if(value.url){
-                const urlEndPart = value.url.split('/').slice(-2).join('/');
-
-                if (cleanedUrlSet.has(value.url) || cleanedUrlSet.has(urlEndPart) ) {
-                    // Delete the key from "FileStoreMap"
-                    await removeFromFileStoreMap(key);
-                    console.log(`Cleaned FileStoreMap key: ${key} with url: ${value.url}`);
-                }
+            //check timestamp of each value compare to nDays and remove if older
+            const timestamp = new Date(value.timestamp);
+            const now = new Date();
+            const diffTime = Math.abs(now - timestamp);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            if (diffDays > nDays) {
+                // Remove the key from the "FileStoreMap" hash map
+                await removeFromFileStoreMap(key);
+                console.log(`Removed key ${key} from FileStoreMap`);
+                cleaned.push(Object.assign({hash:key}, value));
             }
+
         }
     } catch (error) {
         console.error(`Error cleaning FileStoreMap: ${error}`);
+    }finally{
+        return cleaned;
     }
 };
 
