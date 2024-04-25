@@ -34,7 +34,7 @@ class AzureCognitivePlugin extends ModelPlugin {
     async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
-        const { inputVector, calculateInputVector, privateData, filter, docId, title } = combinedParameters;
+        const { inputVector, calculateInputVector, privateData, filter, docId, title, chunkNo } = combinedParameters;
         const data = {};
 
         if (mode == 'delete') {
@@ -85,6 +85,10 @@ class AzureCognitivePlugin extends ModelPlugin {
 
             if(title){
                 doc.title = title;
+            }
+
+            if(chunkNo!=null){
+                doc.chunkNo = chunkNo;
             }
 
             if(!privateData){ //if public, remove owner
@@ -201,7 +205,9 @@ class AzureCognitivePlugin extends ModelPlugin {
                 logger.error(`Error extracting title from file ${file}: ${error}`);
             }
 
-            for (const text of chunks) {
+            for (let i = 0; i < chunks.length; i++) {
+                const text = chunks[i];
+                parameters.chunkNo = i;
                 const { data: singleData } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) 
                 fileData.value.push(singleData.value[0]);
             }
