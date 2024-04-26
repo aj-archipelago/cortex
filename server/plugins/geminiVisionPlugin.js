@@ -10,6 +10,7 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
     convertMessagesToGemini(messages) {
         let modifiedMessages = [];
         let lastAuthor = '';
+        let systemParts = [];
     
         // Check if the messages are already in the Gemini format
         if (messages[0] && Object.prototype.hasOwnProperty.call(messages[0], 'parts')) {
@@ -18,14 +19,8 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
             messages.forEach(message => {
                 const { role, author, content } = message;
     
-                // Right now Gemini API has no direct translation for system messages,
-                // so we insert them as parts of the first user: role message
                 if (role === 'system') {
-                    modifiedMessages.push({
-                        role: 'user',
-                        parts: [{ text: content }],
-                    });
-                    lastAuthor = 'user';
+                    systemParts.push({ text: content });
                     return;
                 }
     
@@ -92,8 +87,11 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
             modifiedMessages = modifiedMessages.slice(1);
         }
     
+        const system = { role: 'user', parts: systemParts };
+
         return {
             modifiedMessages,
+            system,
         };
     }
 

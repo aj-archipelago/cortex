@@ -45,6 +45,7 @@ class GeminiChatPlugin extends ModelPlugin {
     // This code converts either OpenAI or PaLM messages to the Gemini messages format
     convertMessagesToGemini(messages) {
         let modifiedMessages = [];
+        let systemParts = [];
         let lastAuthor = '';
 
         // Check if the messages are already in the Gemini format
@@ -54,14 +55,8 @@ class GeminiChatPlugin extends ModelPlugin {
             messages.forEach(message => {
                 const { role, author, content } = message;
         
-                // Right now Gemini API has no direct translation for system messages,
-                // but they work fine as parts of user messages
                 if (role === 'system') {
-                    modifiedMessages.push({
-                        role: 'user',
-                        parts: [{ text: content }],
-                    });
-                    lastAuthor = 'user';
+                    systemParts.push({ text: content });
                     return;
                 }
         
@@ -86,8 +81,11 @@ class GeminiChatPlugin extends ModelPlugin {
             modifiedMessages = modifiedMessages.slice(1);
         }
 
+        const system = { role: 'user', parts: systemParts };
+
         return {
             modifiedMessages,
+            system,
         };
     }
 
@@ -102,6 +100,7 @@ class GeminiChatPlugin extends ModelPlugin {
         const geminiMessages = this.convertMessagesToGemini(modelPromptMessages || [{ "role": "user", "parts": [{ "text": modelPromptText }]}]);
         
         let requestMessages = geminiMessages.modifiedMessages;
+        let system = geminiMessages.system;
 
         // Check if the token length exceeds the model's max token length
         if (tokenLength > modelTargetTokenLength) {
@@ -122,6 +121,7 @@ class GeminiChatPlugin extends ModelPlugin {
             topK: parameters.topK || 40,
         },
         safety_settings: geminiSafetySettings || undefined,
+        systemInstruction: system,
         tools: geminiTools || undefined
         };
     
@@ -131,11 +131,18 @@ class GeminiChatPlugin extends ModelPlugin {
     // Parse the response from the new Chat API
     parseResponse(data) {
         // If data is not an array, return it directly
-        if (!Array.isArray(data)) {
+        let dataToMerge = [];
+        if (data && data.contents && Array.isArray(data.contents)) {
+            dataToMerge = data.contents;
+        } else if (data && data.candidates && Array.isArray(data.candidates)) {
+            return data.candidates[0].content.parts[0].text;
+        } else if (Array.isArray(data)) {
+            dataToMerge = data;
+        } else {
             return data;
         }
 
-        return mergeResults(data).mergedResult || null;
+        return mergeResults(dataToMerge).mergedResult || null;
     
     }
 
@@ -147,7 +154,8 @@ class GeminiChatPlugin extends ModelPlugin {
         cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
         cortexRequest.params = {}; // query params
         cortexRequest.stream = stream;
-        cortexRequest.url = cortexRequest.stream ? `${cortexRequest.url}?alt=sse` : cortexRequest.url;
+        cortexRequest.stream = stream;
+        cortexRequest.urlSuffix = cortexRequest.stream ? ':streamGenerateContent?alt=sse' : ':generateContent';
 
         const gcpAuthTokenHelper = this.config.get('gcpAuthTokenHelper');
         const authToken = await gcpAuthTokenHelper.getAccessToken();
@@ -179,10 +187,12 @@ class GeminiChatPlugin extends ModelPlugin {
             logger.debug(`${messages[0].parts[0].text}`);
         }
 
-        // check if responseData is an array
-        if (!Array.isArray(responseData)) {
-            logger.info(`[response received as an SSE stream]`);    
-        } else {
+        // check if responseData is an array or string
+        if (typeof responseData === 'string') {
+            const { length, units } = this.getLength(responseData);
+            logger.info(`[response received containing ${length} ${units}]`);
+            logger.debug(`${responseData}`);
+        } else if (Array.isArray(responseData)) {
             const { mergedResult, safetyRatings } = mergeResults(responseData);
             if (safetyRatings?.length) {
                 logger.warn(`!!! response was blocked because the input or response potentially violates policies`);
@@ -191,6 +201,8 @@ class GeminiChatPlugin extends ModelPlugin {
             const { length, units } = this.getLength(mergedResult);
             logger.info(`[response received containing ${length} ${units}]`);
             logger.debug(`${mergedResult}`);
+        } else {
+            logger.info(`[response received as an SSE stream]`);
         }
 
         if (prompt && prompt.debugInfo) {
