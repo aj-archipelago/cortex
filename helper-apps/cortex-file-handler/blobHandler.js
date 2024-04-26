@@ -142,7 +142,7 @@ async function uploadBlob(
       });
 
       busboy.on("file", async (fieldname, file, info) => {
-        //do not use google if file is image or video
+        //do not use google if file is not image or video
         const ext = path.extname(info.filename).toLowerCase();
         const canUseGoogle = IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext);
         if(!canUseGoogle) {
