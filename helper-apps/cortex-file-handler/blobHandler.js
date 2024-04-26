@@ -10,6 +10,7 @@ const pipeline = promisify(_pipeline);
 import { join } from "path";
 import { Storage } from "@google-cloud/storage";
 import axios from "axios";
+import { publicFolder, port, ipAddress } from "./start.js";
 
 const IMAGE_EXTENSIONS = [
   ".jpg",
@@ -71,9 +72,7 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
   }
 }
 
-const GCS_BUCKETNAME = "cortextempfiles";
-
-import { publicFolder, port, ipAddress } from "./start.js";
+const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 
 const getBlobClient = () => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
