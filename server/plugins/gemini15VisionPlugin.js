@@ -1,8 +1,8 @@
-import GeminiChatPlugin from './gemini15ChatPlugin.js';
+import Gemini15ChatPlugin from './gemini15ChatPlugin.js';
 import mime from 'mime-types';
 import logger from '../../lib/logger.js';
 
-class GeminiVisionPlugin extends GeminiChatPlugin {
+class Gemini15VisionPlugin extends Gemini15ChatPlugin {
 
     // Override the convertMessagesToGemini method to handle multimodal vision messages
     // This function can operate on messages in Gemini native format or in OpenAI's format
@@ -97,4 +97,4 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
 
 }
 
-export default GeminiVisionPlugin;
+export default Gemini15VisionPlugin;

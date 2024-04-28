@@ -37,7 +37,7 @@ const mergeResults = (data) => {
     return {mergedResult: output || null, safetyRatings: safetyRatings};
 };
 
-class GeminiChatPlugin extends ModelPlugin {
+class Gemini15ChatPlugin extends ModelPlugin {
     constructor(pathway, model) {
         super(pathway, model);
     }
@@ -212,4 +212,4 @@ class GeminiChatPlugin extends ModelPlugin {
 
 }
 
-export default GeminiChatPlugin;
+export default Gemini15ChatPlugin;
