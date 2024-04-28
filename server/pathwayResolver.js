@@ -226,6 +226,7 @@ class PathwayResolver {
             }
 
             logger.warn(`Bad pathway result - retrying pathway. Attempt ${retries + 1} of ${MAX_RETRIES}`);
+            this.savedContext = JSON.parse(savedContextStr);
         }
 
         // Update saved context if it has changed, generating a new contextId if necessary

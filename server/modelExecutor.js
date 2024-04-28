@@ -19,6 +19,8 @@ import OpenAIDallE3Plugin from './plugins/openAiDallE3Plugin.js';
 import OpenAIVisionPlugin from './plugins/openAiVisionPlugin.js';
 import GeminiChatPlugin from './plugins/geminiChatPlugin.js';
 import GeminiVisionPlugin from './plugins/geminiVisionPlugin.js';
+import Gemini15ChatPlugin from './plugins/gemini15ChatPlugin.js';
+import Gemini15VisionPlugin from './plugins/gemini15VisionPlugin.js';
 import AzureBingPlugin from './plugins/azureBingPlugin.js';
 import Claude3VertexPlugin from './plugins/claude3VertexPlugin.js';
 
@@ -81,6 +83,12 @@ class ModelExecutor {
                 break;
             case 'GEMINI-VISION':
                 plugin = new GeminiVisionPlugin(pathway, model);
+                break;
+            case 'GEMINI-1.5-CHAT':
+                plugin = new Gemini15ChatPlugin(pathway, model);
+                break;
+            case 'GEMINI-1.5-VISION':
+                plugin = new Gemini15VisionPlugin(pathway, model);
                 break;
             case 'AZURE-BING':
                 plugin = new AzureBingPlugin(pathway, model);
