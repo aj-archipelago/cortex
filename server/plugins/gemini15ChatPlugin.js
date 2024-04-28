@@ -1,4 +1,4 @@
-// geminiChatPlugin.js
+// gemini15ChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
 
@@ -45,6 +45,7 @@ class GeminiChatPlugin extends ModelPlugin {
     // This code converts either OpenAI or PaLM messages to the Gemini messages format
     convertMessagesToGemini(messages) {
         let modifiedMessages = [];
+        let systemParts = [];
         let lastAuthor = '';
 
         // Check if the messages are already in the Gemini format
@@ -54,14 +55,8 @@ class GeminiChatPlugin extends ModelPlugin {
             messages.forEach(message => {
                 const { role, author, content } = message;
         
-                // Right now Gemini API has no direct translation for system messages,
-                // but they work fine as parts of user messages
                 if (role === 'system') {
-                    modifiedMessages.push({
-                        role: 'user',
-                        parts: [{ text: content }],
-                    });
-                    lastAuthor = 'user';
+                    systemParts.push({ text: content });
                     return;
                 }
         
@@ -86,8 +81,11 @@ class GeminiChatPlugin extends ModelPlugin {
             modifiedMessages = modifiedMessages.slice(1);
         }
 
+        const system = { role: 'user', parts: systemParts };
+
         return {
             modifiedMessages,
+            system,
         };
     }
 
@@ -102,6 +100,7 @@ class GeminiChatPlugin extends ModelPlugin {
         const geminiMessages = this.convertMessagesToGemini(modelPromptMessages || [{ "role": "user", "parts": [{ "text": modelPromptText }]}]);
         
         let requestMessages = geminiMessages.modifiedMessages;
+        let system = geminiMessages.system;
 
         // Check if the token length exceeds the model's max token length
         if (tokenLength > modelTargetTokenLength) {
@@ -122,6 +121,7 @@ class GeminiChatPlugin extends ModelPlugin {
             topK: parameters.topK || 40,
         },
         safety_settings: geminiSafetySettings || undefined,
+        systemInstruction: system,
         tools: geminiTools || undefined
         };
     
