@@ -127,7 +127,10 @@ class ModelPlugin {
         const mergeParameters = (promptParameters, parameters) => {
             let result = { ...promptParameters };
             for (let key in parameters) {
-                if (parameters[key] !== null) result[key] = parameters[key];
+                let value = parameters[key];
+                if (value !== null && value !== '') {
+                    result[key] = value;
+                }
             }
             return result;
         }
