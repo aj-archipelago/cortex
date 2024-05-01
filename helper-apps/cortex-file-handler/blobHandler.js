@@ -10,39 +10,45 @@ const pipeline = promisify(_pipeline);
 import { join } from "path";
 import { Storage } from "@google-cloud/storage";
 import axios from "axios";
+import { publicFolder, port, ipAddress } from "./start.js";
 
 const IMAGE_EXTENSIONS = [
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.gif',
-  '.bmp',
-  '.webp',
-  '.tiff',
-  '.svg'
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".bmp",
+  ".webp",
+  ".tiff",
+  ".svg",
 ];
 
 const VIDEO_EXTENSIONS = [
-  '.mp4',
-  '.webm',
-  '.ogg',
-  '.mov',
-  '.avi',
-  '.flv',
-  '.wmv',
-  '.mkv',
+  ".mp4",
+  ".webm",
+  ".ogg",
+  ".mov",
+  ".avi",
+  ".flv",
+  ".wmv",
+  ".mkv",
 ];
 
 function isBase64(str) {
   try {
-      return btoa(atob(str)) == str;
+    return btoa(atob(str)) == str;
   } catch (err) {
-      return false;
+    return false;
   }
 }
 
-const GCP_SERVICE_ACCOUNT_KEY = process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 || process.env.GCP_SERVICE_ACCOUNT_KEY || "{}";
-const GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY) ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, 'base64').toString()) : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
+const GCP_SERVICE_ACCOUNT_KEY =
+  process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
+  process.env.GCP_SERVICE_ACCOUNT_KEY ||
+  "{}";
+const GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY)
+  ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, "base64").toString())
+  : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
 const { project_id: GCP_PROJECT_ID } = GCP_SERVICE_ACCOUNT;
 
 let gcs;
@@ -66,7 +72,7 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
   }
 }
 
-import { publicFolder, port, ipAddress } from "./start.js";
+const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 
 const getBlobClient = () => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -197,9 +203,8 @@ async function uploadBlob(
 
         if (useGoogle && useGoogle !== "false") {
           const { url } = body;
-          const bucketName = "cortextempfiles";
           const filename = `${requestId}/${uuidv4()}_${info.filename}`;
-          const gcsFile = gcs.bucket(bucketName).file(filename);
+          const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(filename);
           const writeStream = gcsFile.createWriteStream();
 
           const response = await axios({
@@ -216,7 +221,7 @@ async function uploadBlob(
             writeStream.on("error", reject);
           });
 
-          body.gcs = `gs://${bucketName}/${filename}`;
+          body.gcs = `gs://${GCS_BUCKETNAME}/${filename}`;
         }
 
         resolve(body); // Resolve the promise
@@ -244,29 +249,89 @@ async function uploadBlob(
 }
 
 // Function to delete files that haven't been used in more than a month
-async function cleanup() {
+async function cleanup(urls=null) {
   const { containerClient } = getBlobClient();
 
-  // List all the blobs in the container
-  const blobs = containerClient.listBlobsFlat();
+  if(!urls) {
+    const xMonthAgo = new Date();
+    xMonthAgo.setMonth(xMonthAgo.getMonth() - 1);
 
-  // Calculate the date that is x month ago
-  const xMonthAgo = new Date();
-  xMonthAgo.setMonth(xMonthAgo.getMonth() - 1);
-
-  // Iterate through the blobs
-  for await (const blob of blobs) {
-    // Get the last modified date of the blob
-    const lastModified = blob.properties.lastModified;
-
-    // Compare the last modified date with one month ago
-    if (lastModified < xMonthAgo) {
-      // Delete the blob
-      const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
-      await blockBlobClient.delete();
-      console.log(`Cleaned blob: ${blob.name}`);
+    const blobs = containerClient.listBlobsFlat();
+    const cleanedURLs = [];
+    
+    for await (const blob of blobs) {
+      const lastModified = blob.properties.lastModified;
+      if (lastModified < xMonthAgo) {
+        const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
+        await blockBlobClient.delete();
+        console.log(`Cleaned blob: ${blob.name}`);
+        cleanedURLs.push(blob.name);
+      }
     }
+    
+    return cleanedURLs;
+  }else{
+    // Delete the blobs with the specified URLs 
+    const cleanedURLs = [];
+    for(const url of urls) {
+      // Remove the base url to get the blob name
+      const blobName = url.replace(containerClient.url, '');
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      await blockBlobClient.delete();
+      console.log(`Cleaned blob: ${blobName}`);
+      cleanedURLs.push(blobName);
+    }
+    return cleanedURLs;
   }
 }
 
-export { saveFileToBlob, deleteBlob, uploadBlob, cleanup };
+async function cleanupGCS(urls=null) {
+  const bucket = gcs.bucket(GCS_BUCKETNAME);
+  const directories = new Set();
+  const cleanedURLs = [];
+
+  if(!urls){
+    const daysN = 30;
+    const thirtyDaysAgo = new Date(Date.now() - daysN * 24 * 60 * 60 * 1000);
+    const [files] = await bucket.getFiles();
+
+    for (const file of files) {
+      const [metadata] = await file.getMetadata();
+      const directoryPath = path.dirname(file.name);
+      directories.add(directoryPath);
+      if (metadata.updated) {
+        const updatedTime = new Date(metadata.updated);
+        if (updatedTime.getTime() < thirtyDaysAgo.getTime()) {
+          console.log(`Cleaning file: ${file.name}`);
+          await file.delete();
+          cleanedURLs.push(file.name);
+        }
+      }
+    }
+  }else{
+    try {
+      for(const url of urls) {
+        const filename = path.join(url.split('/').slice(3).join('/'));
+        const file = bucket.file(filename);
+        const directoryPath = path.dirname(file.name);
+        directories.add(directoryPath);
+        await file.delete();
+        cleanedURLs.push(url);
+      }
+    }catch(error){
+      console.error(`Error cleaning up files: ${error}`);
+    }
+  }
+
+  for (const directory of directories) {
+    const [files] = await bucket.getFiles({ prefix: directory });
+    if (files.length === 0) {
+      console.log(`Deleting empty directory: ${directory}`);
+      await bucket.deleteFiles({ prefix: directory });
+    }
+  }
+
+  return cleanedURLs;
+}
+
+export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS };

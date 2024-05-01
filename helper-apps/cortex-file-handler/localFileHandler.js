@@ -29,43 +29,61 @@ async function deleteFolder(requestId) {
     console.log(`Cleaned folder: ${targetFolder}`);
 }
 
-async function cleanupLocal() {
-  try {
-    // Read the directory
-    const items = await fs.readdir(publicFolder);
+async function cleanupLocal(urls=null) {
+  if(!urls){
+    const cleanedUrls = []; // initialize array for holding cleaned file URLs
+    try {
+      // Read the directory
+      const items = await fs.readdir(publicFolder);
 
-    // Calculate the date that is x months ago
-    const monthsAgo = new Date();
-    monthsAgo.setMonth(monthsAgo.getMonth() - 1);
+      // Calculate the date that is x months ago
+      const monthsAgo = new Date();
+      monthsAgo.setMonth(monthsAgo.getMonth() - 1);
 
-    // Iterate through the items
-    for (const item of items) {
-      const itemPath = join(publicFolder, item);
+      // Iterate through the items
+      for (const item of items) {
+        const itemPath = join(publicFolder, item);
 
-      // Get the stats of the item
-      const stats = await fs.stat(itemPath);
+        // Get the stats of the item
+        const stats = await fs.stat(itemPath);
 
-      // Check if the item is a file or a directory
-      const isDirectory = stats.isDirectory();
+        // Check if the item is a file or a directory
+        const isDirectory = stats.isDirectory();
 
-      // Compare the last modified date with three months ago
-      if (stats.mtime < monthsAgo) {
-        if (isDirectory) {
-          // If it's a directory, delete it recursively
-          await fs.rm(itemPath, { recursive: true });
-          console.log(`Cleaned directory: ${item}`);
-        } else {
-          // If it's a file, delete it
-          await fs.unlink(itemPath);
-          console.log(`Cleaned file: ${item}`);
+        // Compare the last modified date with three months ago
+        if (stats.mtime < monthsAgo) {
+          if (isDirectory) {
+            // If it's a directory, delete it recursively
+            await fs.rm(itemPath, { recursive: true });
+            console.log(`Cleaned directory: ${item}`);
+          } else {
+            // If it's a file, delete it
+            await fs.unlink(itemPath);
+            console.log(`Cleaned file: ${item}`);
+
+            // Add the URL of the cleaned file to cleanedUrls array
+            cleanedUrls.push(`http://${ipAddress}:${port}/files/${item}`);
+          }
         }
       }
+    } catch (error) {
+      console.error(`Error cleaning up files: ${error}`);
     }
-  } catch (error) {
-    console.error(`Error cleaning up files: ${error}`);
+  }else{
+    try{
+      for (const url of urls) {
+        const filename = url.split('/').pop();
+        const itemPath = join(publicFolder, filename);
+        await fs.unlink(itemPath);
+      }
+    }catch(error){
+      console.error(`Error cleaning up files: ${error}`);
+    }
   }
-}
 
+  // Return the array of cleaned file URLs
+  return cleanedUrls;
+}
 
 export {
     moveFileToPublicFolder, deleteFolder, cleanupLocal
