@@ -1,30 +1,30 @@
 const getGraphQlType = (value) => {
   switch (typeof value) {
     case 'boolean':
-      return {type: 'Boolean', defaultValue: 'false'};
+      return {type: 'Boolean'};
     case 'string':
-      return {type: 'String', defaultValue: `""`};
+      return {type: 'String'};
     case 'number':
-      return {type: 'Int', defaultValue: 'null'};
+      return {type: 'Int'};
     case 'object':
       if (Array.isArray(value)) {
         if (value.length > 0 && typeof(value[0]) === 'string') {
-          return {type: '[String]', defaultValue: '[]'};
+          return {type: '[String]'};
         }
         else {
           // New case for MultiMessage type
           if (Array.isArray(value[0]?.content)) {
-            return {type: '[MultiMessage]', defaultValue: '[]'};
+            return {type: '[MultiMessage]'};
           }
           else {
-            return {type: '[Message]', defaultValue: '[]'};
+            return {type: '[Message]'};
           }
         }
       } else {
-        return {type: `[${value.objName}]`, defaultValue: 'null'};
+        return {type: `[${value.objName}]`};
       }
     default:
-      return {type: 'String', defaultValue: `""`};
+      return {type: 'String'};
   }
 };
 
