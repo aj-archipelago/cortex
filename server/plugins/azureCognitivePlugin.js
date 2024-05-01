@@ -34,7 +34,7 @@ class AzureCognitivePlugin extends ModelPlugin {
     async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
-        const { inputVector, calculateInputVector, privateData, filter, docId } = combinedParameters;
+        const { inputVector, calculateInputVector, privateData, filter, docId, title, chunkNo } = combinedParameters;
         const data = {};
 
         if (mode == 'delete') {
@@ -80,6 +80,15 @@ class AzureCognitivePlugin extends ModelPlugin {
 
             if(inputVector || calculateInputVector){ //if input vector is provided or needs to be calculated
                 doc.contentVector = inputVector ? inputVector : await this.getInputVector(text);
+            }
+
+
+            if(title){
+                doc.title = title;
+            }
+
+            if(chunkNo!=null){
+                doc.chunkNo = chunkNo;
             }
 
             if(!privateData){ //if public, remove owner
@@ -183,7 +192,22 @@ class AzureCognitivePlugin extends ModelPlugin {
             const chunkTokenLength = this.promptParameters.inputChunkSize || 1000;
             const chunks = getSemanticChunks(data, chunkTokenLength);
 
-            for (const text of chunks) {
+
+            //extract filename as the title from file
+            try {
+                // Extract filename from file
+                let filename = file.split("/").pop();
+                // Remove everything before and including first underscore
+                let title = filename.replace(/^.*?_/, "");
+            
+                parameters.title = title;
+            } catch (error) {
+                logger.error(`Error extracting title from file ${file}: ${error}`);
+            }
+
+            for (let i = 0; i < chunks.length; i++) {
+                const text = chunks[i];
+                parameters.chunkNo = i;
                 const { data: singleData } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) 
                 fileData.value.push(singleData.value[0]);
             }
