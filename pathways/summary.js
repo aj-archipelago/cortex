@@ -21,7 +21,7 @@ export default {
         const originalTargetLength = args.targetLength;
 
         // If targetLength is not provided, execute the prompt once and return the result.
-        if (originalTargetLength === 0 || originalTargetLength === null) {
+        if (!originalTargetLength) {
             let pathwayResolver = new PathwayResolver({ config, pathway, args });
             return await pathwayResolver.resolve(args);
         }
