@@ -1,5 +1,5 @@
 {
-    "defaultModelName": "oai-td3",
+    "defaultModelName": "oai-gpturbo",
     "models": {
         "azure-translate": {
             "type": "AZURE-TRANSLATE",
@@ -11,19 +11,6 @@
             },
             "requestsPerSecond": 10,
             "maxTokenLength": 2000
-        },
-        "oai-td3": {
-            "type": "OPENAI-COMPLETION",
-            "url": "https://api.openai.com/v1/completions",
-            "headers": {
-                "Authorization": "Bearer {{OPENAI_API_KEY}}",
-                "Content-Type": "application/json"
-            },
-            "params": {
-                "model": "text-davinci-003"
-            },
-            "requestsPerSecond": 10,
-            "maxTokenLength": 4096
         },
         "oai-gpturbo": {
             "type": "OPENAI-CHAT",
