@@ -23,6 +23,7 @@ import Gemini15ChatPlugin from './plugins/gemini15ChatPlugin.js';
 import Gemini15VisionPlugin from './plugins/gemini15VisionPlugin.js';
 import AzureBingPlugin from './plugins/azureBingPlugin.js';
 import Claude3VertexPlugin from './plugins/claude3VertexPlugin.js';
+import NeuralSpacePlugin from './plugins/neuralSpacePlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -56,6 +57,9 @@ class ModelExecutor {
                 break;
             case 'OPENAI-WHISPER':
                 plugin = new OpenAIWhisperPlugin(pathway, model);
+                break;
+            case 'NEURALSPACE':
+                plugin = new NeuralSpacePlugin(pathway, model);
                 break;
             case 'LOCAL-CPP-MODEL':
                 plugin = new LocalModelPlugin(pathway, model);
