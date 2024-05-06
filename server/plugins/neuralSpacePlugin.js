@@ -2,7 +2,7 @@ import ModelPlugin from "./modelPlugin.js";
 import fs from "fs";
 import FormData from "form-data";
 import logger from "../../lib/logger.js";
-import { downloadFile, getMediaChunks } from "../../lib/util.js";
+import { deleteTempPath, downloadFile, getMediaChunks } from "../../lib/util.js";
 import CortexRequest from "../../lib/cortexRequest.js";
 
 // const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
@@ -13,78 +13,86 @@ class NeuralSpacePlugin extends ModelPlugin {
     this.pathwayResolver = null;
   }
 
-  async execute(text, parameters, prompt, cortexRequest) {
-    const { pathwayResolver } = cortexRequest;
-    const { file } = parameters;
+async execute(text, parameters, prompt, cortexRequest) {
+    let chunks = [];
+    try {
+        const { pathwayResolver } = cortexRequest;
+        const { file } = parameters;
 
-    const { requestId } = pathwayResolver;
+        const { requestId } = pathwayResolver;
 
-    const chunks = [];
+        const mediaChunks = await getMediaChunks(file, requestId);
 
-    const mediaChunks = await getMediaChunks(file, requestId);
+        if (!mediaChunks || !mediaChunks.length) {
+            throw new Error(
+                `Error in getting chunks from media helper for file ${file}`
+            );
+        }
 
-    if (!mediaChunks || !mediaChunks.length) {
-      throw new Error(
-        `Error in getting chunks from media helper for file ${file}`
-      );
+        const uris = mediaChunks.map((chunk) => chunk?.uri || chunk);
+
+        for (let i = 0; i < uris.length; i++) {
+            const uri = uris[i];
+            try {
+                const chunk = await downloadFile(uri);
+                chunks.push(chunk);
+            } catch (err) {
+                logger.error(`Error downloading chunk: ${err}`);
+                throw err;
+            }
+        }
+
+        const jobs = [];
+
+        for (const chunk of chunks) {
+            const cortexRequest = new CortexRequest({ pathwayResolver });
+            cortexRequest.url = this.requestUrl();
+
+            const formData = new FormData();
+            formData.append('files', fs.createReadStream(chunk));
+            formData.append(
+                "config",
+                JSON.stringify({
+                    file_transcription: {
+                        mode: "advanced",
+                    },
+                })
+            );
+
+            cortexRequest.data = formData;
+            cortexRequest.params = {};
+            cortexRequest.headers = {
+                ...cortexRequest.headers,
+                ...formData.getHeaders(),
+            };
+
+            const result = await this.executeRequest(cortexRequest);
+
+            const jobId = result?.data?.jobId;
+            if (!jobId) {
+                logger.error(`Error in creating job: ${result}`);
+                return;
+            }
+            logger.info(`Job created successfully with ID: ${jobId}`);
+            jobs.push(jobId);
+        }
+
+        const results = await this.checkJobStatus(jobs, pathwayResolver);
+        return results.join(" ").trim();
+    } catch (error) {
+        logger.error(`Error occurred while executing: ${error}`);
+        throw error;
+    } finally {
+        for (const chunk of chunks) {
+            try {
+                await deleteTempPath(chunk);
+            } catch (error) {
+                // Ignore error
+                logger.error(`Error deleting temp file: ${error}`);
+            }
+        }
     }
-
-    const uris = mediaChunks.map((chunk) => chunk?.uri || chunk);
-    // const offsets = mediaChunks.map(
-    //   (chunk, index) => chunk?.offset || index * OFFSET_CHUNK
-    // );
-
-    for (let i = 0; i < uris.length; i++) {
-      const uri = uris[i];
-      try {
-        const chunk = await downloadFile(uri);
-        chunks.push(chunk);
-      } catch (err) {
-        logger.error(`Error downloading chunk: ${err}`);
-        throw err;
-      }
-    }
-
-    const jobs = [];
-
-    for (const chunk of chunks) {
-      const cortexRequest = new CortexRequest({ pathwayResolver });
-      cortexRequest.url = this.requestUrl();
-
-      const formData = new FormData();
-      formData.append("files", fs.createReadStream(chunk));
-      formData.append(
-        "config",
-        JSON.stringify({
-          file_transcription: {
-            // 'language_id': '{{LANG}}',
-            mode: "advanced",
-            // 'number_formatting': '{{NUMBER_FORMATTING}}'
-          },
-        })
-      );
-
-      cortexRequest.data = formData;
-      cortexRequest.params = {};
-      cortexRequest.headers = {
-        ...cortexRequest.headers,
-        ...formData.getHeaders(),
-      };
-
-      const result = await this.executeRequest(cortexRequest);
-
-      const jobId = result?.data?.jobId;
-      if (!jobId) {
-        logger.error(`Error in creating job: ${result}`);
-        return;
-      }
-      logger.info(`Job created successfully with ID: ${jobId}`);
-      jobs.push(jobId);
-    }
-
-    const results = await this.checkJobStatus(jobs, pathwayResolver);
-    return results.join(" ").trim();
-  }
+}
 
   async checkJobStatus(jobs, pathwayResolver) {
     const results = [];
