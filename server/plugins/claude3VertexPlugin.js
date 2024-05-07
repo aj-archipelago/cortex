@@ -78,7 +78,7 @@ async function fetchImageAsDataURL(imageUrl) {
     return `data:${mimeType};base64,${base64Image}`;
   }
   catch (e) {
-    logger.warn(`Failed to fetch image: ${imageUrl}. ${e}`);
+    logger.error(`Failed to fetch image: ${imageUrl}. ${e}`);
     throw e;
   }
 }
