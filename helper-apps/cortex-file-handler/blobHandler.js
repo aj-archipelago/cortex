@@ -21,6 +21,7 @@ const IMAGE_EXTENSIONS = [
   ".webp",
   ".tiff",
   ".svg",
+  ".pdf"
 ];
 
 const VIDEO_EXTENSIONS = [
