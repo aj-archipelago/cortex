@@ -11,6 +11,7 @@ import { join } from "path";
 import { Storage } from "@google-cloud/storage";
 import axios from "axios";
 import { publicFolder, port, ipAddress } from "./start.js";
+import mime from "mime-types";
 
 const IMAGE_EXTENSIONS = [
   ".jpg",
@@ -74,7 +75,7 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
 
 const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 
-const getBlobClient = () => {
+const getBlobClient = async () => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME;
   if (!connectionString || !containerName) {
@@ -83,15 +84,21 @@ const getBlobClient = () => {
     );
   }
 
-  const blobServiceClient =
-    BlobServiceClient.fromConnectionString(connectionString);
+  const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
+
+  const serviceProperties = await blobServiceClient.getProperties();
+  if(!serviceProperties.defaultServiceVersion) {
+    serviceProperties.defaultServiceVersion = '2020-02-10';
+    await blobServiceClient.setProperties(serviceProperties);
+  }
+
   const containerClient = blobServiceClient.getContainerClient(containerName);
 
   return { blobServiceClient, containerClient };
 };
 
 async function saveFileToBlob(chunkPath, requestId) {
-  const { containerClient } = getBlobClient();
+  const { containerClient } = await getBlobClient();
   // Use the filename with a UUID as the blob name
   const blobName = `${requestId}/${uuidv4()}_${path.basename(chunkPath)}`;
 
@@ -110,7 +117,7 @@ async function saveFileToBlob(chunkPath, requestId) {
 //deletes blob that has the requestId
 async function deleteBlob(requestId) {
   if (!requestId) throw new Error("Missing requestId parameter");
-  const { containerClient } = getBlobClient();
+  const { containerClient } = await getBlobClient();
   // List the blobs in the container with the specified prefix
   const blobs = containerClient.listBlobsFlat({ prefix: `${requestId}/` });
 
@@ -181,14 +188,20 @@ async function uploadBlob(
           resolve(body); // Resolve the promise
         } else {
           const filename = `${requestId}/${uuidv4()}_${info.filename}`;
-          const { containerClient } = getBlobClient();
+          const { containerClient } = await getBlobClient();
+
+          const contentType = mime.lookup(filename);  // content type based on file extension
+          const options = {};
+          if (contentType) {
+            options.blobHTTPHeaders = { blobContentType: contentType };
+          }
 
           const blockBlobClient = containerClient.getBlockBlobClient(filename);
 
           const passThroughStream = new PassThrough();
           file.pipe(passThroughStream);
 
-          await blockBlobClient.uploadStream(passThroughStream);
+          await blockBlobClient.uploadStream(passThroughStream, undefined, undefined, options);
 
           const message = `File '${filename}' uploaded successfully.`;
           const url = blockBlobClient.url;
@@ -250,7 +263,7 @@ async function uploadBlob(
 
 // Function to delete files that haven't been used in more than a month
 async function cleanup(urls=null) {
-  const { containerClient } = getBlobClient();
+  const { containerClient } = await getBlobClient();
 
   if(!urls) {
     const xMonthAgo = new Date();
