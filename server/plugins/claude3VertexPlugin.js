@@ -10,6 +10,7 @@ async function convertContentItem(item) {
   let mimeTypeMatch = "";
   let mimeType = "";
   let base64Image = "";
+  const allowedMIMETypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
   try {
     switch (typeof item) {
@@ -24,8 +25,13 @@ async function convertContentItem(item) {
           case "image_url":
             imageUrl = item.image_url.url || item.image_url;
             if (!imageUrl) {
-              logger.error("Could not parse image URL from content - skipping image content.");
+              logger.warn("Could not parse image URL from content - skipping image content.");
               return null;
+            }
+
+            if (!allowedMIMETypes.includes(mime.lookup(imageUrl) || "")) {
+                logger.warn("Unsupported image type - skipping image content.");
+                return null;
             }
 
             isDataURL = imageUrl.startsWith("data:");
@@ -52,7 +58,7 @@ async function convertContentItem(item) {
     }
   }
   catch (e) {
-    logger.error(`Error converting content item: ${e}`);
+    logger.warn(`Error converting content item: ${e}`);
     return null;
   }
 }
