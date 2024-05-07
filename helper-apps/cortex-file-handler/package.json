@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node start.js",
+    "dev": "node -r dotenv/config start.js",
     "test": "echo \"No tests yet...\""
   },
   "dependencies": {
