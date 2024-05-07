@@ -131,7 +131,7 @@ test('vision multi single long text', async t => {
         },
     });
 
-    t.is(response.body?.singleResult?.errors?.[0]?.message, 'Unable to process your request as your single message content is too long. Please try again with a shorter message.');
+    t.is(response.body?.singleResult?.errors?.[0]?.message || response.body?.singleResult?.data?.vision?.result, 'Unable to process your request as your single message content is too long. Please try again with a shorter message.');
 });
 
 

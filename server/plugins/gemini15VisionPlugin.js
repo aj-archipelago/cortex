@@ -25,9 +25,10 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                 }
     
                 // Convert content to Gemini format, trying to maintain compatibility
-                const convertPartToGemini = (partString) => {
+                const convertPartToGemini = (inputPart) => {
                     try {
-                        const part = JSON.parse(partString);
+                        const part = typeof inputPart === 'string' ? JSON.parse(inputPart) : inputPart;
+
                         if (typeof part === 'string') {
                             return { text: part };
                         } else if (part.type === 'text') {
@@ -50,9 +51,9 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                             }
                         }
                     } catch (e) {
-                        logger.warn(`Unable to parse part - including as string: ${partString}`);
+                        logger.warn(`Unable to parse part - including as string: ${inputPart}`);
                     }
-                    return { text: partString };
+                    return { text: inputPart };
                 };
     
                 const addPartToMessages = (geminiPart) => {
