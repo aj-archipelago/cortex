@@ -1,5 +1,5 @@
-// sys_openai_chat.js
-// override handler for gpt-3.5-turbo
+// sys_google_chat.js
+// override handler for palm-chat
 
 import { Prompt } from '../server/prompt.js';
 
@@ -13,7 +13,7 @@ export default {
     inputParameters: {
         messages: [],
     },
-    model: 'azure-turbo-chat',
+    model: 'palm-chat',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-3.5-turbo',
+    emulateOpenAIChatModel: 'palm-chat',
 }

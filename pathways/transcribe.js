@@ -1,6 +1,6 @@
 export default {
     prompt: `{{text}}`,
-    model: `oai-whisper`,
+    model: `azure-whisper`,
     inputParameters: {
         file: ``,
         language: ``,
@@ -14,5 +14,3 @@ export default {
     timeout: 3600, // in seconds
     enableDuplicateRequests: false,
 };
-
-

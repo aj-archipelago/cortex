@@ -1,5 +1,5 @@
-// sys_openai_chat.js
-// override handler for gpt-3.5-turbo
+// sys_openai_chat_gpt4_turbo.js
+// override handler for gpt-4-turbo
 
 import { Prompt } from '../server/prompt.js';
 
@@ -13,7 +13,7 @@ export default {
     inputParameters: {
         messages: [],
     },
-    model: 'azure-turbo-chat',
+    model: 'azure-gpt4-turbo',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-3.5-turbo',
+    emulateOpenAIChatModel: 'gpt-4-turbo',
 }
