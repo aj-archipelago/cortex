@@ -101,7 +101,7 @@ const getBlobClient = async () => {
 async function saveFileToBlob(chunkPath, requestId) {
   const { containerClient } = await getBlobClient();
   // Use the filename with a UUID as the blob name
-  const blobName = `${requestId}/${uuidv4()}_${path.basename(chunkPath)}`;
+  const blobName = `${requestId}/${uuidv4()}_${encodeURIComponent(path.basename(chunkPath))}`;
 
   // Create a read stream for the chunk file
   const fileStream = fs.createReadStream(chunkPath);
@@ -174,7 +174,7 @@ async function uploadBlob(
           const localPath = join(publicFolder, requestId);
           fs.mkdirSync(localPath, { recursive: true });
 
-          const filename = `${uuidv4()}_${info.filename}`;
+          const filename = encodeURIComponent(`${uuidv4()}_${info.filename}`);
           const destinationPath = `${localPath}/${filename}`;
 
           await pipeline(file, fs.createWriteStream(destinationPath));
@@ -188,7 +188,7 @@ async function uploadBlob(
 
           resolve(body); // Resolve the promise
         } else {
-          const filename = `${requestId}/${uuidv4()}_${info.filename}`;
+          const filename = encodeURIComponent(`${requestId}/${uuidv4()}_${info.filename}`);
           const { containerClient } = await getBlobClient();
 
           const contentType = mime.lookup(filename);  // content type based on file extension
@@ -217,7 +217,7 @@ async function uploadBlob(
 
         if (useGoogle && useGoogle !== "false") {
           const { url } = body;
-          const filename = `${requestId}/${uuidv4()}_${info.filename}`;
+          const filename = encodeURIComponent(`${requestId}/${uuidv4()}_${info.filename}`);
           const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(filename);
           const writeStream = gcsFile.createWriteStream();
 
