@@ -122,15 +122,15 @@ async function main(context, req) {
         context.log(`Checking hash: ${hash}`);
         const result = await getFileStoreMap(hash);
 
-        const exists = await urlExists(result?.url);
-        const gcsExists = await gcsUrlExists(result?.gcs);
-
-        if(!exists || !gcsExists){
-            await removeFromFileStoreMap(hash);
-            return;
-        }
-
         if(result){
+            const exists = await urlExists(result?.url);
+            const gcsExists = await gcsUrlExists(result?.gcs);
+
+            if(!exists || !gcsExists){
+                await removeFromFileStoreMap(hash);
+                return;
+            }
+
             context.log(`Hash exists: ${hash}`);
             //update redis timestamp with current time
             await setFileStoreMap(hash, result);
