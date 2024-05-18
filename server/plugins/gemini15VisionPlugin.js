@@ -51,8 +51,9 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                             }
                         }
                     } catch (e) {
-                        logger.warn(`Unable to parse part - including as string: ${inputPart}`);
+                        // this space intentionally left blank
                     }
+
                     return { text: inputPart };
                 };
     
