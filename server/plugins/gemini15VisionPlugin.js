@@ -96,6 +96,22 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         };
     }
 
+    async execute(text, parameters, prompt, cortexRequest) {
+        let result = null;
+        try {
+            result = await super.execute(text, parameters, prompt, cortexRequest);
+        } catch (e) {
+            const { data } = e;
+            if (data && data.error) {
+                if (data.error.code === 400 && data.error.message === 'Precondition check failed.') {
+                    throw new Error('One or more of the included files is too large to process. Please try again with a smaller file.');
+                }
+            throw e;
+            }
+        }
+        return result; 
+    }
+
 }
 
 export default Gemini15VisionPlugin;

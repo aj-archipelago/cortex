@@ -25,8 +25,10 @@ class PathwayResolver {
         this.useInputChunking = pathway.useInputChunking;
         this.chunkMaxTokenLength = 0;
         this.warnings = [];
+        this.errors = [];
         this.requestId = uuidv4();
         this.responseParser = new PathwayResponseParser(pathway);
+        this.tool = null;
         this.modelName = [
             pathway.model,
             args?.model,
@@ -178,6 +180,15 @@ class PathwayResolver {
         }
     }
 
+    mergeResults(mergeData) {
+        if (mergeData) {
+            this.previousResult = mergeData.previousResult ? mergeData.previousResult : this.previousResult;
+            this.warnings = [...this.warnings, ...(mergeData.warnings || [])];
+            this.errors = [...this.errors, ...(mergeData.errors || [])];
+            this.tool = mergeData.tool || this.tool;
+        }
+    }
+
     async resolve(args) {
         // Either we're dealing with an async request, stream, or regular request
         if (args.async || args.stream) {
@@ -242,6 +253,12 @@ class PathwayResolver {
     logWarning(warning) {
         this.warnings.push(warning);
         logger.warn(warning);
+    }
+
+    // Add an error and log it
+    logError(error) {
+        this.errors.push(error);
+        logger.error(error);
     }
 
     // Here we choose how to handle long input - either summarize or chunk
@@ -416,7 +433,8 @@ class PathwayResolver {
             }
         }
 
-        if (prompt.saveResultTo) {
+        // save the result to the context if requested and no errors
+        if (prompt.saveResultTo && this.errors.length === 0) {
             this.savedContext[prompt.saveResultTo] = result;
         }
         return result;

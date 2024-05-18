@@ -50,6 +50,7 @@ const typeDef = (pathway) => {
         result: ${resultStr}
         previousResult: String
         warnings: [String]
+        errors: [String]
         contextId: String
         tool: String
 }`;

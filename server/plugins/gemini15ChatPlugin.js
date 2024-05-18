@@ -135,7 +135,13 @@ class Gemini15ChatPlugin extends ModelPlugin {
         if (data && data.contents && Array.isArray(data.contents)) {
             dataToMerge = data.contents;
         } else if (data && data.candidates && Array.isArray(data.candidates)) {
-            return data.candidates[0].content.parts[0].text;
+            const { content, finishReason, safetyRatings } = data.candidates[0];
+            if (finishReason === 'STOP') {
+                return content?.parts?.[0]?.text ?? '';
+            } else {
+                const returnString = `Response was not completed.  Finish reason: ${finishReason}, Safety ratings: ${JSON.stringify(safetyRatings, null, 2)}`;
+                throw new Error(returnString);
+            }
         } else if (Array.isArray(data)) {
             dataToMerge = data;
         } else {
@@ -153,7 +159,6 @@ class Gemini15ChatPlugin extends ModelPlugin {
 
         cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
         cortexRequest.params = {}; // query params
-        cortexRequest.stream = stream;
         cortexRequest.stream = stream;
         cortexRequest.urlSuffix = cortexRequest.stream ? ':streamGenerateContent?alt=sse' : ':generateContent';
 

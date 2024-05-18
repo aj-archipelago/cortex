@@ -4,17 +4,19 @@ import OpenAIChatPlugin from './openAiChatPlugin.js';
 class OpenAIVisionPlugin extends OpenAIChatPlugin {
 
     tryParseMessages(messages) {
-        //check if elements of messages strings are JSON, if valid JSON parse them to obj
         messages.map(message => {
             try {
-                // message.content can be array or string
                 if (typeof message.content === 'string') {
                     message.content = JSON.parse(message.content);
                 } else if (Array.isArray(message.content)) {
                     message.content = message.content.map(item => {
-                        const parsedItem = JSON.parse(item);
-                        const { type, text, image_url, url } = parsedItem;
-                        return { type, text, image_url: url || image_url};
+                        if (typeof item === 'string') {
+                            return { type: 'text', text: item };
+                        } else {
+                            const parsedItem = JSON.parse(item);
+                            const { type, text, image_url, url } = parsedItem;
+                            return { type, text, image_url: url || image_url };
+                        }
                     });
                 }     
             } catch (e) {
@@ -29,9 +31,13 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
 
         this.tryParseMessages(requestParameters.messages);
 
-        if(this.promptParameters.max_tokens) {
-            requestParameters.max_tokens = this.promptParameters.max_tokens;
-        }
+        const modelMaxReturnTokens = this.getModelMaxReturnTokens();
+        const maxTokensPrompt = this.promptParameters.max_tokens;
+        const maxTokensModel = this.getModelMaxTokenLength() * (1 - this.getPromptTokenRatio());
+
+        const maxTokens = maxTokensPrompt || maxTokensModel;
+
+        requestParameters.max_tokens = maxTokens ? Math.min(maxTokens, modelMaxReturnTokens) : modelMaxReturnTokens;
 
         return requestParameters;
     }
