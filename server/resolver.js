@@ -1,6 +1,5 @@
 import { fulfillWithTimeout } from '../lib/promiser.js';
 import { PathwayResolver } from './pathwayResolver.js';
-import logger from '../lib/logger.js';
 
 // This resolver uses standard parameters required by Apollo server:
 // (parent, args, contextValue, info)

@@ -76,7 +76,7 @@ class Gemini15ChatPlugin extends ModelPlugin {
             });
         }
     
-        // Gemini requires an even number of messages
+        // Gemini requires an odd number of messages
         if (modifiedMessages.length % 2 === 0) {
             modifiedMessages = modifiedMessages.slice(1);
         }
