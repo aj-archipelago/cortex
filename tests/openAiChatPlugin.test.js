@@ -53,6 +53,10 @@ test('getRequestParameters', async (t) => {
                 content: 'Translating: Help me',
                 role: 'assistant',
             },
+            {
+                content: 'Nice work!',
+                role: 'user',
+            },
         ],
         temperature: 0.7,
     });
