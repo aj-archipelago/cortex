@@ -76,6 +76,33 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
 
 const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 
+
+async function gcsUrlExists(url, defaultReturn = true) {
+    try {
+        if(!url) {
+            return defaultReturn; // Cannot check return
+        }
+        if (!gcs) {
+            console.warn('GCS environment variables are not set. Unable to check if URL exists in GCS.');
+            return defaultReturn; // Cannot check return 
+        }
+
+        const urlParts = url.replace('gs://', '').split('/');
+        const bucketName = urlParts[0];
+        const fileName = urlParts.slice(1).join('/');
+
+        const bucket = gcs.bucket(bucketName);
+        const file = bucket.file(fileName);
+
+        const [exists] = await file.exists();
+        
+        return exists;
+    } catch (error) {
+        console.error('Error checking if GCS URL exists:', error);
+        return false;
+    }
+}
+
 const getBlobClient = async () => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME;
@@ -348,4 +375,4 @@ async function cleanupGCS(urls=null) {
   return cleanedURLs;
 }
 
-export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS };
+export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists };

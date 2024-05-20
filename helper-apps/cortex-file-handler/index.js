@@ -1,5 +1,5 @@
 import { downloadFile, processYoutubeUrl, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS } from './blobHandler.js';
+import { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists } from './blobHandler.js';
 import { cleanupRedisFileStoreMap, getFileStoreMap, publishRequestProgress, removeFromFileStoreMap, setFileStoreMap } from './redis.js';
 import { deleteTempPath, ensureEncoded, isValidYoutubeUrl } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
@@ -122,14 +122,15 @@ async function main(context, req) {
         context.log(`Checking hash: ${hash}`);
         const result = await getFileStoreMap(hash);
 
-        const exists = await urlExists(result?.url);
-
-        if(!exists){
-            await removeFromFileStoreMap(hash);
-            return;
-        }
-
         if(result){
+            const exists = await urlExists(result?.url);
+            const gcsExists = await gcsUrlExists(result?.gcs);
+
+            if(!exists || !gcsExists){
+                await removeFromFileStoreMap(hash);
+                return;
+            }
+
             context.log(`Hash exists: ${hash}`);
             //update redis timestamp with current time
             await setFileStoreMap(hash, result);
