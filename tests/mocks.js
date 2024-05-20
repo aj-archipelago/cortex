@@ -35,6 +35,7 @@ export const mockConfig = {
         messages: [
           { role: 'user', content: 'Translate this: {{{text}}}' },
           { role: 'assistant', content: 'Translating: {{{text}}}' },
+          { role: 'user', content: 'Nice work!' },
         ],
       }),
   };
@@ -78,6 +79,7 @@ export const mockConfig = {
         messages: [
           { role: 'user', content: 'Translate this: {{{text}}}' },
           { role: 'assistant', content: 'Translating: {{{text}}}' },
+          { role: 'user', content: 'Nice work!' },
         ],
       }),
   };

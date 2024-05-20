@@ -100,7 +100,7 @@ class PalmChatPlugin extends ModelPlugin {
             throw new Error(`Prompt is too long to successfully call the model at ${tokenLength} tokens.  The model will not be called.`);
         }
     
-        // Ensure there are an even number of messages (PaLM requires an even number of messages)
+        // Ensure there are an odd number of messages for turn taking
         if (requestMessages.length % 2 === 0) {
             requestMessages = requestMessages.slice(1);
         }
