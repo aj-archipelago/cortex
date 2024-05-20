@@ -16,6 +16,7 @@ import test_cohere_summarize from './test_cohere_summarize.js';
 import test_langchain from './test_langchain.mjs';
 import test_palm_chat from './test_palm_chat.js';
 import transcribe from './transcribe.js';
+import transcribe_neuralspace from './transcribe_neuralspace.js';
 import translate from './translate.js';
 import embeddings from './embeddings.js';
 import vision from './vision.js';
@@ -42,6 +43,7 @@ export {
     test_langchain,
     test_palm_chat,
     transcribe,
+    transcribe_neuralspace,
     translate,
     vision,
 };

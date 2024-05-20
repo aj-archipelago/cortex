@@ -1,24 +1,13 @@
 // openAiWhisperPlugin.js
 import ModelPlugin from './modelPlugin.js';
 import { config } from '../../config.js';
-import subsrt from 'subsrt';
 import FormData from 'form-data';
 import fs from 'fs';
-import { axios } from '../../lib/requestExecutor.js';
-import stream from 'stream';
-import os from 'os';
-import path from 'path';
-import http from 'http';
-import https from 'https';
-import { URL } from 'url';
-import { v4 as uuidv4 } from 'uuid';
-import { promisify } from 'util';
 import { publishRequestProgress } from '../../lib/redisSubscription.js';
 import logger from '../../lib/logger.js';
 import CortexRequest from '../../lib/cortexRequest.js';
-const pipeline = promisify(stream.pipeline);
+import { downloadFile, deleteTempPath, convertSrtToText, alignSubtitles, getMediaChunks, markCompletedForCleanUp  } from '../../lib/util.js';
 
-const API_URL = config.get('whisperMediaApiUrl');
 const WHISPER_TS_API_URL  = config.get('whisperTSApiUrl');
 if(WHISPER_TS_API_URL){
     logger.info(`WHISPER API URL using ${WHISPER_TS_API_URL}`);
@@ -28,145 +17,9 @@ if(WHISPER_TS_API_URL){
 
 const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
 
-async function deleteTempPath(path) {
-    try {
-        if (!path) {
-            logger.warn('Temporary path is not defined.');
-            return;
-        }
-        if (!fs.existsSync(path)) {
-            logger.warn(`Temporary path ${path} does not exist.`);
-            return;
-        }
-        const stats = fs.statSync(path);
-        if (stats.isFile()) {
-            fs.unlinkSync(path);
-            logger.info(`Temporary file ${path} deleted successfully.`);
-        } else if (stats.isDirectory()) {
-            fs.rmSync(path, { recursive: true });
-            logger.info(`Temporary folder ${path} and its contents deleted successfully.`);
-        }
-    } catch (err) {
-        logger.error(`Error occurred while deleting the temporary path: ${err}`);
-    }
-}
-
-function generateUniqueFilename(extension) {
-    return `${uuidv4()}.${extension}`;
-}
-
-const downloadFile = async (fileUrl) => {
-    const fileExtension = path.extname(fileUrl).slice(1);
-    const uniqueFilename = generateUniqueFilename(fileExtension);
-    const tempDir = os.tmpdir();
-    const localFilePath = `${tempDir}/${uniqueFilename}`;
-
-    // eslint-disable-next-line no-async-promise-executor
-    return new Promise(async (resolve, reject) => {
-        try {
-            const parsedUrl = new URL(fileUrl);
-            const protocol = parsedUrl.protocol === 'https:' ? https : http;
-
-            const response = await new Promise((resolve, reject) => {
-                protocol.get(parsedUrl, (res) => {
-                    if (res.statusCode === 200) {
-                        resolve(res);
-                    } else {
-                        reject(new Error(`HTTP request failed with status code ${res.statusCode}`));
-                    }
-                }).on('error', reject);
-            });
-
-            await pipeline(response, fs.createWriteStream(localFilePath));
-            logger.info(`Downloaded file to ${localFilePath}`);
-            resolve(localFilePath);
-        } catch (error) {
-            fs.unlink(localFilePath, () => {
-                reject(error);
-            });
-            //throw error;
-        }
-    });
-};
-
-// convert srt format to text
-function convertToText(str) {
-    return str
-      .split('\n')
-      .filter(line => !line.match(/^\d+$/) && !line.match(/^\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}$/) && line !== '')
-      .join(' ');
-}
-
-function alignSubtitles(subtitles, format, offsets) {
-    const result = [];
-
-    function preprocessStr(str) {
-        try{
-            if(!str) return '';
-            return str.trim().replace(/(\n\n)(?!\n)/g, '\n\n\n');
-        }catch(e){
-            logger.error(`An error occurred in content text preprocessing: ${e}`);
-            return '';
-        }
-    }
-
-    function shiftSubtitles(subtitle, shiftOffset) {
-        const captions = subsrt.parse(preprocessStr(subtitle));
-        const resynced = subsrt.resync(captions, { offset: shiftOffset });
-        return resynced;
-    }
-
-    for (let i = 0; i < subtitles.length; i++) {
-        result.push(...shiftSubtitles(subtitles[i], offsets[i]*1000)); // convert to milliseconds
-    }
-    
-    try {
-        //if content has needed html style tags, keep them
-        for(const obj of result) {
-            if(obj && obj.content){ 
-                obj.text = obj.content;
-            }
-        }
-    } catch (error) {
-        logger.error(`An error occurred in content text parsing: ${error}`);
-    }
-    
-    return subsrt.build(result, { format: format === 'vtt' ? 'vtt' : 'srt' });
-}
-
-
 class OpenAIWhisperPlugin extends ModelPlugin {
     constructor(pathway, model) {
         super(pathway, model);
-    }
-
-    async getMediaChunks(file, requestId) {
-        try {
-            if (API_URL) {
-                //call helper api and get list of file uris
-                const res = await axios.get(API_URL, { params: { uri: file, requestId } });
-                return res.data;
-            } else {
-                logger.info(`No API_URL set, returning file as chunk`);
-                return [file];
-            }
-        } catch (err) {
-            logger.error(`Error getting media chunks list from api: ${err}`);
-            throw err;
-        }
-    }
-
-    async markCompletedForCleanUp(requestId) {
-        try {
-            if (API_URL) {
-                //call helper api to mark processing as completed
-                const res = await axios.delete(API_URL, { params: { requestId } });
-                logger.info(`Marked request ${requestId} as completed:`, res.data);
-                return res.data;
-            }
-        } catch (err) {
-            logger.error(`Error marking request ${requestId} as completed: ${err}`);
-        }
     }
 
     // Execute the request to the OpenAI Whisper API
@@ -252,7 +105,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
             if(!wordTimestamped && !responseFormat){ 
                 //if no response format, convert to text
-                return convertToText(res);
+                return convertSrtToText(res);
             }
             return res;
         }
@@ -324,7 +177,7 @@ let offsets = [];
 let uris = []
 
 try {
-    const mediaChunks = await this.getMediaChunks(file, requestId);
+    const mediaChunks = await getMediaChunks(file, requestId);
     
     if (!mediaChunks || !mediaChunks.length) {
         throw new Error(`Error in getting chunks from media helper for file ${file}`);
@@ -363,14 +216,14 @@ try {
                     } 
                 }
 
-                await this.markCompletedForCleanUp(requestId);
+                await markCompletedForCleanUp(requestId);
 
                 //check cleanup for whisper temp uploaded files url
                 const regex = /whispertempfiles\/([a-z0-9-]+)/;
                 const match = file.match(regex);
                 if (match && match[1]) {
                     const extractedValue = match[1];
-                    await this.markCompletedForCleanUp(extractedValue);
+                    await markCompletedForCleanUp(extractedValue);
                     logger.info(`Cleaned temp whisper file ${file} with request id ${extractedValue}`);
                 }
 
