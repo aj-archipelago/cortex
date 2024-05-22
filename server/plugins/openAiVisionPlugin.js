@@ -8,7 +8,8 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             try {
                 if (typeof message.content === 'string') {
                     message.content = JSON.parse(message.content);
-                } else if (Array.isArray(message.content)) {
+                }
+                if (Array.isArray(message.content)) {
                     message.content = message.content.map(item => {
                         if (typeof item === 'string') {
                             return { type: 'text', text: item };
@@ -38,6 +39,10 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         const maxTokens = maxTokensPrompt || maxTokensModel;
 
         requestParameters.max_tokens = maxTokens ? Math.min(maxTokens, modelMaxReturnTokens) : modelMaxReturnTokens;
+
+        if (this.promptParameters.json) {
+            //requestParameters.response_format = { type: "json_object", }
+        }
 
         return requestParameters;
     }

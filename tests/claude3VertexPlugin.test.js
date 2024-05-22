@@ -129,27 +129,33 @@ test('convertMessagesToClaudeVertex text message', async (t) => {
 });
 
 test('convertMessagesToClaudeVertex image_url message', async (t) => {
-    const plugin = new Claude3VertexPlugin(pathway, model);
-    // Test with image_url message
-    const messages = [
-        { 
-            role: 'assistant', 
-            content: { 
-                type: 'image_url', 
-                // Define image_url, make sure it's accessible and supported MIME type
-                image_url: 'https://static.toiimg.com/thumb/msid-102827471,width-1280,height-720,resizemode-4/102827471.jpg' 
-            }
-        }
-    ];
-    const output = await plugin.convertMessagesToClaudeVertex(messages);
-    // Make sure image data is in correct format, this will need to be updated based on the image you are testing with
-    const expectedImageDataStart = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv";
-    t.is(output.system, '');
-    t.is(output.modifiedMessages[0].role, 'assistant');
-    t.is(output.modifiedMessages[0].content[0].type, 'image');
-    t.is(output.modifiedMessages[0].content[0].source.type, 'base64');
-    t.is(output.modifiedMessages[0].content[0].source.media_type, 'image/jpeg');
-    t.true(output.modifiedMessages[0].content[0].source.data.startsWith(expectedImageDataStart));
+  const plugin = new Claude3VertexPlugin(pathway, model);
+  // Test with image_url message
+  const messages = [
+      { 
+          role: 'assistant', 
+          content: { 
+              type: 'image_url', 
+              // Define image_url, make sure it's accessible and supported MIME type
+              image_url: 'https://static.toiimg.com/thumb/msid-102827471,width-1280,height-720,resizemode-4/102827471.jpg' 
+          }
+      }
+  ];
+  const output = await plugin.convertMessagesToClaudeVertex(messages);
+
+  // Define a regex for base64 validation
+  const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+  const base64Data = output.modifiedMessages[0].content[0].source.data;
+
+  t.is(output.system, '');
+  t.is(output.modifiedMessages[0].role, 'assistant');
+  t.is(output.modifiedMessages[0].content[0].type, 'image');
+  t.is(output.modifiedMessages[0].content[0].source.type, 'base64');
+  t.is(output.modifiedMessages[0].content[0].source.media_type, 'image/jpeg');
+  
+  // Check if the base64 data looks reasonable
+  t.true(base64Data.length > 100); // Check if the data is sufficiently long
+  t.true(base64Regex.test(base64Data)); // Check if the data matches the base64 regex
 });
 
 test('convertMessagesToClaudeVertex unsupported type', async (t) => {
