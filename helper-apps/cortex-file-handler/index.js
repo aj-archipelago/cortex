@@ -10,6 +10,10 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import http from 'http';
 import https from 'https';
+import axios from "axios";
+import { pipeline } from "stream";
+import { promisify } from "util";
+const pipelineUtility = promisify(pipeline); // To pipe streams using async/await
 
 const DOC_EXTENSIONS =  [".txt", ".json", ".csv", ".md", ".xml", ".js", ".html", ".css", '.pdf', '.docx', '.xlsx', '.csv'];
 
@@ -116,7 +120,48 @@ async function main(context, req) {
         return;
     }
 
-    const { uri, requestId, save, hash, checkHash } = req.body?.params || req.query;
+    const { uri, requestId, save, hash, checkHash, fetch, load, restore } = req.body?.params || req.query;
+
+    const filepond = fetch || restore || load;
+    if (req.method.toLowerCase() === `get` && filepond) {
+        context.log(`Remote file: ${filepond}`);
+        // Check if file already exists (using hash as the key)
+        const exists = await getFileStoreMap(filepond);
+        if(exists){
+            context.res = {
+                status: 200,
+                body: exists // existing file URL
+            };
+            return;
+        }
+
+        // Check if it's a youtube url
+        let youtubeDownloadedFile = null; 
+        if(isValidYoutubeUrl(filepond)){
+            youtubeDownloadedFile = await processYoutubeUrl(filepond, true);
+        }
+        const filename = path.join(os.tmpdir(), path.basename(youtubeDownloadedFile || filepond));
+        // Download the remote file to a local/temporary location keep name & ext
+        if(!youtubeDownloadedFile){
+            const response = await axios.get(filepond, { responseType: "stream" });
+            await pipelineUtility(response.data, fs.createWriteStream(filename));
+        }
+
+        
+        const res = await uploadBlob(context, null, !useAzure, true, filename); 
+        context.log(`File uploaded: ${JSON.stringify(res)}`);
+
+        //Update Redis (using hash as the key)
+        await setFileStoreMap(filepond, res);
+
+        // Return the file URL
+        context.res = {
+            status: 200,
+            body: res,
+        };
+
+        return;
+    }
 
     if(hash && checkHash){ //check if hash exists
         context.log(`Checking hash: ${hash}`);
@@ -229,7 +274,8 @@ async function main(context, req) {
 
             if (isYoutubeUrl) {
                 // totalCount += 1; // extra 1 step for youtube download
-                file = await processYoutubeUrl(file);
+                const processAsVideo = req.body?.params?.processAsVideo || req.query?.processAsVideo;
+                file = await processYoutubeUrl(file, processAsVideo);
             }
 
             const { chunkPromises, chunkOffsets, uniqueOutputPath } = await splitMediaFile(file);

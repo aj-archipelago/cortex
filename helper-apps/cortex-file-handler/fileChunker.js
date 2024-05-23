@@ -112,16 +112,20 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 500) {
     }
 }
 
-const ytdlDownload = async (url, filename) => {
+const ytdlDownload = async (url, filename, video = false) => {
     return new Promise((resolve, reject) => {
-        const video = ytdl(url, { quality: 'highestaudio' });
+        const videoOptions = video 
+            ? { filter: 'audioandvideo' }  // audio and video
+            : { quality: 'highestaudio' }; // audio only
+
+        const videoStream = ytdl(url, videoOptions);
         let lastLoggedTime = Date.now();
 
-        video.on('error', (error) => {
+        videoStream.on('error', (error) => {
             reject(error);
         });
 
-        video.on('progress', (chunkLength, downloaded, total) => {
+        videoStream.on('progress', (chunkLength, downloaded, total) => {
             const currentTime = Date.now();
             if (currentTime - lastLoggedTime >= 2000) { // Log every 2 seconds
                 const percent = downloaded / total;
@@ -130,7 +134,7 @@ const ytdlDownload = async (url, filename) => {
             }
         });
 
-        video.pipe(fs.createWriteStream(filename))
+        videoStream.pipe(fs.createWriteStream(filename))
             .on('finish', () => {
                 resolve();
             })
@@ -140,10 +144,11 @@ const ytdlDownload = async (url, filename) => {
     });
 };
 
-const processYoutubeUrl = async (url) => {
+async function processYoutubeUrl(url, video=false) {
     try {
-        const outputFileName = path.join(os.tmpdir(), `${uuidv4()}.mp3`);
-        await ytdlDownload(url, outputFileName);
+        const outputFormat = video ? '.mp4' : '.mp3';
+        const outputFileName = path.join(os.tmpdir(), `${uuidv4()}${outputFormat}`);
+        await ytdlDownload(url, outputFileName, video);
         return outputFileName;
     } catch (e) {
         console.log(e);
