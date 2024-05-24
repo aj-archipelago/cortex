@@ -36,6 +36,15 @@ const VIDEO_EXTENSIONS = [
   ".mkv",
 ];
 
+const AUDIO_EXTENSIONS = [
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".flac",
+  ".aac",
+  ".aiff",
+];
+
 function isBase64(str) {
   try {
     return btoa(atob(str)) == str;
@@ -162,122 +171,44 @@ async function deleteBlob(requestId) {
   return result;
 }
 
-async function uploadBlob(
-  context,
-  req,
-  saveToLocal = false,
-  useGoogle = false
-) {
+async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, filePath=null) {
   return new Promise((resolve, reject) => {
     try {
-      const busboy = Busboy({ headers: req.headers });
       let requestId = uuidv4();
       let body = {};
 
-      busboy.on("field", (fieldname, value) => {
-        if (fieldname === "requestId") {
-          requestId = value;
-        } else if (fieldname === "useGoogle") {
-          useGoogle = value;
-        }
-      });
-
-      busboy.on("file", async (fieldname, file, info) => {
-        //do not use google if file is not image or video
-        const ext = path.extname(info.filename).toLowerCase();
-        const canUseGoogle = IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext);
-        if(!canUseGoogle) {
-          useGoogle = false;
-        }
-
-        //check if useGoogle is set but no gcs and warn
-        if(useGoogle && useGoogle !== "false" && !gcs) {
-          context.log.warn("Google Cloud Storage is not initialized reverting google upload ");
-          useGoogle = false;
-        }
-
-        if (saveToLocal) {
-          // Create the target folder if it doesn't exist
-          const localPath = join(publicFolder, requestId);
-          fs.mkdirSync(localPath, { recursive: true });
-
-          const filename = encodeURIComponent(`${uuidv4()}_${info.filename}`);
-          const destinationPath = `${localPath}/${filename}`;
-
-          await pipeline(file, fs.createWriteStream(destinationPath));
-
-          const message = `File '${filename}' saved to folder successfully.`;
-          context.log(message);
-
-          const url = `http://${ipAddress}:${port}/files/${requestId}/${filename}`;
-
-          body = { message, url };
-
-          resolve(body); // Resolve the promise
-        } else {
-          const filename = encodeURIComponent(`${requestId}/${uuidv4()}_${info.filename}`);
-          const { containerClient } = await getBlobClient();
-
-          const contentType = mime.lookup(filename);  // content type based on file extension
-          const options = {};
-          if (contentType) {
-            options.blobHTTPHeaders = { blobContentType: contentType };
+      // If filePath is given, we are dealing with local file and not form-data
+      if (filePath) {
+        const file = fs.createReadStream(filePath);
+        const filename = path.basename(filePath);
+        uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename, resolve)
+      } else {
+        // Otherwise, continue working with form-data
+        const busboy = Busboy({ headers: req.headers });
+      
+        busboy.on("field", (fieldname, value) => {
+          if (fieldname === "requestId") {
+            requestId = value;
+          } else if (fieldname === "useGoogle") {
+            useGoogle = value;
           }
+        });
 
-          const blockBlobClient = containerClient.getBlockBlobClient(filename);
+        busboy.on("file", async (fieldname, file, filename) => {
+          uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename?.filename || filename, resolve)
+        });
 
-          const passThroughStream = new PassThrough();
-          file.pipe(passThroughStream);
+        busboy.on("error", (error) => {
+          context.log.error("Error processing file upload:", error);
+          context.res = {
+            status: 500,
+            body: "Error processing file upload.",
+          };
+          reject(error); // Reject the promise
+        });
 
-          await blockBlobClient.uploadStream(passThroughStream, undefined, undefined, options);
-
-          const message = `File '${filename}' uploaded successfully.`;
-          const url = blockBlobClient.url;
-          context.log(message);
-          body = { message, url };
-        }
-
-        context.res = {
-          status: 200,
-          body,
-        };
-
-        if (useGoogle && useGoogle !== "false") {
-          const { url } = body;
-          const filename = encodeURIComponent(`${requestId}/${uuidv4()}_${info.filename}`);
-          const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(filename);
-          const writeStream = gcsFile.createWriteStream();
-
-          const response = await axios({
-            method: "get",
-            url: url,
-            responseType: "stream",
-          });
-
-          // Pipe the Axios response stream directly into the GCS Write Stream
-          response.data.pipe(writeStream);
-
-          await new Promise((resolve, reject) => {
-            writeStream.on("finish", resolve);
-            writeStream.on("error", reject);
-          });
-
-          body.gcs = `gs://${GCS_BUCKETNAME}/${filename}`;
-        }
-
-        resolve(body); // Resolve the promise
-      });
-
-      busboy.on("error", (error) => {
-        context.log.error("Error processing file upload:", error);
-        context.res = {
-          status: 500,
-          body: "Error processing file upload.",
-        };
-        reject(error); // Reject the promise
-      });
-
-      req.pipe(busboy);
+        req.pipe(busboy);
+      }
     } catch (error) {
       context.log.error("Error processing file upload:", error);
       context.res = {
@@ -287,6 +218,92 @@ async function uploadBlob(
       reject(error); // Reject the promise
     }
   });
+}
+
+async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename, resolve) {
+  // do not use Google if the file is not an image or video
+  const ext = path.extname(filename).toLowerCase();
+  const canUseGoogle = IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext);
+  if (!canUseGoogle) {
+    useGoogle = false;
+  }
+
+  // check if useGoogle is set but no gcs and warn
+  if (useGoogle && useGoogle !== "false" && !gcs) {
+    context.log.warn("Google Cloud Storage is not initialized reverting google upload ");
+    useGoogle = false;
+  }
+
+  const encodedFilename = encodeURIComponent(`${requestId || uuidv4()}_${filename}`);
+
+
+  if (saveToLocal) {
+    // create the target folder if it doesn't exist
+    const localPath = join(publicFolder, requestId);
+    fs.mkdirSync(localPath, { recursive: true });
+
+    const destinationPath = `${localPath}/${encodedFilename}`;
+
+    await pipeline(file, fs.createWriteStream(destinationPath));
+
+    const message = `File '${encodedFilename}' saved to folder successfully.`;
+    context.log(message);
+
+    const url = `http://${ipAddress}:${port}/files/${requestId}/${encodedFilename}`;
+
+    body = { message, url };
+
+    resolve(body); // Resolve the promise
+  } else {
+    const { containerClient } = await getBlobClient();
+
+    const contentType = mime.lookup(encodedFilename);  // content type based on file extension
+    const options = {};
+    if (contentType) {
+      options.blobHTTPHeaders = { blobContentType: contentType };
+    }
+
+    const blockBlobClient = containerClient.getBlockBlobClient(encodedFilename);
+
+    const passThroughStream = new PassThrough();
+    file.pipe(passThroughStream);
+
+    await blockBlobClient.uploadStream(passThroughStream, undefined, undefined, options);
+
+    const message = `File '${encodedFilename}' uploaded successfully.`;
+    const url = blockBlobClient.url;
+    context.log(message);
+    body = { message, url };
+  }
+
+  context.res = {
+    status: 200,
+    body,
+  };
+
+  if (useGoogle && useGoogle !== "false") {
+    const { url } = body;
+    const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
+    const writeStream = gcsFile.createWriteStream();
+
+    const response = await axios({
+      method: "get",
+      url: url,
+      responseType: "stream",
+    });
+
+    // pipe the Axios response stream directly into the GCS Write Stream
+    response.data.pipe(writeStream);
+
+    await new Promise((resolve, reject) => {
+      writeStream.on("finish", resolve);
+      writeStream.on("error", reject);
+    });
+
+    body.gcs = `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
+  }
+  
+  resolve(body); // Resolve the promise
 }
 
 // Function to delete files that haven't been used in more than a month
