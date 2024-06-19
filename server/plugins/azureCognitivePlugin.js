@@ -34,7 +34,7 @@ class AzureCognitivePlugin extends ModelPlugin {
     async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
-        const { inputVector, calculateInputVector, privateData, filter, docId, title, chunkNo } = combinedParameters;
+        const { inputVector, calculateInputVector, privateData, filter, docId, title, chunkNo, chatId } = combinedParameters;
         const data = {};
 
         if (mode == 'delete') {
@@ -44,6 +44,10 @@ class AzureCognitivePlugin extends ModelPlugin {
             
             if (docId) {
                 searchQuery += ` AND docId:'${docId}'`;
+            }
+
+            if (chatId) {
+                searchQuery += ` AND chatId:'${chatId}'`;
             }
 
             cortexRequest.url = searchUrl;
@@ -75,6 +79,7 @@ class AzureCognitivePlugin extends ModelPlugin {
                 content: text,
                 owner: savedContextId,
                 docId: docId || uuidv4(),
+                chatId: chatId,
                 createdAt: new Date().toISOString()
             }
 
@@ -116,6 +121,10 @@ class AzureCognitivePlugin extends ModelPlugin {
         if (indexName == 'indexcortex') { //if private, filter by owner via contextId //privateData && 
             data.filter && (data.filter = data.filter + ' and ');
             data.filter = `owner eq '${savedContextId}'`;
+
+            if(chatId){
+                data.filter += ` and chatId eq '${chatId}'`;
+            }
         }
 
         return { data };

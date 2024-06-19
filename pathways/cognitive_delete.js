@@ -2,7 +2,8 @@ export default {
     // prompt: `{{text}}`,
     model: 'azure-cognitive',
     inputParameters: {
-        docId: ``
+        docId: ``,
+        chatId: ``,
     },
     mode: 'delete', 
     enableDuplicateRequests: false,

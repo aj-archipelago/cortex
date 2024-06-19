@@ -8,6 +8,7 @@ export default {
         file: ``,
         privateData: true,
         docId: ``,
+        chatId: ``,
     },
     mode: 'index', // 'index' or 'search',
     inputChunkSize:  500,
