@@ -138,7 +138,8 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
     modifiedMessages = combinedMessages;
 
-    // Claude vertex requires an even number of messages
+    // Claude vertex requires an odd number of messages
+    // for proper conversation turn-taking
     if (modifiedMessages.length % 2 === 0) {
       modifiedMessages = modifiedMessages.slice(1);
     }

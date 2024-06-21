@@ -7,6 +7,7 @@ export default {
         filter: ``,
         indexName: ``,
         semanticConfiguration: ``,
+        chatId: ``,
     },
     enableDuplicateRequests: false,
     timeout: 300,

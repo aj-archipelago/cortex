@@ -111,6 +111,13 @@ var config = convict({
                     "model": "whisper-1"
                 },
             },
+            "neuralspace": {
+                "type": "NEURALSPACE",
+                "url": "https://voice.neuralspace.ai/api/v2/jobs",
+                "headers": {
+                    "Authorization": "{{NEURALSPACE_API_KEY}}",
+                },
+            },
             "azure-cognitive": {
                 "type": "AZURE-COGNITIVE",
                 "url": "{{{AZURE_COGNITIVE_API_URL}}}",
@@ -222,6 +229,11 @@ var config = convict({
         format: Number,
         default: 0,
         env: 'SUBSCRIPTION_KEEP_ALIVE'
+    },
+    neuralSpaceApiKey: {
+        format: String,
+        default: null,
+        env: 'NEURALSPACE_API_KEY'
     },
 });
 

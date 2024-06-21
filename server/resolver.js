@@ -1,6 +1,5 @@
 import { fulfillWithTimeout } from '../lib/promiser.js';
 import { PathwayResolver } from './pathwayResolver.js';
-import logger from '../lib/logger.js';
 
 // This resolver uses standard parameters required by Apollo server:
 // (parent, args, contextValue, info)
@@ -22,16 +21,16 @@ const rootResolver = async (parent, args, contextValue, info) => {
     try {
         result = await fulfillWithTimeout(pathway.resolver(parent, args, contextValue, info), pathway.timeout);
     } catch (error) {
-        logger.error(`Request failed with error: ${error}`);
+        pathwayResolver.logError(error);
         result = error.message || error.toString();
     }
     
-    const { warnings, previousResult, savedContextId, tool } = pathwayResolver;
+    const { warnings, errors, previousResult, savedContextId, tool } = pathwayResolver;
     
     // Add request parameters back as debug
     const debug = pathwayResolver.prompts.map(prompt => prompt.debugInfo || '').join('\n').trim();
     
-    return { debug, result, warnings, previousResult, tool, contextId: savedContextId }
+    return { debug, result, warnings, errors, previousResult, tool, contextId: savedContextId }
 }
 
 // This resolver is used by the root resolver to process the request

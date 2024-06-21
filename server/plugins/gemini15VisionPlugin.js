@@ -1,6 +1,5 @@
 import Gemini15ChatPlugin from './gemini15ChatPlugin.js';
 import mime from 'mime-types';
-import logger from '../../lib/logger.js';
 
 class Gemini15VisionPlugin extends Gemini15ChatPlugin {
 
@@ -51,8 +50,9 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                             }
                         }
                     } catch (e) {
-                        logger.warn(`Unable to parse part - including as string: ${inputPart}`);
+                        // this space intentionally left blank
                     }
+
                     return { text: inputPart };
                 };
     
@@ -83,7 +83,7 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
             });
         }
     
-        // Gemini requires an even number of messages
+        // Gemini requires an odd number of messages
         if (modifiedMessages.length % 2 === 0) {
             modifiedMessages = modifiedMessages.slice(1);
         }
@@ -94,6 +94,22 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
             modifiedMessages,
             system,
         };
+    }
+
+    async execute(text, parameters, prompt, cortexRequest) {
+        let result = null;
+        try {
+            result = await super.execute(text, parameters, prompt, cortexRequest);
+        } catch (e) {
+            const { data } = e;
+            if (data && data.error) {
+                if (data.error.code === 400 && data.error.message === 'Precondition check failed.') {
+                    throw new Error('One or more of the included files is too large to process. Please try again with a smaller file.');
+                }
+            throw e;
+            }
+        }
+        return result; 
     }
 
 }

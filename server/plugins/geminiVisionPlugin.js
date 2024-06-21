@@ -1,6 +1,5 @@
 import GeminiChatPlugin from './geminiChatPlugin.js';
 import mime from 'mime-types';
-import logger from '../../lib/logger.js';
 
 class GeminiVisionPlugin extends GeminiChatPlugin {
 
@@ -55,7 +54,7 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
                             }
                         }
                     } catch (e) {
-                        logger.warn(`Unable to parse part - including as string: ${partString}`);
+                        // this space intentionally left blank
                     }
                     return { text: partString };
                 };
@@ -87,7 +86,7 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
             });
         }
     
-        // Gemini requires an even number of messages
+        // Gemini requires an odd number of messages
         if (modifiedMessages.length % 2 === 0) {
             modifiedMessages = modifiedMessages.slice(1);
         }

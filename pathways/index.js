@@ -69,6 +69,7 @@ import timeline from './timeline.js';
 import topics from './topics.js';
 import topics_sentiment from './topics_sentiment.js';
 import transcribe from './transcribe.js';
+import transcribe_neuralspace from './transcribe_neuralspace.js';
 import translate from './translate.js';
 import translate_azure from './translate_azure.js';
 import translate_context from './translate_context.js';
@@ -129,6 +130,7 @@ export {
     sys_openai_chat_gpt4_turbo, tags,
     taxonomy,
     timeline, topics, topics_sentiment, transcribe,
+    transcribe_neuralspace,
     translate,
     translate_azure,
     translate_context, translate_gpt4, translate_gpt4_turbo, translate_turbo,
