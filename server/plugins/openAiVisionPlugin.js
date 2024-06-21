@@ -1,30 +1,38 @@
 import OpenAIChatPlugin from './openAiChatPlugin.js';
 
+function safeJsonParse(content) {
+    try {
+        const parsedContent = JSON.parse(content);
+        return (typeof parsedContent === 'object' && parsedContent !== null) ? parsedContent : content;
+    } catch (e) {
+        return content;
+    }
+}
 
 class OpenAIVisionPlugin extends OpenAIChatPlugin {
-
+    
     tryParseMessages(messages) {
-        messages.map(message => {
+        return messages.map(message => {
             try {
                 if (typeof message.content === 'string') {
-                    message.content = JSON.parse(message.content);
+                    message.content = safeJsonParse(message.content);
                 }
                 if (Array.isArray(message.content)) {
                     message.content = message.content.map(item => {
                         if (typeof item === 'string') {
                             return { type: 'text', text: item };
                         } else {
-                            const parsedItem = JSON.parse(item);
+                            const parsedItem = safeJsonParse(item);
                             const { type, text, image_url, url } = parsedItem;
                             return { type, text, image_url: url || image_url };
                         }
                     });
-                }     
+                }
             } catch (e) {
                 return message;
             }
+            return message;
         });
-        return messages;
     }
 
     getRequestParameters(text, parameters, prompt) {
