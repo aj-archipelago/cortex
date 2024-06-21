@@ -85,8 +85,8 @@ test('validates edit endpoint', async (t) => {
 
 test('validates summary endpoint', async (t) => {
     const response = await testServer.executeOperation({
-        query: 'query summary($text: String!) { summary(text: $text) { result } }',
-        variables: { text: 'hello there my dear world!' },
+        query: 'query summary($text: String!, $targetLength: Int) { summary(text: $text, targetLength: $targetLength) { result } }',
+        variables: { text: 'Now is the time for all good men to come to the aid of their country.  We ride at dawn!', targetLength: 50 },
     });
 
     t.is(response.body?.singleResult?.errors, undefined);

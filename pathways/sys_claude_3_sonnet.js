@@ -1,5 +1,5 @@
-// sys_openai_chat.js
-// override handler for gpt-3.5-turbo
+// sys_claude_3_sonnet.js
+// override handler for claude-3-sonnet
 
 import { Prompt } from '../server/prompt.js';
 
@@ -13,7 +13,7 @@ export default {
     inputParameters: {
         messages: [],
     },
-    model: 'oai-gpturbo',
+    model: 'claude-3-sonnet-vertex',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-3.5-turbo',
+    emulateOpenAIChatModel: 'claude-3-sonnet',
 }

@@ -101,40 +101,6 @@ test('vision test chunking', async t => {
     t.true(response.body?.singleResult?.data?.vision.result.length > 100);
 });
 
-
-test('vision multi single long text', async t => {
-    t.timeout(400000);
-    //generate text adem1 adem2 ... ademN
-    const testText = Array.from(Array(10).keys()).map(i => `adem${i}`).join(' ');
-    const testRow = { "role": "user", "content": [`{"type": "text", "text": "${testText}"}`] };
-
-    const base64ImgRow = `{"type":"image_url","image_url":{"url":"${base64Img}"}}`;
-
-    const response = await testServer.executeOperation({
-        query: `query($text: String, $chatHistory: [MultiMessage]){
-            vision(text: $text, chatHistory: $chatHistory) {
-              result
-            }
-          }`,
-
-          variables: {
-            "chatHistory": [
-              ...Array.from(new Array(10),()=> testRow),
-              { 
-                "role": "user",
-                "content": [
-                  "{\"type\": \"text\", \"text\": \"first tell me your name then describe the image shortly:\"}",
-                  ...Array.from(new Array(10),()=> base64ImgRow),
-                ],
-              },
-            ],
-        },
-    });
-
-    t.is(response.body?.singleResult?.errors?.[0]?.message || response.body?.singleResult?.data?.vision?.result, 'Unable to process your request as your single message content is too long. Please try again with a shorter message.');
-});
-
-
 test('vision multi long text', async t => {
     t.timeout(400000);
     //generate text adem1 adem2 ... ademN

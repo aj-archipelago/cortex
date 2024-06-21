@@ -3,7 +3,7 @@
 
 export default {
     prompt: `{{text}}`,
-    model: 'oai-embeddings',
+    model: 'azure-embeddings',
     enableCache: true,
     inputParameters: {
         input: [],
