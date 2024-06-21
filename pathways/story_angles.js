@@ -7,7 +7,7 @@ export default {
             { "role": "user", "content": "Give me a numbered list of angles that can be emphasized in the following news excerpt. Don't need explanations, just a short phrase (< 5 words) describing the angle. Sort them by decreasing order of relevance.\n\nNews excerpt\n{{text}}" },
         ]
     })],
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     list: true,
     useInputChunking: false,
 }

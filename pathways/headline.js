@@ -11,7 +11,7 @@ export default {
     },
     list: true,
     useInputSummarization: true,
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
 
     // Custom resolver to generate headlines by reprompting if they are too long
     resolver: async (_parent, args, contextValue, _info) => {

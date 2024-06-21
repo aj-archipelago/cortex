@@ -9,7 +9,7 @@ export default {
             ]
         })
     ],
-    model: 'azure-gpt4-32',
+    model: 'oai-gpt4o',
     tokenRatio: 0.75,
     enableDuplicateRequests: false,
     timeout: 1800,

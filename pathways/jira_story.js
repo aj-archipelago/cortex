@@ -13,6 +13,6 @@ export default {
         storyType: "Auto",
         storyCount: "one",
     },
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     temperature: 0.7,
 }

@@ -17,5 +17,5 @@ export default {
         summaryFormat: ''
     },
 
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
 }

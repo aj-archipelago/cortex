@@ -13,7 +13,7 @@ export default {
     inputParameters: {
         messages: [],
     },
-    model: 'azure-gpt4-32',
+    model: 'oai-gpt4-32',
     useInputChunking: false,
     emulateOpenAIChatModel: 'gpt-4-32k',
 }

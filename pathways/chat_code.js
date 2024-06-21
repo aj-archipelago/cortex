@@ -11,7 +11,7 @@ export default {
         ],
     inputParameters: {
         chatHistory: [],
-        model: 'azure-gpt4-32',
+        model: 'oai-gpt4o',
     },
     tokenRatio: 0.75,
     useInputChunking: false,

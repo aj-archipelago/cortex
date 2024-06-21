@@ -13,7 +13,7 @@ export default {
         contextId: ``,
     },
     max_tokens: 1024,
-    model: 'azure-gpt4-vision',
+    model: 'oai-gpt4o',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,

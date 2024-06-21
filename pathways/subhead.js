@@ -9,7 +9,7 @@ export default {
         headline: '',
     },
     list: true,
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     useInputChunking: false,
 
     // Custom resolver to generate subheads by reprompting if they are too long

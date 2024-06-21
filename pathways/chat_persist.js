@@ -17,7 +17,7 @@ export default {
         chatHistory: [],
         contextId: ``,
     },
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     //model: 'oai-gpturbo',
     useInputChunking: false,
 }

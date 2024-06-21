@@ -13,7 +13,7 @@ export default {
             ]
         })
     ],
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     useInputChunking: false,
     enableCache: true,
     temperature: 0,

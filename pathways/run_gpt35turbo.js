@@ -20,5 +20,5 @@ export default {
         systemPrompt: "Assistant is an expert journalist's assistant working for a prestigious international news agency. When a user posts a request, Assistant will come up with the best response while upholding the highest journalistic standards.",
     },
 
-    model: 'azure-turbo-chat',
+    model: 'oai-gpturbo',
 }

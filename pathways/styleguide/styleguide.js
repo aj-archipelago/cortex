@@ -24,7 +24,7 @@ export default {
     inputChunkSize: 500,
     enableDuplicateRequests: false,
     useParallelChunkProcessing: true,
-    model: 'azure-gpt4',
+    model: 'oai-gpt4o',
     executePathway: async ({ args, runAllPrompts }) => {
         const originalText = args.text;
 

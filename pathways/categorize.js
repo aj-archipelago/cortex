@@ -12,7 +12,7 @@ export default {
     inputParameters: {
         categories: '',
     },
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     inputChunkSize: 1000,
     joinChunksWith: '\n',
     tokenRatio: 0.75,

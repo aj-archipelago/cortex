@@ -17,6 +17,6 @@ export default {
     inputParameters: {
         count: 4,
     },
-    model: 'azure-gpt4',
+    model: 'oai-gpt4o',
     temperature: 0.0,
 }

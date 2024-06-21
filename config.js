@@ -132,7 +132,7 @@ var config = convict({
                 },
                 "maxTokenLength": 8192,
             },
-            "oai-gpt4-vision": {
+            "oai-gpt4o": {
                 "type": "OPENAI-VISION",
                 "url": "https://api.openai.com/v1/chat/completions",
                 "headers": {
@@ -140,10 +140,11 @@ var config = convict({
                     "Content-Type": "application/json"
                 },
                 "params": {
-                    "model": "gpt-4-vision-preview"
+                    "model": "gpt-4o"
                 },
-                "requestsPerSecond": 1,
-                "maxTokenLength": 128000,
+                "requestsPerSecond": 50,
+                "maxTokenLength": 131072,
+                "maxReturnTokens": 4096,
                 "supportsStreaming": true
             },
             "azure-bing": {

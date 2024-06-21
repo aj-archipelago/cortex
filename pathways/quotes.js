@@ -13,7 +13,7 @@ export default {
             ]
         })
     ],
-    model: 'azure-gpt4',
+    model: 'oai-gpt4o',
     list: true,
     temperature: 0.7,
 }

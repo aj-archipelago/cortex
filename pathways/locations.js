@@ -8,7 +8,7 @@ import { callPathway } from '../lib/pathwayTools.js';
 
 export default {
     prompt: [],
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
 
     // Define input parameters for the prompt, such as the number of top news locations to identify and select.
     inputParameters: {

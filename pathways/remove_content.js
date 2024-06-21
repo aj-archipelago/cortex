@@ -26,6 +26,6 @@ export default {
     inputParameters: {
         content: "",
     },
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     temperature: 0.0,
 }

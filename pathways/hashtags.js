@@ -11,7 +11,7 @@ export default {
             ]
         })
     ],
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     useInputSummarization: true,
     list: true,
     temperature: 0.7,

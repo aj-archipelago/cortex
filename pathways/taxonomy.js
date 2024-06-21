@@ -38,7 +38,7 @@ function getFilteredTaxonomyItems(taxonomyResult, taxonomySet) {
 
 export default {
     prompt: [],
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
 
     // Define input parameters for the prompt, such as the number of top news taxonomyItems to identify and select.
     inputParameters: {

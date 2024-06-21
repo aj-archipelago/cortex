@@ -94,6 +94,34 @@
             "requestsPerSecond": 10,
             "maxTokenLength": 8192
         },
+        "oai-gpt4-32": {
+            "type": "OPENAI-CHAT",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-4-32"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 32768
+        },
+        "oai-gpt4o": {
+            "type": "OPENAI-VISION",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-4o"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 131072,
+            "maxReturnTokens": 4096,
+            "supportsStreaming": true
+        },
         "palm-text": {
             "type": "PALM-COMPLETION",
             "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/text-bison@001:predict",

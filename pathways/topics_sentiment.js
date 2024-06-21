@@ -9,7 +9,7 @@ export default {
             ]
         })
     ],
-    model: 'azure-gpt4',
+    model: 'oai-gpt4o',
     //inputChunkSize: 1000,
     joinChunksWith: '\n',
     tokenRatio: 1,

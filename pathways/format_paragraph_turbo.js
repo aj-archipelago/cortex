@@ -9,7 +9,7 @@ export default {
         ]}),
     ],
     //inputChunkSize: 500,
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     enableDuplicateRequests: true,
     duplicateRequestAfter: 20,
 

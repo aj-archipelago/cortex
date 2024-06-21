@@ -13,7 +13,7 @@ export default {
         tokenRatio: 0.2,
     },
     inputChunkSize: 500,
-    model: 'azure-gpt4-turbo',
+    model: 'oai-gpt4-turbo',
     enableDuplicateRequests: false,
 
 }

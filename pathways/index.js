@@ -62,12 +62,14 @@ import sys_openai_chat_16 from './sys_openai_chat_16.js';
 import sys_openai_chat_gpt4 from './sys_openai_chat_gpt4.js';
 import sys_openai_chat_gpt4_32 from './sys_openai_chat_gpt4_32.js';
 import sys_openai_chat_gpt4_turbo from './sys_openai_chat_gpt4_turbo.js';
+import sys_openai_completion from './sys_openai_completion.js';
 import tags from './tags.js';
 import taxonomy from './taxonomy.js';
 import timeline from './timeline.js';
 import topics from './topics.js';
 import topics_sentiment from './topics_sentiment.js';
 import transcribe from './transcribe.js';
+import translate from './translate.js';
 import translate_azure from './translate_azure.js';
 import translate_context from './translate_context.js';
 import translate_gpt4 from './translate_gpt4.js';
@@ -123,9 +125,11 @@ export {
     sys_google_chat,
     sys_google_code_chat,
     sys_google_gemini_chat, sys_openai_chat, sys_openai_chat_16, sys_openai_chat_gpt4, sys_openai_chat_gpt4_32,
+    sys_openai_completion,
     sys_openai_chat_gpt4_turbo, tags,
     taxonomy,
     timeline, topics, topics_sentiment, transcribe,
+    translate,
     translate_azure,
     translate_context, translate_gpt4, translate_gpt4_turbo, translate_turbo,
     vision

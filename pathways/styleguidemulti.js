@@ -122,6 +122,6 @@ export default {
     useInputChunking: true,
     inputChunkSize: 500,
     useParallelChunkProcessing: true,
-    model: 'azure-gpt4',
+    model: 'oai-gpt4o',
     enableDuplicateRequests: false,
 }

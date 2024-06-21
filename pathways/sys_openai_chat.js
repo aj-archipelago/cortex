@@ -13,7 +13,7 @@ export default {
     inputParameters: {
         messages: [],
     },
-    model: 'azure-turbo-chat',
+    model: 'oai-gpturbo',
     useInputChunking: false,
     emulateOpenAIChatModel: 'gpt-3.5-turbo',
 }

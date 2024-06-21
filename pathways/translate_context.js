@@ -17,6 +17,5 @@ export default {
         to: `Arabic`,
         tokenRatio: 0.2,
     },
-    model: 'azure-td3',
     timeout: 120,
 }

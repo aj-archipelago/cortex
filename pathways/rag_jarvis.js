@@ -21,7 +21,7 @@ export default {
     ],
     useInputChunking: false,
     enableDuplicateRequests: false,
-    model: 'azure-gpt4',
+    model: 'oai-gpt4o',
     inputParameters: {
         privateData: false,    
         chatHistory: [{role: '', content: []}],
@@ -110,7 +110,7 @@ export default {
             ]);
 
             const parsedHelper = JSON.parse(helper);
-            const { searchRequired, searchAJA, searchAJE, searchWires, searchPersonal, searchBing, dateFilter, languageStr } = parsedHelper;
+            const { searchRequired, searchPersonal, searchBing, dateFilter, languageStr } = parsedHelper;
 
             // if AI thinks we don't need RAG, then return the result from chat_jarvis
             if ( !searchRequired ) {
@@ -155,18 +155,6 @@ export default {
             if(dataSources && dataSources.length>0){
                 if(dataSources.includes('mydata') && searchPersonal){ 
                     promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchPersonal), indexName: 'indexcortex' }));
-                }
-
-                if(dataSources.includes('aja') && searchAJA){
-                    promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJA), indexName: 'indexucmsaja' }));
-                }
-
-                if(dataSources.includes('aje') && searchAJE){
-                    promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJE), indexName: 'indexucmsaje' }));
-                }
-
-                if(dataSources.includes('wires') && searchWires){
-                    promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchWires), indexName: 'indexwires' }));
                 }
             }
 

@@ -20,13 +20,13 @@ export default {
         targetLength: 0,
     },
 
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     enableCache: true,
 
     // Custom resolver to generate summaries by reprompting if they are too long or too short.
     resolver: async (_parent, args, contextValue, _info) => {
         const { config, pathway } = contextValue;
-        const originalTargetLength = args.targetLength;
+        const originalTargetLength = args.targetLength || pathway.inputParameters.targetLength;
 
         // If targetLength is not provided, execute the prompt once and return the result.
         if (originalTargetLength === 0) {

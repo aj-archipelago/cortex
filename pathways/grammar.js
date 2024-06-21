@@ -26,5 +26,5 @@ When the user posts any text, assistant will correct all spelling and grammar in
     useInputChunking: true,
     inputChunkSize: 1000,
     useParallelChunkProcessing: true,
-    model: 'azure-gpt4'
+    model: 'oai-gpt4o'
 }

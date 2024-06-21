@@ -42,7 +42,7 @@ export default {
                 { "role": "user", "content": "{{text}}" },
             ]
         })],
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
     inputParameters: {
         date: new Date().toDateString(),
     },

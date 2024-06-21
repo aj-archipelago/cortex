@@ -14,7 +14,7 @@ export default {
         targetLanguage: ''
     },
 
-    model: 'azure-turbo-chat',
+    model: 'oai-gpt4o',
 
     // Custom resolver to generate summaries by reprompting if they are too long or too short.
     resolver: async (parent, args, contextValue, _info) => {

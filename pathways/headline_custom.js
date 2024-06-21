@@ -25,7 +25,7 @@ export default {
         keywords: ['']
     },
     list: true,
-    model: 'azure-gpt4',
+    model: 'oai-gpt4o',
     useInputChunking: false,
     enableDuplicateRequests: false,
 
