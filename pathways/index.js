@@ -38,7 +38,7 @@ import release_notes from './release_notes.js';
 import remove_content from './remove_content.js';
 import retrieval from './retrieval.js';
 import run_claude3_haiku from './run_claude3_haiku.js';
-import run_claude3_sonnet from './run_claude3_sonnet.js';
+import run_claude35_sonnet from './run_claude35_sonnet.js';
 import run_gpt35turbo from './run_gpt35turbo.js';
 import run_gpt4 from './run_gpt4.js';
 import run_gpt4_32 from './run_gpt4_32.js';
@@ -53,7 +53,7 @@ import subhead from './subhead.js';
 import summarize_turbo from './summarize_turbo.js';
 import summary from './summary.js';
 import sys_claude_3_haiku from './sys_claude_3_haiku.js';
-import sys_claude_3_sonnet from './sys_claude_3_sonnet.js';
+import sys_claude_35_sonnet from './sys_claude_35_sonnet.js';
 import sys_google_chat from './sys_google_chat.js';
 import sys_google_code_chat from './sys_google_code_chat.js';
 import sys_google_gemini_chat from './sys_google_gemini_chat.js';
@@ -110,7 +110,7 @@ export {
     remove_content,
     retrieval,
     run_claude3_haiku,
-    run_claude3_sonnet,
+    run_claude35_sonnet,
     run_gpt35turbo, run_gpt4, run_gpt4_32, select_extension,
     select_services,
     sentiment,
@@ -122,7 +122,7 @@ export {
     summarize_turbo,
     summary,
     sys_claude_3_haiku,
-    sys_claude_3_sonnet,
+    sys_claude_35_sonnet,
     sys_google_chat,
     sys_google_code_chat,
     sys_google_gemini_chat, sys_openai_chat, sys_openai_chat_16, sys_openai_chat_gpt4, sys_openai_chat_gpt4_32,

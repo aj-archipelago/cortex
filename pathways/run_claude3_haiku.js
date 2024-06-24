@@ -1,11 +1,7 @@
-// Text summarization module with custom resolver for turbo models
-// This module exports a prompt that takes an input text and generates a summary using a custom resolver.
-
 // Import required modules
 import { Prompt } from '../server/prompt.js';
 
 export default {
-    // The main prompt function that takes the input text and asks to generate a summary.
     prompt: [
         new Prompt({
             messages: [
