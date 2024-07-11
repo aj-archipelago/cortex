@@ -76,7 +76,7 @@ import translate_context from './translate_context.js';
 import translate_gpt4 from './translate_gpt4.js';
 import translate_gpt4_turbo from './translate_gpt4_turbo.js';
 import translate_subtitle from './translate_subtitle.js';
-import translate_subtitle_single from './translate_subtitle_single.js';
+import translate_subtitle_helper from './translate_subtitle_helper.js';
 import translate_turbo from './translate_turbo.js';
 import vision from './vision.js';
 
@@ -137,7 +137,7 @@ export {
     translate_azure,
     translate_context, translate_gpt4, translate_gpt4_turbo, translate_turbo,
     translate_subtitle,
-    translate_subtitle_single,
+    translate_subtitle_helper,
     vision
 };
 

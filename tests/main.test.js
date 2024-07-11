@@ -377,10 +377,6 @@ async function testTranslateSrt(t, text, language='English') {
     
     t.deepEqual(originalTimestamps, translatedTimestamps, 'All timestamps should be present and unchanged');
 
-    //check all lines are translated simple
-    const originalLines = text.split(/\r?\n/).filter(line => !/^\d+$/.test(line.trim()) && !/^\d{2}:\d{2}:\d{2},\d{3}/.test(line.trim()));
-    const translatedLines = result.split('\n').filter(line => !/^\d+$/.test(line.trim()) && !/^\d{2}:\d{2}:\d{2},\d{3}/.test(line.trim()));
-
     const originalLineCount = text.split('\n').length;
     const translatedLineCount = result.split('\n').length;
     
