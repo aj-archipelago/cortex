@@ -6,7 +6,7 @@ import os from 'os';
 import { promisify } from 'util';
 import axios from 'axios';
 import { ensureEncoded } from './helper.js';
-import ytdl from 'ytdl-core';
+import ytdl from '@distube/ytdl-core';
 
 
 const ffmpegProbe = promisify(ffmpeg.ffprobe);
@@ -152,7 +152,7 @@ async function processYoutubeUrl(url, video=false) {
         return outputFileName;
     } catch (e) {
         console.log(e);
-        throw e;
+        throw new Error(`Error processing YouTube video, YouTube downloader might be outdated or blocked. ${e.message}`);    
     }
 }
 
