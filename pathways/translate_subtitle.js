@@ -172,7 +172,7 @@ async function myResolver(args) {
     );
   } catch (e) {
     logger.error(
-      `An error occurred in subtitle translation, 'll try direct translation next: ${e}`
+      `An error occurred in subtitle translation, trying direct translation next: ${e}`
     );
     try {
       return await callPathway("translate_gpt4", {...args, async: false});
