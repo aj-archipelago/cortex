@@ -1,6 +1,5 @@
 import subsrt from "subsrt";
 import logger from "../lib/logger.js";
-import pLimit from "p-limit";
 import { callPathway } from "../lib/pathwayTools.js";
 
 function preprocessStr(str) {
