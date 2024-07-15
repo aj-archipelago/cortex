@@ -94,7 +94,7 @@ class PathwayResolver {
 
         // If the response is a string, it's a regular long running response
         if (args.async || typeof responseData === 'string') {
-            const { completedCount, totalCount } = requestState[this.requestId];
+            const { completedCount=1, totalCount=1 } = requestState[this.requestId];
             requestState[this.requestId].data = responseData;
             
             // some models don't support progress updates
