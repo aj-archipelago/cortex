@@ -52,30 +52,31 @@ function getContextLines(captions, startIndex, direction, wordLimit = 100) {
 async function processBatch(batch, args, captions, batchStartIndex) {
   const batchText = batch
     .map((caption, index) => `LINE#${index + 1}: ${caption.content}`)
+    // .map((caption, index) => `${caption.content}`)
     .join("\n");
-  const prevLines = getContextLines(captions, batchStartIndex - 1, "prev");
-  const nextLines = getContextLines(
-    captions,
-    batchStartIndex + batch.length,
-    "next"
-  );
+  // const prevLines = getContextLines(captions, batchStartIndex - 1, "prev");
+  // const nextLines = getContextLines(
+  //   captions,
+  //   batchStartIndex + batch.length,
+  //   "next"
+  // );
 
   const translatedText = await callPathway("translate_subtitle_helper", {
     ...args,
     text: batchText,
-    prevLines,
-    nextLines,
+    // prevLines,
+    // nextLines,
     async: false,
   });
 
   // Remove LINE# and LINE() labels
-    const translatedLines = translatedText.split("\n");
+  const translatedLines = translatedText.split("\n");
     translatedLines.forEach((line, i) => {
     translatedLines[i] = line.replace(/^LINE#\d+:\s*/, "").trim();
-    });
+  });
   //make sure translatedLines.length===batch.length
   if (translatedLines.length < batch.length) {
-    const emptyLines = Array(batch.length - translatedLines.length).fill("");
+    const emptyLines = Array(batch.length - translatedLines.length).fill("-");
     translatedLines.push(...emptyLines);
   } else if (translatedLines.length > batch.length) {
     //first remove the empty lines
@@ -88,7 +89,7 @@ async function processBatch(batch, args, captions, batchStartIndex) {
         mergedLines.unshift(lastLine);
         translatedLines.splice(batch.length - 1, translatedLines.length - batch.length + 1, mergedLines.join(" "));
     }else {
-        const emptyLines = Array(batch.length - translatedLines.length).fill("");
+        const emptyLines = Array(batch.length - translatedLines.length).fill("-");
         translatedLines.push(...emptyLines);
     }
   }
@@ -123,7 +124,7 @@ async function myResolver(args) {
       eol: "\n",
     });
     const maxLineCount = 100;
-    const maxWordCount = 1000;
+    const maxWordCount = 300;
     let translatedCaptions = [];
     let currentBatch = [];
     let currentWordCount = 0;
@@ -171,11 +172,11 @@ async function myResolver(args) {
         .trim() + "\n"
     );
   } catch (e) {
-    logger.error(
-      `An error occurred in subtitle translation, trying direct translation next: ${e}`
+    logger.warn(
+      `${e} - could be that there are no subtitles, so attempting block translation.`
     );
     try {
-      return await callPathway("translate_gpt4", {...args, async: false});
+      return await callPathway("translate_gpt4_omni", {...args, async: false});
     } catch (e) {
       logger.error(`An error occurred in subtitle translation: ${e}`);
       return "";
@@ -191,7 +192,7 @@ export default {
     prevLines: ``,
     nextLines: ``,
   },
-  inputChunkSize: 500,
+  useInputChunking: false,
   model: "oai-gpt4o",
   enableDuplicateRequests: false,
   timeout: 3600,
