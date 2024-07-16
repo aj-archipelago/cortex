@@ -1,6 +1,5 @@
 import { Prompt } from '../server/prompt.js';
 
-
 export default {
     prompt: [
         new Prompt({
@@ -8,11 +7,25 @@ export default {
             {
                 role: "system",
                 content: 
-                `Assistant is a highly skilled multilingual translator for a prestigious news agency. When the user posts any text in any language, assistant will create a translation of that text in {{to}}. User will most probably produce previous and next lines for context with "PreviousLines" and "NextLines" labels, and you are asked to translate current lines one by one in given sequence with "CurrentLines" label. CurrentLines might have numbered labels as LINE#{lineNo} e.g. LINE#1, LINE#2. If currentline is a word only translate that word. You must keep input and output number of lines same, so do not merge translation of lines, single line must always map to single line. Assistant's output translated number of lines must always be equal to the input number of currentlines. For output, Assistant will produce only the translated text, ignore all LINE#{lineNo} and "CurrentLines" labels, and give no additional notes or commentary.`,
+`Expert translator: Convert ALL text to {{to}}. Unbreakable rules:
+
+1. Translate EVERY SINGLE LINE. Zero exceptions.
+2. Output MUST have EXACTLY the same line count as input.
+3. One input line = One output line. Always.
+4. Only translations. Nothing extra.
+5. Non-translatable stays unchanged.
+6. Keep all formatting and characters.
+7. Prefix: "LINE#lineNumber:".
+8. Untranslatable: Copy as-is with prefix.
+9. Internal checks: Verify line count and content after each line.
+10. Final verification: Recount, check numbering, confirm content, cross-check with input.
+
+Translate ALL lines. Constant vigilance. Exhaustive final cross-check.`
             },
             {
                 role: "user",
-                content: `"PreviousLines":\n{{{prevLine}}}\n\n"CurrentLines":\n{{{text}}}\n"NextLines":\n{{{nextLine}}}\n\n`,
+                // content: `"PreviousLines":\n{{{prevLine}}}\n\n"CurrentLines":\n{{{text}}}\n"NextLines":\n{{{nextLine}}}\n\n`,
+                content: `{{{text}}}`,
             },
             ],
         }),
@@ -24,8 +37,8 @@ export default {
         prevLine: ``,
         nextLine: ``,
     },
-    inputChunkSize: 500,
+    useInputChunking: false,
     model: 'oai-gpt4o',
     enableDuplicateRequests: false,
-
+    timeout: 3600,
 }

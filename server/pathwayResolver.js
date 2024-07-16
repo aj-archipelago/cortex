@@ -206,7 +206,7 @@ class PathwayResolver {
 
     async executePathway(args) {
         if (this.pathway.executePathway && typeof this.pathway.executePathway === 'function') {
-            return await this.pathway.executePathway({ args, runAllPrompts: this.promptAndParse.bind(this) });
+            return await this.pathway.executePathway({ args, runAllPrompts: this.promptAndParse.bind(this), resolver: this });
         }
         else {
             return await this.promptAndParse(args);

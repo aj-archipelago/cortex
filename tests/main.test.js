@@ -405,6 +405,13 @@ Aseel is mommy
 });
 
 test('test translate_srt endpoint with long srt file', async t => {
+    t.timeout(400000);
     const text = fs.readFileSync(path.join(__dirname, 'sublong.srt'), 'utf8');
     await testTranslateSrt(t, text, 'English');
+});
+
+test('test translate_srt endpoint with horizontal srt file', async t => {
+    t.timeout(400000);
+    const text = fs.readFileSync(path.join(__dirname, 'subhorizontal.srt'), 'utf8');
+    await testTranslateSrt(t, text, 'Turkish');
 });
