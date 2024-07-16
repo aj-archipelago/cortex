@@ -37,14 +37,13 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 chunks.push(chunk);
 
                 const { language, responseFormat } = parameters;
-                cortexRequest.url = this.requestUrl(text);
                 const params = {};
                 const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
                 const response_format = responseFormat || 'text';
 
                 const formData = new FormData();
                 formData.append('file', fs.createReadStream(chunk));
-                formData.append('model', this.model.params.model);
+                formData.append('model', cortexRequest.params.model);
                 formData.append('response_format', response_format);
                 language && formData.append('language', language);
                 modelPromptText && formData.append('prompt', modelPromptText);
