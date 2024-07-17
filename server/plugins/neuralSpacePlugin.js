@@ -117,48 +117,51 @@ class NeuralSpacePlugin extends ModelPlugin {
         const cortexRequest = new CortexRequest({ pathwayResolver });
         cortexRequest.url = this.requestUrl();
 
-        const formData = new FormData();
-        formData.append("files", fs.createReadStream(chunk));
-        const configObj = {
-          file_transcription: {
-            mode: "advanced",
-          },
+        const nsInitCallback = (requestInstance) => {
+          const formData = new FormData();
+          formData.append("files", fs.createReadStream(chunk));
+          const configObj = {
+            file_transcription: {
+              mode: "advanced",
+            },
+          };
+
+          //phrase/segment level
+          if ((responseFormat && !wordTimestamped) || maxLineWidth) {
+            configObj.speaker_diarization = {
+              // mode: "speakers",
+              // num_speakers: numSpeakers,
+              // overrides: {
+              //   clustering: {
+              //     threshold: clusteringThreshold,
+              //   },
+              // },
+            };
+
+            configObj.subtitles_guidelines = {
+              line_count: 1,
+            };
+          }
+
+          if (maxLineWidth) {
+            configObj.subtitles_guidelines = {
+              character_count: maxLineWidth,
+            };
+          }
+
+          if (language) {
+            configObj.file_transcription.language_id = language;
+          }
+          formData.append("config", JSON.stringify(configObj));
+
+          requestInstance.data = formData;
+          requestInstance.params = {};
+          requestInstance.addHeaders = {
+            ...formData.getHeaders(),
+          };
         };
 
-        //phrase/segment level
-        if ((responseFormat && !wordTimestamped) || maxLineWidth) {
-          configObj.speaker_diarization = {
-            // mode: "speakers",
-            // num_speakers: numSpeakers,
-            // overrides: {
-            //   clustering: {
-            //     threshold: clusteringThreshold,
-            //   },
-            // },
-          };
-
-          configObj.subtitles_guidelines = {
-            line_count: 1
-          };
-        }
-
-        if (maxLineWidth) {
-          configObj.subtitles_guidelines = {
-            character_count: maxLineWidth,
-          };
-        }
-
-        if (language) {
-          configObj.file_transcription.language_id = language;
-        }
-        formData.append("config", JSON.stringify(configObj));
-
-        cortexRequest.data = formData;
-        cortexRequest.params = {};
-        cortexRequest.headers = {
-          ...cortexRequest.headers,
-          ...formData.getHeaders(),
-        };
+        cortexRequest.initCallback = nsInitCallback;
 
         const result = await this.executeRequest(cortexRequest);
 

@@ -37,22 +37,26 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 chunks.push(chunk);
 
                 const { language, responseFormat } = parameters;
-                const params = {};
                 const { modelPromptText } = this.getCompiledPrompt(text, parameters, prompt);
                 const response_format = responseFormat || 'text';
 
-                const formData = new FormData();
-                formData.append('file', fs.createReadStream(chunk));
-                formData.append('model', cortexRequest.params.model);
-                formData.append('response_format', response_format);
-                language && formData.append('language', language);
-                modelPromptText && formData.append('prompt', modelPromptText);
+                const whisperInitCallback = (requestInstance) => {
 
-                cortexRequest.data = formData;
-                cortexRequest.params = params;
-                cortexRequest.headers = { ...cortexRequest.headers, ...formData.getHeaders() };
+                    const formData = new FormData();
+                    formData.append('file', fs.createReadStream(chunk));
+                    formData.append('model', requestInstance.params.model);
+                    formData.append('response_format', response_format);
+                    language && formData.append('language', language);
+                    modelPromptText && formData.append('prompt', modelPromptText);
 
+                    requestInstance.data = formData;
+                    requestInstance.addHeaders = { ...formData.getHeaders() };
+
+                };
+
+                cortexRequest.initCallback = whisperInitCallback;
                 return this.executeRequest(cortexRequest);
+
             } catch (err) {
                 logger.error(`Error getting word timestamped data from api: ${err}`);
                 throw err;
