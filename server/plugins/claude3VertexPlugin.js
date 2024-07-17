@@ -263,7 +263,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
     const gcpAuthTokenHelper = this.config.get("gcpAuthTokenHelper");
     const authToken = await gcpAuthTokenHelper.getAccessToken();
-    cortexRequest.headers.Authorization = `Bearer ${authToken}`;
+    cortexRequest.auth.Authorization = `Bearer ${authToken}`;
 
     return this.executeRequest(cortexRequest);
   }
