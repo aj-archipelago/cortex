@@ -164,7 +164,7 @@ class Gemini15ChatPlugin extends ModelPlugin {
 
         const gcpAuthTokenHelper = this.config.get('gcpAuthTokenHelper');
         const authToken = await gcpAuthTokenHelper.getAccessToken();
-        cortexRequest.headers.Authorization = `Bearer ${authToken}`;
+        cortexRequest.auth.Authorization = `Bearer ${authToken}`;
 
         return this.executeRequest(cortexRequest);
     }
