@@ -114,13 +114,13 @@ class PalmCompletionPlugin extends ModelPlugin {
         if (modelInput) {
             const { length, units } = this.getLength(modelInput);
             logger.info(`[request sent containing ${length} ${units}]`);
-            logger.debug(`${modelInput}`);
+            logger.verbose(`${modelInput}`);
         }
 
         const responseText = this.parseResponse(responseData);
         const { length, units } = this.getLength(responseText);
         logger.info(`[response received containing ${length} ${units}]`);
-        logger.debug(`${responseText}`);
+        logger.verbose(`${responseText}`);
 
         if (safetyAttributes) {
             logger.warn(`[response contains safety attributes: ${JSON.stringify(safetyAttributes, null, 2)}]`);

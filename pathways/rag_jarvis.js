@@ -190,7 +190,7 @@ export default {
                 indexCount++;
                 const rowCount = data.length;
                 if (rowCount === 0) {
-                    logger.debug(`Index ${indexCount} had no matching sources.`);
+                    logger.verbose(`Index ${indexCount} had no matching sources.`);
                     continue;
                 }
                 const proportion = rowCount / totalLength;
@@ -203,7 +203,7 @@ export default {
                 let items = data.splice(0, slots);
                 searchResults.push(...items);
             
-                logger.debug(`Index ${indexCount} had ${rowCount} matching sources. ${items.length} forwarded to the LLM.`);
+                logger.verbose(`Index ${indexCount} had ${rowCount} matching sources. ${items.length} forwarded to the LLM.`);
                 // Update remaining slots for next iteration
                 remainingSlots -= slots;
             }

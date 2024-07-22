@@ -117,7 +117,7 @@ class OpenAIChatPlugin extends ModelPlugin {
                 const { length, units } = this.getLength(content);
                 const preview = words.length < 41 ? content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
-                logger.debug(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
+                logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
                 totalLength += length;
                 totalUnits = units;
             });
@@ -127,7 +127,7 @@ class OpenAIChatPlugin extends ModelPlugin {
             const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
             const { length, units } = this.getLength(content);
             logger.info(`[request sent containing ${length} ${units}]`);
-            logger.debug(`${content}`);
+            logger.verbose(`${content}`);
         }
     
         if (stream) {
@@ -136,7 +136,7 @@ class OpenAIChatPlugin extends ModelPlugin {
             const responseText = this.parseResponse(responseData);
             const { length, units } = this.getLength(responseText);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.debug(`${responseText}`);
+            logger.verbose(`${responseText}`);
         }
 
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);

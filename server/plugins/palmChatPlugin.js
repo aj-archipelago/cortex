@@ -190,13 +190,13 @@ class PalmChatPlugin extends ModelPlugin {
         if (context) {
             const { length, units } = this.getLength(context);
             logger.info(`[chat request contains context information of length ${length} ${units}]`)
-            logger.debug(`context: ${context}`);
+            logger.verbose(`context: ${context}`);
         }
 
         if (examples && examples.length) {
             logger.info(`[chat request contains ${examples.length} examples]`);
             examples.forEach((example, index) => {
-                logger.debug(`example ${index + 1}: input: "${example.input.content}", output: "${example.output.content}"`);
+                logger.verbose(`example ${index + 1}: input: "${example.input.content}", output: "${example.output.content}"`);
             });
         }
         
@@ -207,10 +207,10 @@ class PalmChatPlugin extends ModelPlugin {
                 const { length, units } = this.getLength(message.content);
                 const preview = words.length < 41 ? message.content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
-                logger.debug(`message ${index + 1}: author: ${message.author}, ${units}: ${length}, content: "${preview}"`);
+                logger.verbose(`message ${index + 1}: author: ${message.author}, ${units}: ${length}, content: "${preview}"`);
             });
         } else if (messages && messages.length === 1) {
-            logger.debug(`${messages[0].content}`);
+            logger.verbose(`${messages[0].content}`);
         }
 
         const safetyAttributes = this.getSafetyAttributes(responseData);
@@ -218,7 +218,7 @@ class PalmChatPlugin extends ModelPlugin {
         const responseText = this.parseResponse(responseData);
         const { length, units } = this.getLength(responseText);
         logger.info(`[response received containing ${length} ${units}]`);
-        logger.debug(`${responseText}`);
+        logger.verbose(`${responseText}`);
 
         if (safetyAttributes) {
             logger.warn(`[response contains safety attributes: ${JSON.stringify(safetyAttributes, null, 2)}]`);

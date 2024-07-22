@@ -183,7 +183,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     if (system) {
       const { length, units } = this.getLength(system);
       logger.info(`[system messages sent containing ${length} ${units}]`);
-      logger.debug(`${system}`);
+      logger.verbose(`${system}`);
     }
 
     if (messages && messages.length > 1) {
@@ -209,7 +209,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
               " ... " +
               words.slice(-20).join(" ");
 
-        logger.debug(
+        logger.verbose(
           `message ${index + 1}: role: ${
             message.role
           }, ${units}: ${length}, content: "${preview}"`
@@ -225,7 +225,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
         : message.content;
       const { length, units } = this.getLength(content);
       logger.info(`[request sent containing ${length} ${units}]`);
-      logger.debug(`${content}`);
+      logger.verbose(`${content}`);
     }
 
     if (stream) {
@@ -234,7 +234,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       const responseText = this.parseResponse(responseData);
       const { length, units } = this.getLength(responseText);
       logger.info(`[response received containing ${length} ${units}]`);
-      logger.debug(`${responseText}`);
+      logger.verbose(`${responseText}`);
     }
 
     prompt &&

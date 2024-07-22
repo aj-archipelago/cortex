@@ -250,13 +250,13 @@ class ModelPlugin {
         if (modelInput) {
             const { length, units } = this.getLength(modelInput);
             logger.info(`[request sent containing ${length} ${units}]`);
-            logger.debug(`${modelInput}`);
+            logger.verbose(`${modelInput}`);
         }
     
         const responseText = JSON.stringify(responseData);
         const { length, units } = this.getLength(responseText);
         logger.info(`[response received containing ${length} ${units}]`);
-        logger.debug(`${responseText}`);
+        logger.verbose(`${responseText}`);
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
