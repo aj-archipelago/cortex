@@ -186,26 +186,26 @@ class Gemini15ChatPlugin extends ModelPlugin {
                 const { length, units } = this.getLength(messageContent);
                 const preview = words.length < 41 ? messageContent : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
     
-                logger.debug(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
+                logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
             });
         } else if (messages && messages.length === 1) {
-            logger.debug(`${messages[0].parts[0].text}`);
+            logger.verbose(`${messages[0].parts[0].text}`);
         }
 
         // check if responseData is an array or string
         if (typeof responseData === 'string') {
             const { length, units } = this.getLength(responseData);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.debug(`${responseData}`);
+            logger.verbose(`${responseData}`);
         } else if (Array.isArray(responseData)) {
             const { mergedResult, safetyRatings } = mergeResults(responseData);
             if (safetyRatings?.length) {
                 logger.warn(`!!! response was blocked because the input or response potentially violates policies`);
-                logger.debug(`Safety Ratings: ${JSON.stringify(safetyRatings, null, 2)}`);
+                logger.verbose(`Safety Ratings: ${JSON.stringify(safetyRatings, null, 2)}`);
             }
             const { length, units } = this.getLength(mergedResult);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.debug(`${mergedResult}`);
+            logger.verbose(`${mergedResult}`);
         } else {
             logger.info(`[response received as an SSE stream]`);
         }

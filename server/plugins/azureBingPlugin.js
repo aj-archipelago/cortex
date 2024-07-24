@@ -39,7 +39,7 @@ class AzureBingPlugin extends ModelPlugin {
     logRequestData(data, responseData, prompt) {
         this.logAIRequestFinished();
     
-        logger.debug(`${this.parseResponse(responseData)}`);
+        logger.verbose(`${this.parseResponse(responseData)}`);
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }

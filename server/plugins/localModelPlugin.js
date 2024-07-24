@@ -55,13 +55,13 @@ class LocalModelPlugin extends ModelPlugin {
         //args.push("--temperature", requestParameters.temperature);
 
         try {
-            logger.debug(`Running local model: ${executablePath}, ${args}`);
+            logger.verbose(`Running local model: ${executablePath}, ${args}`);
             const result = execFileSync(executablePath, args, { encoding: 'utf8' });
             // Remove only the first occurrence of requestParameters.prompt from the result
             // Could have used regex here but then would need to escape the prompt
             const parts = result.split(requestParameters.prompt, 2);
             const modifiedResult = parts[0] + parts[1];
-            logger.debug(`Result: ${modifiedResult}`);
+            logger.verbose(`Result: ${modifiedResult}`);
             return this.filterFirstResponse(modifiedResult);
         } catch (error) {
             logger.error(`Error running local model: ${error}`);
