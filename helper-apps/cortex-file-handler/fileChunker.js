@@ -118,7 +118,8 @@ const ytdlDownload = async (url, filename, video = false) => {
             ? { filter: 'audioandvideo' }  // audio and video
             : { quality: 'highestaudio' }; // audio only
 
-        const videoStream = ytdl(url, videoOptions);
+        const encodedUrl = encodeURI(url);
+        const videoStream = ytdl(encodedUrl, videoOptions);
         let lastLoggedTime = Date.now();
 
         videoStream.on('error', (error) => {
