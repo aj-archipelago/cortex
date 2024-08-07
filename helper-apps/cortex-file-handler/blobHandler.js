@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { BlobServiceClient } from "@azure/storage-blob";
+import { generateBlobSASQueryParameters, StorageSharedKeyCredential, BlobServiceClient } from "@azure/storage-blob";
 import { v4 as uuidv4 } from "uuid";
 import Busboy from "busboy";
 import { PassThrough } from "stream";
@@ -53,6 +53,7 @@ function isBase64(str) {
   }
 }
 
+const { SAS_TOKEN_LIFE_DAYS = 7 } = process.env;
 const GCP_SERVICE_ACCOUNT_KEY =
   process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
   process.env.GCP_SERVICE_ACCOUNT_KEY ||
@@ -138,6 +139,7 @@ async function saveFileToBlob(chunkPath, requestId) {
   const { containerClient } = await getBlobClient();
   // Use the filename with a UUID as the blob name
   const blobName = `${requestId}/${uuidv4()}_${encodeURIComponent(path.basename(chunkPath))}`;
+  const sasToken = generateSASToken(containerClient, blobName);
 
   // Create a read stream for the chunk file
   const fileStream = fs.createReadStream(chunkPath);
@@ -147,9 +149,27 @@ async function saveFileToBlob(chunkPath, requestId) {
   await blockBlobClient.uploadStream(fileStream);
 
   // Return the full URI of the uploaded blob
-  const blobUrl = blockBlobClient.url;
+  const blobUrl = `${blockBlobClient.url}?${sasToken}`;
   return blobUrl;
 }
+
+const generateSASToken = (containerClient, blobName, expiryTimeSeconds = 
+    parseInt(SAS_TOKEN_LIFE_DAYS) * 24 * 60 * 60
+) => {
+  const { accountName, accountKey } = containerClient.credential;
+  const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
+
+  const sasOptions = {
+    containerName: containerClient.containerName,
+    blobName: blobName,
+    permissions: "r", // Read permission
+    startsOn: new Date(),
+    expiresOn: new Date(new Date().valueOf() + expiryTimeSeconds * 1000)
+  };
+
+  const sasToken = generateBlobSASQueryParameters(sasOptions, sharedKeyCredential).toString();
+  return sasToken;
+};
 
 //deletes blob that has the requestId
 async function deleteBlob(requestId) {
@@ -271,8 +291,9 @@ async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file
     await blockBlobClient.uploadStream(passThroughStream, undefined, undefined, options);
 
     const message = `File '${encodedFilename}' uploaded successfully.`;
-    const url = blockBlobClient.url;
     context.log(message);
+    const sasToken = generateSASToken(containerClient, encodedFilename);
+    const url = `${blockBlobClient.url}?${sasToken}`;
     body = { message, url };
   }
 
