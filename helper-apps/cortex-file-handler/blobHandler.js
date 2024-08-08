@@ -53,7 +53,7 @@ function isBase64(str) {
   }
 }
 
-const { SAS_TOKEN_LIFE_DAYS = 7 } = process.env;
+const { SAS_TOKEN_LIFE_DAYS = 30 } = process.env;
 const GCP_SERVICE_ACCOUNT_KEY =
   process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
   process.env.GCP_SERVICE_ACCOUNT_KEY ||
