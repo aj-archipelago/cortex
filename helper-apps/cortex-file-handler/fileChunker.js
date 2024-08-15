@@ -44,8 +44,14 @@ const generateUniqueFolderName = () => {
 
 async function downloadFile(url, outputPath) {
     try {
+        let response;
+        try {
+            response = await axios.get(decodeURIComponent(url), { responseType: 'stream' });
+        } catch (error) {
+            response = await axios.get(url, { responseType: 'stream' });
+        }
+
         // Make an HTTP request for the file
-        const response = await axios.get(decodeURIComponent(url), { responseType: 'stream' });
 
         // Create a writable file stream to save the file
         const fileStream = fs.createWriteStream(outputPath);
