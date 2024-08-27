@@ -36,8 +36,8 @@ const typeDef = (pathway) => {
 
   const typeName = fields ? `${objName}Result` : `String`;
 
-  const messageType = `input Message { role: String, content: String }`;
-  const multiMessageType = `input MultiMessage { role: String, content: [String] }`;
+  const messageType = `input Message { role: String, content: String, name: String }`;
+  const multiMessageType = `input MultiMessage { role: String, content: [String], name: String }`;
 
   const type = fields ? `type ${typeName} {
     ${fieldsStr}
