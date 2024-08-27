@@ -31,14 +31,6 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         return acc;
     }, {});
 
-    //AUTOGEN temporary fix remove "name" from messages, openai "name" is not in documentation
-    if(variables.messages){
-        variables.messages = variables.messages.map((message) => {
-            delete message.name;
-            return message;
-        });
-    }
-
     const variableParams = fieldVariableDefs.map(({ name, type }) => `$${name}: ${type}`).join(', ');
     const queryArgs = fieldVariableDefs.map(({ name }) => `${name}: $${name}`).join(', ');
 
