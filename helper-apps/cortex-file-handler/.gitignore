@@ -97,3 +97,7 @@ local.settings.json
 __blobstorage__
 __queuestorage__
 __azurite_db*__.json
+
+# Python virtual environments and caches
+.venv
+__pycache__
