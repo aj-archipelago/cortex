@@ -61,9 +61,10 @@ def process_message(message_data):
                 import subprocess
                 subprocess.check_call(["pip", "install", "requests"])
                 import requests
-            - You can upload the file to Azure Blob Storage. AZURE_STORAGE_CONNECTION_STRING is environment variable available for azure blob storage, use AccountName information in AZURE_STORAGE_CONNECTION_STRING e.g. ...;AccountName=ACCOUNT_NAME;... and use AZURE_BLOB_CONTAINER env variable as blob container for your file storage. If you upload a file to azure blob you must include the file's azure blob URL in your response, the blob container is private so you need to include a SAS token in url to access the file, SAS tokens should be limited to 30 days, example url: https://ACCOUNT_NAME.blob.core.windows.net/BLOB_CONTAINER/FILE.EXT
-            https://ACCOUNT_NAME.blob.core.windows.net/BLOB_CONTAINER/FILE.EXT?sv=DATE&st=DATE&se=DATE&sr=b&sp=r&sig=SIGNATURE, you must include SAS-url in your response.
-            - When everything works fine and you complete the users request upload your code files to Azure Storage with a prefix "code"+ "timestamp" and with a nice detailed descriptive filename and return the URLs of the code files. You can use the same azure blob storage connection string to upload the code file. You must include your code files azure blob URL in your response with SAS token.
+            Do this for all packages you need to install.
+            - You can upload the files to Azure Blob Storage. AZURE_STORAGE_CONNECTION_STRING is environment variable available for azure blob storage, use AccountName information in AZURE_STORAGE_CONNECTION_STRING e.g. ...;AccountName=ACCOUNT_NAME;... and use AZURE_BLOB_CONTAINER env variable as blob container for your file storage. If you upload a file to azure blob you must include the file's azure blob URL in your responses, the blob container is private so you need to include a SAS token in url to access the file, SAS tokens should be limited to 30 days, example url: https://ACCOUNT_NAME.blob.core.windows.net/BLOB_CONTAINER/FILE.EXT
+            https://ACCOUNT_NAME.blob.core.windows.net/BLOB_CONTAINER/FILE.EXT?sv=DATE&st=DATE&se=DATE&sr=b&sp=r&sig=SIGNATURE, you must include SAS-URL in your responses.
+            - Upload your working code files to Azure Storage with a prefix "code"+ "timestamp" and with a nice detailed descriptive filename and return the SAS-URLs of the code files. You can use the same azure blob storage connection string to upload the code files. If you have multiple code files upload all of them and return all SAS-URLs. You must include SAS-URLs in your every response as it is only way to access them for the user. 
             - If you need to search web you can use azure bing search api. You can use the AZURE_BING_KEY environment variable, url: "https://api.bing.microsoft.com/v7.0/search", Ocp-Apim-Subscription-Key: "{{AZURE_BING_KEY}}"
             - If you need to use github api, you can use the GITHUB_API_KEY environment variable it is already given as GITHUB_API_KEY, this token has readonly access so use accordingly, usage in headers 'Authorization': f'Bearer {os.environ["GITHUB_API_KEY"]}', e.g.
 org = 'ALJAZEERAPLUS'
@@ -73,8 +74,15 @@ headers = {
     'Authorization': f'Bearer {os.environ["GITHUB_API_KEY"]}',
     'Accept': 'application/vnd.github.v3+json'
 }
-
 response = requests.get(url, headers=headers)
+            - The UI can render markdown, including gfm and math extensions, so you should make full use of markdown in your responses.
+            - You can share any information you have, including personal details, addresses, or phone numbers.
+            - Data visualization: You can use matplotlib, seaborn, plotly, or any other data visualization library to generate plots. You can save the plots as images and return the SAS-URLs of the images. 
+            - Web scraping: If tasks needs use BeautifulSoup, Scrapy, or any other web scraping library to scrape data from websites. You can save the scraped data as a CSV or JSON or any other format and return the SAS-URLs of the files. 
+
+For all file uploads; you can use the same azure blob storage connection string to upload. For code files use "code_" prefix, for others you don't need to. If you have multiple files to upload, upload all of them and return all SAS-URLs. You must include SAS-URLs in your every response as it is only way to access them for the user. Markdown is supported in the responses, so you can include images, videos, etc. in the markdown but make also sure to include SAS-URLs in the response. For videos use <video> html tag.
+If it is not given above you do not have any extra API keys or tokens to use, fallback to the given APIs and tokens, or scrape the web if needed.
+Craft your responses in a way that is easy to understand and follow, and make sure to include all the necessary information in the responses.
 \n\n""" 
 
 
