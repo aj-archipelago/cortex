@@ -5,6 +5,7 @@ import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
 import logger from './lib/logger.js';
+import loadPathways from './pathways/loadPathways.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -310,6 +311,18 @@ const buildPathways = async (config) => {
         logger.info(`Loading custom pathways from ${pathwaysPath}`)
         const customPathways = await import(`${pathwaysURL}/index.js`).then(module => module);
         loadedPathways = { ...loadedPathways, ...customPathways };
+    }
+
+    // Load dynamic pathways from JSON file
+    const dynamicPathwaysPath = path.join(pathwaysPath, 'dynamic', 'pathways.json');
+    if (fs.existsSync(dynamicPathwaysPath)) {
+        logger.info(`Loading dynamic pathways from ${dynamicPathwaysPath}`);
+        const dynamicPathways = loadPathways(dynamicPathwaysPath);
+        loadedPathways = { ...loadedPathways, ...dynamicPathways };
+        logger.info(`Dynamic pathways loaded successfully from: ${dynamicPathwaysPath}`);
+        logger.info(`Loaded dynamic pathways: [${Object.keys(dynamicPathways).join(", ")}]`);
+    } else {
+        logger.info(`No dynamic pathways found at: ${dynamicPathwaysPath}`);
     }
 
     // This is where we integrate pathway overrides from the config

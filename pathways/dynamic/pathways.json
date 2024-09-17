@@ -1,0 +1,11 @@
+{
+  "hello_world": {
+    "module": "hello_world",
+    "prompt": "Say 'Hello, World!' in the specified language: {{language}}",
+    "inputParameters": {
+      "language": "English"
+    },
+    "model": "oai-gpt3.5-turbo",
+    "enableCache": true
+  }
+}
