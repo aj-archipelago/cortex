@@ -5,19 +5,19 @@ import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
 import logger from './lib/logger.js';
-import loadPathways from './pathways/loadPathways.js';
+import PathwayManager from './lib/pathwayManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 convict.addFormat({
     name: 'string-array',
-    validate: function(val) {
-      if (!Array.isArray(val)) {
-        throw new Error('must be of type Array');
-      }
+    validate: function (val) {
+        if (!Array.isArray(val)) {
+            throw new Error('must be of type Array');
+        }
     },
-    coerce: function(val) {
-      return val.split(',');
+    coerce: function (val) {
+        return val.split(',');
     },
 });
 
@@ -315,9 +315,11 @@ const buildPathways = async (config) => {
 
     // Load dynamic pathways from JSON file
     const dynamicPathwaysPath = path.join(pathwaysPath, 'dynamic', 'pathways.json');
+    let pathwayManager;
     if (fs.existsSync(dynamicPathwaysPath)) {
         logger.info(`Loading dynamic pathways from ${dynamicPathwaysPath}`);
-        const dynamicPathways = loadPathways(dynamicPathwaysPath);
+        pathwayManager = new PathwayManager(dynamicPathwaysPath);
+        const dynamicPathways = pathwayManager.loadPathways();
         loadedPathways = { ...loadedPathways, ...dynamicPathways };
         logger.info(`Dynamic pathways loaded successfully from: ${dynamicPathwaysPath}`);
         logger.info(`Loaded dynamic pathways: [${Object.keys(dynamicPathways).join(", ")}]`);
@@ -337,7 +339,7 @@ const buildPathways = async (config) => {
     // Add pathways to config
     config.load({ pathways })
 
-    return pathways;
+    return { pathwayManager, pathways };
 }
 
 // Build and load models to config
@@ -349,7 +351,7 @@ const buildModels = (config) => {
         if (!model.name) {
             model.name = key;
         }
-        
+
         // if model is in old format, convert it to new format
         if (!model.endpoints) {
             model = {
@@ -367,7 +369,7 @@ const buildModels = (config) => {
         }
 
         // compile handlebars templates for each endpoint
-        model.endpoints = model.endpoints.map(endpoint => 
+        model.endpoints = model.endpoints.map(endpoint =>
             JSON.parse(HandleBars.compile(JSON.stringify(endpoint))({ ...model, ...config.getEnv(), ...config.getProperties() }))
         );
 
