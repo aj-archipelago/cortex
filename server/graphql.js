@@ -34,9 +34,9 @@ const getPlugins = (config) => {
     //if cache is enabled and Redis is available, use it
     let cache;
     if (config.get('enableGraphqlCache') && config.get('storageConnectionString')) {
-        cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString'),{
+        cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString'), {
             ssl: true,
-            abortConnect: false,            
+            abortConnect: false,
         }));
         //caching similar strings, embedding hashing, ... #delta similarity 
         // TODO: custom cache key:
@@ -48,10 +48,8 @@ const getPlugins = (config) => {
     return { plugins, cache };
 }
 
-
 // Type Definitions for GraphQL
-const getTypedefs = (pathways) => {
-
+const getTypedefs = (pathways, pathwayManager) => {
     const defaultTypeDefs = `#graphql
     enum CacheControlScope {
         PUBLIC
@@ -85,12 +83,13 @@ const getTypedefs = (pathways) => {
     }
 `;
 
-    const typeDefs = [defaultTypeDefs, ...Object.values(pathways).filter(p=>!p.disabled).map(p => p.typeDef(p).gqlDefinition)];
+    const pathwayManagerTypeDefs = pathwayManager.getTypeDefs();
+    const typeDefs = [defaultTypeDefs, pathwayManagerTypeDefs, ...Object.values(pathways).filter(p => !p.disabled).map(p => p.typeDef(p).gqlDefinition)];
     return typeDefs.join('\n');
 }
 
 // Resolvers for GraphQL
-const getResolvers = (config, pathways) => {
+const getResolvers = (config, pathways, pathwayManager) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
         if (pathway.disabled) continue; //skip disabled pathways
@@ -102,9 +101,14 @@ const getResolvers = (config, pathways) => {
         }
     }
 
+    const pathwayManagerResolvers = pathwayManager.getResolvers();
+
     const resolvers = {
         Query: resolverFunctions,
-        Mutation: { 'cancelRequest': cancelRequestResolver },
+        Mutation: { 
+            'cancelRequest': cancelRequestResolver,
+            ...pathwayManagerResolvers.Mutation
+        },
         Subscription: subscriptions,
     }
 
@@ -114,7 +118,7 @@ const getResolvers = (config, pathways) => {
 // Build the server including the GraphQL schema and REST endpoints
 const build = async (config) => {
     // First perform config build
-    await buildPathways(config);
+    const { pathwayManager } = await buildPathways(config);
     buildModels(config);
 
     // build model API endpoints and limiters
@@ -123,8 +127,8 @@ const build = async (config) => {
     //build api
     const pathways = config.get('pathways');
 
-    const typeDefs = getTypedefs(pathways);
-    const resolvers = getResolvers(config, pathways);
+    const typeDefs = getTypedefs(pathways, pathwayManager);
+    const resolvers = getResolvers(config, pathways, pathwayManager);
 
     const schema = makeExecutableSchema({ typeDefs, resolvers });
 
