@@ -86,9 +86,16 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 500) {
             // Extract the original file name from the URL
             const urlObj = new URL(inputPath);
             const originalFileName = path.basename(urlObj.pathname);
+            const maxLength = 200; // Set the maximum length for the filename
+            let truncatedFileName = originalFileName;
+            if (originalFileName.length > maxLength) {
+                const extension = path.extname(originalFileName); // Preserve the file extension
+                const basename = path.basename(originalFileName, extension); // Get the filename without the extension
+                truncatedFileName = basename.substring(0, maxLength) + extension; // Truncate the filename and append the extension
+            }
 
-            // Use the original file name when saving the downloaded file
-            const downloadPath = path.join(uniqueOutputPath, originalFileName);
+            // Use the original-truncated file name when saving the downloaded file
+            const downloadPath = path.join(uniqueOutputPath, truncatedFileName);
             await downloadFile(inputPath, downloadPath);
             inputPath = downloadPath;
         }
