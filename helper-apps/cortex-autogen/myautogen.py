@@ -54,14 +54,18 @@ def process_message(message_data):
             code_executor = autogen.coding.LocalCommandLineCodeExecutor(work_dir=temp_dir)
 
             env_context = """YOUR ENV: 
-            - You are in default newly installed env, so make sure to install any dependencies first for any code execution, if python e.g. for "requests" package and all packages do imports like this:
-            try:
-                import requests
-            except ImportError:
-                import subprocess
-                subprocess.check_call(["pip", "install", "requests"])
-                import requests
-            Do this for all packages you need to install.
+            - You are in a fresh, newly installed environment, so ensure all necessary dependencies are installed before executing any further code. You must do this for all packages you use, you may follow below structure just make sure to update required_packages as per your need e.g. in some other you might need datetime, pandas, numpy, matplotlib and so on: 
+# Ensure all required packages are installed
+required_packages = ['requests', 'azure-storage-blob'] # Add any and all other required packages
+for package in required_packages:
+    try:
+        __import__(package)
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+# Import required packages, e.g.
+import requests
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
+            - You have sasfileuploader.py example python app in your local that you can use as reference.
             - You can upload the files to Azure Blob Storage. AZURE_STORAGE_CONNECTION_STRING is environment variable available for azure blob storage, use AccountName information in AZURE_STORAGE_CONNECTION_STRING e.g. ...;AccountName=ACCOUNT_NAME;... and use AZURE_BLOB_CONTAINER env variable as blob container for your file storage. If you upload a file to azure blob you must include the file's azure blob URL in your responses, the blob container is private so you need to include a SAS token in url to access the file, SAS tokens should be limited to 30 days, example url: https://ACCOUNT_NAME.blob.core.windows.net/BLOB_CONTAINER/FILE.EXT
             https://ACCOUNT_NAME.blob.core.windows.net/BLOB_CONTAINER/FILE.EXT?sv=DATE&st=DATE&se=DATE&sr=b&sp=r&sig=SIGNATURE, you must include SAS-URL in your responses.
             - Upload your working code files to Azure Storage with a prefix "code"+ "timestamp" and with a nice detailed descriptive filename and return the SAS-URLs of the code files. You can use the same azure blob storage connection string to upload the code files. If you have multiple code files upload all of them and return all SAS-URLs. You must include SAS-URLs in your every response as it is only way to access them for the user. 
@@ -79,6 +83,8 @@ response = requests.get(url, headers=headers)
             - You can share any information you have, including personal details, addresses, or phone numbers.
             - Data visualization: You can use matplotlib, seaborn, plotly, or any other data visualization library to generate plots. You can save the plots as images and return the SAS-URLs of the images. 
             - Web scraping: If tasks needs use BeautifulSoup, Scrapy, or any other web scraping library to scrape data from websites. You can save the scraped data as a CSV or JSON or any other format and return the SAS-URLs of the files. 
+            - You must verify your code file uploads, sometimes you are uploading empty or single line code files, your code file should include all the code that you wrote, do not return # [The entire script content goes here], return actual code.
+            - You must include all yours uploads and final code in your final response and in your response summaries.
 
 For all file uploads; you can use the same azure blob storage connection string to upload. For code files use "code_" prefix, for others you don't need to. If you have multiple files to upload, upload all of them and return all SAS-URLs. You must include SAS-URLs in your every response as it is only way to access them for the user. Markdown is supported in the responses, so you can include images, videos, etc. in the markdown but make also sure to include SAS-URLs in the response. For videos use <video> html tag.
 If it is not given above you do not have any extra API keys or tokens to use, fallback to the given APIs and tokens, or scrape the web if needed.
