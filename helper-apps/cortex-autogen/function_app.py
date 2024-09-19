@@ -26,7 +26,7 @@ def queue_trigger(msg: func.QueueMessage):
         message_data = json.loads(msg.get_body().decode('utf-8'))
         if "requestId" not in message_data:
             message_data['requestId'] = msg.id
-        process_message(message_data)
+        process_message(message_data, msg)
 
     except Exception as e:
         logging.error(f"Error processing message: {str(e)}")

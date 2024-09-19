@@ -7,9 +7,22 @@ from azure.storage.queue import QueueClient
 import os
 import tempfile
 import redis
-import base64
 from dotenv import load_dotenv
+import pymongo
+import logging
+from datetime import datetime, timezone
 load_dotenv()
+
+def store_in_mongo(data):
+    try:
+        if 'MONGO_URI' in os.environ:
+            client = pymongo.MongoClient(os.environ['MONGO_URI'])
+            collection = client.get_default_database()[os.environ.get('MONGO_COLLECTION_NAME', 'autogenruns')]
+            collection.insert_one(data)
+        else:
+            logging.warning("MONGO_URI not found in environment variables")
+    except Exception as e:
+        logging.error(f"An error occurred while storing data in MongoDB: {str(e)}")
 
 app = func.FunctionApp()
 
@@ -38,9 +51,10 @@ def publish_request_progress(data):
         except Exception as e:
             logging.error(f"Error publishing message: {e}")
 
-def process_message(message_data):
+def process_message(message_data, original_request_message):
     logging.info(f"Processing Message: {message_data}")
     try:
+        started_at = datetime.now()
         message = message_data['message']
         request_id = message_data.get('requestId') or msg.id
 
@@ -148,15 +162,23 @@ Craft your responses in a way that is easy to understand and follow, and make su
             # logging.info(f"####Summary: {summary}")
 
             msg = all_messages[-3]["message"] if len(all_messages) >= 3 else ""
-            logging.info(f"####Final message: {msg}")            
+            logging.info(f"####Final message: {msg}")     
+
+            finalData = {
+                "requestId": request_id,
+                "requestMessage": message_data.get("message"),
+                "progress": 1,
+                "data": msg,
+                "contextId": message_data.get("contextId"),
+                "conversation": all_messages,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "insertionTime": original_request_message.insertion_time.astimezone(timezone.utc).isoformat() if original_request_message else None,
+                "startedAt": started_at.astimezone(timezone.utc).isoformat(),
+            }       
 
             # Final message to indicate completion
-            publish_request_progress({
-                "requestId": request_id,
-                "progress": 1,
-                "data": msg
-                # "data": #json.dumps([x["message"] for x in all_messages]),
-            })
+            publish_request_progress(finalData)
+            store_in_mongo(finalData)
 
     except Exception as e:
         logging.error(f"Error processing message: {str(e)}")
