@@ -291,6 +291,36 @@ if (config.get('gcpServiceAccountKey')) {
     config.set('gcpAuthTokenHelper', gcpAuthTokenHelper);
 }
 
+// Load dynamic pathways from JSON file or cloud storage
+const loadDynamicPathways = async (config) => {
+    const { pathwaysPath } = config.getProperties();
+    const dynamicPathwaysPath = path.join(pathwaysPath, 'dynamic', 'pathways.json');
+    
+    const storageConfig = {
+        storageType: process.env.STORAGE_TYPE || 'local',
+        filePath: dynamicPathwaysPath,
+        connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
+        containerName: process.env.AZURE_CONTAINER_NAME,
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        region: process.env.AWS_REGION,
+        bucketName: process.env.S3_BUCKET_NAME
+    };
+
+    const pathwayManager = new PathwayManager(storageConfig);
+    
+    try {
+        logger.info(`Loading dynamic pathways using ${storageConfig.storageType} storage`);
+        const dynamicPathways = await pathwayManager.loadPathways();
+        logger.info(`Dynamic pathways loaded successfully`);
+        logger.info(`Loaded dynamic pathways: [${Object.keys(dynamicPathways).join(", ")}]`);
+        return { pathwayManager, dynamicPathways };
+    } catch (error) {
+        logger.error(`Error loading dynamic pathways: ${error.message}`);
+        return { pathwayManager, dynamicPathways: {} };
+    }
+};
+
 // Build and load pathways to config
 const buildPathways = async (config) => {
     const { pathwaysPath, corePathwaysPath, basePathwayPath } = config.getProperties();
@@ -313,19 +343,9 @@ const buildPathways = async (config) => {
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
 
-    // Load dynamic pathways from JSON file
-    const dynamicPathwaysPath = path.join(pathwaysPath, 'dynamic', 'pathways.json');
-    let pathwayManager;
-    if (fs.existsSync(dynamicPathwaysPath)) {
-        logger.info(`Loading dynamic pathways from ${dynamicPathwaysPath}`);
-        pathwayManager = new PathwayManager(dynamicPathwaysPath);
-        const dynamicPathways = pathwayManager.loadPathways();
-        loadedPathways = { ...loadedPathways, ...dynamicPathways };
-        logger.info(`Dynamic pathways loaded successfully from: ${dynamicPathwaysPath}`);
-        logger.info(`Loaded dynamic pathways: [${Object.keys(dynamicPathways).join(", ")}]`);
-    } else {
-        logger.info(`No dynamic pathways found at: ${dynamicPathwaysPath}`);
-    }
+    // Load dynamic pathways
+    const { pathwayManager, dynamicPathways } = await loadDynamicPathways(config);
+    loadedPathways = { ...loadedPathways, ...dynamicPathways };
 
     // This is where we integrate pathway overrides from the config
     // file. This can run into a partial definition issue if the
