@@ -2,3 +2,5 @@ azure-storage-queue
 azure-functions
 pyautogen
 redis
+requests
+azure-storage-blob
