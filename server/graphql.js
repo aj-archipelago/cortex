@@ -1,28 +1,27 @@
 // graphql.js
 // Setup the Apollo server and Express middleware
 
-import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
-import { ApolloServerPluginLandingPageLocalDefault } from '@apollo/server/plugin/landingPage/default';
 import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
+import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
+import { ApolloServerPluginLandingPageLocalDefault } from '@apollo/server/plugin/landingPage/default';
 import { makeExecutableSchema } from '@graphql-tools/schema';
-import { WebSocketServer } from 'ws';
-import { useServer } from 'graphql-ws/lib/use/ws';
 import express from 'express';
+import { useServer } from 'graphql-ws/lib/use/ws';
 import http from 'http';
 import Keyv from 'keyv';
+import { WebSocketServer } from 'ws';
 // eslint-disable-next-line import/no-extraneous-dependencies
-import cors from 'cors';
-import { KeyvAdapter } from '@apollo/utils.keyvadapter';
 import responseCachePlugin from '@apollo/server-plugin-response-cache';
-import subscriptions from './subscriptions.js';
-import { buildModelEndpoints } from '../lib/requestExecutor.js';
-import { cancelRequestResolver } from './resolver.js';
-import { buildPathways, buildModels } from '../config.js';
-import { requestState } from './requestState.js';
-import { buildRestEndpoints } from './rest.js';
-import { startTestServer } from '../tests/server.js'
+import { KeyvAdapter } from '@apollo/utils.keyvadapter';
+import cors from 'cors';
+import { buildModels, buildPathways } from '../config.js';
 import logger from '../lib/logger.js';
+import { buildModelEndpoints } from '../lib/requestExecutor.js';
+import { startTestServer } from '../tests/server.js';
+import { requestState } from './requestState.js';
+import { cancelRequestResolver } from './resolver.js';
+import subscriptions from './subscriptions.js';
 
 // Utility functions
 // Server plugins
@@ -49,7 +48,7 @@ const getPlugins = (config) => {
 }
 
 // Type Definitions for GraphQL
-const getTypedefs = (pathways, pathwayManager) => {
+const getTypedefs = (pathways, pathwayManager, userDefined = false) => {
     const defaultTypeDefs = `#graphql
     enum CacheControlScope {
         PUBLIC
@@ -84,15 +83,19 @@ const getTypedefs = (pathways, pathwayManager) => {
 `;
 
     const pathwayManagerTypeDefs = pathwayManager.getTypeDefs();
-    const typeDefs = [defaultTypeDefs, pathwayManagerTypeDefs, ...Object.values(pathways).filter(p => !p.disabled).map(p => p.typeDef(p).gqlDefinition)];
+    const pathwayTypeDefs = Object.values(pathways)
+        .filter(p => !p.disabled && !!p.userDefined === userDefined)
+        .map(p => p.typeDef(p).gqlDefinition);
+    
+    const typeDefs = [defaultTypeDefs, pathwayManagerTypeDefs, ...pathwayTypeDefs];
     return typeDefs.join('\n');
 }
 
 // Resolvers for GraphQL
-const getResolvers = (config, pathways, pathwayManager) => {
+const getResolvers = (config, pathways, pathwayManager, userDefined = false) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
-        if (pathway.disabled) continue; //skip disabled pathways
+        if (pathway.disabled || !!pathway.userDefined !== userDefined) continue;
         resolverFunctions[name] = (parent, args, contextValue, info) => {
             // add shared state to contextValue
             contextValue.pathway = pathway;
@@ -132,6 +135,13 @@ const build = async (config) => {
 
     const schema = makeExecutableSchema({ typeDefs, resolvers });
 
+    // Create user-defined schema
+    const userTypeDefs = getTypedefs(pathways, pathwayManager, true);
+    const userResolvers = getResolvers(config, pathways, pathwayManager, true);
+    const userSchema = makeExecutableSchema({ typeDefs: userTypeDefs, resolvers: userResolvers });
+
+    console.log("pathways", pathways);
+
     const { plugins, cache } = getPlugins(config);
 
     const app = express();
@@ -158,7 +168,27 @@ const build = async (config) => {
     const serverCleanup = useServer({ schema }, wsServer, keepAlive);
 
     const server = new ApolloServer({
-        schema,
+        schema: schema, 
+        introspection: config.get('env') === 'development',
+        csrfPrevention: true,
+        plugins: plugins.concat([// Proper shutdown for the HTTP server.
+            ApolloServerPluginDrainHttpServer({ httpServer }),
+
+            // Proper shutdown for the WebSocket server.
+            {
+                async serverWillStart() {
+                    return {
+                        async drainServer() {
+                            await serverCleanup.dispose();
+                        },
+                    };
+                },
+            }
+        ]),
+    });
+
+    const userServer = new ApolloServer({
+        schema: userSchema,
         introspection: config.get('env') === 'development',
         csrfPrevention: true,
         plugins: plugins.concat([// Proper shutdown for the HTTP server.
@@ -224,23 +254,30 @@ const build = async (config) => {
 
     // Server Startup Function
     const startServer = async () => {
-        await server.start();
+        // Start both servers
+        await Promise.all([server.start(), userServer.start()]);
+
         app.use(
             '/graphql',
-
             cors(),
-
             expressMiddleware(server, {
                 context: async ({ req, res }) => ({ req, res, config, requestState }),
             }),
         );
-            
-        // add the REST endpoints
-        buildRestEndpoints(pathways, app, server, config);
+
+        // Add the user-defined GraphQL endpoint
+        app.use(
+            '/graphql-user',
+            cors(),
+            expressMiddleware(userServer, {
+                context: async ({ req, res }) => ({ req, res, config, requestState }),
+            }),
+        );
 
         // Now that our HTTP server is fully set up, we can listen to it.
         httpServer.listen(config.get('PORT'), () => {
             logger.info(`🚀 Server is now running at http://localhost:${config.get('PORT')}/graphql`);
+            logger.info(`🚀 User-defined server is now running at http://localhost:${config.get('PORT')}/graphql/user`);
         });
     };
 
