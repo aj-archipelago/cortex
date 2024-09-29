@@ -314,6 +314,10 @@ const loadDynamicPathways = async (config) => {
         const dynamicPathways = await pathwayManager.loadPathways();
         logger.info(`Dynamic pathways loaded successfully`);
         logger.info(`Loaded dynamic pathways: [${Object.keys(dynamicPathways).join(", ")}]`);
+        // set pathway.userDefined flag to true for all pathways
+        for (const [key, pathway] of Object.entries(dynamicPathways)) {
+            dynamicPathways[key].userDefined = true;
+        }
         return { pathwayManager, dynamicPathways };
     } catch (error) {
         logger.error(`Error loading dynamic pathways: ${error.message}`);
