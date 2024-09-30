@@ -81,7 +81,7 @@ def process_message(message_data):
         config_list = config_list_from_json(env_or_file="OAI_CONFIG_LIST")
         base_url = os.environ.get("CORTEX_API_BASE_URL")
         api_key = os.environ.get("CORTEX_API_KEY")
-        llm_config = {"config_list": config_list, "base_url": base_url, "api_key": api_key, "cache_seed": None}
+        llm_config = {"config_list": config_list, "base_url": base_url, "api_key": api_key, "cache_seed": None, "timeout": 600}
 
         with tempfile.TemporaryDirectory() as temp_dir:
             code_executor = autogen.coding.LocalCommandLineCodeExecutor(work_dir=temp_dir)
