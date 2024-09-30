@@ -4,3 +4,4 @@ pyautogen
 redis
 requests
 azure-storage-blob
+mysql-connector-python
