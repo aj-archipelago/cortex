@@ -103,11 +103,15 @@ def process_message(message_data):
             system_message_assistant = AssistantAgent.DEFAULT_SYSTEM_MESSAGE 
 
             if system_message_given:
-                system_message_assistant = f"{system_message_assistant}\n\n{system_message_given}"
+                system_message_assistant = system_message_given
             else:
                 print("No extra system message given for assistant")
 
-            assistant = AssistantAgent("assistant", llm_config=llm_config, system_message=system_message_assistant)
+            assistant = AssistantAgent("assistant", 
+                llm_config=llm_config, 
+                system_message=system_message_assistant,
+                code_execution_config={"executor": code_executor},
+            )
 
             user_proxy = UserProxyAgent(
                 "user_proxy",
@@ -139,8 +143,13 @@ def process_message(message_data):
 
             chat_result = user_proxy.initiate_chat(assistant, message=message)
 
-            msg = all_messages[-3]["message"] if len(all_messages) >= 3 else ""
-            logging.info(f"####Final message: {msg}")            
+            msg = ""
+            try:
+                msg = all_messages[-1 if all_messages[-2]["message"] else -3]["message"] 
+                logging.info(f"####Final message: {msg}")            
+            except Exception as e:
+                logging.error(f"Error getting final message: {e}")
+                msg = f"Finished, with errors 🤖 ... {e}"
 
             publish_request_progress({
                 "requestId": request_id,
