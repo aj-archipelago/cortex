@@ -27,6 +27,7 @@ class PathwayResolver {
         this.warnings = [];
         this.errors = [];
         this.requestId = uuidv4();
+        this.rootRequestId = null;
         this.responseParser = new PathwayResponseParser(pathway);
         this.tool = null;
         this.modelName = [
@@ -84,7 +85,7 @@ class PathwayResolver {
         catch (error) {
             if (!args.async) {
                 publishRequestProgress({
-                    requestId: this.requestId,
+                    requestId: this.rootRequestId || this.requestId,
                     progress: 1,
                     data: '[DONE]',
                 });
@@ -100,9 +101,9 @@ class PathwayResolver {
             // some models don't support progress updates
             if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
                 await publishRequestProgress({
-                        requestId: this.requestId,
+                        requestId: this.rootRequestId || this.requestId,
                         progress: completedCount / totalCount,
-                        data: JSON.stringify(responseData),
+                        data: typeof responseData === 'string' ? responseData : JSON.stringify(responseData),
                 });
             }
         // If the response is an object, it's a streaming response
@@ -113,7 +114,7 @@ class PathwayResolver {
 
                 const onParse = (event) => {
                     let requestProgress = {
-                        requestId: this.requestId
+                        requestId: this.rootRequestId || this.requestId
                     };
 
                     logger.debug(`Received event: ${event.type}`);
@@ -138,8 +139,10 @@ class PathwayResolver {
 
                     try {
                         if (!streamEnded && requestProgress.data) {
-                            //logger.info(`Publishing stream message to requestId ${this.requestId}: ${message}`);
-                            publishRequestProgress(requestProgress);
+                            if (!(this.rootRequestId && requestProgress.progress === 1)) {
+                                logger.info(`Publishing stream message to requestId ${this.requestId}: ${requestProgress.data}`);
+                                publishRequestProgress(requestProgress);
+                            }
                             streamEnded = requestProgress.progress === 1;
                         }
                     } catch (error) {
@@ -195,6 +198,7 @@ class PathwayResolver {
             if (!requestState[this.requestId]) {
                 requestState[this.requestId] = {}
             }
+            this.rootRequestId = args.rootRequestId ?? null;
             requestState[this.requestId] = { ...requestState[this.requestId], args, resolver: this.asyncResolve.bind(this) };
             return this.requestId;
         }

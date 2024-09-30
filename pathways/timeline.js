@@ -1,5 +1,6 @@
 import { Prompt } from '../server/prompt.js';
 import * as chrono from 'chrono-node';
+// eslint-disable-next-line import/no-extraneous-dependencies
 import dayjs from 'dayjs';
 
 const getLastOccurrenceOfMonth = (month) => {
