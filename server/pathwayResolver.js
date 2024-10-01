@@ -140,7 +140,7 @@ class PathwayResolver {
                     try {
                         if (!streamEnded && requestProgress.data) {
                             if (!(this.rootRequestId && requestProgress.progress === 1)) {
-                                logger.info(`Publishing stream message to requestId ${this.requestId}: ${requestProgress.data}`);
+                                logger.debug(`Publishing stream message to requestId ${this.requestId}: ${requestProgress.data}`);
                                 publishRequestProgress(requestProgress);
                             }
                             streamEnded = requestProgress.progress === 1;
