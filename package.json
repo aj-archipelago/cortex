@@ -33,6 +33,7 @@
     "@apollo/server-plugin-response-cache": "^4.1.2",
     "@apollo/utils.keyvadapter": "^3.0.0",
     "@azure/storage-queue": "^12.24.0",
+    "@azure/eventgrid": "^5.7.0",
     "@azure/storage-blob": "^12.24.0",
     "@datastructures-js/deque": "^1.0.4",
     "@graphql-tools/schema": "^9.0.12",
