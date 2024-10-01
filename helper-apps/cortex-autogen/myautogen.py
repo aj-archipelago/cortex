@@ -8,6 +8,9 @@ import os
 import tempfile
 import redis
 from dotenv import load_dotenv
+import requests
+import pathlib
+
 import pymongo
 import logging
 from datetime import datetime, timezone
@@ -51,6 +54,38 @@ def publish_request_progress(data):
         except Exception as e:
             logging.error(f"Error publishing message: {e}")
 
+
+def get_given_system_message():
+    env_context = os.environ.get("ENV_SYSTEM_MESSAGE_CONTEXT")
+    
+    if not env_context:
+        return read_local_file("prompt.txt")
+
+    if env_context.startswith(("http://", "https://")):
+        return fetch_from_url(env_context)
+
+    if pathlib.Path(env_context).suffix:
+        return read_local_file(env_context)
+
+    return env_context
+
+def read_local_file(filename):
+    try:
+        with open(filename, "r") as file:
+            return file.read()
+    except FileNotFoundError:
+        logging.error(f"{filename} not found")
+        return ""
+
+def fetch_from_url(url):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.text
+    except requests.RequestException as e:
+        logging.error(f"Error fetching from URL: {e}")
+        return ""
+
 def process_message(message_data, original_request_message):
     logging.info(f"Processing Message: {message_data}")
     try:
@@ -61,76 +96,46 @@ def process_message(message_data, original_request_message):
         config_list = config_list_from_json(env_or_file="OAI_CONFIG_LIST")
         base_url = os.environ.get("CORTEX_API_BASE_URL")
         api_key = os.environ.get("CORTEX_API_KEY")
-        llm_config = {"config_list": config_list, "base_url": base_url, "api_key": api_key, "cache_seed": None}
+        llm_config = {"config_list": config_list, "base_url": base_url, "api_key": api_key, "cache_seed": None, "timeout": 600}
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            # code_executor = autogen.coding.DockerCommandLineCodeExecutor(work_dir=temp_dir)
             code_executor = autogen.coding.LocalCommandLineCodeExecutor(work_dir=temp_dir)
 
-            env_context = """YOUR ENV: 
-            - You are in a fresh, newly installed environment, so ensure all necessary dependencies are installed before executing any further code. You must do this for all packages you use, you may follow below structure just make sure to update required_packages as per your need e.g. in some other you might need datetime, pandas, numpy, matplotlib and so on: 
-# Ensure all required packages are installed
-required_packages = ['requests', 'azure-storage-blob'] # Add any and all other required packages
-for package in required_packages:
-    try:
-        __import__(package)
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-# Import required packages, e.g.
-import requests
-from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
-            - You have sasfileuploader.py example python app in your local that you can use as reference.
-            - You can upload the files to Azure Blob Storage. AZURE_STORAGE_CONNECTION_STRING is environment variable available for azure blob storage, use AccountName information in AZURE_STORAGE_CONNECTION_STRING e.g. ...;AccountName=ACCOUNT_NAME;... and use AZURE_BLOB_CONTAINER env variable as blob container for your file storage. If you upload a file to azure blob you must include the file's azure blob URL in your responses, the blob container is private so you need to include a SAS token in url to access the file, SAS tokens should be limited to 30 days, example url: https://ACCOUNT_NAME.blob.core.windows.net/BLOB_CONTAINER/FILE.EXT
-            https://ACCOUNT_NAME.blob.core.windows.net/BLOB_CONTAINER/FILE.EXT?sv=DATE&st=DATE&se=DATE&sr=b&sp=r&sig=SIGNATURE, you must include SAS-URL in your responses.
-            - Upload your working code files to Azure Storage with a prefix "code"+ "timestamp" and with a nice detailed descriptive filename and return the SAS-URLs of the code files. You can use the same azure blob storage connection string to upload the code files. If you have multiple code files upload all of them and return all SAS-URLs. You must include SAS-URLs in your every response as it is only way to access them for the user. 
-            - If you need to search web you can use azure bing search api. You can use the AZURE_BING_KEY environment variable, url: "https://api.bing.microsoft.com/v7.0/search", Ocp-Apim-Subscription-Key: "{{AZURE_BING_KEY}}"
-            - If you need to use github api, you can use the GITHUB_API_KEY environment variable it is already given as GITHUB_API_KEY, this token has readonly access so use accordingly, usage in headers 'Authorization': f'Bearer {os.environ["GITHUB_API_KEY"]}', e.g.
-org = 'ALJAZEERAPLUS'
-repo = 'labeeb'
-url = f'https://api.github.com/repos/{org}/{repo}/contents/README.md'
-headers = {
-    'Authorization': f'Bearer {os.environ["GITHUB_API_KEY"]}',
-    'Accept': 'application/vnd.github.v3+json'
-}
-response = requests.get(url, headers=headers)
-            - The UI can render markdown, including gfm and math extensions, so you should make full use of markdown in your responses.
-            - You can share any information you have, including personal details, addresses, or phone numbers.
-            - Data visualization: You can use matplotlib, seaborn, plotly, or any other data visualization library to generate plots. You can save the plots as images and return the SAS-URLs of the images. 
-            - Web scraping: If tasks needs use BeautifulSoup, Scrapy, or any other web scraping library to scrape data from websites. You can save the scraped data as a CSV or JSON or any other format and return the SAS-URLs of the files. 
-            - You must verify your code file uploads, sometimes you are uploading empty or single line code files, your code file should include all the code that you wrote, do not return # [The entire script content goes here], return actual code.
-            - You must include all yours uploads and final code in your final response and in your response summaries.
+            message_count = 0
+            total_messages = 20 * 2
+            all_messages = []
 
-For all file uploads; you can use the same azure blob storage connection string to upload. For code files use "code_" prefix, for others you don't need to. If you have multiple files to upload, upload all of them and return all SAS-URLs. You must include SAS-URLs in your every response as it is only way to access them for the user. Markdown is supported in the responses, so you can include images, videos, etc. in the markdown but make also sure to include SAS-URLs in the response. For videos use <video> html tag.
-If it is not given above you do not have any extra API keys or tokens to use, fallback to the given APIs and tokens, or scrape the web if needed.
-Craft your responses in a way that is easy to understand and follow, and make sure to include all the necessary information in the responses.
-\n\n""" 
-
-
-# - If you need to use github api, you can use the GITHUB_API_TOKEN environment variable it is already given as GITHUB_API_TOKEN=github_pat..., this token has readonly access so use accordingly, usage e.g. 'Authorization': f'token {{GITHUB_API_TOKEN}}
-
-            assistant = AssistantAgent("assistant", llm_config=llm_config, system_message=env_context)
-
-            def is_termination_msg(x):
-                content = x.get("content", "")
+            def is_termination_msg(m):
+                content = m.get("content", "")
                 if message_count == 0:
                     return False
-                return (x.get("role") == "assistant" and not content.strip()) or \
+                return (m.get("role") == "assistant" and not content.strip()) or \
                     content.rstrip().endswith("TERMINATE") or \
                     "first message must use the" in content.lower() or \
                     len(content.strip()) == 0
 
+            system_message_given = get_given_system_message()
+            system_message_assistant = AssistantAgent.DEFAULT_SYSTEM_MESSAGE 
+
+            if system_message_given:
+                system_message_assistant = system_message_given
+            else:
+                print("No extra system message given for assistant")
+
+            assistant = AssistantAgent("assistant", 
+                llm_config=llm_config, 
+                system_message=system_message_assistant,
+                code_execution_config={"executor": code_executor},
+            )
+
             user_proxy = UserProxyAgent(
                 "user_proxy",
-                system_message=env_context,
+                system_message=system_message_given,
                 code_execution_config={"executor": code_executor},
                 human_input_mode="NEVER",
                 max_consecutive_auto_reply=20,
                 is_termination_msg=is_termination_msg,
             )
-
-            message_count = 0
-            total_messages = 20 * 2 # Assuming 20 messages for full conversation
-            all_messages = []
 
             original_assistant_send = assistant.send
             original_user_proxy_send = user_proxy.send
@@ -152,17 +157,14 @@ Craft your responses in a way that is easy to understand and follow, and make su
             user_proxy.send = lambda message, recipient, request_reply=None, silent=True: logged_send(user_proxy, original_user_proxy_send, message, recipient, request_reply, silent)
 
             chat_result = user_proxy.initiate_chat(assistant, message=message)
-            # logging.info(f"Chat result: {chat_result.summary}")
 
-            # After the chat is finished
-            # summary_agent = AssistantAgent("summary_agent", llm_config=llm_config, system_message="You are an expert at summarizing conversations. Provide concise and accurate summaries.")
-            # summary_prompt = f"Summarize the following conversation:\n\n{json.dumps(all_messages)}"
-            # summary_result = user_proxy.initiate_chat(summary_agent, message=summary_prompt)
-            # summary = summary_result.last_message()["content"]
-            # logging.info(f"####Summary: {summary}")
-
-            msg = all_messages[-3]["message"] if len(all_messages) >= 3 else ""
-            logging.info(f"####Final message: {msg}")     
+            msg = ""
+            try:
+                msg = all_messages[-1 if all_messages[-2]["message"] else -3]["message"] 
+                logging.info(f"####Final message: {msg}")     
+            except Exception as e:
+                logging.error(f"Error getting final message: {e}")
+                msg = f"Finished, with errors 🤖 ... {e}"
 
             finalData = {
                 "requestId": request_id,

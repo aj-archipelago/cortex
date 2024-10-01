@@ -3,3 +3,6 @@ azure-functions
 pyautogen
 redis
 pymongo
+requests
+azure-storage-blob
+mysql-connector-python

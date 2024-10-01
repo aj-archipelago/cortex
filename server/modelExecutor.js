@@ -17,6 +17,7 @@ import OpenAiEmbeddingsPlugin from './plugins/openAiEmbeddingsPlugin.js';
 import OpenAIImagePlugin from './plugins/openAiImagePlugin.js';
 import OpenAIDallE3Plugin from './plugins/openAiDallE3Plugin.js';
 import OpenAIVisionPlugin from './plugins/openAiVisionPlugin.js';
+import OpenAIReasoningPlugin from './plugins/openAiReasoningPlugin.js';
 import GeminiChatPlugin from './plugins/geminiChatPlugin.js';
 import GeminiVisionPlugin from './plugins/geminiVisionPlugin.js';
 import Gemini15ChatPlugin from './plugins/gemini15ChatPlugin.js';
@@ -81,6 +82,9 @@ class ModelExecutor {
                 break;
             case 'OPENAI-VISION':
                 plugin = new OpenAIVisionPlugin(pathway, model);
+                break;
+            case 'OPENAI-REASONING':
+                plugin = new OpenAIReasoningPlugin(pathway, model);
                 break;
             case 'GEMINI-CHAT':
                 plugin = new GeminiChatPlugin(pathway, model);

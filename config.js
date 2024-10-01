@@ -154,6 +154,36 @@ var config = convict({
                 "maxReturnTokens": 4096,
                 "supportsStreaming": true
             },
+            "oai-o1-mini": {
+                "type": "OPENAI-REASONING",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "o1-mini"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 128000,
+                "maxReturnTokens": 65536,
+                "supportsStreaming": false
+            },
+            "oai-o1-preview": {
+                "type": "OPENAI-REASONING",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "o1-preview"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 128000,
+                "maxReturnTokens": 32768,
+                "supportsStreaming": false
+            },
             "azure-bing": {
                 "type": "AZURE-BING",
                 "url": "https://api.bing.microsoft.com/v7.0/search",
