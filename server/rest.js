@@ -176,7 +176,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
                 sendStreamData(jsonResponse);
             });
         } catch (error) {
-            logger.info(`progressData not JSON: ${progressData}`);
+            logger.debug(`progressData not JSON: ${progressData}`);
             if (typeof progressData === 'string') {
                 if (progress === 1 && progressData.trim() === "[DONE]") {
                     fillJsonResponse(jsonResponse, progressData, "stop");
