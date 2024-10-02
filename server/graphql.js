@@ -22,6 +22,7 @@ import { startTestServer } from '../tests/server.js';
 import { requestState } from './requestState.js';
 import { cancelRequestResolver } from './resolver.js';
 import subscriptions from './subscriptions.js';
+import { getMessageTypeDefs, getPathwayTypeDef, userPathwayInputParameters } from './typeDef.js';
 
 // Utility functions
 // Server plugins
@@ -48,8 +49,12 @@ const getPlugins = (config) => {
 }
 
 // Type Definitions for GraphQL
-const getTypedefs = (pathways, pathwayManager, userDefined = false) => {
+const getTypedefs = (pathways, userPathways, pathwayManager, userDefined = false) => {
+    const userIds = Object.keys(userPathways);
+
     const defaultTypeDefs = `#graphql
+    ${getMessageTypeDefs()}
+
     enum CacheControlScope {
         PUBLIC
         PRIVATE
@@ -68,7 +73,31 @@ const getTypedefs = (pathways, pathwayManager, userDefined = false) => {
     type Mutation {
         cancelRequest(requestId: String!): Boolean
     }
+
+
+    type AllUsers {
+        ${userIds.map(userId => `
+            ${userId}: ${userId}
+        `).join('\n')}
+    }
     
+    extend type Query {
+        user: AllUsers
+    }
+
+    ${userIds.map(userId => {
+        const pathwayTypeDefs = Object.values(userPathways[userId]).map(p => getPathwayTypeDef(p.objName, "String")).join('\n');
+
+
+        return `
+${pathwayTypeDefs}
+        
+type ${userId} {
+    ${Object.values(userPathways[userId]).map(p => `${p.name}(${userPathwayInputParameters}): ${p.objName}!`).join('\n')}
+}
+
+    `}).join('\n')}
+
     type RequestSubscription {
         requestId: String
         progress: Float
@@ -86,13 +115,13 @@ const getTypedefs = (pathways, pathwayManager, userDefined = false) => {
     const pathwayTypeDefs = Object.values(pathways)
         .filter(p => !p.disabled && !!p.userDefined === userDefined)
         .map(p => p.typeDef(p).gqlDefinition);
-    
+
     const typeDefs = [defaultTypeDefs, pathwayManagerTypeDefs, ...pathwayTypeDefs];
     return typeDefs.join('\n');
 }
 
 // Resolvers for GraphQL
-const getResolvers = (config, pathways, pathwayManager, userDefined = false) => {
+const getResolvers = (config, pathways, userPathways, pathwayManager, userDefined = false) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
         if (pathway.disabled || !!pathway.userDefined !== userDefined) continue;
@@ -104,11 +133,29 @@ const getResolvers = (config, pathways, pathwayManager, userDefined = false) => 
         }
     }
 
+    // Add resolvers for user pathways
+    const userResolvers = {};
+    for (const [userId, userPathway] of Object.entries(userPathways)) {
+        userResolvers[`${userId}`] = {};
+        for (const [name, pathway] of Object.entries(userPathway)) {
+            userResolvers[`${userId}`][name] = (parent, args, contextValue, info) => {
+                contextValue.pathway = pathway;
+                contextValue.config = config;
+                return pathway.rootResolver(parent, args, contextValue, info);
+            };
+        }
+    }
+
     const pathwayManagerResolvers = pathwayManager.getResolvers();
 
     const resolvers = {
-        Query: resolverFunctions,
-        Mutation: { 
+        Query: {
+            ...resolverFunctions,
+            user: {
+                ...userResolvers
+            }
+        },
+        Mutation: {
             'cancelRequest': cancelRequestResolver,
             ...pathwayManagerResolvers.Mutation
         },
@@ -128,19 +175,16 @@ const build = async (config) => {
     buildModelEndpoints(config);
 
     //build api
-    const pathways = config.get('pathways');
+    const { system, user } = config.get('pathways');
 
-    const typeDefs = getTypedefs(pathways, pathwayManager);
-    const resolvers = getResolvers(config, pathways, pathwayManager);
+    const pathways = system;
 
+    const typeDefs = getTypedefs(system, user, pathwayManager);
+    const resolvers = getResolvers(config, pathways, user, pathwayManager);
+
+    console.log("typeDefs", typeDefs);
+    console.log("resolvers", resolvers);
     const schema = makeExecutableSchema({ typeDefs, resolvers });
-
-    // Create user-defined schema
-    const userTypeDefs = getTypedefs(pathways, pathwayManager, true);
-    const userResolvers = getResolvers(config, pathways, pathwayManager, true);
-    const userSchema = makeExecutableSchema({ typeDefs: userTypeDefs, resolvers: userResolvers });
-
-    console.log("pathways", pathways);
 
     const { plugins, cache } = getPlugins(config);
 
@@ -168,27 +212,7 @@ const build = async (config) => {
     const serverCleanup = useServer({ schema }, wsServer, keepAlive);
 
     const server = new ApolloServer({
-        schema: schema, 
-        introspection: config.get('env') === 'development',
-        csrfPrevention: true,
-        plugins: plugins.concat([// Proper shutdown for the HTTP server.
-            ApolloServerPluginDrainHttpServer({ httpServer }),
-
-            // Proper shutdown for the WebSocket server.
-            {
-                async serverWillStart() {
-                    return {
-                        async drainServer() {
-                            await serverCleanup.dispose();
-                        },
-                    };
-                },
-            }
-        ]),
-    });
-
-    const userServer = new ApolloServer({
-        schema: userSchema,
+        schema: schema,
         introspection: config.get('env') === 'development',
         csrfPrevention: true,
         plugins: plugins.concat([// Proper shutdown for the HTTP server.
@@ -214,7 +238,7 @@ const build = async (config) => {
 
     // If CORTEX_API_KEY is set, we roll our own auth middleware - usually not used if you're being fronted by a proxy
     const cortexApiKeys = config.get('cortexApiKeys');
-    if (cortexApiKeys  && Array.isArray(cortexApiKeys)) {
+    if (cortexApiKeys && Array.isArray(cortexApiKeys)) {
         app.use((req, res, next) => {
             let providedApiKey = req.headers['cortex-api-key'] || req.query['cortex-api-key'];
             if (!providedApiKey) {
@@ -225,9 +249,9 @@ const build = async (config) => {
             if (!cortexApiKeys.includes(providedApiKey)) {
                 if (req.baseUrl === '/graphql' || req.headers['content-type'] === 'application/graphql') {
                     res.status(401)
-                    .set('WWW-Authenticate', 'Cortex-Api-Key')
-                    .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
-                    .json({
+                        .set('WWW-Authenticate', 'Cortex-Api-Key')
+                        .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
+                        .json({
                             errors: [
                                 {
                                     message: 'Unauthorized',
@@ -239,9 +263,9 @@ const build = async (config) => {
                         });
                 } else {
                     res.status(401)
-                    .set('WWW-Authenticate', 'Cortex-Api-Key')
-                    .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
-                    .send('Unauthorized');
+                        .set('WWW-Authenticate', 'Cortex-Api-Key')
+                        .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
+                        .send('Unauthorized');
                 }
             } else {
                 next();
@@ -254,8 +278,8 @@ const build = async (config) => {
 
     // Server Startup Function
     const startServer = async () => {
-        // Start both servers
-        await Promise.all([server.start(), userServer.start()]);
+        // Start only the main server
+        await server.start();
 
         app.use(
             '/graphql',
@@ -265,19 +289,9 @@ const build = async (config) => {
             }),
         );
 
-        // Add the user-defined GraphQL endpoint
-        app.use(
-            '/graphql-user',
-            cors(),
-            expressMiddleware(userServer, {
-                context: async ({ req, res }) => ({ req, res, config, requestState }),
-            }),
-        );
-
         // Now that our HTTP server is fully set up, we can listen to it.
         httpServer.listen(config.get('PORT'), () => {
             logger.info(`🚀 Server is now running at http://localhost:${config.get('PORT')}/graphql`);
-            logger.info(`🚀 User-defined server is now running at http://localhost:${config.get('PORT')}/graphql/user`);
         });
     };
 

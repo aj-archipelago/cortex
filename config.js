@@ -295,7 +295,7 @@ if (config.get('gcpServiceAccountKey')) {
 const loadDynamicPathways = async (config) => {
     const { pathwaysPath } = config.getProperties();
     const dynamicPathwaysPath = path.join(pathwaysPath, 'dynamic', 'pathways.json');
-    
+
     const storageConfig = {
         storageType: process.env.STORAGE_TYPE || 'local',
         filePath: dynamicPathwaysPath,
@@ -308,7 +308,7 @@ const loadDynamicPathways = async (config) => {
     };
 
     const pathwayManager = new PathwayManager(storageConfig);
-    
+
     try {
         logger.info(`Loading dynamic pathways using ${storageConfig.storageType} storage`);
         const dynamicPathways = await pathwayManager.loadPathways();
@@ -349,7 +349,6 @@ const buildPathways = async (config) => {
 
     // Load dynamic pathways
     const { pathwayManager, dynamicPathways } = await loadDynamicPathways(config);
-    loadedPathways = { ...loadedPathways, ...dynamicPathways };
 
     // This is where we integrate pathway overrides from the config
     // file. This can run into a partial definition issue if the
@@ -360,8 +359,17 @@ const buildPathways = async (config) => {
         pathways[def.name || key] = pathways[key] = pathway;
     }
 
+    const userPathways = {};
+
+    for (const [userId, def] of Object.entries(dynamicPathways)) {
+        userPathways[userId] = {};
+        for (const [key, pathway] of Object.entries(def)) {
+            userPathways[userId][key] = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...pathway };
+        }
+    }
+
     // Add pathways to config
-    config.load({ pathways })
+    config.load({ pathways: { system: pathways, user: userPathways } })
 
     return { pathwayManager, pathways };
 }
