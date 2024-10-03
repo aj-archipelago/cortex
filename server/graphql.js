@@ -136,14 +136,10 @@ const getResolvers = (config, pathways, userPathways, pathwayManager, userDefine
     // Add resolvers for user pathways
     const userResolvers = {};
     for (const [userId, userPathway] of Object.entries(userPathways)) {
-        userResolvers[`${userId}`] = {};
-        for (const [name, pathway] of Object.entries(userPathway)) {
-            userResolvers[`${userId}`][name] = (parent, args, contextValue, info) => {
-                contextValue.pathway = pathway;
-                contextValue.config = config;
-                return pathway.rootResolver(parent, args, contextValue, info);
-            };
-        }
+        userResolvers[userId] = () => {
+            // Return an object that will be the parent for this user's pathways
+            return {};
+        };
     }
 
     const pathwayManagerResolvers = pathwayManager.getResolvers();
@@ -151,10 +147,22 @@ const getResolvers = (config, pathways, userPathways, pathwayManager, userDefine
     const resolvers = {
         Query: {
             ...resolverFunctions,
-            user: {
-                ...userResolvers
-            }
+            user: () => ({}) // This returns the parent for AllUsers
         },
+        AllUsers: userResolvers,
+        // Add resolvers for each user type
+        ...Object.fromEntries(Object.entries(userPathways).map(([userId, userPathway]) => [
+            userId,
+            Object.fromEntries(Object.entries(userPathway).map(([name, pathway]) => [
+                name,
+                (parent, args, contextValue, info) => {
+                    contextValue.pathway = pathway;
+                    contextValue.config = config;
+                    console.log("resolving. args", args);
+                    return pathway.rootResolver(parent, args, contextValue, info);
+                }
+            ]))
+        ])),
         Mutation: {
             'cancelRequest': cancelRequestResolver,
             ...pathwayManagerResolvers.Mutation
