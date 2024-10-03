@@ -1,5 +1,5 @@
 import test from 'ava';
-import { getSemanticChunks, determineTextFormat } from '../server/chunker.js';
+import { getSemanticChunks, determineTextFormat, getSingleTokenChunks } from '../server/chunker.js';
 import { encode } from '../lib/encodeCache.js';
 
 const testText = `Lorem ipsum dolor sit amet, consectetur adipiscing elit. In id erat sem. Phasellus ac dapibus purus, in fermentum nunc. Mauris quis rutrum magna. Quisque rutrum, augue vel blandit posuere, augue magna convallis turpis, nec elementum augue mauris sit amet nunc. Aenean sit amet leo est. Nunc ante ex, blandit et felis ut, iaculis lacinia est. Phasellus dictum orci id libero ullamcorper tempor.
@@ -207,4 +207,18 @@ test('should return identical text that chunker was passed, given weird spaces a
     t.assert(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
     const recomposedText = chunks.reduce((acc, chunk) => acc + chunk, '');
     t.assert(recomposedText === testTextShortWeirdSpaces); //check recomposition
+});
+
+test('should correctly split text into single token chunks', t => {
+    const testString = 'Hello, world!';
+    const chunks = getSingleTokenChunks(testString);
+    
+    // Check that each chunk is a single token
+    t.true(chunks.every(chunk => encode(chunk).length === 1));
+    
+    // Check that joining the chunks recreates the original string
+    t.is(chunks.join(''), testString);
+    
+    // Check specific tokens (this may need adjustment based on your tokenizer)
+    t.deepEqual(chunks, ['Hello', ',', ' world', '!']);
 });

@@ -1,4 +1,5 @@
 import { Prompt } from '../../server/prompt.js';
+// eslint-disable-next-line import/no-extraneous-dependencies
 import * as Diff from "diff";
 
 const prompt = new Prompt({

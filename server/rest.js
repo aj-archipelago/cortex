@@ -5,7 +5,20 @@ import pubsub from './pubsub.js';
 import { requestState } from './requestState.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../lib/logger.js';
+import { getSingleTokenChunks } from './chunker.js';
 
+const chunkTextIntoTokens = (() => {
+    let partialToken = '';
+    return (text, isLast = false, useSingleTokenStream = false) => {
+        const tokens = useSingleTokenStream ? getSingleTokenChunks(partialToken + text) : [text];
+        if (isLast) {
+            partialToken = '';
+            return tokens;
+        }
+        partialToken = useSingleTokenStream ? tokens.pop() : '';
+        return tokens;
+    };
+})();
 
 const processRestRequest = async (server, req, pathway, name, parameterMap = {}) => {
     const fieldVariableDefs = pathway.typeDef(pathway).restDefinition || [];
@@ -50,7 +63,8 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
     return resultText;
 };
 
-const processIncomingStream = (requestId, res, jsonResponse) => {
+const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
+    const useSingleTokenStream = pathway.useSingleTokenStream || false;
 
     const startStream = (res) => {
         // Set the headers for streaming
@@ -61,6 +75,14 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     }
     
     const finishStream = (res, jsonResponse) => {
+        // Send the last partial token if it exists
+        const lastTokens = chunkTextIntoTokens('', true, useSingleTokenStream);
+        if (lastTokens.length > 0) {
+            lastTokens.forEach(token => {
+                fillJsonResponse(jsonResponse, token, null);
+                sendStreamData(jsonResponse);
+            });
+        }
 
         // If we haven't sent the stop message yet, do it now
         if (jsonResponse.choices?.[0]?.finish_reason !== "stop") {
@@ -85,11 +107,11 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
     }
 
     const sendStreamData = (data) => {
-        logger.debug(`REST SEND: data: ${JSON.stringify(data)}`);
         const dataString = (data==='[DONE]') ? data : JSON.stringify(data);
 
         if (!res.writableEnded) {
             res.write(`data: ${dataString}\n\n`);
+            logger.debug(`REST SEND: data: ${dataString}`);
         }
     }
 
@@ -115,62 +137,67 @@ const processIncomingStream = (requestId, res, jsonResponse) => {
             if (subscription) {
                 try {
                     const subPromiseResult = await subscription;
-                    if (subPromiseResult) {
-                        pubsub.unsubscribe(subPromiseResult);
-                    }
+                    subPromiseResult && pubsub.unsubscribe(subPromiseResult);
                 } catch (error) {
                     logger.error(`Error unsubscribing from pubsub: ${error}`);
                 }
             }
         }
 
-        if (data.requestProgress.requestId === requestId) {
-            logger.debug(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
-            
-            const progress = data.requestProgress.progress;
-            const progressData = data.requestProgress.data;
+        if (data.requestProgress.requestId !== requestId) return;
 
-            try {
-                const messageJson = JSON.parse(progressData);
-                if (messageJson.error) {
-                    logger.error(`Stream error REST: ${messageJson?.error?.message || 'unknown error'}`);
-                    safeUnsubscribe();
-                    finishStream(res, jsonResponse);
-                    return;
-                } else if (messageJson.choices) {
-                    const { text, delta, finish_reason } = messageJson.choices[0];
+        logger.debug(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
+        
+        const { progress, data: progressData } = data.requestProgress;
 
-                    if (messageJson.object === 'text_completion') {
-                        fillJsonResponse(jsonResponse, text, finish_reason);
-                    } else {
-                        fillJsonResponse(jsonResponse, delta.content, finish_reason);
-                    }
-                } else if (messageJson.candidates) {
-                    const { content, finishReason } = messageJson.candidates[0];
-                    fillJsonResponse(jsonResponse, content.parts[0].text, finishReason);
-                } else if (messageJson.content) {
-                    const text = messageJson.content?.[0]?.text || '';
-                    const finishReason = messageJson.stop_reason;
-                    fillJsonResponse(jsonResponse, text, finishReason);
-                } else {
-                    fillJsonResponse(jsonResponse, messageJson, null);
-                }
-            } catch (error) {
-                //logger.info(`progressData not JSON: ${progressData}`);
-                fillJsonResponse(jsonResponse, progressData, "stop");
-            }
-            if (progress === 1 && progressData.trim() === "[DONE]") {
+        try {
+            const messageJson = JSON.parse(progressData);
+            if (messageJson.error) {
+                logger.error(`Stream error REST: ${messageJson?.error?.message || 'unknown error'}`);
                 safeUnsubscribe();
                 finishStream(res, jsonResponse);
                 return;
             }
 
-            sendStreamData(jsonResponse);
-
-            if (progress === 1) {
-                safeUnsubscribe();
-                finishStream(res, jsonResponse);
+            let content = '';
+            if (messageJson.choices) {
+                const { text, delta } = messageJson.choices[0];
+                content = messageJson.object === 'text_completion' ? text : delta.content;
+            } else if (messageJson.candidates) {
+                content = messageJson.candidates[0].content.parts[0].text;
+            } else if (messageJson.content) {
+                content = messageJson.content?.[0]?.text || '';
+            } else {
+                content = messageJson;
             }
+
+            chunkTextIntoTokens(content, false, useSingleTokenStream).forEach(token => {
+                fillJsonResponse(jsonResponse, token, null);
+                sendStreamData(jsonResponse);
+            });
+        } catch (error) {
+            logger.debug(`progressData not JSON: ${progressData}`);
+            if (typeof progressData === 'string') {
+                if (progress === 1 && progressData.trim() === "[DONE]") {
+                    fillJsonResponse(jsonResponse, progressData, "stop");
+                    safeUnsubscribe();
+                    finishStream(res, jsonResponse);
+                    return;
+                }
+
+                chunkTextIntoTokens(progressData, false, useSingleTokenStream).forEach(token => {
+                    fillJsonResponse(jsonResponse, token, null);
+                    sendStreamData(jsonResponse);
+                });
+            } else {
+                fillJsonResponse(jsonResponse, progressData, "stop");
+                sendStreamData(jsonResponse);
+            }
+        }
+
+        if (progress === 1) {
+            safeUnsubscribe();
+            finishStream(res, jsonResponse);
         }
     });
 
@@ -254,7 +281,7 @@ function buildRestEndpoints(pathways, app, server, config) {
                 jsonResponse.choices[0].finish_reason = null;
                 //jsonResponse.object = "text_completion.chunk";
 
-                processIncomingStream(resultText, res, jsonResponse);
+                processIncomingStream(resultText, res, jsonResponse, pathway);
             } else {
                 const requestId = uuidv4();
                 jsonResponse.id = `cmpl-${requestId}`;
@@ -306,7 +333,7 @@ function buildRestEndpoints(pathways, app, server, config) {
                 }
                 jsonResponse.object = "chat.completion.chunk";
 
-                processIncomingStream(resultText, res, jsonResponse);
+                processIncomingStream(resultText, res, jsonResponse, pathway);
             } else {
                 const requestId = uuidv4();
                 jsonResponse.id = `chatcmpl-${requestId}`;

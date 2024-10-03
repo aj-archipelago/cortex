@@ -217,6 +217,11 @@ const semanticTruncate = (text, maxLength) => {
     : truncatedText + "...";
 };
 
+const getSingleTokenChunks = (text) => {
+  if (text === '') return [''];
+  return encode(text).map(token => decode([token]));
+}
+
 export {
-    getSemanticChunks, semanticTruncate, getLastNToken, getFirstNToken, determineTextFormat
+    getSemanticChunks, semanticTruncate, getLastNToken, getFirstNToken, determineTextFormat, getSingleTokenChunks
 };
