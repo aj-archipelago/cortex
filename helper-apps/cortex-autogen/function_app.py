@@ -1,11 +1,8 @@
 import azure.functions as func
 import logging
 import json
-import autogen
-from autogen import AssistantAgent, UserProxyAgent, config_list_from_json
 from azure.storage.queue import QueueClient
 import os
-import tempfile
 import redis
 from myautogen import process_message
 
