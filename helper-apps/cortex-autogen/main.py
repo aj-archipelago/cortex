@@ -25,7 +25,7 @@ def main():
                 message_data = json.loads(decoded_content)
                 if "requestId" not in message_data:
                     message_data['requestId'] = message.id
-                process_message(message_data)
+                process_message(message_data, message)
                 queue_client.delete_message(message)
             attempts = 0  # Reset attempts if a message was processed
         else:

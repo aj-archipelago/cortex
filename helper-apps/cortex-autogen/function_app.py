@@ -1,11 +1,8 @@
 import azure.functions as func
 import logging
 import json
-import autogen
-from autogen import AssistantAgent, UserProxyAgent, config_list_from_json
 from azure.storage.queue import QueueClient
 import os
-import tempfile
 import redis
 from myautogen import process_message
 
@@ -26,7 +23,7 @@ def queue_trigger(msg: func.QueueMessage):
         message_data = json.loads(msg.get_body().decode('utf-8'))
         if "requestId" not in message_data:
             message_data['requestId'] = msg.id
-        process_message(message_data)
+        process_message(message_data, msg)
 
     except Exception as e:
         logging.error(f"Error processing message: {str(e)}")
