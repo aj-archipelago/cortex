@@ -61,6 +61,7 @@
     "keyv": "^4.5.2",
     "langchain": "^0.1.28",
     "mime-types": "^2.1.35",
+    "stringcase": "^4.3.1",
     "subsrt": "^1.1.1",
     "uuid": "^9.0.0",
     "winston": "^3.11.0",
