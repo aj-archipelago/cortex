@@ -301,10 +301,10 @@ const loadDynamicPathways = async (config) => {
         filePath: dynamicPathwaysPath,
         connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
         containerName: process.env.AZURE_CONTAINER_NAME,
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-        region: process.env.AWS_REGION,
-        bucketName: process.env.S3_BUCKET_NAME
+        accessKeyId: process.env.AWS_S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_S3_SECRET_ACCESS_KEY,
+        region: process.env.AWS_S3_REGION,
+        bucketName: process.env.AWS_S3_BUCKET_NAME
     };
 
     const pathwayManager = new PathwayManager(storageConfig);
@@ -314,10 +314,7 @@ const loadDynamicPathways = async (config) => {
         const dynamicPathways = await pathwayManager.loadPathways();
         logger.info(`Dynamic pathways loaded successfully`);
         logger.info(`Loaded dynamic pathways: [${Object.keys(dynamicPathways).join(", ")}]`);
-        // set pathway.userDefined flag to true for all pathways
-        for (const [key, pathway] of Object.entries(dynamicPathways)) {
-            dynamicPathways[key].userDefined = true;
-        }
+        
         return { pathwayManager, dynamicPathways };
     } catch (error) {
         logger.error(`Error loading dynamic pathways: ${error.message}`);
