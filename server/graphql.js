@@ -23,6 +23,7 @@ import { requestState } from './requestState.js';
 import { cancelRequestResolver } from './resolver.js';
 import subscriptions from './subscriptions.js';
 import { getMessageTypeDefs, getPathwayTypeDef, userPathwayInputParameters } from './typeDef.js';
+import stringcase from 'stringcase';
 
 // Utility functions
 // Server plugins
@@ -49,7 +50,7 @@ const getPlugins = (config) => {
 }
 
 // Type Definitions for GraphQL
-const getTypedefs = (pathways, userPathways, pathwayManager, userDefined = false) => {
+const getTypedefs = (pathways, userPathways, pathwayManager) => {
     const userIds = Object.keys(userPathways);
 
     const defaultTypeDefs = `#graphql
@@ -86,14 +87,12 @@ const getTypedefs = (pathways, userPathways, pathwayManager, userDefined = false
     }
 
     ${userIds.map(userId => {
-        const pathwayTypeDefs = Object.values(userPathways[userId]).map(p => getPathwayTypeDef(p.objName, "String")).join('\n');
-
-
+        const pathwayTypeDefs = Object.values(userPathways[userId]).map(p => getPathwayTypeDef(stringcase.pascalcase(`${userId}_${p.name}`), "String")).join('\n');
         return `
 ${pathwayTypeDefs}
         
 type ${userId} {
-    ${Object.values(userPathways[userId]).map(p => `${p.name}(${userPathwayInputParameters}): ${p.objName}!`).join('\n')}
+    ${Object.values(userPathways[userId]).map(p => `${p.name}(${userPathwayInputParameters}): ${stringcase.pascalcase(`${userId}_${p.name}`)}!`).join('\n')}
 }
 
     `}).join('\n')}
@@ -113,7 +112,7 @@ type ${userId} {
 
     const pathwayManagerTypeDefs = pathwayManager.getTypeDefs();
     const pathwayTypeDefs = Object.values(pathways)
-        .filter(p => !p.disabled && !!p.userDefined === userDefined)
+        .filter(p => !p.disabled)
         .map(p => p.typeDef(p).gqlDefinition);
 
     const typeDefs = [defaultTypeDefs, pathwayManagerTypeDefs, ...pathwayTypeDefs];
@@ -121,10 +120,10 @@ type ${userId} {
 }
 
 // Resolvers for GraphQL
-const getResolvers = (config, pathways, userPathways, pathwayManager, userDefined = false) => {
+const getResolvers = (config, pathways, userPathways, pathwayManager) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
-        if (pathway.disabled || !!pathway.userDefined !== userDefined) continue;
+        if (pathway.disabled) continue;
         resolverFunctions[name] = (parent, args, contextValue, info) => {
             // add shared state to contextValue
             contextValue.pathway = pathway;
@@ -158,7 +157,6 @@ const getResolvers = (config, pathways, userPathways, pathwayManager, userDefine
                 (parent, args, contextValue, info) => {
                     contextValue.pathway = pathway;
                     contextValue.config = config;
-                    console.log("resolving. args", args);
                     return pathway.rootResolver(parent, args, contextValue, info);
                 }
             ]))
@@ -189,9 +187,6 @@ const build = async (config) => {
 
     const typeDefs = getTypedefs(system, user, pathwayManager);
     const resolvers = getResolvers(config, pathways, user, pathwayManager);
-
-    console.log("typeDefs", typeDefs);
-    console.log("resolvers", resolvers);
     const schema = makeExecutableSchema({ typeDefs, resolvers });
 
     const { plugins, cache } = getPlugins(config);
