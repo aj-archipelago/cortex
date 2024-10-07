@@ -125,7 +125,7 @@ def process_message(message_data, original_request_message):
                     return False
                 if content.rstrip().endswith("TERMINATE"):
                     terminate_count += 1
-                return terminate_count >= 2 or "first message must use the" in content.lower()
+                return terminate_count >= 3 or "first message must use the" in content.lower()
 
             system_message_given = get_given_system_message()
             system_message_assistant = AssistantAgent.DEFAULT_SYSTEM_MESSAGE 
