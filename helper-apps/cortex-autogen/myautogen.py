@@ -58,7 +58,7 @@ def publish_request_progress(data):
     if connect_redis():
         try:
             message = json.dumps(data)
-            logging.info(f"Publishing message {message} to channel {channel}")
+            #logging.info(f"Publishing message {message} to channel {channel}")
             redis_client.publish(channel, message)
         except Exception as e:
             logging.error(f"Error publishing message: {e}")
@@ -117,14 +117,15 @@ def process_message(message_data, original_request_message):
             total_messages = 20 * 2
             all_messages = []
 
+            terminate_count = 0
             def is_termination_msg(m):
-                content = m.get("content", "")
-                if message_count == 0:
+                nonlocal terminate_count
+                content = m.get("content", "").strip()
+                if not content:
                     return False
-                return (m.get("role") == "assistant" and not content.strip()) or \
-                    content.rstrip().endswith("TERMINATE") or \
-                    "first message must use the" in content.lower() or \
-                    len(content.strip()) == 0
+                if content.rstrip().endswith("TERMINATE"):
+                    terminate_count += 1
+                return terminate_count >= 2 or "first message must use the" in content.lower()
 
             system_message_given = get_given_system_message()
             system_message_assistant = AssistantAgent.DEFAULT_SYSTEM_MESSAGE 
@@ -148,6 +149,7 @@ def process_message(message_data, original_request_message):
                 code_execution_config={"executor": code_executor},
                 human_input_mode="NEVER",
                 max_consecutive_auto_reply=20,
+                is_termination_msg=is_termination_msg,
             )
 
             # description = "Upload a file to Azure Blob Storage and get URL back with a SAS token. Requires AZURE_STORAGE_CONNECTION_STRING and AZURE_BLOB_CONTAINER environment variables. Input: file_path (str). Output: SAS URL (str) or error message."
