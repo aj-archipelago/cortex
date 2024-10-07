@@ -10,7 +10,9 @@ import time
 
 model_download_root = './models'
 try:
-    model = whisper.load_model("large", download_root=model_download_root) #large, tiny
+    model_name = "turbo"
+    model = whisper.load_model(model_name, download_root=model_download_root) #large, tiny
+    print(f"Model {model_name} loaded successfully")
 except Exception as e:
     print(f"Error loading model: {e}")
     raise
