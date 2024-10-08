@@ -51,8 +51,6 @@ const getPlugins = (config) => {
 
 // Type Definitions for GraphQL
 const getTypedefs = (pathways, userPathways, pathwayManager) => {
-    const userIds = Object.keys(userPathways);
-
     const defaultTypeDefs = `#graphql
     ${getMessageTypeDefs()}
 
@@ -75,27 +73,11 @@ const getTypedefs = (pathways, userPathways, pathwayManager) => {
         cancelRequest(requestId: String!): Boolean
     }
 
-
-    type AllUsers {
-        ${userIds.map(userId => `
-            ${userId}: ${userId}
-        `).join('\n')}
-    }
+    ${getPathwayTypeDef('UserPathway', 'String')}
     
     extend type Query {
-        user: AllUsers
+        user(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): UserPathway
     }
-
-    ${userIds.map(userId => {
-        const pathwayTypeDefs = Object.values(userPathways[userId]).map(p => getPathwayTypeDef(stringcase.pascalcase(`${userId}_${p.name}`), "String")).join('\n');
-        return `
-${pathwayTypeDefs}
-        
-type ${userId} {
-    ${Object.values(userPathways[userId]).map(p => `${p.name}(${userPathwayInputParameters}): ${stringcase.pascalcase(`${userId}_${p.name}`)}!`).join('\n')}
-}
-
-    `}).join('\n')}
 
     type RequestSubscription {
         requestId: String
@@ -132,35 +114,28 @@ const getResolvers = (config, pathways, userPathways, pathwayManager) => {
         }
     }
 
-    // Add resolvers for user pathways
-    const userResolvers = {};
-    for (const [userId, userPathway] of Object.entries(userPathways)) {
-        userResolvers[userId] = () => {
-            // Return an object that will be the parent for this user's pathways
-            return {};
-        };
-    }
-
     const pathwayManagerResolvers = pathwayManager.getResolvers();
+
+    const userResolver = async (_, args, contextValue, info) => {
+        const { userId, pathwayName, ...pathwayArgs } = args;
+        const userPathway = userPathways[userId]?.[pathwayName];
+        
+        if (!userPathway) {
+            throw new Error(`Pathway not found for user ${userId} and pathway ${pathwayName}`);
+        }
+
+        contextValue.pathway = userPathway;
+        contextValue.config = config;
+        
+        const result = await userPathway.rootResolver(null, pathwayArgs, contextValue, info);
+        return result;
+    };
 
     const resolvers = {
         Query: {
             ...resolverFunctions,
-            user: () => ({}) // This returns the parent for AllUsers
+            user: userResolver
         },
-        AllUsers: userResolvers,
-        // Add resolvers for each user type
-        ...Object.fromEntries(Object.entries(userPathways).map(([userId, userPathway]) => [
-            userId,
-            Object.fromEntries(Object.entries(userPathway).map(([name, pathway]) => [
-                name,
-                (parent, args, contextValue, info) => {
-                    contextValue.pathway = pathway;
-                    contextValue.config = config;
-                    return pathway.rootResolver(parent, args, contextValue, info);
-                }
-            ]))
-        ])),
         Mutation: {
             'cancelRequest': cancelRequestResolver,
             ...pathwayManagerResolvers.Mutation

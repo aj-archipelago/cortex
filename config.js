@@ -297,23 +297,24 @@ const loadDynamicPathways = async (config) => {
     const dynamicPathwaysPath = path.join(pathwaysPath, 'dynamic', 'pathways.json');
 
     const storageConfig = {
-        storageType: process.env.STORAGE_TYPE || 'local',
+        storageType: process.env.DYNAMIC_PATHWAYS_STORAGE_TYPE || 'local',
         filePath: dynamicPathwaysPath,
         connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
-        containerName: process.env.AZURE_CONTAINER_NAME,
+        containerName: process.env.AZURE_CONTAINER_NAME || 'cortexdynamicpathways',
         accessKeyId: process.env.AWS_S3_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_S3_SECRET_ACCESS_KEY,
         region: process.env.AWS_S3_REGION,
-        bucketName: process.env.AWS_S3_BUCKET_NAME
+        bucketName: process.env.AWS_S3_BUCKET_NAME || 'cortexdynamicpathways',
+        eventGridEndpoint: process.env.AZURE_EVENT_GRID_ENDPOINT,
+        eventGridKey: process.env.AZURE_EVENT_GRID_KEY
     };
 
     const pathwayManager = new PathwayManager(storageConfig);
 
     try {
-        logger.info(`Loading dynamic pathways using ${storageConfig.storageType} storage`);
-        const dynamicPathways = await pathwayManager.loadPathways();
+        const dynamicPathways = await pathwayManager.initialize();
         logger.info(`Dynamic pathways loaded successfully`);
-        logger.info(`Loaded dynamic pathways: [${Object.keys(dynamicPathways).join(", ")}]`);
+        logger.info(`Loaded dynamic pathways for users: [${Object.keys(dynamicPathways).join(", ")}]`);
         
         return { pathwayManager, dynamicPathways };
     } catch (error) {
