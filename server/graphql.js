@@ -50,7 +50,7 @@ const getPlugins = (config) => {
 }
 
 // Type Definitions for GraphQL
-const getTypedefs = (pathways, userPathways, pathwayManager) => {
+const getTypedefs = (pathways, pathwayManager) => {
     const defaultTypeDefs = `#graphql
     ${getMessageTypeDefs()}
 
@@ -73,10 +73,10 @@ const getTypedefs = (pathways, userPathways, pathwayManager) => {
         cancelRequest(requestId: String!): Boolean
     }
 
-    ${getPathwayTypeDef('UserPathway', 'String')}
+    ${getPathwayTypeDef('ExecuteWorkspace', 'String')}
     
     extend type Query {
-        user(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): UserPathway
+        executeWorkspace(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): ExecuteWorkspace
     }
 
     type RequestSubscription {
@@ -102,7 +102,7 @@ const getTypedefs = (pathways, userPathways, pathwayManager) => {
 }
 
 // Resolvers for GraphQL
-const getResolvers = (config, pathways, userPathways, pathwayManager) => {
+const getResolvers = (config, pathways, pathwayManager) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
         if (pathway.disabled) continue;
@@ -116,14 +116,10 @@ const getResolvers = (config, pathways, userPathways, pathwayManager) => {
 
     const pathwayManagerResolvers = pathwayManager.getResolvers();
 
-    const userResolver = async (_, args, contextValue, info) => {
+    const executeWorkspaceResolver = async (_, args, contextValue, info) => {
         const { userId, pathwayName, ...pathwayArgs } = args;
-        const userPathway = userPathways[userId]?.[pathwayName];
+        const userPathway = await pathwayManager.getPathway(userId, pathwayName);
         
-        if (!userPathway) {
-            throw new Error(`Pathway not found for user ${userId} and pathway ${pathwayName}`);
-        }
-
         contextValue.pathway = userPathway;
         contextValue.config = config;
         
@@ -134,7 +130,7 @@ const getResolvers = (config, pathways, userPathways, pathwayManager) => {
     const resolvers = {
         Query: {
             ...resolverFunctions,
-            user: userResolver
+            executeWorkspace: executeWorkspaceResolver
         },
         Mutation: {
             'cancelRequest': cancelRequestResolver,
@@ -156,12 +152,10 @@ const build = async (config) => {
     buildModelEndpoints(config);
 
     //build api
-    const { system, user } = config.get('pathways');
+    const pathways = config.get('pathways');
 
-    const pathways = system;
-
-    const typeDefs = getTypedefs(system, user, pathwayManager);
-    const resolvers = getResolvers(config, pathways, user, pathwayManager);
+    const typeDefs = getTypedefs(pathways, pathwayManager);
+    const resolvers = getResolvers(config, pathways, pathwayManager);
     const schema = makeExecutableSchema({ typeDefs, resolvers });
 
     const { plugins, cache } = getPlugins(config);

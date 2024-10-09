@@ -292,7 +292,7 @@ if (config.get('gcpServiceAccountKey')) {
 }
 
 // Load dynamic pathways from JSON file or cloud storage
-const loadDynamicPathways = async (config) => {
+const createDynamicPathwayManager = async (config, basePathway) => {
     const { pathwaysPath } = config.getProperties();
     const dynamicPathwaysPath = path.join(pathwaysPath, 'dynamic', 'pathways.json');
 
@@ -305,21 +305,19 @@ const loadDynamicPathways = async (config) => {
         secretAccessKey: process.env.AWS_S3_SECRET_ACCESS_KEY,
         region: process.env.AWS_S3_REGION,
         bucketName: process.env.AWS_S3_BUCKET_NAME || 'cortexdynamicpathways',
-        eventGridEndpoint: process.env.AZURE_EVENT_GRID_ENDPOINT,
-        eventGridKey: process.env.AZURE_EVENT_GRID_KEY
     };
 
-    const pathwayManager = new PathwayManager(storageConfig);
+    const pathwayManager = new PathwayManager(storageConfig, basePathway);
 
     try {
         const dynamicPathways = await pathwayManager.initialize();
         logger.info(`Dynamic pathways loaded successfully`);
         logger.info(`Loaded dynamic pathways for users: [${Object.keys(dynamicPathways).join(", ")}]`);
-        
-        return { pathwayManager, dynamicPathways };
+
+        return pathwayManager;
     } catch (error) {
         logger.error(`Error loading dynamic pathways: ${error.message}`);
-        return { pathwayManager, dynamicPathways: {} };
+        return pathwayManager;
     }
 };
 
@@ -346,7 +344,7 @@ const buildPathways = async (config) => {
     }
 
     // Load dynamic pathways
-    const { pathwayManager, dynamicPathways } = await loadDynamicPathways(config);
+    const pathwayManager = await createDynamicPathwayManager(config, basePathway);
 
     // This is where we integrate pathway overrides from the config
     // file. This can run into a partial definition issue if the
@@ -357,17 +355,8 @@ const buildPathways = async (config) => {
         pathways[def.name || key] = pathways[key] = pathway;
     }
 
-    const userPathways = {};
-
-    for (const [userId, def] of Object.entries(dynamicPathways)) {
-        userPathways[userId] = {};
-        for (const [key, pathway] of Object.entries(def)) {
-            userPathways[userId][key] = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...pathway };
-        }
-    }
-
     // Add pathways to config
-    config.load({ pathways: { system: pathways, user: userPathways } })
+    config.load({ pathways });
 
     return { pathwayManager, pathways };
 }
