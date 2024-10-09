@@ -15,7 +15,22 @@ import logging
 from datetime import datetime, timezone
 from tools.sasfileuploader import autogen_sas_uploader
 import shutil
+import time
+import base64
 load_dotenv()
+
+connection_string = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
+human_input_queue_name = os.environ.get("HUMAN_INPUT_QUEUE_NAME", "autogen-human-input-queue")
+human_input_queue_client = QueueClient.from_connection_string(connection_string, human_input_queue_name)
+
+def check_for_human_input(request_id):
+    messages = human_input_queue_client.receive_messages()
+    for message in messages:
+        content = json.loads(base64.b64decode(message.content).decode('utf-8'))
+        if content['codeRequestId'] == request_id:
+            human_input_queue_client.delete_message(message)
+            return content['text']
+    return None
 
 DEFAULT_SUMMARY_PROMPT = "Summarize the takeaway from the conversation. Do not add any introductory phrases."
 try:
@@ -177,10 +192,35 @@ def process_message(message_data, original_request_message):
                 nonlocal message_count, all_messages
                 if not message:
                     return
+                
+                if True or sender.name == "user_proxy":
+                    human_input = check_for_human_input(request_id)
+                    if human_input:
+                        if human_input == "TERMINATE":
+                            logging.info("Terminating conversation")
+                            raise Exception("Conversation terminated by user")
+                        elif human_input == "PAUSE":
+                            logging.info("Pausing conversation")
+                            pause_start = time.time()
+                            while time.time() - pause_start < 60*15:  # 15 minutes pause timeout
+                                time.sleep(10)
+                                new_input = check_for_human_input(request_id)
+                                if new_input:
+                                    logging.info(f"Resuming conversation with human input: {new_input}")
+                                    return logged_send(sender, original_send, new_input, recipient, request_reply, silent)
+                            logging.info("Pause timeout, ending conversation")
+                            raise Exception("Conversation ended due to pause timeout")
+                        logging.info(f"Human input to {recipient.name}: {human_input}")
+                        return original_send(human_input, recipient, request_reply, silent)
+
+
                 logging.info(f"Message from {sender.name} to {recipient.name}: {message}")
+
                 message_count += 1
                 progress = min(message_count / total_messages, 1)
                 all_messages.append({"sender": sender.name, "message": message})
+
+                # if sender.name == "assistant":
                 publish_request_progress({
                     "requestId": request_id,
                     "progress": progress,
@@ -228,3 +268,16 @@ def process_message(message_data, original_request_message):
                 "progress": 1,
                 "error": str(e)
             })
+            store_in_mongo({
+                "requestId": request_id,
+                "requestMessage": message_data.get("message"),
+                "progress": 1,
+                "error": str(e),
+                "data": str(e),
+                "contextId": message_data.get("contextId"),
+                "conversation": all_messages,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+                "insertionTime": original_request_message.insertion_time.astimezone(timezone.utc).isoformat() if original_request_message else None,
+                "startedAt": started_at.astimezone(timezone.utc).isoformat(),
+            })
+
