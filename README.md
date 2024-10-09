@@ -544,8 +544,8 @@ To ensure the security of dynamic pathways:
 2. This key must be provided in the `key` parameter when adding, updating, or deleting pathways.
 3. Each pathway is associated with a `userId` and `secret`. The secret must be provided to modify or delete an existing pathway.
 
-### Synchronization
+### Synchronization across multiple instances
 
-For non-local storage types (Azure and S3), Cortex uses Redis to synchronize pathway updates across multiple instances. Ensure the `REDIS_CONNECTION_STRING` environment variable is set when using cloud storage for dynamic pathways.
+Each instance of Cortex maintains its own local cache of pathways. On every dynamic pathway request, it checks if the local cache is up to date by comparing the last modified timestamp of the storage with the last update time of the local cache. If the local cache is out of date, it reloads the pathways from storage.
 
-Dynamic pathways provide a flexible way to extend Cortex's functionality without modifying its core code, allowing for more adaptable and customizable AI applications.
+This approach ensures that all instances of Cortex will eventually have access to the most up-to-date dynamic pathways without requiring immediate synchronization. 
