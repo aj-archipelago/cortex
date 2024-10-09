@@ -5,18 +5,19 @@ import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
 import logger from './lib/logger.js';
+import PathwayManager from './lib/pathwayManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 convict.addFormat({
     name: 'string-array',
-    validate: function(val) {
-      if (!Array.isArray(val)) {
-        throw new Error('must be of type Array');
-      }
+    validate: function (val) {
+        if (!Array.isArray(val)) {
+            throw new Error('must be of type Array');
+        }
     },
-    coerce: function(val) {
-      return val.split(',');
+    coerce: function (val) {
+        return val.split(',');
     },
 });
 
@@ -290,6 +291,36 @@ if (config.get('gcpServiceAccountKey')) {
     config.set('gcpAuthTokenHelper', gcpAuthTokenHelper);
 }
 
+// Load dynamic pathways from JSON file or cloud storage
+const createDynamicPathwayManager = async (config, basePathway) => {
+    const { pathwaysPath } = config.getProperties();
+    const dynamicPathwaysPath = path.join(pathwaysPath, 'dynamic', 'pathways.json');
+
+    const storageConfig = {
+        storageType: process.env.DYNAMIC_PATHWAYS_STORAGE_TYPE || 'local',
+        filePath: dynamicPathwaysPath,
+        connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
+        containerName: process.env.AZURE_CONTAINER_NAME || 'cortexdynamicpathways',
+        accessKeyId: process.env.AWS_S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_S3_SECRET_ACCESS_KEY,
+        region: process.env.AWS_S3_REGION,
+        bucketName: process.env.AWS_S3_BUCKET_NAME || 'cortexdynamicpathways',
+    };
+
+    const pathwayManager = new PathwayManager(storageConfig, basePathway);
+
+    try {
+        const dynamicPathways = await pathwayManager.initialize();
+        logger.info(`Dynamic pathways loaded successfully`);
+        logger.info(`Loaded dynamic pathways for users: [${Object.keys(dynamicPathways).join(", ")}]`);
+
+        return pathwayManager;
+    } catch (error) {
+        logger.error(`Error loading dynamic pathways: ${error.message}`);
+        return pathwayManager;
+    }
+};
+
 // Build and load pathways to config
 const buildPathways = async (config) => {
     const { pathwaysPath, corePathwaysPath, basePathwayPath } = config.getProperties();
@@ -312,6 +343,9 @@ const buildPathways = async (config) => {
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
 
+    // Load dynamic pathways
+    const pathwayManager = await createDynamicPathwayManager(config, basePathway);
+
     // This is where we integrate pathway overrides from the config
     // file. This can run into a partial definition issue if the
     // config file contains pathways that no longer exist.
@@ -322,9 +356,9 @@ const buildPathways = async (config) => {
     }
 
     // Add pathways to config
-    config.load({ pathways })
+    config.load({ pathways });
 
-    return pathways;
+    return { pathwayManager, pathways };
 }
 
 // Build and load models to config
@@ -336,7 +370,7 @@ const buildModels = (config) => {
         if (!model.name) {
             model.name = key;
         }
-        
+
         // if model is in old format, convert it to new format
         if (!model.endpoints) {
             model = {
@@ -354,7 +388,7 @@ const buildModels = (config) => {
         }
 
         // compile handlebars templates for each endpoint
-        model.endpoints = model.endpoints.map(endpoint => 
+        model.endpoints = model.endpoints.map(endpoint =>
             JSON.parse(HandleBars.compile(JSON.stringify(endpoint))({ ...model, ...config.getEnv(), ...config.getProperties() }))
         );
 
