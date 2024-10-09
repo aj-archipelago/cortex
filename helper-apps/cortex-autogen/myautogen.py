@@ -266,7 +266,8 @@ def process_message(message_data, original_request_message):
             publish_request_progress({
                 "requestId": request_id,
                 "progress": 1,
-                "error": str(e)
+                "error": str(e),
+                "data": str(e),
             })
             store_in_mongo({
                 "requestId": request_id,
