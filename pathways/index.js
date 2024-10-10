@@ -7,6 +7,7 @@ import chat_context from './chat_context.js';
 import chat_jarvis from './chat_jarvis.js';
 import chat_persist from './chat_persist.js';
 import code_review from './code_review.js';
+import code_human_input from './code_human_input.js';
 import cognitive_delete from './cognitive_delete.js';
 import cognitive_insert from './cognitive_insert.js';
 import cognitive_search from './cognitive_search.js';
@@ -87,6 +88,7 @@ export {
     chat_context,
     chat_jarvis,
     chat_persist, code_review,
+    code_human_input,
     cognitive_delete,
     cognitive_insert,
     cognitive_search,
