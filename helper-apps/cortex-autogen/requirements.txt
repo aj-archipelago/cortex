@@ -1,6 +1,6 @@
 azure-storage-queue
 azure-functions
-pyautogen
+pyautogen==0.3.0
 redis
 pymongo
 requests
