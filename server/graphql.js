@@ -92,7 +92,7 @@ const getTypedefs = (pathways, pathwayManager) => {
     }
 `;
 
-    const pathwayManagerTypeDefs = pathwayManager.getTypeDefs();
+    const pathwayManagerTypeDefs = pathwayManager?.getTypeDefs() || '';
     const pathwayTypeDefs = Object.values(pathways)
         .filter(p => !p.disabled)
         .map(p => p.typeDef(p).gqlDefinition);
@@ -114,7 +114,7 @@ const getResolvers = (config, pathways, pathwayManager) => {
         }
     }
 
-    const pathwayManagerResolvers = pathwayManager.getResolvers();
+    const pathwayManagerResolvers = pathwayManager?.getResolvers() || {};
 
     const executeWorkspaceResolver = async (_, args, contextValue, info) => {
         const { userId, pathwayName, ...pathwayArgs } = args;

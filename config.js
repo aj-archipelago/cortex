@@ -293,18 +293,21 @@ if (config.get('gcpServiceAccountKey')) {
 
 // Load dynamic pathways from JSON file or cloud storage
 const createDynamicPathwayManager = async (config, basePathway) => {
-    const { pathwaysPath } = config.getProperties();
-    const dynamicPathwaysPath = path.join(pathwaysPath, 'dynamic', 'pathways.json');
+    const { dynamicPathwayConfig } = config.getProperties();
+
+    if (!dynamicPathwayConfig) {
+        return null;
+    }
 
     const storageConfig = {
-        storageType: process.env.DYNAMIC_PATHWAYS_STORAGE_TYPE || 'local',
-        filePath: dynamicPathwaysPath,
-        connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
-        containerName: process.env.AZURE_CONTAINER_NAME || 'cortexdynamicpathways',
-        accessKeyId: process.env.AWS_S3_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_S3_SECRET_ACCESS_KEY,
-        region: process.env.AWS_S3_REGION,
-        bucketName: process.env.AWS_S3_BUCKET_NAME || 'cortexdynamicpathways',
+        storageType: dynamicPathwayConfig.storageType || 'local',
+        filePath: dynamicPathwayConfig.filePath || "./dynamic/pathways.json",
+        azureStorageConnectionString: dynamicPathwayConfig.azureStorageConnectionString,
+        azureContainerName: dynamicPathwayConfig.azureContainerName || 'cortexdynamicpathways',
+        awsAccessKeyId: dynamicPathwayConfig.awsAccessKeyId,
+        awsSecretAccessKey: dynamicPathwayConfig.awsSecretAccessKey,
+        awsRegion: dynamicPathwayConfig.awsRegion,
+        awsBucketName: dynamicPathwayConfig.awsBucketName || 'cortexdynamicpathways',
     };
 
     const pathwayManager = new PathwayManager(storageConfig, basePathway);
@@ -343,8 +346,31 @@ const buildPathways = async (config) => {
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
 
+
+    const { DYNAMIC_PATHWAYS_CONFIG_FILE, DYNAMIC_PATHWAYS_CONFIG_JSON } = process.env;
+
+    let dynamicPathwayConfig;
+
     // Load dynamic pathways
-    const pathwayManager = await createDynamicPathwayManager(config, basePathway);
+    let pathwayManager;
+    try {
+        if (DYNAMIC_PATHWAYS_CONFIG_FILE) {
+            logger.info(`Reading dynamic pathway config from ${DYNAMIC_PATHWAYS_CONFIG_FILE}`);
+            dynamicPathwayConfig = JSON.parse(fs.readFileSync(DYNAMIC_PATHWAYS_CONFIG_FILE, 'utf8'));
+        } else if (DYNAMIC_PATHWAYS_CONFIG_JSON) {
+            logger.info(`Reading dynamic pathway config from DYNAMIC_PATHWAYS_CONFIG_JSON variable`);
+            dynamicPathwayConfig = JSON.parse(DYNAMIC_PATHWAYS_CONFIG_JSON);
+        }
+        else {
+            logger.warn('Dynamic pathways are not enabled. Please set the DYNAMIC_PATHWAYS_CONFIG_FILE or DYNAMIC_PATHWAYS_CONFIG_JSON environment variable to enable dynamic pathways.');
+        }
+
+        config.load({ dynamicPathwayConfig });
+        pathwayManager = await createDynamicPathwayManager(config, basePathway);
+    } catch (error) {
+        logger.error(`Error loading dynamic pathways: ${error.message}`);
+        process.exit(1);
+    }
 
     // This is where we integrate pathway overrides from the config
     // file. This can run into a partial definition issue if the

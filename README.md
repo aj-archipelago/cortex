@@ -484,25 +484,44 @@ Cortex supports dynamic pathways, which allow for the creation and management of
 
 ### Configuration
 
-To use dynamic pathways, you need to set up the following environment variables:
+To use dynamic pathways, you need to provide a JSON configuration file or a JSON string. There are two ways to specify this configuration:
 
-- `DYNAMIC_PATHWAYS_STORAGE_TYPE`: Specifies the storage type for dynamic pathways. Options are:
-  - `local` (default): Stores pathways in a local JSON file
-  - `azure`: Stores pathways in Azure Blob Storage
-  - `s3`: Stores pathways in AWS S3
+1. Using a configuration file:
+   Set the `DYNAMIC_PATHWAYS_CONFIG_FILE` environment variable to the path of your JSON configuration file.
 
-#### For Local Storage:
-- No additional configuration needed
+2. Using a JSON string:
+   Set the `DYNAMIC_PATHWAYS_CONFIG_JSON` environment variable with the JSON configuration as a string.
 
-#### For Azure Blob Storage:
-- `AZURE_STORAGE_CONNECTION_STRING`: Connection string for your Azure Storage account
-- `AZURE_CONTAINER_NAME`: Name of the Azure Blob container (default: "cortexdynamicpathways")
+The configuration should include the following properties:
 
-#### For AWS S3:
-- `AWS_S3_ACCESS_KEY_ID`: Your AWS access key ID
-- `AWS_S3_SECRET_ACCESS_KEY`: Your AWS secret access key
-- `AWS_S3_REGION`: The AWS region of your S3 bucket
-- `AWS_S3_BUCKET_NAME`: Name of the S3 bucket (default: "cortexdynamicpathways")
+```json
+{
+  "storageType": "local" | "azure" | "s3",
+  "filePath": "./dynamic/pathways.json",  // Only for local storage
+  "azureStorageConnectionString": "your_connection_string",  // Only for Azure
+  "azureContainerName": "cortexdynamicpathways",  // Optional, default is "cortexdynamicpathways"
+  "awsAccessKeyId": "your_access_key_id",  // Only for AWS S3
+  "awsSecretAccessKey": "your_secret_access_key",  // Only for AWS S3
+  "awsRegion": "your_aws_region",  // Only for AWS S3
+  "awsBucketName": "cortexdynamicpathways"  // Optional, default is "cortexdynamicpathways"
+}
+```
+
+### Storage Options
+
+1. Local Storage (default):
+   - Set `storageType` to `"local"`
+   - Specify `filePath` for the local JSON file (default: "./dynamic/pathways.json")
+
+2. Azure Blob Storage:
+   - Set `storageType` to `"azure"`
+   - Provide `azureStorageConnectionString`
+   - Optionally set `azureContainerName` (default: "cortexdynamicpathways")
+
+3. AWS S3:
+   - Set `storageType` to `"s3"`
+   - Provide `awsAccessKeyId`, `awsSecretAccessKey`, and `awsRegion`
+   - Optionally set `awsBucketName` (default: "cortexdynamicpathways")
 
 ### Usage
 
@@ -548,4 +567,4 @@ To ensure the security of dynamic pathways:
 
 Each instance of Cortex maintains its own local cache of pathways. On every dynamic pathway request, it checks if the local cache is up to date by comparing the last modified timestamp of the storage with the last update time of the local cache. If the local cache is out of date, it reloads the pathways from storage.
 
-This approach ensures that all instances of Cortex will eventually have access to the most up-to-date dynamic pathways without requiring immediate synchronization. 
+This approach ensures that all instances of Cortex will eventually have access to the most up-to-date dynamic pathways without requiring immediate synchronization.
