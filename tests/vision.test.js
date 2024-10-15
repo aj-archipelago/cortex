@@ -39,7 +39,10 @@ test('vision test image', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    t.true(response.body?.singleResult?.data?.vision.result.length > 100);
+    const result = response.body?.singleResult?.data?.vision.result;
+    t.true(result.length > 100);
+    t.true(result.toLowerCase().includes('chess'), 'Response should mention chess');
+    t.true(result.toLowerCase().includes('board'), 'Response should mention a board');
 });
 
 
@@ -64,7 +67,9 @@ test('vision test base64 image', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    t.true(response.body?.singleResult?.data?.vision.result.length > 100);
+    const result = response.body?.singleResult?.data?.vision.result;
+    t.true(result.length > 100);
+    t.true(result.toLowerCase().includes('soccer') || result.toLowerCase().includes('uniform'), 'Response should mention either soccer or uniform');
 });
 
 
@@ -98,7 +103,9 @@ test('vision test chunking', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    t.true(response.body?.singleResult?.data?.vision.result.length > 100);
+    const result = response.body?.singleResult?.data?.vision.result;
+    t.true(result.length > 100);
+    t.true(result.toLowerCase().includes('soccer') || result.toLowerCase().includes('uniform'), 'Response should mention either soccer or uniform');
 });
 
 test('vision multi long text', async t => {
@@ -138,5 +145,7 @@ test('vision multi long text', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    t.true(response.body?.singleResult?.data?.vision.result.length > 100);
+    const result = response.body?.singleResult?.data?.vision.result;
+    t.true(result.length > 100);
+    t.true(result.toLowerCase().includes('soccer') || result.toLowerCase().includes('uniform'), 'Response should mention either soccer or uniform');
 });

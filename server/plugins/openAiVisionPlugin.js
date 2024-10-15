@@ -20,12 +20,17 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                 if (Array.isArray(message.content)) {
                     message.content = message.content.map(item => {
                         if (typeof item === 'string') {
-                            return { type: 'text', text: item };
-                        } else {
                             const parsedItem = safeJsonParse(item);
-                            const { type, text, image_url, url } = parsedItem;
+                            if (parsedItem.type && (parsedItem.text || parsedItem.image_url)) {
+                                return parsedItem;
+                            } else {
+                                return { type: 'text', text: item };
+                            }
+                        } else if (typeof item === 'object') {
+                            const { type, text, image_url, url } = item;
                             return { type, text, image_url: url || image_url };
                         }
+                        return item;
                     });
                 }
             } catch (e) {

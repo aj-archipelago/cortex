@@ -7,8 +7,6 @@ async function convertContentItem(item) {
   let imageUrl = "";
   let isDataURL = false;
   let urlData = "";
-  let mimeTypeMatch = "";
-  let mimeType = "";
   let base64Image = "";
   const allowedMIMETypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
@@ -23,31 +21,39 @@ async function convertContentItem(item) {
             return item.text ? { type: "text", text: item.text } : null;
 
           case "image_url":
-            imageUrl = item.image_url.url || item.image_url;
+            imageUrl = item.image_url?.url || item.image_url;
             if (!imageUrl) {
               logger.warn("Could not parse image URL from content - skipping image content.");
               return null;
             }
 
-            if (!allowedMIMETypes.includes(mime.lookup(imageUrl) || "")) {
-                logger.warn("Unsupported image type - skipping image content.");
-                return null;
-            }
-
             isDataURL = imageUrl.startsWith("data:");
-            urlData = isDataURL ? item.image_url.url : await fetchImageAsDataURL(imageUrl);
-            mimeTypeMatch = urlData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
-            mimeType = mimeTypeMatch && mimeTypeMatch[1] ? mimeTypeMatch[1] : "image/jpeg";
-            base64Image = urlData.split(",")[1];
 
-            return {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: mimeType,
-                data: base64Image,
-              },
-            };
+            if (!isDataURL) {
+              const mimeType = mime.lookup(imageUrl);
+              if (!allowedMIMETypes.includes(mimeType)) {
+                logger.warn(`Unsupported image type: ${mimeType} - skipping image content.`);
+                return null;
+              }
+            }
+            
+            try {
+              urlData = isDataURL ? imageUrl : await fetchImageAsDataURL(imageUrl);
+              const [, mimeType = "image/jpeg"] = urlData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/) || [];
+              base64Image = urlData.split(",")[1];
+
+              return {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: mimeType,
+                  data: base64Image,
+                },
+              };
+            } catch (error) {
+              logger.error(`Failed to process image: ${error.message}`);
+              return null;
+            }
 
           default:
             return null;
