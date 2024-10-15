@@ -288,8 +288,11 @@ class ModelPlugin {
             return parsedData;
         } catch (error) {
             // Log the error and continue
-            logger.error(error.message || error);
-            throw error;
+            logger.error(`Error in executeRequest for ${this.pathwayName}: ${error.message || error}`);
+            if (error.data) {
+                logger.error(`Additional error data: ${JSON.stringify(error.data)}`);
+            }
+            throw new Error(`Execution failed for ${this.pathwayName}: ${error.message || error}`);
         }
     }
 
