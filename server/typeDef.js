@@ -28,7 +28,26 @@ const getGraphQlType = (value) => {
   }
 };
 
-const typeDef = (pathway) => {
+const getMessageTypeDefs = () => {
+  const messageType = `input Message { role: String, content: String, name: String }`;
+  const multiMessageType = `input MultiMessage { role: String, content: [String], name: String }`;
+  
+  return `${messageType}\n\n${multiMessageType}`;
+};
+
+const getPathwayTypeDef = (name, returnType) => {
+  return `type ${name} {
+    debug: String
+    result: ${returnType}
+    previousResult: String
+    warnings: [String]
+    errors: [String]
+    contextId: String
+    tool: String
+  }`
+};
+
+const getPathwayTypeDefAndExtendQuery = (pathway) => {
   const { name, objName, defaultInputParameters, inputParameters, format } = pathway;
 
   const fields = format ? format.match(/\b(\w+)\b/g) : null;
@@ -36,24 +55,13 @@ const typeDef = (pathway) => {
 
   const typeName = fields ? `${objName}Result` : `String`;
 
-  const messageType = `input Message { role: String, content: String, name: String }`;
-  const multiMessageType = `input MultiMessage { role: String, content: [String], name: String }`;
-
   const type = fields ? `type ${typeName} {
     ${fieldsStr}
     }` : ``;
 
-  const resultStr = pathway.list ? `[${typeName}]` : typeName;
+  const returnType = pathway.list ? `[${typeName}]` : typeName;
 
-  const responseType = `type ${objName} {
-        debug: String
-        result: ${resultStr}
-        previousResult: String
-        warnings: [String]
-        errors: [String]
-        contextId: String
-        tool: String
-}`;
+  const responseType = getPathwayTypeDef(objName, returnType);
 
   const params = { ...defaultInputParameters, ...inputParameters };
 
@@ -71,7 +79,7 @@ const typeDef = (pathway) => {
     };
   });
 
-  const gqlDefinition = `${messageType}\n\n${multiMessageType}\n\n${type}\n\n${responseType}\n\nextend type Query {${name}(${paramsStr}): ${objName}}`;
+  const gqlDefinition = `${type}\n\n${responseType}\n\nextend type Query {${name}(${paramsStr}): ${objName}}`;
 
   return {
     gqlDefinition,
@@ -79,6 +87,16 @@ const typeDef = (pathway) => {
   };
 };
 
+const typeDef = (pathway) => {
+  return getPathwayTypeDefAndExtendQuery(pathway);
+};
+
+const userPathwayInputParameters = `text: String`;
+
+
 export {
   typeDef,
+  getMessageTypeDefs,
+  getPathwayTypeDef,
+  userPathwayInputParameters,
 };

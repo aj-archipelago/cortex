@@ -1,28 +1,29 @@
 // graphql.js
 // Setup the Apollo server and Express middleware
 
-import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
-import { ApolloServerPluginLandingPageLocalDefault } from '@apollo/server/plugin/landingPage/default';
 import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
+import { ApolloServerPluginDrainHttpServer } from '@apollo/server/plugin/drainHttpServer';
+import { ApolloServerPluginLandingPageLocalDefault } from '@apollo/server/plugin/landingPage/default';
 import { makeExecutableSchema } from '@graphql-tools/schema';
-import { WebSocketServer } from 'ws';
-import { useServer } from 'graphql-ws/lib/use/ws';
 import express from 'express';
+import { useServer } from 'graphql-ws/lib/use/ws';
 import http from 'http';
 import Keyv from 'keyv';
+import { WebSocketServer } from 'ws';
 // eslint-disable-next-line import/no-extraneous-dependencies
-import cors from 'cors';
-import { KeyvAdapter } from '@apollo/utils.keyvadapter';
 import responseCachePlugin from '@apollo/server-plugin-response-cache';
-import subscriptions from './subscriptions.js';
-import { buildModelEndpoints } from '../lib/requestExecutor.js';
-import { cancelRequestResolver } from './resolver.js';
-import { buildPathways, buildModels } from '../config.js';
-import { requestState } from './requestState.js';
-import { buildRestEndpoints } from './rest.js';
-import { startTestServer } from '../tests/server.js'
+import { KeyvAdapter } from '@apollo/utils.keyvadapter';
+import cors from 'cors';
+import { buildModels, buildPathways } from '../config.js';
 import logger from '../lib/logger.js';
+import { buildModelEndpoints } from '../lib/requestExecutor.js';
+import { startTestServer } from '../tests/server.js';
+import { requestState } from './requestState.js';
+import { cancelRequestResolver } from './resolver.js';
+import subscriptions from './subscriptions.js';
+import { getMessageTypeDefs, getPathwayTypeDef, userPathwayInputParameters } from './typeDef.js';
+import stringcase from 'stringcase';
 
 // Utility functions
 // Server plugins
@@ -34,9 +35,9 @@ const getPlugins = (config) => {
     //if cache is enabled and Redis is available, use it
     let cache;
     if (config.get('enableGraphqlCache') && config.get('storageConnectionString')) {
-        cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString'),{
+        cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString'), {
             ssl: true,
-            abortConnect: false,            
+            abortConnect: false,
         }));
         //caching similar strings, embedding hashing, ... #delta similarity 
         // TODO: custom cache key:
@@ -48,11 +49,11 @@ const getPlugins = (config) => {
     return { plugins, cache };
 }
 
-
 // Type Definitions for GraphQL
-const getTypedefs = (pathways) => {
-
+const getTypedefs = (pathways, pathwayManager) => {
     const defaultTypeDefs = `#graphql
+    ${getMessageTypeDefs()}
+
     enum CacheControlScope {
         PUBLIC
         PRIVATE
@@ -71,7 +72,13 @@ const getTypedefs = (pathways) => {
     type Mutation {
         cancelRequest(requestId: String!): Boolean
     }
+
+    ${getPathwayTypeDef('ExecuteWorkspace', 'String')}
     
+    extend type Query {
+        executeWorkspace(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): ExecuteWorkspace
+    }
+
     type RequestSubscription {
         requestId: String
         progress: Float
@@ -85,15 +92,20 @@ const getTypedefs = (pathways) => {
     }
 `;
 
-    const typeDefs = [defaultTypeDefs, ...Object.values(pathways).filter(p=>!p.disabled).map(p => p.typeDef(p).gqlDefinition)];
+    const pathwayManagerTypeDefs = pathwayManager?.getTypeDefs() || '';
+    const pathwayTypeDefs = Object.values(pathways)
+        .filter(p => !p.disabled)
+        .map(p => p.typeDef(p).gqlDefinition);
+
+    const typeDefs = [defaultTypeDefs, pathwayManagerTypeDefs, ...pathwayTypeDefs];
     return typeDefs.join('\n');
 }
 
 // Resolvers for GraphQL
-const getResolvers = (config, pathways) => {
+const getResolvers = (config, pathways, pathwayManager) => {
     const resolverFunctions = {};
     for (const [name, pathway] of Object.entries(pathways)) {
-        if (pathway.disabled) continue; //skip disabled pathways
+        if (pathway.disabled) continue;
         resolverFunctions[name] = (parent, args, contextValue, info) => {
             // add shared state to contextValue
             contextValue.pathway = pathway;
@@ -102,9 +114,28 @@ const getResolvers = (config, pathways) => {
         }
     }
 
+    const pathwayManagerResolvers = pathwayManager?.getResolvers() || {};
+
+    const executeWorkspaceResolver = async (_, args, contextValue, info) => {
+        const { userId, pathwayName, ...pathwayArgs } = args;
+        const userPathway = await pathwayManager.getPathway(userId, pathwayName);
+        
+        contextValue.pathway = userPathway;
+        contextValue.config = config;
+        
+        const result = await userPathway.rootResolver(null, pathwayArgs, contextValue, info);
+        return result;
+    };
+
     const resolvers = {
-        Query: resolverFunctions,
-        Mutation: { 'cancelRequest': cancelRequestResolver },
+        Query: {
+            ...resolverFunctions,
+            executeWorkspace: executeWorkspaceResolver
+        },
+        Mutation: {
+            'cancelRequest': cancelRequestResolver,
+            ...pathwayManagerResolvers.Mutation
+        },
         Subscription: subscriptions,
     }
 
@@ -114,7 +145,7 @@ const getResolvers = (config, pathways) => {
 // Build the server including the GraphQL schema and REST endpoints
 const build = async (config) => {
     // First perform config build
-    await buildPathways(config);
+    const { pathwayManager } = await buildPathways(config);
     buildModels(config);
 
     // build model API endpoints and limiters
@@ -123,9 +154,8 @@ const build = async (config) => {
     //build api
     const pathways = config.get('pathways');
 
-    const typeDefs = getTypedefs(pathways);
-    const resolvers = getResolvers(config, pathways);
-
+    const typeDefs = getTypedefs(pathways, pathwayManager);
+    const resolvers = getResolvers(config, pathways, pathwayManager);
     const schema = makeExecutableSchema({ typeDefs, resolvers });
 
     const { plugins, cache } = getPlugins(config);
@@ -154,7 +184,7 @@ const build = async (config) => {
     const serverCleanup = useServer({ schema }, wsServer, keepAlive);
 
     const server = new ApolloServer({
-        schema,
+        schema: schema,
         introspection: config.get('env') === 'development',
         csrfPrevention: true,
         plugins: plugins.concat([// Proper shutdown for the HTTP server.
@@ -180,7 +210,7 @@ const build = async (config) => {
 
     // If CORTEX_API_KEY is set, we roll our own auth middleware - usually not used if you're being fronted by a proxy
     const cortexApiKeys = config.get('cortexApiKeys');
-    if (cortexApiKeys  && Array.isArray(cortexApiKeys)) {
+    if (cortexApiKeys && Array.isArray(cortexApiKeys)) {
         app.use((req, res, next) => {
             let providedApiKey = req.headers['cortex-api-key'] || req.query['cortex-api-key'];
             if (!providedApiKey) {
@@ -191,9 +221,9 @@ const build = async (config) => {
             if (!cortexApiKeys.includes(providedApiKey)) {
                 if (req.baseUrl === '/graphql' || req.headers['content-type'] === 'application/graphql') {
                     res.status(401)
-                    .set('WWW-Authenticate', 'Cortex-Api-Key')
-                    .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
-                    .json({
+                        .set('WWW-Authenticate', 'Cortex-Api-Key')
+                        .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
+                        .json({
                             errors: [
                                 {
                                     message: 'Unauthorized',
@@ -205,9 +235,9 @@ const build = async (config) => {
                         });
                 } else {
                     res.status(401)
-                    .set('WWW-Authenticate', 'Cortex-Api-Key')
-                    .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
-                    .send('Unauthorized');
+                        .set('WWW-Authenticate', 'Cortex-Api-Key')
+                        .set('X-Cortex-Api-Key-Info', 'Server requires Cortex API Key')
+                        .send('Unauthorized');
                 }
             } else {
                 next();
@@ -220,19 +250,16 @@ const build = async (config) => {
 
     // Server Startup Function
     const startServer = async () => {
+        // Start only the main server
         await server.start();
+
         app.use(
             '/graphql',
-
             cors(),
-
             expressMiddleware(server, {
                 context: async ({ req, res }) => ({ req, res, config, requestState }),
             }),
         );
-            
-        // add the REST endpoints
-        buildRestEndpoints(pathways, app, server, config);
 
         // Now that our HTTP server is fully set up, we can listen to it.
         httpServer.listen(config.get('PORT'), () => {

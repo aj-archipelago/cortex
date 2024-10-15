@@ -432,7 +432,7 @@ Configuration of Cortex is done via a [convict](https://github.com/mozilla/node-
 - `PORT`: The port number for the Cortex server. Default is 4000. The value can be set using the `CORTEX_PORT` environment variable.
 - `storageConnectionString`: The connection string used for accessing storage. This is sensitive information and has no default value. The value can be set using the `STORAGE_CONNECTION_STRING` environment variable.
 
-The `buildPathways` function takes the config object and builds the `pathways` object by loading the core pathways and any custom pathways specified in the `pathwaysPath` property of the config object. The function returns the `pathways` object.
+The `buildPathways` function takes the config object and builds the `pathways` and `pathwayManager` objects by loading the core pathways and any custom pathways specified in the `pathwaysPath` property of the config object. The function returns the `pathways` and `pathwayManager` objects.
 
 The `buildModels` function takes the `config` object and builds the `models` object by compiling handlebars templates for each model specified in the `models` property of the config object. The function returns the `models` object.
 
@@ -471,3 +471,100 @@ Cortex is a constantly evolving project, and the following features are coming s
 * Prompt execution context preservation between calls (to enable interactive, multi-call integrations with LangChain and other technologies)
 * Model-specific cache key optimizations to increase hit rate and reduce cache size
 * Structured analytics and reporting on AI API call frequency, cost, cache hit rate, etc.
+
+## Dynamic Pathways
+
+Cortex supports dynamic pathways, which allow for the creation and management of pathways at runtime. This feature enables users to define custom pathways without modifying the core Cortex codebase.
+
+### How It Works
+
+1. Dynamic pathways are stored either locally or in cloud storage (Azure Blob Storage or AWS S3).
+2. The `PathwayManager` class handles loading, saving, and managing these dynamic pathways.
+3. Dynamic pathways can be added, updated, or removed via GraphQL mutations.
+
+### Configuration
+
+To use dynamic pathways, you need to provide a JSON configuration file or a JSON string. There are two ways to specify this configuration:
+
+1. Using a configuration file:
+   Set the `DYNAMIC_PATHWAYS_CONFIG_FILE` environment variable to the path of your JSON configuration file.
+
+2. Using a JSON string:
+   Set the `DYNAMIC_PATHWAYS_CONFIG_JSON` environment variable with the JSON configuration as a string.
+
+The configuration should include the following properties:
+
+```json
+{
+  "storageType": "local" | "azure" | "s3",
+  "filePath": "./dynamic/pathways.json",  // Only for local storage
+  "azureStorageConnectionString": "your_connection_string",  // Only for Azure
+  "azureContainerName": "cortexdynamicpathways",  // Optional, default is "cortexdynamicpathways"
+  "awsAccessKeyId": "your_access_key_id",  // Only for AWS S3
+  "awsSecretAccessKey": "your_secret_access_key",  // Only for AWS S3
+  "awsRegion": "your_aws_region",  // Only for AWS S3
+  "awsBucketName": "cortexdynamicpathways"  // Optional, default is "cortexdynamicpathways"
+}
+```
+
+### Storage Options
+
+1. Local Storage (default):
+   - Set `storageType` to `"local"`
+   - Specify `filePath` for the local JSON file (default: "./dynamic/pathways.json")
+
+2. Azure Blob Storage:
+   - Set `storageType` to `"azure"`
+   - Provide `azureStorageConnectionString`
+   - Optionally set `azureContainerName` (default: "cortexdynamicpathways")
+
+3. AWS S3:
+   - Set `storageType` to `"s3"`
+   - Provide `awsAccessKeyId`, `awsSecretAccessKey`, and `awsRegion`
+   - Optionally set `awsBucketName` (default: "cortexdynamicpathways")
+
+### Usage
+
+Dynamic pathways can be managed through GraphQL mutations. Here are the available operations:
+
+1. Adding or updating a pathway:
+
+```graphql
+mutation PutPathway($name: String!, $pathway: PathwayInput!, $userId: String!, $secret: String!, $displayName: String, $key: String!) {
+  putPathway(name: $name, pathway: $pathway, userId: $userId, secret: $secret, displayName: $displayName, key: $key) {
+    name
+  }
+}
+```
+
+2. Deleting a pathway:
+
+```graphql
+mutation DeletePathway($name: String!, $userId: String!, $secret: String!, $key: String!) {
+  deletePathway(name: $name, userId: $userId, secret: $secret, key: $key)
+}
+```
+
+3. Executing a dynamic pathway:
+
+```graphql
+query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String!) {
+  executeWorkspace(userId: $userId, pathwayName: $pathwayName, text: $text) {
+    result
+  }
+}
+```
+
+### Security
+
+To ensure the security of dynamic pathways:
+
+1. A `PATHWAY_PUBLISH_KEY` environment variable must be set to enable pathway publishing.
+2. This key must be provided in the `key` parameter when adding, updating, or deleting pathways.
+3. Each pathway is associated with a `userId` and `secret`. The secret must be provided to modify or delete an existing pathway.
+
+### Synchronization across multiple instances
+
+Each instance of Cortex maintains its own local cache of pathways. On every dynamic pathway request, it checks if the local cache is up to date by comparing the last modified timestamp of the storage with the last update time of the local cache. If the local cache is out of date, it reloads the pathways from storage.
+
+This approach ensures that all instances of Cortex will eventually have access to the most up-to-date dynamic pathways without requiring immediate synchronization.

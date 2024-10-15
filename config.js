@@ -5,18 +5,19 @@ import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
 import logger from './lib/logger.js';
+import PathwayManager from './lib/pathwayManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 convict.addFormat({
     name: 'string-array',
-    validate: function(val) {
-      if (!Array.isArray(val)) {
-        throw new Error('must be of type Array');
-      }
+    validate: function (val) {
+        if (!Array.isArray(val)) {
+            throw new Error('must be of type Array');
+        }
     },
-    coerce: function(val) {
-      return val.split(',');
+    coerce: function (val) {
+        return val.split(',');
     },
 });
 
@@ -290,6 +291,39 @@ if (config.get('gcpServiceAccountKey')) {
     config.set('gcpAuthTokenHelper', gcpAuthTokenHelper);
 }
 
+// Load dynamic pathways from JSON file or cloud storage
+const createDynamicPathwayManager = async (config, basePathway) => {
+    const { dynamicPathwayConfig } = config.getProperties();
+
+    if (!dynamicPathwayConfig) {
+        return null;
+    }
+
+    const storageConfig = {
+        storageType: dynamicPathwayConfig.storageType || 'local',
+        filePath: dynamicPathwayConfig.filePath || "./dynamic/pathways.json",
+        azureStorageConnectionString: dynamicPathwayConfig.azureStorageConnectionString,
+        azureContainerName: dynamicPathwayConfig.azureContainerName || 'cortexdynamicpathways',
+        awsAccessKeyId: dynamicPathwayConfig.awsAccessKeyId,
+        awsSecretAccessKey: dynamicPathwayConfig.awsSecretAccessKey,
+        awsRegion: dynamicPathwayConfig.awsRegion,
+        awsBucketName: dynamicPathwayConfig.awsBucketName || 'cortexdynamicpathways',
+    };
+
+    const pathwayManager = new PathwayManager(storageConfig, basePathway);
+
+    try {
+        const dynamicPathways = await pathwayManager.initialize();
+        logger.info(`Dynamic pathways loaded successfully`);
+        logger.info(`Loaded dynamic pathways for users: [${Object.keys(dynamicPathways).join(", ")}]`);
+
+        return pathwayManager;
+    } catch (error) {
+        logger.error(`Error loading dynamic pathways: ${error.message}`);
+        return pathwayManager;
+    }
+};
+
 // Build and load pathways to config
 const buildPathways = async (config) => {
     const { pathwaysPath, corePathwaysPath, basePathwayPath } = config.getProperties();
@@ -312,6 +346,32 @@ const buildPathways = async (config) => {
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
 
+
+    const { DYNAMIC_PATHWAYS_CONFIG_FILE, DYNAMIC_PATHWAYS_CONFIG_JSON } = process.env;
+
+    let dynamicPathwayConfig;
+
+    // Load dynamic pathways
+    let pathwayManager;
+    try {
+        if (DYNAMIC_PATHWAYS_CONFIG_FILE) {
+            logger.info(`Reading dynamic pathway config from ${DYNAMIC_PATHWAYS_CONFIG_FILE}`);
+            dynamicPathwayConfig = JSON.parse(fs.readFileSync(DYNAMIC_PATHWAYS_CONFIG_FILE, 'utf8'));
+        } else if (DYNAMIC_PATHWAYS_CONFIG_JSON) {
+            logger.info(`Reading dynamic pathway config from DYNAMIC_PATHWAYS_CONFIG_JSON variable`);
+            dynamicPathwayConfig = JSON.parse(DYNAMIC_PATHWAYS_CONFIG_JSON);
+        }
+        else {
+            logger.warn('Dynamic pathways are not enabled. Please set the DYNAMIC_PATHWAYS_CONFIG_FILE or DYNAMIC_PATHWAYS_CONFIG_JSON environment variable to enable dynamic pathways.');
+        }
+
+        config.load({ dynamicPathwayConfig });
+        pathwayManager = await createDynamicPathwayManager(config, basePathway);
+    } catch (error) {
+        logger.error(`Error loading dynamic pathways: ${error.message}`);
+        process.exit(1);
+    }
+
     // This is where we integrate pathway overrides from the config
     // file. This can run into a partial definition issue if the
     // config file contains pathways that no longer exist.
@@ -322,9 +382,9 @@ const buildPathways = async (config) => {
     }
 
     // Add pathways to config
-    config.load({ pathways })
+    config.load({ pathways });
 
-    return pathways;
+    return { pathwayManager, pathways };
 }
 
 // Build and load models to config
@@ -336,7 +396,7 @@ const buildModels = (config) => {
         if (!model.name) {
             model.name = key;
         }
-        
+
         // if model is in old format, convert it to new format
         if (!model.endpoints) {
             model = {
@@ -354,7 +414,7 @@ const buildModels = (config) => {
         }
 
         // compile handlebars templates for each endpoint
-        model.endpoints = model.endpoints.map(endpoint => 
+        model.endpoints = model.endpoints.map(endpoint =>
             JSON.parse(HandleBars.compile(JSON.stringify(endpoint))({ ...model, ...config.getEnv(), ...config.getProperties() }))
         );
 
