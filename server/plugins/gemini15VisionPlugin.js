@@ -3,6 +3,11 @@ import mime from 'mime-types';
 
 class Gemini15VisionPlugin extends Gemini15ChatPlugin {
 
+    constructor(pathway, model) {
+        super(pathway, model);
+        this.isMultiModal = true;
+    }
+
     // Override the convertMessagesToGemini method to handle multimodal vision messages
     // This function can operate on messages in Gemini native format or in OpenAI's format
     // It will convert the messages to the Gemini format
@@ -27,24 +32,26 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                 const convertPartToGemini = (inputPart) => {
                     try {
                         const part = typeof inputPart === 'string' ? JSON.parse(inputPart) : inputPart;
+                        const {type, text, image_url, gcs} = part;
+                        let fileUrl = gcs || image_url?.url;
 
                         if (typeof part === 'string') {
-                            return { text: part };
-                        } else if (part.type === 'text') {
-                            return { text: part.text };
-                        } else if (part.type === 'image_url') {
-                            if (part.image_url.url.startsWith('gs://')) {
+                            return { text: text };
+                        } else if (type === 'text') {
+                            return { text: text };
+                        } else if (type === 'image_url') {
+                            if (fileUrl.startsWith('gs://')) {
                                 return {
                                     fileData: {
-                                        mimeType: mime.lookup(part.image_url.url),
-                                        fileUri: part.image_url.url
+                                        mimeType: mime.lookup(fileUrl) || 'image/jpeg',
+                                        fileUri: fileUrl
                                     }
                                 };
                             } else {
                                 return {
                                     inlineData: {
                                         mimeType: 'image/jpeg', // fixed for now as there's no MIME type in the request
-                                        data: part.image_url.url.split('base64,')[1]
+                                        data: fileUrl.split('base64,')[1]
                                     }
                                 };
                             }
@@ -52,11 +59,11 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     } catch (e) {
                         // this space intentionally left blank
                     }
-
-                    return { text: inputPart };
+                    return inputPart ? { text: inputPart } : null;
                 };
-    
+
                 const addPartToMessages = (geminiPart) => {
+                    if (!geminiPart) { return; }
                     // Gemini requires alternating user: and model: messages
                     if ((role === lastAuthor || author === lastAuthor) && modifiedMessages.length > 0) {
                         modifiedMessages[modifiedMessages.length - 1].parts.push(geminiPart);
@@ -88,7 +95,11 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
             modifiedMessages = modifiedMessages.slice(1);
         }
     
-        const system = { role: 'user', parts: systemParts };
+        let system = null;
+
+        if (systemParts.length > 0) {
+            system = { role: 'user', parts: systemParts };
+        }
 
         return {
             modifiedMessages,

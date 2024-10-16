@@ -20,6 +20,7 @@ class ModelPlugin {
         this.pathwayPrompt = pathway.prompt;
         this.pathwayName = pathway.name;
         this.promptParameters = {};
+        this.isMultiModal = false;
 
         // Make all of the parameters defined on the pathway itself available to the prompt
         for (const [k, v] of Object.entries(pathway)) {
@@ -205,6 +206,15 @@ class ModelPlugin {
                 message.content = '';
             }
         });
+
+        // Flatten content arrays for non-multimodal models
+        if (!this.isMultiModal) {
+            expandedMessages.forEach(message => {
+                if (Array.isArray(message?.content)) {
+                    message.content = message.content.join("\n");
+                }
+            });
+        }
         
         return expandedMessages;
     }

@@ -144,6 +144,20 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
             }
         }
 
+        const processStringData = (stringData) => {
+            if (progress === 1 && stringData.trim() === "[DONE]") {
+                fillJsonResponse(jsonResponse, stringData, "stop");
+                safeUnsubscribe();
+                finishStream(res, jsonResponse);
+                return;
+            }
+
+            chunkTextIntoTokens(stringData, false, useSingleTokenStream).forEach(token => {
+                fillJsonResponse(jsonResponse, token, null);
+                sendStreamData(jsonResponse);
+            });
+        }
+
         if (data.requestProgress.requestId !== requestId) return;
 
         logger.debug(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
@@ -152,6 +166,12 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
 
         try {
             const messageJson = JSON.parse(progressData);
+
+            if (typeof messageJson === 'string') {
+                processStringData(messageJson);
+                return;
+            }
+
             if (messageJson.error) {
                 logger.error(`Stream error REST: ${messageJson?.error?.message || 'unknown error'}`);
                 safeUnsubscribe();
@@ -178,17 +198,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         } catch (error) {
             logger.debug(`progressData not JSON: ${progressData}`);
             if (typeof progressData === 'string') {
-                if (progress === 1 && progressData.trim() === "[DONE]") {
-                    fillJsonResponse(jsonResponse, progressData, "stop");
-                    safeUnsubscribe();
-                    finishStream(res, jsonResponse);
-                    return;
-                }
-
-                chunkTextIntoTokens(progressData, false, useSingleTokenStream).forEach(token => {
-                    fillJsonResponse(jsonResponse, token, null);
-                    sendStreamData(jsonResponse);
-                });
+                processStringData(progressData);
             } else {
                 fillJsonResponse(jsonResponse, progressData, "stop");
                 sendStreamData(jsonResponse);

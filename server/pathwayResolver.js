@@ -103,7 +103,7 @@ class PathwayResolver {
                 await publishRequestProgress({
                         requestId: this.rootRequestId || this.requestId,
                         progress: completedCount / totalCount,
-                        data: typeof responseData === 'string' ? responseData : JSON.stringify(responseData),
+                        data: JSON.stringify(responseData),
                 });
             }
         // If the response is an object, it's a streaming response

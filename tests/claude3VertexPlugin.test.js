@@ -199,7 +199,7 @@ test('convertMessagesToClaudeVertex system message with user message', async (t)
 test('convertMessagesToClaudeVertex user message with unsupported image type', async (t) => {
   const plugin = new Claude3VertexPlugin(pathway, model);
   // Test with unsupported image type
-  const messages = [{ role: 'user', content: { type: 'image_url', image_url: 'http://example.com/image.svg' } }];
+  const messages = [{ role: 'user', content: { type: 'image_url', image_url: 'https://unec.edu.az/application/uploads/2014/12/pdf-sample.pdf' } }];
   const output = await plugin.convertMessagesToClaudeVertex(messages);
   t.deepEqual(output, { system: '', modifiedMessages: [{role: 'user', content: [] }] });
 });
