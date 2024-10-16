@@ -17,7 +17,7 @@ async function convertContentItem(item) {
             return item.text ? { type: "text", text: item.text } : null;
 
           case "image_url":
-            imageUrl = item.url || item.image_url.url || item.image_url;
+            imageUrl = item.url || item.image_url?.url || item.image_url;
 
             if (!imageUrl) {
               logger.warn("Could not parse image URL from content - skipping image content.");
