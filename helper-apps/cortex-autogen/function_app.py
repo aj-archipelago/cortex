@@ -11,7 +11,7 @@ import sys
 def install_packages():
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 
-# install_packages()
+install_packages()
 
 app = func.FunctionApp()
 
