@@ -12,11 +12,13 @@ import requests
 import pathlib
 import pymongo
 import logging
-from datetime import datetime, timezone
-from tools.sasfileuploader import autogen_sas_uploader
+from datetime import datetime, timezone, timedelta
 import shutil
 import time
 import base64
+import zipfile
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
+
 load_dotenv()
 
 connection_string = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
@@ -50,12 +52,6 @@ def store_in_mongo(data):
             logging.warning("MONGO_URI not found in environment variables")
     except Exception as e:
         logging.error(f"An error occurred while storing data in MongoDB: {str(e)}")
-
-app = func.FunctionApp()
-
-connection_string = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
-queue_name = os.environ.get("QUEUE_NAME", "autogen-message-queue")
-queue_client = QueueClient.from_connection_string(connection_string, queue_name)
 
 redis_client = redis.from_url(os.environ['REDIS_CONNECTION_STRING'])
 channel = 'requestProgress'
@@ -110,8 +106,41 @@ def fetch_from_url(url):
         logging.error(f"Error fetching from URL: {e}")
         return ""
 
+
+def zip_and_upload_tmp_folder(temp_dir):
+    zip_path = os.path.join(temp_dir, "tmp_contents.zip")
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(temp_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, temp_dir)
+                zipf.write(file_path, arcname)
+
+    blob_service_client = BlobServiceClient.from_connection_string(os.environ["AZURE_STORAGE_CONNECTION_STRING"])
+    container_name = os.environ.get("AZURE_BLOB_CONTAINER", "autogen-uploads")
+    blob_name = f"tmp_contents_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}.zip"
+    blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+
+    with open(zip_path, "rb") as data:
+        blob_client.upload_blob(data)
+
+    account_key = blob_service_client.credential.account_key
+    account_name = blob_service_client.account_name
+    expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    sas_token = generate_blob_sas(
+        account_name,
+        container_name,
+        blob_name,
+        account_key=account_key,
+        permission=BlobSasPermissions(read=True),
+        expiry=expiry
+    )
+
+    return f"{blob_client.url}?{sas_token}"
+
 def process_message(message_data, original_request_message):
-    logging.info(f"Processing Message: {message_data}")
+    # logging.info(f"Processing Message: {message_data}")
     try:
         started_at = datetime.now()
         message = message_data['message']
@@ -153,13 +182,13 @@ def process_message(message_data, original_request_message):
             assistant = AssistantAgent("assistant", 
                 llm_config=llm_config, 
                 system_message=system_message_assistant,
-                code_execution_config={"executor": code_executor},
+                # code_execution_config={"executor": code_executor},
                 is_termination_msg=is_termination_msg,
             )
             
             user_proxy = UserProxyAgent(
                 "user_proxy",
-                llm_config=llm_config,
+                # llm_config=llm_config,
                 system_message=system_message_given,
                 code_execution_config={"executor": code_executor},
                 human_input_mode="NEVER",
@@ -234,6 +263,9 @@ def process_message(message_data, original_request_message):
             #summary_method="reflection_with_llm", "last_msg"
             chat_result = user_proxy.initiate_chat(assistant, message=message, summary_method="reflection_with_llm", summary_args={"summary_role": "user", "summary_prompt": summary_prompt})
 
+
+            zip_url = zip_and_upload_tmp_folder(temp_dir)
+
             msg = ""
             try:
                 msg = all_messages[-1 if all_messages[-2]["message"] else -3]["message"] 
@@ -243,6 +275,7 @@ def process_message(message_data, original_request_message):
                 msg = f"Finished, with errors 🤖 ... {e}"
 
             msg = chat_result.summary if chat_result.summary else msg
+            msg += f"\n\n[Download all files of this task]({zip_url})"
 
             finalData = {
                 "requestId": request_id,

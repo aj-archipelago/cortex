@@ -5,6 +5,13 @@ from azure.storage.queue import QueueClient
 import os
 import redis
 from myautogen import process_message
+import subprocess
+import sys
+
+def install_packages():
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+
+# install_packages()
 
 app = func.FunctionApp()
 
