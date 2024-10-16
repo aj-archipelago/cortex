@@ -137,9 +137,11 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
             if (subscription) {
                 try {
                     const subPromiseResult = await subscription;
-                    subPromiseResult && pubsub.unsubscribe(subPromiseResult);
+                    if (subPromiseResult && pubsub.subscriptions?.[subPromiseResult]) {
+                        pubsub.unsubscribe(subPromiseResult);
+                    }
                 } catch (error) {
-                    logger.error(`Error unsubscribing from pubsub: ${error}`);
+                    logger.warn(`Pubsub unsubscribe threw error: ${error}`);
                 }
             }
         }
@@ -156,6 +158,12 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
                 fillJsonResponse(jsonResponse, token, null);
                 sendStreamData(jsonResponse);
             });
+
+            if (progress === 1) {
+                safeUnsubscribe();
+                finishStream(res, jsonResponse);
+            }
+
         }
 
         if (data.requestProgress.requestId !== requestId) return;
