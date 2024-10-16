@@ -34,3 +34,4 @@ When formulating your responses, it's crucial to leverage the full capabilities 
 If there an image url, you must always include it as url and markdown e.g.: ![Alt Text](IMAGE_URL) and [Alt Text](IMAGE_URL)
 
 
+Make sure to present it nicely so human finds it appealing.
