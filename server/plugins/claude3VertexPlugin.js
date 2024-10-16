@@ -1,16 +1,10 @@
 import OpenAIVisionPlugin from "./openAiVisionPlugin.js";
 import logger from "../../lib/logger.js";
-import mime from 'mime-types';
 
+const allowedMIMETypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 async function convertContentItem(item) {
 
   let imageUrl = "";
-  let isDataURL = false;
-  let urlData = "";
-  let mimeTypeMatch = "";
-  let mimeType = "";
-  let base64Image = "";
-  const allowedMIMETypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
   try {
     switch (typeof item) {
@@ -23,31 +17,31 @@ async function convertContentItem(item) {
             return item.text ? { type: "text", text: item.text } : null;
 
           case "image_url":
-            imageUrl = item.image_url.url || item.image_url;
+            imageUrl = item.url || item.image_url?.url || item.image_url;
+
             if (!imageUrl) {
               logger.warn("Could not parse image URL from content - skipping image content.");
               return null;
             }
 
-            if (!allowedMIMETypes.includes(mime.lookup(imageUrl) || "")) {
-                logger.warn("Unsupported image type - skipping image content.");
-                return null;
+            try {
+              const urlData = imageUrl.startsWith("data:") ? imageUrl : await fetchImageAsDataURL(imageUrl);
+              if (!urlData) { return null; }
+              const [, mimeType = "image/jpeg"] = urlData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/) || [];
+              const base64Image = urlData.split(",")[1];
+
+              return {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: mimeType,
+                  data: base64Image,
+                },
+              };
+            } catch (error) {
+              logger.error(`Failed to process image: ${error.message}`);
+              return null;
             }
-
-            isDataURL = imageUrl.startsWith("data:");
-            urlData = isDataURL ? item.image_url.url : await fetchImageAsDataURL(imageUrl);
-            mimeTypeMatch = urlData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
-            mimeType = mimeTypeMatch && mimeTypeMatch[1] ? mimeTypeMatch[1] : "image/jpeg";
-            base64Image = urlData.split(",")[1];
-
-            return {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: mimeType,
-                data: base64Image,
-              },
-            };
 
           default:
             return null;
@@ -66,16 +60,26 @@ async function convertContentItem(item) {
 // Fetch image and convert to base 64 data URL
 async function fetchImageAsDataURL(imageUrl) {
   try {
-    const response = await fetch(imageUrl);
+    const response = await fetch(imageUrl, { method: 'HEAD' });
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const buffer = await response.arrayBuffer();
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !allowedMIMETypes.includes(contentType)) {
+      logger.warn(`Unsupported image type: ${contentType} - skipping image content.`);
+      return null;
+    }
+
+    const dataResponse = await fetch(imageUrl);
+    if (!dataResponse.ok) {
+      throw new Error(`HTTP error! status: ${dataResponse.status}`);
+    }
+
+    const buffer = await dataResponse.arrayBuffer();
     const base64Image = Buffer.from(buffer).toString("base64");
-    const mimeType = mime.lookup(imageUrl) || "image/jpeg";
-    return `data:${mimeType};base64,${base64Image}`;
+    return `data:${contentType};base64,${base64Image}`;
   }
   catch (e) {
     logger.error(`Failed to fetch image: ${imageUrl}. ${e}`);
@@ -103,49 +107,49 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
   // This code converts messages to the format required by the Claude Vertex API
   async convertMessagesToClaudeVertex(messages) {
-    let modifiedMessages = [];
+    // Create a deep copy of the input messages
+    const messagesCopy = JSON.parse(JSON.stringify(messages));
+  
     let system = "";
-    let lastAuthor = "";
-
-    // Claude needs system messages in a separate field
-    const systemMessages = messages.filter(
-      (message) => message.role === "system"
-    );
+  
+    // Extract system messages
+    const systemMessages = messagesCopy.filter(message => message.role === "system");
     if (systemMessages.length > 0) {
-      system = systemMessages.map((message) => message.content).join("\n");
-      modifiedMessages = messages.filter(
-        (message) => message.role !== "system"
-      );
-    } else {
-      modifiedMessages = messages;
+      system = systemMessages.map(message => message.content).join("\n");
     }
-
-    // remove any empty messages
-    modifiedMessages = modifiedMessages.filter((message) => message.content);
-
-    // combine any consecutive messages from the same author
-    var combinedMessages = [];
-
-    modifiedMessages.forEach((message) => {
-      if (message.role === lastAuthor) {
-        combinedMessages[combinedMessages.length - 1].content +=
-          "\n" + message.content;
+  
+    // Filter out system messages and empty messages
+    let modifiedMessages = messagesCopy
+      .filter(message => message.role !== "system" && message.content)
+      .map(message => ({ ...message }));
+  
+    // Combine consecutive messages from the same author
+    const combinedMessages = modifiedMessages.reduce((acc, message) => {
+      if (acc.length === 0 || message.role !== acc[acc.length - 1].role) {
+        acc.push({ ...message });
       } else {
-        combinedMessages.push(message);
-        lastAuthor = message.role;
+        const lastMessage = acc[acc.length - 1];
+        if (Array.isArray(lastMessage.content) && Array.isArray(message.content)) {
+          lastMessage.content = [...lastMessage.content, ...message.content];
+        } else if (Array.isArray(lastMessage.content)) {
+          lastMessage.content.push({ type: 'text', text: message.content });
+        } else if (Array.isArray(message.content)) {
+          lastMessage.content = [{ type: 'text', text: lastMessage.content }, ...message.content];
+        } else {
+          lastMessage.content += "\n" + message.content;
+        }
       }
-    });
-
-    modifiedMessages = combinedMessages;
-
-    // Claude vertex requires an odd number of messages
-    // for proper conversation turn-taking
-    if (modifiedMessages.length % 2 === 0) {
-      modifiedMessages = modifiedMessages.slice(1);
-    }
-
+      return acc;
+    }, []);
+  
+    // Ensure an odd number of messages
+    const finalMessages = combinedMessages.length % 2 === 0
+      ? combinedMessages.slice(1)
+      : combinedMessages;
+  
+    // Convert content items
     const claude3Messages = await Promise.all(
-      modifiedMessages.map(async (message) => {
+      finalMessages.map(async (message) => {
         const contentArray = Array.isArray(message.content) ? message.content : [message.content];
         const claude3Content = await Promise.all(contentArray.map(convertContentItem));
         return {
@@ -154,13 +158,13 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
         };
       })
     );
-
+  
     return {
       system,
       modifiedMessages: claude3Messages,
     };
   }
-
+  
   async getRequestParameters(text, parameters, prompt, cortexRequest) {
     const requestParameters = await super.getRequestParameters(
       text,

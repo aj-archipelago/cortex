@@ -137,11 +137,33 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
             if (subscription) {
                 try {
                     const subPromiseResult = await subscription;
-                    subPromiseResult && pubsub.unsubscribe(subPromiseResult);
+                    if (subPromiseResult && pubsub.subscriptions?.[subPromiseResult]) {
+                        pubsub.unsubscribe(subPromiseResult);
+                    }
                 } catch (error) {
-                    logger.error(`Error unsubscribing from pubsub: ${error}`);
+                    logger.warn(`Pubsub unsubscribe threw error: ${error}`);
                 }
             }
+        }
+
+        const processStringData = (stringData) => {
+            if (progress === 1 && stringData.trim() === "[DONE]") {
+                fillJsonResponse(jsonResponse, stringData, "stop");
+                safeUnsubscribe();
+                finishStream(res, jsonResponse);
+                return;
+            }
+
+            chunkTextIntoTokens(stringData, false, useSingleTokenStream).forEach(token => {
+                fillJsonResponse(jsonResponse, token, null);
+                sendStreamData(jsonResponse);
+            });
+
+            if (progress === 1) {
+                safeUnsubscribe();
+                finishStream(res, jsonResponse);
+            }
+
         }
 
         if (data.requestProgress.requestId !== requestId) return;
@@ -152,6 +174,12 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
 
         try {
             const messageJson = JSON.parse(progressData);
+
+            if (typeof messageJson === 'string') {
+                processStringData(messageJson);
+                return;
+            }
+
             if (messageJson.error) {
                 logger.error(`Stream error REST: ${messageJson?.error?.message || 'unknown error'}`);
                 safeUnsubscribe();
@@ -178,17 +206,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         } catch (error) {
             logger.debug(`progressData not JSON: ${progressData}`);
             if (typeof progressData === 'string') {
-                if (progress === 1 && progressData.trim() === "[DONE]") {
-                    fillJsonResponse(jsonResponse, progressData, "stop");
-                    safeUnsubscribe();
-                    finishStream(res, jsonResponse);
-                    return;
-                }
-
-                chunkTextIntoTokens(progressData, false, useSingleTokenStream).forEach(token => {
-                    fillJsonResponse(jsonResponse, token, null);
-                    sendStreamData(jsonResponse);
-                });
+                processStringData(progressData);
             } else {
                 fillJsonResponse(jsonResponse, progressData, "stop");
                 sendStreamData(jsonResponse);

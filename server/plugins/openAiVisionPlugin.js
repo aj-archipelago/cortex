@@ -10,6 +10,11 @@ function safeJsonParse(content) {
 }
 
 class OpenAIVisionPlugin extends OpenAIChatPlugin {
+
+    constructor(pathway, model) {
+        super(pathway, model);
+        this.isMultiModal = true;
+    }
     
     tryParseMessages(messages) {
         return messages.map(message => {
@@ -20,12 +25,16 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                 if (Array.isArray(message.content)) {
                     message.content = message.content.map(item => {
                         if (typeof item === 'string') {
-                            return { type: 'text', text: item };
-                        } else {
                             const parsedItem = safeJsonParse(item);
-                            const { type, text, image_url, url } = parsedItem;
-                            return { type, text, image_url: url || image_url };
+                            return parsedItem.type ? parsedItem : { type: 'text', text: item };
+                        } else if (typeof item === 'object') {
+                            const { type, image_url, url } = item;
+                            if (type === 'image_url') {
+                                image_url.url = url || image_url.url;
+                                return { type, image_url };
+                            }
                         }
+                        return item;
                     });
                 }
             } catch (e) {
