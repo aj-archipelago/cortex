@@ -24,6 +24,7 @@ import { cancelRequestResolver } from './resolver.js';
 import subscriptions from './subscriptions.js';
 import { getMessageTypeDefs, getPathwayTypeDef, userPathwayInputParameters } from './typeDef.js';
 import stringcase from 'stringcase';
+import { buildRestEndpoints } from './rest.js';
 
 // Utility functions
 // Server plugins
@@ -260,6 +261,9 @@ const build = async (config) => {
                 context: async ({ req, res }) => ({ req, res, config, requestState }),
             }),
         );
+
+        // add the REST endpoints
+        buildRestEndpoints(pathways, app, server, config);
 
         // Now that our HTTP server is fully set up, we can listen to it.
         httpServer.listen(config.get('PORT'), () => {
