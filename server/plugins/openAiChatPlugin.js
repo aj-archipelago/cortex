@@ -112,7 +112,7 @@ class OpenAIChatPlugin extends ModelPlugin {
             let totalUnits;
             messages.forEach((message, index) => {
                 //message.content string or array
-                const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
+                const content = message.content === undefined ? JSON.stringify(message) : (Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content);
                 const words = content.split(" ");
                 const { length, units } = this.getLength(content);
                 const preview = words.length < 41 ? content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");

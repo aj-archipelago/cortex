@@ -195,6 +195,13 @@ var config = convict({
                 "requestsPerSecond": 10,
                 "maxTokenLength": 200000
             },
+            "runware-flux-schnell": {
+                "type": "RUNWARE-AI",
+                "url": "https://api.runware.ai/v1",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+            },
         },
         env: 'CORTEX_MODELS'
     },
@@ -239,6 +246,12 @@ var config = convict({
         format: String,
         default: null,
         env: 'REDIS_ENCRYPTION_KEY',
+        sensitive: true
+    },
+    runwareAiApiKey: {
+        format: String,
+        default: null,
+        env: 'RUNWARE_API_KEY',
         sensitive: true
     },
     dalleImageApiUrl: {
