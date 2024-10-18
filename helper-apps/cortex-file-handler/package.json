@@ -20,7 +20,7 @@
     "ioredis": "^5.3.1",
     "mammoth": "^1.6.0",
     "papaparse": "^5.4.1",
-    "pdfjs-dist": "^3.9.179",
+    "pdfjs-dist": "^4.2.67",
     "public-ip": "^6.0.1",
     "uuid": "^9.0.0",
     "xlsx": "^0.18.5"
