@@ -23,7 +23,6 @@ import { requestState } from './requestState.js';
 import { cancelRequestResolver } from './resolver.js';
 import subscriptions from './subscriptions.js';
 import { getMessageTypeDefs, getPathwayTypeDef, userPathwayInputParameters } from './typeDef.js';
-import stringcase from 'stringcase';
 import { buildRestEndpoints } from './rest.js';
 
 // Utility functions
