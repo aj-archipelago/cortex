@@ -43,7 +43,7 @@ class RunwareAiPlugin extends ModelPlugin {
     return requestParameters;
   }
 
-  // Execute the request to the Azure Translate API
+  // Execute the request to the Runware REST API
   async execute(text, parameters, prompt, cortexRequest) {
     const requestParameters = this.getRequestParameters(
       text,
