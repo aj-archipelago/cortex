@@ -25,6 +25,7 @@ import Gemini15VisionPlugin from './plugins/gemini15VisionPlugin.js';
 import AzureBingPlugin from './plugins/azureBingPlugin.js';
 import Claude3VertexPlugin from './plugins/claude3VertexPlugin.js';
 import NeuralSpacePlugin from './plugins/neuralSpacePlugin.js';
+import RunwareAiPlugin from './plugins/runwareAIPlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -103,6 +104,9 @@ class ModelExecutor {
                 break;
             case 'CLAUDE-3-VERTEX':
                 plugin = new Claude3VertexPlugin(pathway, model);
+                break;
+            case 'RUNWARE-AI':
+                plugin = new RunwareAiPlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);

@@ -187,7 +187,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     if (system) {
       const { length, units } = this.getLength(system);
       logger.info(`[system messages sent containing ${length} ${units}]`);
-      logger.verbose(`${system}`);
+      logger.verbose(`${this.shortenContent(system)}`);
     }
 
     if (messages && messages.length > 1) {
@@ -195,7 +195,6 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       let totalLength = 0;
       let totalUnits;
       messages.forEach((message, index) => {
-        //message.content string or array
         const content = Array.isArray(message.content)
           ? message.content.map((item) => {
               if (item.source && item.source.type === 'base64') {
@@ -204,14 +203,8 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
               return JSON.stringify(item);
             }).join(", ")
           : message.content;
-        const words = content.split(" ");
         const { length, units } = this.getLength(content);
-        const preview =
-          words.length < 41
-            ? content
-            : words.slice(0, 20).join(" ") +
-              " ... " +
-              words.slice(-20).join(" ");
+        const preview = this.shortenContent(content);
 
         logger.verbose(
           `message ${index + 1}: role: ${
@@ -229,7 +222,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
         : message.content;
       const { length, units } = this.getLength(content);
       logger.info(`[request sent containing ${length} ${units}]`);
-      logger.verbose(`${content}`);
+      logger.verbose(`${this.shortenContent(content)}`);
     }
 
     if (stream) {
@@ -304,6 +297,16 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     }
 
     return requestProgress;
+  }
+
+  shortenContent(content, maxWords = 40) {
+    const words = content.split(" ");
+    if (words.length <= maxWords) {
+      return content;
+    }
+    return words.slice(0, maxWords / 2).join(" ") +
+      " ... " +
+      words.slice(-maxWords / 2).join(" ");
   }
 }
 
