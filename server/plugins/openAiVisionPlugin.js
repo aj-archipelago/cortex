@@ -27,17 +27,18 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                 }
                 if (Array.isArray(message.content)) {
                     message.content = message.content.map(item => {
-                        if (typeof item === 'string') {
-                            const parsedItem = safeJsonParse(item);
-                            return parsedItem.type ? parsedItem : { type: 'text', text: item };
-                        } else if (typeof item === 'object') {
-                            const { type, image_url, url } = item;
-                            if (type === 'image_url') {
-                                image_url.url = url || image_url.url;
-                                return { type, image_url };
-                            }
+                        const parsedItem = safeJsonParse(item);
+
+                        if (typeof parsedItem === 'string') {
+                            return { type: 'text', text: parsedItem };
                         }
-                        return item;
+
+                        if (typeof parsedItem === 'object' && parsedItem !== null && parsedItem.type === 'image_url') {
+                            parsedItem.image_url.url = parsedItem.url || parsedItem.image_url.url;
+                            return parsedItem;
+                        }
+                        
+                        return parsedItem;
                     });
                 }
             } catch (e) {
