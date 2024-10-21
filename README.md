@@ -503,7 +503,8 @@ The configuration should include the following properties:
   "awsAccessKeyId": "your_access_key_id",  // Only for AWS S3
   "awsSecretAccessKey": "your_secret_access_key",  // Only for AWS S3
   "awsRegion": "your_aws_region",  // Only for AWS S3
-  "awsBucketName": "cortexdynamicpathways"  // Optional, default is "cortexdynamicpathways"
+  "awsBucketName": "cortexdynamicpathways",  // Optional, default is "cortexdynamicpathways"
+  "publishKey": "your_publish_key"
 }
 ```
 
@@ -559,7 +560,7 @@ query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String!) 
 
 To ensure the security of dynamic pathways:
 
-1. A `PATHWAY_PUBLISH_KEY` environment variable must be set to enable pathway publishing.
+1. A `publishKey` must be set in the dynamic pathways configuration to enable pathway publishing.
 2. This key must be provided in the `key` parameter when adding, updating, or deleting pathways.
 3. Each pathway is associated with a `userId` and `secret`. The secret must be provided to modify or delete an existing pathway.
 
