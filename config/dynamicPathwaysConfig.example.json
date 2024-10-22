@@ -1,4 +1,5 @@
 {
     "storageType": "azure",
     "filePath": "./pathways/dynamic/pathways.json",
+    "publishKey": "development"
 }

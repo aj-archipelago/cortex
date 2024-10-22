@@ -321,6 +321,7 @@ const createDynamicPathwayManager = async (config, basePathway) => {
         awsSecretAccessKey: dynamicPathwayConfig.awsSecretAccessKey,
         awsRegion: dynamicPathwayConfig.awsRegion,
         awsBucketName: dynamicPathwayConfig.awsBucketName || 'cortexdynamicpathways',
+        publishKey: dynamicPathwayConfig.publishKey,
     };
 
     const pathwayManager = new PathwayManager(storageConfig, basePathway);
