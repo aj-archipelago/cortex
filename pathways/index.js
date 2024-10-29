@@ -1,3 +1,4 @@
+import azure_video_translate from './azure_video_translate.js';
 import bias from './bias.js';
 import bing from './bing.js';
 import categorize from './categorize.js';
@@ -83,6 +84,7 @@ import translate_turbo from './translate_turbo.js';
 import vision from './vision.js';
 
 export {
+    azure_video_translate,
     bias,
     bing,
     categorize, chat, chat_code,

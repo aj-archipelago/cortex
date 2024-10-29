@@ -26,6 +26,7 @@ import AzureBingPlugin from './plugins/azureBingPlugin.js';
 import Claude3VertexPlugin from './plugins/claude3VertexPlugin.js';
 import NeuralSpacePlugin from './plugins/neuralSpacePlugin.js';
 import RunwareAiPlugin from './plugins/runwareAIPlugin.js';
+import AzureVideoTranslatePlugin from './plugins/azureVideoTranslatePlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -107,6 +108,9 @@ class ModelExecutor {
                 break;
             case 'RUNWARE-AI':
                 plugin = new RunwareAiPlugin(pathway, model);
+                break;
+            case 'AZURE-VIDEO-TRANSLATE':
+                plugin = new AzureVideoTranslatePlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);
