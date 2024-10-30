@@ -33,14 +33,14 @@ test('parseNumberedList should parse different numbered list formats', t => {
     t.deepEqual(result, ['First item', 'Second item', 'Third item', 'Fourth item']);
 });
 
-test('parseNumberedObjectList should parse numbered object list correctly', t => {
+test('parseNumberedObjectList should parse numbered object list correctly', async t => {
     const text = `1. name: John, age: 30
     2. name: Jane, age: 25`;
     const format = 'name age';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, [
-        { name: 'John', age: '30' },
-        { name: 'Jane', age: '25' }
+        { name: 'John', age: 30 },
+        { name: 'Jane', age: 25 }
     ]);
 });
 
@@ -140,105 +140,116 @@ test('parseJson should handle JSON with boolean and null values', async t => {
     t.is(result, jsonWithSpecialValues);
 });
 
-test('parseNumberedObjectList should handle mixed separators', t => {
+test('parseNumberedObjectList should handle mixed separators', async t => {
     const text = `1. name: John, age-30
     2. name - Jane, age: 25`;
     const format = 'name age';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, [
-        { name: 'John', age: '30' },
-        { name: 'Jane', age: '25' }
+        { name: 'John', age: 30 },
+        { name: 'Jane', age: 25 }
     ]);
 });
 
-test('parseNumberedObjectList should handle n fields', t => {
+test('parseNumberedObjectList should handle n fields', async t => {
     const text = `1. name: John, age: 30, city: New York, country: USA
     2. name: Jane, age: 25, country: Canada`;
     const format = 'name age city country';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, [
-        { name: 'John', age: '30', city: 'New York', country: 'USA' },
-        { name: 'Jane', age: '25', country: 'Canada' }
+        { name: 'John', age: 30, city: 'New York', country: 'USA' },
+        { name: 'Jane', age: 25, country: 'Canada' }
     ]);
 });
 
-test('parseNumberedObjectList should ignore extra fields', t => {
+test('parseNumberedObjectList should ignore extra fields', async t => {
     const text = `1. name: John, age: 30, city: New York
     2. name: Jane, age: 25, country: Canada`;
     const format = 'name age';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, [
-        { name: 'John', age: '30' },
-        { name: 'Jane', age: '25' }
+        { name: 'John', age: 30 },
+        { name: 'Jane', age: 25 }
     ]);
 });
 
-test('parseNumberedObjectList should handle missing fields', t => {
+test('parseNumberedObjectList should handle missing fields', async t => {
     const text = `1. name: John
     2. age: 25`;
     const format = 'name age';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, [
         { name: 'John' },
-        { age: '25' }
+        { age: 25 }
     ]);
 });
 
-test('parseNumberedObjectList should be case-insensitive for field names', t => {
+test('parseNumberedObjectList should be case-insensitive for field names', async t => {
     const text = `1. NAME: John, AGE: 30
     2. Name: Jane, Age: 25`;
     const format = 'name age';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, [
-        { name: 'John', age: '30' },
-        { name: 'Jane', age: '25' }
+        { name: 'John', age: 30 },
+        { name: 'Jane', age: 25 }
     ]);
 });
 
-test('parseNumberedObjectList should handle whitespace variations', t => {
+test('parseNumberedObjectList should handle whitespace variations', async t => {
     const text = `1. name:John,age:   30
     2.    name    :    Jane   ,   age:25`;
     const format = 'name age';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, [
-        { name: 'John', age: '30' },
-        { name: 'Jane', age: '25' }
+        { name: 'John', age: 30 },
+        { name: 'Jane', age: 25 }
     ]);
 });
 
-test('parseNumberedObjectList should handle empty input', t => {
+test('parseNumberedObjectList should handle empty input', async t => {
     const text = '';
     const format = 'name age';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, []);
 });
 
-test('parseNumberedObjectList should handle input with no valid fields', t => {
+test('parseNumberedObjectList should handle input with no valid fields', async t => {
     const text = `1. foo: bar, baz: qux
     2. quux: corge`;
     const format = 'name age';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, []);
 });
 
-test('parseNumberedObjectList should handle values with splitters in them', t => {
+test('parseNumberedObjectList should handle values with splitters in them', async t => {
     const text = `1. name: John Doe, birth: 1990-01-01
     2. name: Jane Smith, birth: 1985-05-05`;
     const format = 'name birth';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, [
         { 'name': 'John Doe', 'birth': '1990-01-01' },
         { 'name': 'Jane Smith', 'birth': '1985-05-05' }
     ]);
 });
 
-test('parseNumberedObjectList should infer field names when given a list of separated values', t => {
+test('parseNumberedObjectList should infer field names when given a list of separated values', async t => {
     const text = `1. John Doe, 1990-01-01
     2. Jane Smith, 1985-05-05`;
     const format = 'name birth';
-    const result = parser.parseNumberedObjectList(text, format);
+    const result = await parser.parseNumberedObjectList(text, format);
     t.deepEqual(result, [
         { 'name': 'John Doe', 'birth': '1990-01-01' },
         { 'name': 'Jane Smith', 'birth': '1985-05-05' }
+    ]);
+});
+
+test('parseNumberedObjectList should match simple string output to objects', async t => {
+    const text = "1. World: The Earth and all its inhabitants, considered as a single entity.\n2. Dear: Loved or cherished by someone; regarded with deep affection.\n3. Hello: Used as a greeting or to begin a conversation.";
+    const format = 'name definition';
+    const result = await parser.parseNumberedObjectList(text, format);
+    t.deepEqual(result, [
+        { 'name': 'World', 'definition': 'The Earth and all its inhabitants, considered as a single entity.' },
+        { 'name': 'Dear', 'definition': 'Loved or cherished by someone; regarded with deep affection.' },
+        { 'name': 'Hello', 'definition': 'Used as a greeting or to begin a conversation.' }
     ]);
 });

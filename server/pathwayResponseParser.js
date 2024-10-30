@@ -13,7 +13,7 @@ class PathwayResponseParser {
         if (this.pathway.list) {
             if (isNumberedList(data)) {
                 if (this.pathway.format) {
-                    return parseNumberedObjectList(data, this.pathway.format);
+                    return await parseNumberedObjectList(data, this.pathway.format);
                 }
                 return parseNumberedList(data);
             } else if (isCommaSeparatedList(data)) {

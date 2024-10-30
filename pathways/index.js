@@ -65,6 +65,7 @@ import sys_openai_chat_gpt4 from './sys_openai_chat_gpt4.js';
 import sys_openai_chat_gpt4_32 from './sys_openai_chat_gpt4_32.js';
 import sys_openai_chat_gpt4_turbo from './sys_openai_chat_gpt4_turbo.js';
 import sys_openai_completion from './sys_openai_completion.js';
+import sys_parse_numbered_object_list from './sys_parse_numbered_object_list.js';
 import sys_repair_json from './sys_repair_json.js';
 import tags from './tags.js';
 import taxonomy from './taxonomy.js';
@@ -135,6 +136,7 @@ export {
     sys_google_gemini_chat, sys_openai_chat, sys_openai_chat_16, sys_openai_chat_gpt4, sys_openai_chat_gpt4_32,
     sys_openai_completion,
     sys_openai_chat_gpt4_turbo,
+    sys_parse_numbered_object_list,
     sys_repair_json,
     tags,
     taxonomy,
