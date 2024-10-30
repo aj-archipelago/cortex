@@ -155,6 +155,21 @@ var config = convict({
                 "maxReturnTokens": 4096,
                 "supportsStreaming": true
             },
+            "oai-gpt4o-mini": {
+                "type": "OPENAI-VISION",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "gpt-4o-mini"
+                },
+                "requestsPerSecond": 50,
+                "maxTokenLength": 131072,
+                "maxReturnTokens": 4096,
+                "supportsStreaming": true
+            },
             "oai-o1-mini": {
                 "type": "OPENAI-REASONING",
                 "url": "https://api.openai.com/v1/chat/completions",
@@ -229,8 +244,20 @@ var config = convict({
                     "Content-Type": "application/json"
                 },
             },
+            "azure-video-translate": {
+                "type": "AZURE-VIDEO-TRANSLATE",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "supportsStreaming": true,
+            }
         },
         env: 'CORTEX_MODELS'
+    },
+    azureVideoTranslationApiUrl: {
+        format: String,
+        default: 'http://127.0.0.1:5005',
+        env: 'AZURE_VIDEO_TRANSLATION_API_URL'
     },
     openaiApiKey: {
         format: String,

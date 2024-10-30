@@ -9,8 +9,9 @@ export default {
             ]
         })
     ],
-    model: 'oai-gpt4o',
+    model: 'oai-gpt4o-mini',
     temperature: 0.0,
     enableCache: true,
+    enableDuplicateRequests: false,
 }
 

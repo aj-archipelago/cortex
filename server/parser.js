@@ -13,50 +13,14 @@ const parseNumberedList = (str) => {
     return regexParser(str, /^\s*[\[\{\(]*\d+[\s.=\-:,;\]\)\}]/gm);
 }
 
-// parse a numbered object list text format into list of objects
-const parseNumberedObjectList = (text, format) => {
-    const fields = format.match(/\b(\w+)\b/g);
-    const values = parseNumberedList(text);
-    const fieldMap = new Map(fields.map(f => [f.toLowerCase(), f]));
-
-    return values.map(value => {
-        const obj = {};
-        const pairs = value.split(/,\s*/);
-        for (let i = 0; i < pairs.length; i++) {
-            const pair = pairs[i];
-
-            // either there are actual fieldnames (separated by :) in which case we split by :
-            // and do a hard match against the fieldMap, or there are soft or no fieldnames (separated by - or no separator)
-            // in which case we try match but then infer the field name from the field order
-            let splitIndex = pair.indexOf(':');
-            if (splitIndex !== -1) {
-                const key = pair.slice(0, splitIndex).trim().toLowerCase();
-                const val = pair.slice(splitIndex + 1).trim();
-                const field = fieldMap.get(key);
-                if (field) {
-                    obj[field] = val;
-                }
-                continue;
-            }
-
-            splitIndex = pair.indexOf('-');
-            if (splitIndex !== -1) {
-                const key = pair.slice(0, splitIndex).trim().toLowerCase();
-                const val = pair.slice(splitIndex + 1).trim();
-                const field = fieldMap.get(key);
-                if (field) {
-                    obj[field] = val;
-                    continue;
-                }
-            }
-
-            const inferredField = fields[i];
-            if (inferredField) {
-                obj[inferredField] = pair.trim();
-            }
-        }
-        return Object.keys(obj).length > 0 ? obj : null;
-    }).filter(Boolean);
+async function parseNumberedObjectList(text, format) {
+    const parsedList = await callPathway('sys_parse_numbered_object_list', { text, format });
+    try {
+        return JSON.parse(parsedList);
+    } catch (error) {
+        logger.warn(`Failed to parse numbered object list: ${error.message}`);
+        return [];
+    }
 }
 
 // parse a comma-separated list text format into list
@@ -76,11 +40,8 @@ const isNumberedList = (data) => {
 
 async function parseJson(str) {
     try {
-        const jsonStart = str.indexOf('{') !== -1 ? str.indexOf('{') : str.indexOf('[');
-        const jsonEnd = str.lastIndexOf('}') !== -1 ? str.lastIndexOf('}') + 1 : str.lastIndexOf(']') + 1;
-        const jsonStr = str.slice(jsonStart, jsonEnd);
-        JSON.parse(jsonStr); // Validate JSON
-        return jsonStr;
+        JSON.parse(str); // Validate JSON
+        return str;
     } catch (error) {
         try {
             const repairedJson = await callPathway('sys_repair_json', { text: str });

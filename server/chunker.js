@@ -143,8 +143,10 @@ const findChunks = (text, chunkSize, maxTokenLen) => {
 
     // If chunk is too large, reduce size until it fits
     while (encode(chunk).length > maxTokenLen && chunkSize > 1) {
-      chunkSize = Math.floor(chunkSize / 2);
-      endIndex = Math.min(startIndex + chunkSize, text.length);
+      // reduce chunk size by a proportional amount
+      const reductionFactor = maxTokenLen / encode(chunk).length;
+      chunkSize = Math.floor(chunkSize * reductionFactor);
+      endIndex = Math.min(chunkSize, searchWindow.length);
       breakPoint = Math.max(findSemanticBreak(searchWindow.slice(0, endIndex)), 1);
       chunk = searchWindow.slice(0, breakPoint);
     }

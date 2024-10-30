@@ -22,9 +22,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                 if (message.role === "tool") {
                     return message;
                 }
-                if (typeof message.content === 'string') {
-                    message.content = safeJsonParse(message.content);
-                }
                 if (Array.isArray(message.content)) {
                     message.content = message.content.map(item => {
                         const parsedItem = safeJsonParse(item);
