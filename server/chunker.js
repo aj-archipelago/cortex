@@ -27,7 +27,6 @@ const getFirstNTokenSingle = (text, maxTokenLen) => {
   return text;
 }
 
-
 function getFirstNTokenArray(content, tokensToKeep) {
   let totalTokens = 0;
   let result = [];
@@ -71,138 +70,182 @@ const determineTextFormat = (text) => {
 }
 
 const getSemanticChunks = (text, chunkSize, inputFormat = 'text') => {
-  const breakByRegex = (str, regex, preserveWhitespace = false) => {
-    const result = [];
-    let match;
-  
-    while ((match = regex.exec(str)) !== null) {
-      const value = str.slice(0, match.index);
-      result.push(value);
-  
-      if (preserveWhitespace || /\S/.test(match[0])) {
-        result.push(match[0]);
-      }
-  
-      str = str.slice(match.index + match[0].length);
-    }
-  
-    if (str) {
-      result.push(str);
-    }
-  
-    return result.filter(Boolean);
-  };
-
-  const breakByParagraphs = (str) => breakByRegex(str, /[\r\n]+/, true);
-  const breakBySentences = (str) => breakByRegex(str, /(?<=[.。؟！?!\n])\s+/, true);
-  const breakByWords = (str) => breakByRegex(str, /(\s,;:.+)/);
-
-  const breakByHtmlElements = (str) => {
-    const $ = cheerio.load(str, null, true);
-
-    // the .filter() call is important to get the text nodes
-    // https://stackoverflow.com/questions/54878673/cheerio-get-normal-text-nodes
-    let rootNodes = $('body').contents();
-
-    // create an array with the outerHTML of each node
-    const nodes = rootNodes.map((i, el) => $(el).prop('outerHTML') || $(el).text()).get();
-
-    return nodes;
-};
-
-  const createChunks = (tokens) => {
-    let chunks = [];
-    let currentChunk = '';
-  
-    for (const token of tokens) {
-      const currentTokenLength = encode(currentChunk + token).length;
-      if (currentTokenLength <= chunkSize) {
-        currentChunk += token;
-      } else {
-        if (currentChunk) {
-          chunks.push(currentChunk);
-        }
-        currentChunk = token;
-      }
-    }
-  
-    if (currentChunk) {
-      chunks.push(currentChunk);
-    }
-  
-    return chunks;
-  };
-
-  const combineChunks = (chunks) => {
-    let optimizedChunks = [];
-  
-    for (let i = 0; i < chunks.length; i++) {
-      if (i < chunks.length - 1) {
-        const combinedChunk = chunks[i] + chunks[i + 1];
-        const combinedLen = encode(combinedChunk).length;
-  
-        if (combinedLen <= chunkSize) {
-          optimizedChunks.push(combinedChunk);
-          i += 1;
-        } else {
-          optimizedChunks.push(chunks[i]);
-        }
-      } else {
-        optimizedChunks.push(chunks[i]);
-      }
-    }
-  
-    return optimizedChunks;
-  };
-
-  const breakText = (str) => {
-    const tokenLength = encode(str).length;
-
-    if (tokenLength <= chunkSize) {
-      return [str];
-    }
-
-    const breakers = [breakByParagraphs, breakBySentences, breakByWords];
-
-    for (let i = 0; i < breakers.length; i++) {
-      const tokens = breakers[i](str);
-      if (tokens.length > 1) {
-        let chunks = createChunks(tokens);
-        chunks = combineChunks(chunks);
-        const brokenChunks = chunks.flatMap(breakText);
-        if (brokenChunks.every(chunk => encode(chunk).length <= chunkSize)) {
-          return brokenChunks;
-        }
-      }
-    }
-
-    return createChunks([...str]); // Split by characters
-  };
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
+    throw new Error('Invalid chunkSize: must be a positive integer');
+  }
 
   if (inputFormat === 'html') {
-    const tokens = breakByHtmlElements(text);
-    let chunks = createChunks(tokens);
-    chunks = combineChunks(chunks);
-
-    chunks = chunks.flatMap(chunk => {
-      if (determineTextFormat(chunk) === 'text') {
-        return getSemanticChunks(chunk, chunkSize);
-      } else {
-        return chunk;
-      }
-    });
-
-    if (chunks.filter(c => determineTextFormat(c) === 'html').some(chunk => encode(chunk).length > chunkSize)) {
-      throw new Error('The HTML contains elements that are larger than the chunk size. Please try again with HTML that has smaller elements.');
-    }
-
-    return chunks;
-  }
-  else {
-      return breakText(text);
+    return getHtmlChunks(text, chunkSize);
+  } else {
+    // Pre-calculate encoding ratio with a sample to avoid encoding entire text
+    const sampleSize = Math.min(500, text.length);
+    const sample = text.slice(0, sampleSize);
+    const sampleEncoded = encode(sample);
+    const avgCharsPerToken = sample.length / sampleEncoded.length;
+    const charChunkSize = Math.round(chunkSize * avgCharsPerToken);
+    return findChunks(text, charChunkSize, chunkSize);
   }
 }
 
+const getHtmlChunks = (html, chunkSize) => {
+  const $ = cheerio.load(html, null, true);
+  const nodes = $('body').contents().map((_, el) => $.html(el)).get();
+  
+  let chunks = [];
+  let currentChunk = '';
+  
+  for (const node of nodes) {
+    if (encode(node).length > chunkSize && node.startsWith('<') && node.endsWith('>')) {
+      throw new Error('The HTML contains elements that are larger than the chunk size. Please try again with HTML that has smaller elements.');
+    }
+    
+    if (encode(currentChunk + node).length <= chunkSize) {
+      currentChunk += node;
+    } else {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+        currentChunk = '';
+      }
+      if (encode(node).length > chunkSize) {
+        // If the node is larger than chunkSize, split it
+        const textChunks = getSemanticChunks(node, chunkSize, 'text');
+        chunks.push(...textChunks);
+      } else {
+        currentChunk = node;
+      }
+    }
+  }
+  
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+  
+  return chunks;
+};
+
+const findChunks = (text, chunkSize, maxTokenLen) => {
+  const chunks = [];
+  let startIndex = 0;
+
+  while (startIndex < text.length) {
+    let endIndex = Math.min(startIndex + chunkSize, text.length);
+
+    if (endIndex == text.length) {
+      chunks.push(text.slice(startIndex));
+      break;
+    }
+
+    const searchWindow = text.slice(startIndex, endIndex);
+    
+    // Find semantic break point, minimum 1 character
+    let breakPoint = Math.max(findSemanticBreak(searchWindow), 1);
+    let chunk = searchWindow.slice(0, breakPoint);
+
+    // If chunk is too large, reduce size until it fits
+    while (encode(chunk).length > maxTokenLen && chunkSize > 1) {
+      // reduce chunk size by a proportional amount
+      const reductionFactor = maxTokenLen / encode(chunk).length;
+      chunkSize = Math.floor(chunkSize * reductionFactor);
+      endIndex = Math.min(chunkSize, searchWindow.length);
+      breakPoint = Math.max(findSemanticBreak(searchWindow.slice(0, endIndex)), 1);
+      chunk = searchWindow.slice(0, breakPoint);
+    }
+
+    // Force single character if still too large
+    if (encode(chunk).length > maxTokenLen) {
+      breakPoint = 1;
+      chunk = searchWindow.slice(0, 1);
+    }
+
+    chunks.push(chunk);
+    startIndex += breakPoint;
+  }
+
+  return chunks;
+}
+
+const findSemanticBreak = (text) => {
+  const findLastDelimiter = (text, delimiters) => {
+    let lastIndex = -1;
+    for (const delimiter of delimiters) {
+      const index = text.lastIndexOf(delimiter);
+      if (index > -1) {
+        const delimitedIndex = index + delimiter.length;
+        if (delimitedIndex > lastIndex) lastIndex = delimitedIndex;
+      }
+    }
+    return lastIndex;
+  }
+
+  let breakIndex;
+
+  // Look for paragraph break (including different newline styles)
+  const paragraphDelimiters = ['\n\n', '\r\n\r\n', '\r\r', '\n'];
+  breakIndex = findLastDelimiter(text, paragraphDelimiters);
+  if (breakIndex !== -1) return breakIndex;
+
+  // Look for sentence break
+  const sentenceDelimiters = [
+    // Latin/European
+    '.', '!', '?', 
+    // CJK
+    '。', '！', '？', '．', '…', 
+    // Arabic/Persian/Urdu
+    '؟', '۔', '.',
+    // Devanagari/Hindi
+    '।',
+    // Thai
+    '๏', 'ฯ',
+    // Armenian
+    '։',
+    // Ethiopian
+    '።'
+  ];
+  breakIndex = findLastDelimiter(text, sentenceDelimiters);
+  if (breakIndex !== -1) return breakIndex;
+
+  // Look for phrase break
+  const phraseDelimiters = [
+    // Latin/European
+    '-', ';', ':', ',',
+    // CJK
+    '、', '，', '；', '：', '─',
+    // Arabic/Persian/Urdu
+    '،', '؛', '٬',
+    // Devanagari/Hindi
+    '॥', ',',
+    // Thai
+    '๚', '、'
+  ];
+  breakIndex = findLastDelimiter(text, phraseDelimiters);
+  if (breakIndex !== -1) return breakIndex;
+
+  // Look for word break (Unicode whitespace)
+  const whitespaceDelimiters = [
+    ' ',    // Space
+    '\t',   // Tab
+    '\u00A0', // No-Break Space
+    '\u1680', // Ogham Space Mark
+    '\u2000', // En Quad
+    '\u2001', // Em Quad
+    '\u2002', // En Space
+    '\u2003', // Em Space
+    '\u2004', // Three-Per-Em Space
+    '\u2005', // Four-Per-Em Space
+    '\u2006', // Six-Per-Em Space
+    '\u2007', // Figure Space
+    '\u2008', // Punctuation Space
+    '\u2009', // Thin Space
+    '\u200A', // Hair Space
+    '\u202F', // Narrow No-Break Space
+    '\u205F', // Medium Mathematical Space
+    '\u3000'  // Ideographic Space
+  ];
+  breakIndex = findLastDelimiter(text, whitespaceDelimiters);
+  if (breakIndex !== -1) return breakIndex;
+  
+  return text.length - 1;
+};
 
 const semanticTruncate = (text, maxLength) => {
   if (text.length <= maxLength) {

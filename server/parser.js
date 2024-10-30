@@ -1,4 +1,5 @@
 import logger from '../lib/logger.js';
+import { callPathway } from '../lib/pathwayTools.js';
 
 //simply trim and parse with given regex
 const regexParser = (text, regex) => {
@@ -12,26 +13,14 @@ const parseNumberedList = (str) => {
     return regexParser(str, /^\s*[\[\{\(]*\d+[\s.=\-:,;\]\)\}]/gm);
 }
 
-// parse a numbered object list text format into list of objects
-const parseNumberedObjectList = (text, format) => {
-    const fields = format.match(/\b(\w+)\b/g);
-    const values = parseNumberedList(text);
-
-    const result = [];
-    for (const value of values) {
-        try {
-            const splitted = regexParser(value, /[:-](.*)/);
-            const obj = {};
-            for (let i = 0; i < fields.length; i++) {
-                obj[fields[i]] = splitted[i];
-            }
-            result.push(obj);
-        } catch (e) {
-            logger.warn(`Failed to parse value in parseNumberedObjectList, value: ${value}, fields: ${fields}`);
-        }
+async function parseNumberedObjectList(text, format) {
+    const parsedList = await callPathway('sys_parse_numbered_object_list', { text, format });
+    try {
+        return JSON.parse(parsedList);
+    } catch (error) {
+        logger.warn(`Failed to parse numbered object list: ${error.message}`);
+        return [];
     }
-
-    return result;
 }
 
 // parse a comma-separated list text format into list
@@ -49,25 +38,18 @@ const isNumberedList = (data) => {
     return numberedListPattern.test(data.trim());
 }
 
-function parseJson(str) {
+async function parseJson(str) {
     try {
-      const start = Math.min(
-        str.indexOf('{') !== -1 ? str.indexOf('{') : Infinity,
-        str.indexOf('[') !== -1 ? str.indexOf('[') : Infinity
-      );
-
-      const end = Math.max(
-        str.lastIndexOf('}') !== -1 ? str.lastIndexOf('}') + 1 : 0,
-        str.lastIndexOf(']') !== -1 ? str.lastIndexOf(']') + 1 : 0
-      );
-  
-      const jsonStr = str.slice(start, end);
-      // eslint-disable-next-line no-unused-vars
-      const json = JSON.parse(jsonStr);
-      return jsonStr;
+        JSON.parse(str); // Validate JSON
+        return str;
     } catch (error) {
-      logger.warn(`Pathway requires JSON format result. Failed to parse JSON: ${error.message}`);
-      return null;
+        try {
+            const repairedJson = await callPathway('sys_repair_json', { text: str });
+            return JSON.parse(repairedJson) ? repairedJson : null;
+        } catch (repairError) {
+            logger.warn(`Failed to parse JSON: ${repairError.message}`);
+            return null;
+        }
     }
 }
 

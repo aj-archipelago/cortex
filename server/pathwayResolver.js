@@ -235,7 +235,7 @@ class PathwayResolver {
                 break;
             }
 
-            data = this.responseParser.parse(data);
+            data = await this.responseParser.parse(data);
             if (data !== null) {
                 break;
             }
