@@ -202,8 +202,20 @@ var config = convict({
                     "Content-Type": "application/json"
                 },
             },
+            "azure-video-translate": {
+                "type": "AZURE-VIDEO-TRANSLATE",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "supportsStreaming": true,
+            }
         },
         env: 'CORTEX_MODELS'
+    },
+    azureVideoTranslationApiUrl: {
+        format: String,
+        default: 'http://127.0.0.1:5005',
+        env: 'AZURE_VIDEO_TRANSLATION_API_URL'
     },
     openaiApiKey: {
         format: String,
