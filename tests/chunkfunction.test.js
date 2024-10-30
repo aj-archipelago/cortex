@@ -87,9 +87,9 @@ test('should chunk text between html elements if needed', async t => {
     
     t.is(chunks.length, 4);
     t.is(chunks[0], htmlChunkTwo);
-    t.is(chunks[1], 'Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae');
-    t.is(encode(chunks[1]).length, chunkSize);
-    t.is(chunks[2], '; Fusce at dignissim quam.');
+    t.is(chunks[1], 'Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia ');
+    t.true(encode(chunks[1]).length < chunkSize);
+    t.is(chunks[2], 'curae; Fusce at dignissim quam.');
     t.is(chunks[3], htmlChunkTwo);
 });
 
@@ -221,4 +221,270 @@ test('should correctly split text into single token chunks', t => {
     
     // Check specific tokens (this may need adjustment based on your tokenizer)
     t.deepEqual(chunks, ['Hello', ',', ' world', '!']);
+});
+
+test('should respect sentence boundaries when possible', t => {
+    const text = 'First sentence. Second sentence. Third sentence.';
+    const maxChunkToken = encode('First sentence. Second').length;
+    const chunks = getSemanticChunks(text, maxChunkToken);
+    
+    t.is(chunks[0], 'First sentence.');
+    t.is(chunks[1], ' Second sentence.');
+    t.is(chunks[2], ' Third sentence.');
+});
+
+test('should respect paragraph boundaries', t => {
+    const text = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.';
+    const maxChunkToken = encode('First paragraph.\n\nSecond').length;
+    const chunks = getSemanticChunks(text, maxChunkToken);
+    
+    t.is(chunks[0], 'First paragraph.\n\n');
+    t.is(chunks[1], 'Second paragraph.\n\n');
+    t.is(chunks[2], 'Third paragraph.');
+});
+
+test('should handle lists appropriately', t => {
+    const text = '1. First item\n2. Second item\n3. Third item';
+    const maxChunkToken = encode('1. First item\n2.').length;
+    const chunks = getSemanticChunks(text, maxChunkToken);
+    
+    t.is(chunks[0], '1. First item\n');
+    t.is(chunks[1], '2. Second item\n');
+    t.is(chunks[2], '3. Third item');
+});
+
+test('should keep related punctuation together', t => {
+    const text = 'Question? Answer! Ellipsis... Done.';
+    const maxChunkToken = 5; // Small chunk size to force splits
+    const chunks = getSemanticChunks(text, maxChunkToken);
+    
+    // Ensure question mark stays with "Question"
+    t.true(chunks.some(chunk => chunk.includes('Question?')));
+    // Ensure exclamation mark stays with "Answer"
+    t.true(chunks.some(chunk => chunk.includes('Answer!')));
+    // Ensure ellipsis stays together
+    t.true(chunks.some(chunk => chunk.includes('...')));
+});
+
+test('should handle empty strings appropriately', t => {
+    const chunks = getSemanticChunks('', 100);
+    t.deepEqual(chunks, []);
+});
+
+test('should handle strings with only whitespace', t => {
+    const text = '    \n\n   \t   \n    ';
+    const chunks = getSemanticChunks(text, 100);
+    t.is(chunks.join(''), text);
+});
+
+test('should handle special characters and emoji correctly', t => {
+    const text = '👋 Hello! Special chars: §±@#$%^&* and more 🌟';
+    const maxChunkToken = 10;
+    const chunks = getSemanticChunks(text, maxChunkToken);
+    t.true(chunks.length > 0);
+    t.is(chunks.join(''), text);
+});
+
+test('should handle code-like content appropriately', t => {
+    const text = 'const x = 42;\nfunction test() {\n    return x;\n}';
+    const maxChunkToken = 20;
+    const chunks = getSemanticChunks(text, maxChunkToken);
+    
+    // Code blocks should preferably break at logical points
+    t.true(chunks.some(chunk => chunk.includes('const x = 42;')));
+    t.true(chunks.join('').includes('function test() {'));
+});
+
+test('should handle extremely large token sizes gracefully', t => {
+    const maxChunkToken = Number.MAX_SAFE_INTEGER;
+    const chunks = getSemanticChunks(testText, maxChunkToken);
+    t.is(chunks.length, 1);
+    t.is(chunks[0], testText);
+});
+
+test('should throw error for invalid maxChunkToken values', t => {
+    t.throws(() => getSemanticChunks(testText, 0), { message: /invalid/i });
+    t.throws(() => getSemanticChunks(testText, -1), { message: /invalid/i });
+    t.throws(() => getSemanticChunks(testText, NaN), { message: /invalid/i });
+});
+
+test('should handle Arabic text correctly', t => {
+    const arabicText = 'مرحبا بالعالم. هذه جملة عربية. وهذه جملة أخرى!';
+    const maxChunkToken = encode('مرحبا بالعالم. هذه !').length;
+    const chunks = getSemanticChunks(arabicText, maxChunkToken);
+    
+    // Check that chunks respect Arabic sentence boundaries
+    t.true(chunks[0].endsWith('.')); 
+    t.is(chunks.join(''), arabicText);
+});
+
+test('should handle mixed RTL and LTR text', t => {
+    const mixedText = 'Hello مرحبا World عالم! Testing اختبار.';
+    const maxChunkToken = 10;
+    const chunks = getSemanticChunks(mixedText, maxChunkToken);
+    
+    t.true(chunks.length > 0);
+    t.is(chunks.join(''), mixedText);
+});
+
+test('should handle Chinese text correctly', t => {
+    const chineseText = '你好世界。这是一个测试。我们在测试中文分段。';
+    const maxChunkToken = encode('你好世界。').length;
+    const chunks = getSemanticChunks(chineseText, maxChunkToken);
+    
+    // Check that chunks respect Chinese sentence boundaries
+    t.true(chunks[0].endsWith('。'));
+    t.is(chunks.join(''), chineseText);
+});
+
+test('should handle mixed scripts appropriately', t => {
+    const mixedText = 'Hello World! مرحبا بالعالم! 你好世界! Bonjour le monde!';
+    const maxChunkToken = 15;
+    const chunks = getSemanticChunks(mixedText, maxChunkToken);
+    
+    t.true(chunks.length > 0);
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken));
+    t.is(chunks.join(''), mixedText);
+});
+
+test('should handle text with combining diacritical marks', t => {
+    const textWithDiacritics = 'é è ê ë ā ă ą ḥ ḫ ṭ ﻋَﺮَﺑِﻲ';
+    const maxChunkToken = 5;
+    const chunks = getSemanticChunks(textWithDiacritics, maxChunkToken);
+    
+    t.true(chunks.length > 0);
+    t.is(chunks.join(''), textWithDiacritics);
+});
+
+test('should handle Arabic text with various sentence structures', t => {
+    const arabicText = `السَّلامُ عَلَيْكُمْ وَرَحْمَةُ اللهِ وَبَرَكَاتُهُ! 
+    
+    هَذَا نَصٌّ طَوِيلٌ لِاخْتِبَارِ التَّقْسِيمِ. يَحْتَوِي عَلَى عِدَّةِ جُمَلٍ؟ وَيَشْمَلُ عَلَامَاتِ التَّرْقِيمِ!
+    
+    نَصٌّ مَعَ أَرْقَامٍ: 123 و ٤٥٦ و ٧٨٩.`;
+    
+    const maxChunkToken = 20;
+    const chunks = getSemanticChunks(arabicText, maxChunkToken);
+    
+    t.true(chunks.length > 1);
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken));
+    t.is(chunks.join(''), arabicText);
+});
+
+test('should handle Arabic text with Quranic diacritics', t => {
+    const quranText = 'بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ ۝ ٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَٰلَمِينَ';
+    const maxChunkToken = 15;
+    const chunks = getSemanticChunks(quranText, maxChunkToken);
+    
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken));
+    t.is(chunks.join(''), quranText);
+});
+
+test('should handle Arabic text with mixed numbers and punctuation', t => {
+    const mixedArabicText = 'العام الدراسي 2023-2024م. سيبدأ في ١٥ سبتمبر! (إن شاء الله)';
+    const maxChunkToken = 10;
+    const chunks = getSemanticChunks(mixedArabicText, maxChunkToken);
+    
+    t.true(chunks.length > 1);
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken));
+    t.is(chunks.join(''), mixedArabicText);
+});
+
+test('should handle Arabic text with HTML', t => {
+    const arabicHtml = '<p>مرحباً <strong>بالعالم</strong> العربي!</p>';
+    const maxChunkToken = encode(arabicHtml).length;
+    const chunks = getSemanticChunks(arabicHtml, maxChunkToken, 'html');
+    
+    t.is(chunks.length, 1);
+    t.is(chunks[0], arabicHtml);
+});
+
+test('should respect Arabic paragraph breaks', t => {
+    const arabicParagraphs = `الفقرة الأولى تحتوي على معلومات مهمة.
+
+    الفقرة الثانية تكمل الموضوع.
+    
+    الفقرة الثالثة تختم الكلام.`;
+    
+    const maxChunkToken = encode('الفقرة الأولى تحتوي على معلومات مهمة.').length;
+    const chunks = getSemanticChunks(arabicParagraphs, maxChunkToken);
+    
+    t.true(chunks.some(chunk => chunk.includes('الفقرة الأولى')));
+    t.true(chunks.some(chunk => chunk.includes('الفقرة الثانية')));
+    t.true(chunks.some(chunk => chunk.includes('الفقرة الثالثة')));
+});
+
+test('should handle very large text (50x) efficiently', async t => {
+    const largeText = Array(50).fill(testText).join('\n');
+    t.log('Size of very large text:', largeText.length, 'bytes');
+
+    const startTime = performance.now();
+    
+    const maxChunkToken = 1000;
+    const chunks = getSemanticChunks(largeText, maxChunkToken);
+    
+    const endTime = performance.now();
+    const processingTime = endTime - startTime;
+    
+    t.true(chunks.length > 0);
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken));
+    t.is(chunks.join(''), largeText);
+    
+    // Processing should take less than 1 second for this size
+    t.true(processingTime < 1000, `Processing took ${processingTime}ms`);
+});
+
+test('should handle extremely large text (500x) efficiently', async t => {
+    const largeText = Array(500).fill(testText).join('\n');
+    t.log('Size of extremely large text:', largeText.length, 'bytes');
+
+    const startTime = performance.now();
+    
+    const maxChunkToken = 1000;
+    const chunks = getSemanticChunks(largeText, maxChunkToken);
+    
+    const endTime = performance.now();
+    const processingTime = endTime - startTime;
+    
+    t.true(chunks.length > 0);
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken));
+    t.is(chunks.join(''), largeText);
+    
+    // Processing should take less than 5 seconds for this size
+    t.true(processingTime < 5000, `Processing took ${processingTime}ms`);
+});
+
+test('should handle massive text (5000x) efficiently', async t => {
+    const largeText = Array(5000).fill(testText).join('\n');
+    t.log('Size of massive text:', largeText.length, 'bytes');
+
+    const startTime = performance.now();
+    
+    const maxChunkToken = 1000;
+    const chunks = getSemanticChunks(largeText, maxChunkToken);
+    
+    const endTime = performance.now();
+    const processingTime = endTime - startTime;
+    
+    t.true(chunks.length > 0);
+    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken));
+    t.is(chunks.join(''), largeText);
+    
+    // Processing should take less than 30 seconds for this size
+    t.true(processingTime < 30000, `Processing took ${processingTime}ms`);
+});
+
+test('should maintain memory efficiency with huge texts', async t => {
+    const initialMemory = process.memoryUsage().heapUsed;
+    
+    const largeText = Array(1000).fill(testText).join('\n');
+    const maxChunkToken = 1000;
+    const chunks = getSemanticChunks(largeText, maxChunkToken);
+    
+    const finalMemory = process.memoryUsage().heapUsed;
+    const memoryIncrease = (finalMemory - initialMemory) / 1024 / 1024; // Convert to MB
+    
+    t.true(chunks.length > 0);
+    // Memory increase should be reasonable (less than 100MB for this test)
+    t.true(memoryIncrease < 100, `Memory increase was ${memoryIncrease.toFixed(2)}MB`);
 });

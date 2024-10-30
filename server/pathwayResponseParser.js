@@ -5,7 +5,7 @@ class PathwayResponseParser {
         this.pathway = pathway;
     }
 
-    parse(data) {
+    async parse(data) {
         if (this.pathway.parser) {
             return this.pathway.parser(data);
         }
@@ -23,7 +23,7 @@ class PathwayResponseParser {
         }
 
         if (this.pathway.json) {
-            return parseJson(data);
+            return await parseJson(data);
         }
 
         return data;

@@ -65,6 +65,7 @@ import sys_openai_chat_gpt4 from './sys_openai_chat_gpt4.js';
 import sys_openai_chat_gpt4_32 from './sys_openai_chat_gpt4_32.js';
 import sys_openai_chat_gpt4_turbo from './sys_openai_chat_gpt4_turbo.js';
 import sys_openai_completion from './sys_openai_completion.js';
+import sys_repair_json from './sys_repair_json.js';
 import tags from './tags.js';
 import taxonomy from './taxonomy.js';
 import timeline from './timeline.js';
@@ -133,7 +134,9 @@ export {
     sys_google_code_chat,
     sys_google_gemini_chat, sys_openai_chat, sys_openai_chat_16, sys_openai_chat_gpt4, sys_openai_chat_gpt4_32,
     sys_openai_completion,
-    sys_openai_chat_gpt4_turbo, tags,
+    sys_openai_chat_gpt4_turbo,
+    sys_repair_json,
+    tags,
     taxonomy,
     timeline, topics, topics_sentiment, transcribe,
     transcribe_neuralspace,

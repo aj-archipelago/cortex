@@ -1,4 +1,5 @@
 import logger from '../lib/logger.js';
+import { callPathway } from '../lib/pathwayTools.js';
 
 //simply trim and parse with given regex
 const regexParser = (text, regex) => {
@@ -16,22 +17,46 @@ const parseNumberedList = (str) => {
 const parseNumberedObjectList = (text, format) => {
     const fields = format.match(/\b(\w+)\b/g);
     const values = parseNumberedList(text);
+    const fieldMap = new Map(fields.map(f => [f.toLowerCase(), f]));
 
-    const result = [];
-    for (const value of values) {
-        try {
-            const splitted = regexParser(value, /[:-](.*)/);
-            const obj = {};
-            for (let i = 0; i < fields.length; i++) {
-                obj[fields[i]] = splitted[i];
+    return values.map(value => {
+        const obj = {};
+        const pairs = value.split(/,\s*/);
+        for (let i = 0; i < pairs.length; i++) {
+            const pair = pairs[i];
+
+            // either there are actual fieldnames (separated by :) in which case we split by :
+            // and do a hard match against the fieldMap, or there are soft or no fieldnames (separated by - or no separator)
+            // in which case we try match but then infer the field name from the field order
+            let splitIndex = pair.indexOf(':');
+            if (splitIndex !== -1) {
+                const key = pair.slice(0, splitIndex).trim().toLowerCase();
+                const val = pair.slice(splitIndex + 1).trim();
+                const field = fieldMap.get(key);
+                if (field) {
+                    obj[field] = val;
+                }
+                continue;
             }
-            result.push(obj);
-        } catch (e) {
-            logger.warn(`Failed to parse value in parseNumberedObjectList, value: ${value}, fields: ${fields}`);
-        }
-    }
 
-    return result;
+            splitIndex = pair.indexOf('-');
+            if (splitIndex !== -1) {
+                const key = pair.slice(0, splitIndex).trim().toLowerCase();
+                const val = pair.slice(splitIndex + 1).trim();
+                const field = fieldMap.get(key);
+                if (field) {
+                    obj[field] = val;
+                    continue;
+                }
+            }
+
+            const inferredField = fields[i];
+            if (inferredField) {
+                obj[inferredField] = pair.trim();
+            }
+        }
+        return Object.keys(obj).length > 0 ? obj : null;
+    }).filter(Boolean);
 }
 
 // parse a comma-separated list text format into list
@@ -49,25 +74,21 @@ const isNumberedList = (data) => {
     return numberedListPattern.test(data.trim());
 }
 
-function parseJson(str) {
+async function parseJson(str) {
     try {
-      const start = Math.min(
-        str.indexOf('{') !== -1 ? str.indexOf('{') : Infinity,
-        str.indexOf('[') !== -1 ? str.indexOf('[') : Infinity
-      );
-
-      const end = Math.max(
-        str.lastIndexOf('}') !== -1 ? str.lastIndexOf('}') + 1 : 0,
-        str.lastIndexOf(']') !== -1 ? str.lastIndexOf(']') + 1 : 0
-      );
-  
-      const jsonStr = str.slice(start, end);
-      // eslint-disable-next-line no-unused-vars
-      const json = JSON.parse(jsonStr);
-      return jsonStr;
+        const jsonStart = str.indexOf('{') !== -1 ? str.indexOf('{') : str.indexOf('[');
+        const jsonEnd = str.lastIndexOf('}') !== -1 ? str.lastIndexOf('}') + 1 : str.lastIndexOf(']') + 1;
+        const jsonStr = str.slice(jsonStart, jsonEnd);
+        JSON.parse(jsonStr); // Validate JSON
+        return jsonStr;
     } catch (error) {
-      logger.warn(`Pathway requires JSON format result. Failed to parse JSON: ${error.message}`);
-      return null;
+        try {
+            const repairedJson = await callPathway('sys_repair_json', { text: str });
+            return JSON.parse(repairedJson) ? repairedJson : null;
+        } catch (repairError) {
+            logger.warn(`Failed to parse JSON: ${repairError.message}`);
+            return null;
+        }
     }
 }
 
