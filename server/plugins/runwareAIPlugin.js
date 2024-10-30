@@ -57,7 +57,7 @@ class RunwareAiPlugin extends ModelPlugin {
     return this.executeRequest(cortexRequest);
   }
 
-  // Parse the response from the Azure Translate API
+  // Parse the response from the Runware API
   parseResponse(data) {
     if (data.data) {
       return JSON.stringify(data.data);
