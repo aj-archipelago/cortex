@@ -16,7 +16,6 @@ import edit from './edit.js';
 import embeddings from './embeddings.js';
 import entities from './entities.js';
 import expand_story from './expand_story.js';
-import flux_image from './flux_image.js';
 import format_paragraph_turbo from './format_paragraph_turbo.js';
 import gemini_15_vision from './gemini_15_vision.js';
 import gemini_vision from './gemini_vision.js';
@@ -26,6 +25,8 @@ import headline from './headline.js';
 import headline_custom from './headline_custom.js';
 import highlights from './highlights.js';
 import image from './image.js';
+import image_flux from './image_flux.js';
+import image_recraft from './image_recraft.js';
 import jira_story from './jira_story.js';
 import keywords from './keywords.js';
 import language from './language.js';
@@ -100,13 +101,14 @@ export {
     embeddings,
     entities,
     expand_story,
-    flux_image,
     format_paragraph_turbo,
     gemini_15_vision,
     gemini_vision,
     grammar,
     hashtags, headline, headline_custom, highlights,
     image,
+    image_flux,
+    image_recraft,
     jira_story,
     keywords,
     language,
