@@ -1,8 +1,9 @@
 export default {
   prompt: ["{{text}}"],
-  model: "runware-flux-schnell",
+
   enableDuplicateRequests: false,
   inputParameters: {
+    model: "runware-flux-schnell",
     negativePrompt: "",
     width: 512,
     height: 512,

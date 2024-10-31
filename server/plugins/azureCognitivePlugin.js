@@ -123,7 +123,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             data.filter = `owner eq '${savedContextId}'`;
 
             if(chatId){
-                data.filter += ` and chatId eq '${chatId}'`;
+                data.filter += ` and (chatId eq '${chatId}' or docId eq '${savedContextId}-indexmainpane')`;
             }
         }
 
