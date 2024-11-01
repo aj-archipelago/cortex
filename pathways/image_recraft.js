@@ -4,7 +4,7 @@ export default {
   enableDuplicateRequests: false,
   inputParameters: {
     model: "replicate-recraft-v3",
-    size: "512x512",
+    size: "1024x1024",
     style: "realistic_image",
   },
 };
