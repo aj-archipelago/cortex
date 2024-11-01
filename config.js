@@ -244,6 +244,15 @@ var config = convict({
                     "Content-Type": "application/json"
                 },
             },
+            "replicate-recraft-v3": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/recraft-ai/recraft-v3/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
             "azure-video-translate": {
                 "type": "AZURE-VIDEO-TRANSLATE",
                 "headers": {

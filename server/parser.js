@@ -40,7 +40,12 @@ const isNumberedList = (data) => {
 
 async function parseJson(str) {
     try {
-        JSON.parse(str); // Validate JSON
+        // check for the common error case that the JSON is surrounded by markdown
+        const match = str.match(/```\s*(?:json)?(.*?)```/s);
+        if (match) {
+            str = match[1].trim();
+        }
+        JSON.parse(str);
         return str;
     } catch (error) {
         try {

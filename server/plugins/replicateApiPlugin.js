@@ -18,15 +18,19 @@ class ReplicateApiPlugin extends ModelPlugin {
 
     const requestParameters = {
       input: {
-        aspect_ratio: "1:1",
-        output_format: "webp",
-        output_quality: 80,
+        aspect_ratio: combinedParameters.aspectRatio || "1:1",
+        output_format: combinedParameters.outputFormat || "webp",
+        output_quality: combinedParameters.outputQuality || 80,
         prompt: modelPromptText,
-        //prompt_upsampling: false,
-        //safety_tolerance: 5,
+        prompt_upsampling: combinedParameters.promptUpsampling || false,
+        safety_tolerance: combinedParameters.safety_tolerance || 3,
         go_fast: true,
         megapixels: "1",
         num_outputs: combinedParameters.numberResults,
+        width: combinedParameters.width,
+        height: combinedParameters.height,
+        size: combinedParameters.size || "1024x1024",
+        style: combinedParameters.style || "realistic_image",
       },
     };
 
