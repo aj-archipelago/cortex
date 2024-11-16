@@ -1,7 +1,7 @@
-// sys_openai_chat.js
-// override handler for gpt-3.5-turbo
+// sys_openai_chat_gpt4_32.js
+// override handler for gpt-4-32
 
-import { Prompt } from '../server/prompt.js';
+import { Prompt } from '../../../server/prompt.js';
 
 export default {
     prompt:
@@ -13,7 +13,7 @@ export default {
     inputParameters: {
         messages: [],
     },
-    model: 'oai-gpturbo',
+    model: 'oai-gpt4-32',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-3.5-turbo',
+    emulateOpenAIChatModel: 'gpt-4-32k',
 }

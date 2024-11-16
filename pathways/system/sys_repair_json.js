@@ -1,4 +1,4 @@
-import { Prompt } from '../server/prompt.js';
+import { Prompt } from '../../server/prompt.js';
 
 export default {
     prompt: [

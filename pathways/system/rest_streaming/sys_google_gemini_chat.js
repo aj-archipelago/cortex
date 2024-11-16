@@ -1,7 +1,7 @@
 // sys_google_gemini_chat.js
 // override handler for gemini-chat
 
-import { Prompt } from '../server/prompt.js';
+import { Prompt } from '../../../server/prompt.js';
 
 export default {
     prompt:

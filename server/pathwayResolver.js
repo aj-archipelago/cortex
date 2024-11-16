@@ -221,15 +221,59 @@ class PathwayResolver {
         // Get saved context from contextId or change contextId if needed
         const { contextId } = args;
         this.savedContextId = contextId ? contextId : uuidv4();
-        this.savedContext = contextId ? (getv && (await getv(contextId)) || {}) : {};
+        
+        const loadMemory = async () => {
+            // Load initial values
+            this.savedContext = (getv && await getv(contextId)) || {};
+            this.memorySelf = (getv && await getv(`${contextId}-memorySelf`)) || "";
+            this.memoryDirectives = (getv && await getv(`${contextId}-memoryDirectives`)) || "";
+            this.memoryTopics = (getv && await getv(`${contextId}-memoryTopics`)) || "";
+            this.memoryUser = (getv && await getv(`${contextId}-memoryUser`)) || "";
 
-        // Save the context before processing the request
-        const savedContextStr = JSON.stringify(this.savedContext);
+            // Store initial state for comparison
+            this.initialState = {
+                savedContext: this.savedContext,
+                memorySelf: this.memorySelf,
+                memoryDirectives: this.memoryDirectives,
+                memoryTopics: this.memoryTopics,
+                memoryUser: this.memoryUser
+            };
+        };
+
+        const saveChangedMemory = async () => {
+            this.savedContextId = this.savedContextId || uuidv4();
+            
+            const currentState = {
+                savedContext: this.savedContext,
+                memorySelf: this.memorySelf,
+                memoryDirectives: this.memoryDirectives,
+                memoryTopics: this.memoryTopics,
+                memoryUser: this.memoryUser
+            };
+
+            if (currentState.savedContext !== this.initialState.savedContext) {
+                setv && await setv(this.savedContextId, this.savedContext);
+            }
+            if (currentState.memorySelf !== this.initialState.memorySelf) {
+                setv && await setv(`${this.savedContextId}-memorySelf`, this.memorySelf);
+            }
+            if (currentState.memoryDirectives !== this.initialState.memoryDirectives) {
+                setv && await setv(`${this.savedContextId}-memoryDirectives`, this.memoryDirectives);
+            }
+            if (currentState.memoryTopics !== this.initialState.memoryTopics) {
+                setv && await setv(`${this.savedContextId}-memoryTopics`, this.memoryTopics);
+            }
+            if (currentState.memoryUser !== this.initialState.memoryUser) {
+                setv && await setv(`${this.savedContextId}-memoryUser`, this.memoryUser);
+            }
+        };
 
         const MAX_RETRIES = 3;
         let data = null;
         
         for (let retries = 0; retries < MAX_RETRIES; retries++) {
+            await loadMemory(); // Reset memory state on each retry
+            
             data = await this.processRequest(args);
             if (!data) {
                 break;
@@ -241,13 +285,10 @@ class PathwayResolver {
             }
 
             logger.warn(`Bad pathway result - retrying pathway. Attempt ${retries + 1} of ${MAX_RETRIES}`);
-            this.savedContext = JSON.parse(savedContextStr);
         }
 
-        // Update saved context if it has changed, generating a new contextId if necessary
-        if (savedContextStr !== JSON.stringify(this.savedContext)) {
-            this.savedContextId = this.savedContextId || uuidv4();
-            setv && setv(this.savedContextId, this.savedContext);
+        if (data !== null) {
+            await saveChangedMemory();
         }
 
         return data;
@@ -419,7 +460,14 @@ class PathwayResolver {
 
         // If this text is empty, skip applying the prompt as it will likely be a nonsensical result
         if (!/^\s*$/.test(text) || parameters?.file || parameters?.inputVector || this?.modelName.includes('cognitive')) {
-            result = await this.modelExecutor.execute(text, { ...parameters, ...this.savedContext }, prompt, this);
+            result = await this.modelExecutor.execute(text, { 
+                ...parameters, 
+                ...this.savedContext,
+                memorySelf: this.memorySelf,
+                memoryDirectives: this.memoryDirectives,
+                memoryTopics: this.memoryTopics,
+                memoryUser: this.memoryUser 
+            }, prompt, this);
         } else {
             result = text;
         }
@@ -439,6 +487,10 @@ class PathwayResolver {
 
         // save the result to the context if requested and no errors
         if (prompt.saveResultTo && this.errors.length === 0) {
+            // Update memory property if it matches a known type
+            if (["memorySelf", "memoryUser", "memoryDirectives", "memoryTopics"].includes(prompt.saveResultTo)) {
+                this[prompt.saveResultTo] = result;
+            }
             this.savedContext[prompt.saveResultTo] = result;
         }
         return result;

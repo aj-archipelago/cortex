@@ -58,7 +58,7 @@ export default {
             
             // execute the router and default response in parallel
             const [helper, JarvisResponse] = await Promise.all([
-                callPathway('rag_search_helper', { ...args, contextInfo, chatHistory: chatHistory.filter(message => message.role === "user").slice(-1) }),
+                callPathway('sys_search_helper', { ...args, contextInfo, chatHistory: chatHistory.filter(message => message.role === "user").slice(-1) }),
                 callPathway('chat_jarvis', { ...args })
             ]);
 
