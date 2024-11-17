@@ -301,7 +301,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
   shortenContent(content, maxWords = 40) {
     const words = content.split(" ");
-    if (words.length <= maxWords) {
+    if (words.length <= maxWords || logger.level === 'debug') {
       return content;
     }
     return words.slice(0, maxWords / 2).join(" ") +

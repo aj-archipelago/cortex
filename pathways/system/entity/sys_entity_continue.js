@@ -8,7 +8,7 @@ export default {
     enableDuplicateRequests: false,
     inputParameters: {
         privateData: false,
-        useMemory: false,    
+        useMemory: true,    
         chatHistory: [{role: '', content: []}],
         aiName: "Jarvis",
         contextId: ``,

@@ -192,14 +192,12 @@ export default {
                             //return JSON.stringify({response: expertResponse, search: false });
                         }
                         break;
-                    case "search":
+                    default:
                         if (searchRequired) {
                             toolCallbackName = 'sys_generator_results';
                             toolCallbackId = null;
                             toolCallbackMessage = toolMessage;
                         }
-                        break;
-                    default:
                         break;
                 }
             }
