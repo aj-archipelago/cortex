@@ -183,9 +183,17 @@ export default {
                         break;
                     case "code":
                     case "write":
-                    case "reason":
                         if (toolRequired) {
                             toolCallbackName = 'sys_generator_expert';
+                            toolCallbackMessage = toolMessage;
+                            //const expertResponse = await callPathway('sys_generator_expert', { ...args, chatHistory: multiModalChatHistory }, pathwayResolver);
+                            //pathwayResolver.tool = JSON.stringify({ search: false, title });
+                            //return JSON.stringify({response: expertResponse, search: false });
+                        }
+                        break;
+                    case "reason":
+                        if (toolRequired) {
+                            toolCallbackName = 'sys_generator_reasoning';
                             toolCallbackMessage = toolMessage;
                             //const expertResponse = await callPathway('sys_generator_expert', { ...args, chatHistory: multiModalChatHistory }, pathwayResolver);
                             //pathwayResolver.tool = JSON.stringify({ search: false, title });
