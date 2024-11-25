@@ -117,8 +117,16 @@ class AzureCognitivePlugin extends ModelPlugin {
             data.search = modelPromptText;
             data.top = parameters.top || 50;
             data.skip = 0;
-            if (parameters.titleOnly && indexName !== 'indexcortex') {
-                data.select = 'title,id,url';
+            if (parameters.titleOnly) {
+                switch(indexName){
+                    case 'indexcortex':
+                    case 'indexwires':
+                        data.select = 'title,id';
+                        break;
+                    default:
+                        data.select = 'title,id,url';
+                        break;
+                }
             }
         }
 

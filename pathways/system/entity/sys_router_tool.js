@@ -21,7 +21,7 @@ Available tools and their specific use cases:
 
 2. Document: Access user's personal document index. Use for user-specific uploaded information. If user refers vaguely to "this document/file/article" without context, search the personal index.
 
-3. Write: Engage for any task related to composing, editing, or refining written content. This includes articles, essays, scripts, or any form of textual creation or modification.
+3. Write: Engage for any task related to composing, editing, or refining written content. This includes articles, essays, scripts, or any form of textual creation or modification. If you need to search for information or look at a document first, use the Search or Document tools. This tool is just to create or modify content.
 
 4. Image: Use when asked to create, generate, or manipulate visual content. This covers photographs, illustrations, diagrams, or any other type of image. Always use this tool for image requests unless explicitly directed to use CodeExecution.
 

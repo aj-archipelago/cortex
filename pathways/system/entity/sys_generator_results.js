@@ -56,7 +56,7 @@ Here are the search strings used to find the information sources:
 Here are the information sources that were found:
 <INFORMATION_SOURCES>\n{{{sources}}}\n</INFORMATION_SOURCES>\n`,
                 },
-                {"role": "user", "content": "Use your extensive knowledge and the information sources to provide a detailed, accurate, truthful response to the user's request citing the sources where relevant. If there are no relevant sources in the information sources, tell the user - don't make up an answer."},
+                {"role": "user", "content": "Use your extensive knowledge and the information sources to provide a detailed, accurate, truthful response to the user's request citing the sources where relevant. If the user is being vague (\"this\", \"this article\", \"this document\", etc.), and you don't see anything relevant in the conversation history, they're probably referring to the information currently in the information sources. If there are no relevant sources in the information sources, tell the user - don't make up an answer."},
             ]}),
         ];
 
@@ -124,27 +124,29 @@ Here are the information sources that were found:
                 };
             }
             
-            // Execute the index searches in parallel
+            // Execute the index searches in parallel respecting the dataSources parameter
             const promises = [];
+            const dataSources = args.dataSources || pathwayResolver.pathway.inputParameters.dataSources;
+            const allowAllSources = !dataSources.length || (dataSources.length === 1 && dataSources[0] === "");
 
-            if(searchPersonal){ 
+            if(searchPersonal && (allowAllSources || dataSources.includes('mydata'))){ 
                 promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchPersonal), indexName: 'indexcortex' }));
             }
 
-            if(searchAJA){
+            if(searchAJA && (allowAllSources || dataSources.includes('aja'))){
                 promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJA), indexName: 'indexucmsaja' }));
             }
 
-            if(searchAJE){
+            if(searchAJE && (allowAllSources || dataSources.includes('aje'))){
                 promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJE), indexName: 'indexucmsaje' }));
             }
 
-            if(searchWires){
+            if(searchWires && (allowAllSources || dataSources.includes('wires'))){
                 promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchWires), indexName: 'indexwires' }));
             }
 
             const bingAvailable = !!config.getEnv()["AZURE_BING_KEY"];
-            if(bingAvailable && searchBing){
+            if(bingAvailable && searchBing && (allowAllSources || dataSources.includes('bing'))){
                 const handleRejection = (promise) => {
                     return promise.catch((error) => {
                         logger.error(`Error occurred searching Bing: ${error}`);
@@ -295,8 +297,8 @@ Here are the information sources that were found:
 
             return result;
         } catch (e) {
-            pathwayResolver.logError(e);
-            return await callPathway('sys_generator_error', { ...args, text: e.message });
+            //pathwayResolver.logError(e);
+            return await callPathway('sys_generator_error', { ...args, text: JSON.stringify(e) });
         }
     }
 };

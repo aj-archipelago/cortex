@@ -32,16 +32,22 @@ export default {
         }
         try {
             // Get the generator pathway name from args or use default
-            const generatorPathway = args.generatorPathway || 'sys_generator_results';
+            let generatorPathway = args.generatorPathway || 'sys_generator_results';
+
+            const newArgs = {
+                ...args,
+                chatHistory: args.chatHistory.slice(-6),
+                stream: false
+            };
+
+            if (generatorPathway === 'sys_generator_document') {
+                generatorPathway = 'sys_generator_results';
+                newArgs.dataSources = ["mydata"];
+            }
             
             logger.debug(`Using generator pathway: ${generatorPathway}`);
-
-            // Shorten chat history for speed
-            const shortChatHistory = args.chatHistory.slice(-6);
-            // Call the specified generator pathway with all original args and resolver
-            const result = await callPathway(generatorPathway, { ...args, chatHistory: shortChatHistory, stream: false }, resolver);
             
-            return result;
+            return await callPathway(generatorPathway, newArgs, resolver);
 
         } catch (e) {
             resolver.logError(e.message ?? e);

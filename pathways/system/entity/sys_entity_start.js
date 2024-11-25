@@ -168,8 +168,12 @@ export default {
                         toolCallbackMessage = toolMessage;
                         break;
                     case "search":
-                    case "document":
                         toolCallbackName = 'sys_generator_results';
+                        toolCallbackId = null;
+                        toolCallbackMessage = toolMessage;
+                        break;
+                    case "document":
+                        toolCallbackName = 'sys_generator_document';
                         toolCallbackId = null;
                         toolCallbackMessage = toolMessage;
                         break;
@@ -188,7 +192,7 @@ export default {
 
             if (toolCallbackMessage) {
                 pathwayResolver.tool = JSON.stringify({ 
-                    hideFromModel: true, 
+                    hideFromModel: toolCallbackName ? true : false, 
                     toolCallbackName, 
                     title,
                     search: toolCallbackName === 'sys_generator_results' ? true : false,

@@ -22,6 +22,8 @@ Assess whether your response requires looking up additional information, context
 
 Assess whether you need to search one or more indexes for data. If you're going to search an index, you can provide an appropriate search string or wildcard (e.g. "*") in the corresponding field for the index: "searchAJE", "searchAJA", "searchWires", and "searchPersonal" respectively. Longer search strings will get you more relevant and specific results, but shorter ones or wildcards will get you a broader result set. Wildcards are especially useful in finding all results over a time period or finding vague information (e.g. "the news", "the latest").
 
+When the user infers or explicitly asks for a specific index (e.g. "the wires"), use only that index.
+
 When the user is referencing something specific, (e.g. "this", "this document", "this file", "my uploads","this article", etc.) and you don't see the document contents in the conversation history, use a wildcard search on the personal index with no date filter to see if there is anything relevant. In this case, don't search any other indexes.
 
 Keep in mind the language of the index and the user's request and translate search keywords appropriately, e.g. if you're searching the "aja" index the search terms, if any, should be in Arabic to provide the best matches.
