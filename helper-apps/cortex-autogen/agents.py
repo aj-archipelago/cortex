@@ -14,6 +14,18 @@ import autogen.coding
 from data_operations import check_for_human_input
 from agents_extra import process_helper_results
 from config import prompts
+import queue
+import threading
+
+shared_queues = {}
+def background_human_input_check(request_id):
+    while True:
+        human_input = check_for_human_input(request_id)
+        if human_input:
+            shared_queues[request_id].put(human_input)
+            if human_input in ["TERMINATE", "PAUSE"]:
+                break
+        time.sleep(1)
 
 
 def find_code_message(all_messages):
@@ -167,8 +179,9 @@ def logged_send(sender, original_send, message, recipient, request_reply=None, s
         logging.warning("No chat_publish_progress function provided!")
         logging.log(logging.INFO, message)
     
-    if False and sender.name == "user_proxy": #TODO
-        human_input = check_for_human_input(request_id)
+
+    if request_id in shared_queues and not shared_queues[request_id].empty():
+        human_input = shared_queues[request_id].get()
         if human_input:
             if human_input == "TERMINATE":
                 logging.info("Terminating conversation")
@@ -192,12 +205,18 @@ def logged_send(sender, original_send, message, recipient, request_reply=None, s
     return original_send(message, recipient, request_reply, silent)
 
 
-def process_message(original_request_message_data, original_request_message_data_obj):
+def process_message(original_request_message_data, original_request_message_data_obj):    
     try:
         all_messages = []
         started_at = datetime.now()
         request_id = original_request_message_data.get('requestId') or original_request_message_data.id
         original_request_message = original_request_message_data['message']
+
+        shared_queues[request_id] = queue.Queue()
+        thread = threading.Thread(target=background_human_input_check, args=(request_id,))
+        thread.daemon = True
+        thread.start()
+
         final_msg = process_message_safe(original_request_message_data, original_request_message_data_obj, original_request_message,  all_messages, request_id, started_at)
 
         finalData = {
