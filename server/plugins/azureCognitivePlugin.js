@@ -55,7 +55,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             { search: searchQuery,  
                 "searchMode": "all",
                 "queryType": "full",
-                select: 'id', top: TOP 
+                select: 'id', top: TOP, skip: 0
             };
 
             const docsToDelete = JSON.parse(await this.executeRequest(cortexRequest));
@@ -115,6 +115,11 @@ class AzureCognitivePlugin extends ModelPlugin {
             ];
         } else {
             data.search = modelPromptText;
+            data.top = parameters.top || 50;
+            data.skip = 0;
+            if (parameters.titleOnly && indexName !== 'indexcortex') {
+                data.select = 'title,id,url';
+            }
         }
 
         filter && (data.filter = filter);

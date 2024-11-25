@@ -36,8 +36,10 @@ export default {
             
             logger.debug(`Using generator pathway: ${generatorPathway}`);
 
+            // Shorten chat history for speed
+            const shortChatHistory = args.chatHistory.slice(-6);
             // Call the specified generator pathway with all original args and resolver
-            const result = await callPathway(generatorPathway, { ...args, stream: false }, resolver);
+            const result = await callPathway(generatorPathway, { ...args, chatHistory: shortChatHistory, stream: false }, resolver);
             
             return result;
 

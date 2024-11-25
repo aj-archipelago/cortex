@@ -4,7 +4,7 @@ export default {
     prompt:
         [
             new Prompt({ messages: [
-                {"role": "system", "content": `{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}`},
+                {"role": "system", "content": `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_DIRECTIVES}}`},
                 "{{chatHistory}}",
             ]}),
         ],
@@ -18,4 +18,9 @@ export default {
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,
+    executePathway: async ({args, runAllPrompts, resolver}) => {
+        const result = await runAllPrompts({ ...args });
+        resolver.tool = JSON.stringify({ toolUsed: "writing" });
+        return result;
+    }
 }

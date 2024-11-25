@@ -222,7 +222,7 @@ var config = convict({
                 "type": "REPLICATE-API",
                 "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions",
                 "headers": {
-                    "Prefer": "wait",
+                    "Prefer": "wait=60",
                     "Authorization": "Token {{REPLICATE_API_KEY}}",
                     "Content-Type": "application/json"
                 },
@@ -231,7 +231,7 @@ var config = convict({
                 "type": "REPLICATE-API",
                 "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
                 "headers": {
-                    "Prefer": "wait",
+                    "Prefer": "wait=10",
                     "Authorization": "Token {{REPLICATE_API_KEY}}",
                     "Content-Type": "application/json"
                 },

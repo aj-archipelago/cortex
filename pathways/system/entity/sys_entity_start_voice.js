@@ -74,7 +74,7 @@ export default {
             // Execute the router options in parallel
             let promises = {
                 searchRequiredResponse: callPathway('sys_router_search', { ...args, chatHistory: miniChatHistory, contextInfo, stream: false }),
-                toolRequiredResponse: callPathway('sys_router_expert', { ...args, chatHistory: miniChatHistory, contextInfo, stream: false }),
+                toolRequiredResponse: callPathway('sys_router_tool', { ...args, chatHistory: miniChatHistory, contextInfo, stream: false }),
             };
 
             const results = await Promise.all(Object.values(promises));

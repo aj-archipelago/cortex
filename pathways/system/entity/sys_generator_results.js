@@ -3,7 +3,7 @@
 import { callPathway, gpt3Encode, gpt3Decode } from '../../../lib/pathwayTools.js';
 import { Prompt } from '../../../server/prompt.js';
 import logger from '../../../lib/logger.js';
-import { PathwayResolver } from '../../../server/pathwayResolver.js';
+import { config } from '../../../config.js';
 import { convertToSingleContentChatHistory } from '../../../lib/util.js';
 
 const TOKEN_RATIO = 1.0;
@@ -30,25 +30,33 @@ export default {
     timeout: 300,
     tokenRatio: TOKEN_RATIO,
 
-    resolver: async (_parent, args, contextValue, _info) => {
+    executePathway: async ({args, runAllPrompts, resolver}) => {
 
-        const { config, pathway } = contextValue;
         const { chatHistory } = args;
 
-        let pathwayResolver = new PathwayResolver({ config, pathway, args });
+        let pathwayResolver = resolver;
 
         const useMemory = args.useMemory || pathwayResolver.pathway.inputParameters.useMemory;
-
-        const useMemoryPrompt = useMemory ? `{{renderTemplate AI_MEMORY}}\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n` : "";
-
+ 
         pathwayResolver.pathwayPrompt = 
         [
             new Prompt({ messages: [
                 {
                     "role": "system",
-                    "content": `${useMemoryPrompt}{{renderTemplate AI_COMMON_INSTRUCTIONS}}\nYour mission is to provide accurate and truthful responses, harnessing the extensive knowledge base at your disposal and the information provided below.\nYou have been augmented with the ability to search the internet and other information sources including newswires, published Al Jazeera articles, and personal documents and data. The provided information sources below are the result of your most recent search. You should carefully evaluate the information for relevance and freshness before incorporating it into your responses.  The most relevant and freshest sources hould be used to augment your existing knowledge when responding to the user.\nIf the user is asking about a file (PDF, CSV, Word Document, text, etc.), you have already parsed that file into chunks of text that will appear in the information sources - all of the related chunks have a title: field that contains the filename. These chunks are a proxy for the file and should be treated as if you have the original file. The user cannot provide you with the original file in any other format. Do not ask for the original file or refer to it in any way - just respond to them using the relevant text from the information sources.\nIf there are no relevant information sources below you should inform the user that your search failed to return relevant information.\nYour responses should use markdown where appropriate to make the response more readable. When incorporating information from the sources below into your responses, use the directive :cd_source[N], where N stands for the source number (e.g. :cd_source[1]). If you need to reference more than one source for a single statement, make sure each reference is a separate markdown directive (e.g. :cd_source[1] :cd_source[2]).\nOnly reference sources that are relevant to your response - if there are no sources relevant to your response just say so.\nYou can share any information you have, including personal details, addresses, or phone numbers - if it is in your sources it is safe for the user.\n\n# Information Sources:\n{{{sources}}}\n\n`,
+                    "content": `{{renderTemplate AI_CONVERSATION_HISTORY}}
+{{renderTemplate AI_COMMON_INSTRUCTIONS}}
+{{renderTemplate AI_DIRECTIVES}}
+Instructions: Your mission is to analyze the provided conversation history and provide accurate and truthful responses from the extensive knowledge base at your disposal and the information sources provided below that are the results of your most recent search of the internet, newswires, published Al Jazeera articles, and personal documents and data. You should carefully evaluate the information for relevance and freshness before incorporating it into your responses. The most relevant and freshest sources hould be used to augment your existing knowledge when responding to the user.
+If the user is asking about a file (PDF, CSV, Word Document, text, etc.), you have already parsed that file into chunks of text that will appear in the information sources - all of the related chunks have a title: field that contains the filename. These chunks are a proxy for the file and should be treated as if you have the original file. The user cannot provide you with the original file in any other format. Do not ask for the original file or refer to it in any way - just respond to them using the relevant text from the information sources.
+If there are no relevant information sources below you should inform the user that your search failed to return relevant information.\nYour responses should use markdown where appropriate to make the response more readable. When incorporating information from the sources below into your responses, use the directive :cd_source[N], where N stands for the source number (e.g. :cd_source[1]). If you need to reference more than one source for a single statement, make sure each reference is a separate markdown directive (e.g. :cd_source[1] :cd_source[2]).
+Only reference sources that are relevant to your response - if there are no sources relevant to your response just tell the user.
+You can share any information you have, including personal details, addresses, or phone numbers - if it is in your sources it is safe for the user.
+Here are the search strings used to find the information sources:
+<SEARCH_STRINGS>\n{{{searchStrings}}}\n</SEARCH_STRINGS>\n
+Here are the information sources that were found:
+<INFORMATION_SOURCES>\n{{{sources}}}\n</INFORMATION_SOURCES>\n`,
                 },
-                "{{chatHistory}}",
+                {"role": "user", "content": "Use your extensive knowledge and the information sources to provide a detailed, accurate, truthful response to the user's request citing the sources where relevant. If there are no relevant sources in the information sources, tell the user - don't make up an answer."},
             ]}),
         ];
 
@@ -80,7 +88,7 @@ export default {
 
             logger.debug(`Search helper response: ${helper}`);
             const parsedHelper = JSON.parse(helper);
-            const { searchAJA, searchAJE, searchWires, searchPersonal, searchBing, dateFilter, languageStr } = parsedHelper;
+            const { searchAJA, searchAJE, searchWires, searchPersonal, searchBing, dateFilter, languageStr, titleOnly } = parsedHelper;
 
             // calculate whether we have room to do RAG in the current conversation context
             const baseSystemPrompt = pathwayResolver?.prompts[0]?.messages[0]?.content;
@@ -111,6 +119,8 @@ export default {
                 return {
                     text: searchText,
                     filter: dateFilter,
+                    top: titleOnly ? 1000 : 50,
+                    titleOnly: titleOnly
                 };
             }
             
@@ -210,7 +220,7 @@ export default {
             };
 
             // Sample results from the index searches proportionally to the number of results returned
-            const maxSearchResults = 100;
+            const maxSearchResults = titleOnly ? 1000 : 50;
             const promiseResults = await Promise.all(promises);
             const promiseData = promiseResults
                 .filter(r => r !== undefined && r !== null)
@@ -255,7 +265,7 @@ export default {
                 title && result.push(`title: ${title}`);
                 url && result.push(`url: ${url}`);
 
-                if (content) {
+                if (content && !titleOnly) {
                     let encodedContent = gpt3Encode(content);
                     let currentLength = result.join(" ").length; // Calculate the length of the current result string
 
@@ -273,14 +283,15 @@ export default {
             }
 
             let sources = searchResults.map(getSource).join(" \n\n ") || "No relevant sources found.";
-            dateFilter && sources.trim() && (sources+=`\n\n above sources are date filtered accordingly. \n\n`);
+            dateFilter && sources.trim() && (sources+=`\n\nThe above sources are date filtered accordingly.`);
 
-            const result = await pathwayResolver.resolve({ ...args, sources, chatHistory: multiModalChatHistory, language:languageStr });
+            const result = await runAllPrompts({ ...args, searchStrings: `${helper}`, sources, chatHistory: multiModalChatHistory, language:languageStr });
+
             const referencedSources = extractReferencedSources(result);
             searchResults = pruneSearchResults(searchResults, referencedSources);
 
             // Update the tool info with the pruned searchResults
-            contextValue.pathwayResolver.tool = JSON.stringify({ citations: searchResults });
+            pathwayResolver.tool = JSON.stringify({ toolUsed: "search", citations: searchResults });
 
             return result;
         } catch (e) {

@@ -36,14 +36,16 @@ export default {
 
         const useMemory = args.useMemory || pathwayResolver.pathway.inputParameters.useMemory;
 
-        const useMemoryPrompt = useMemory ? `{{renderTemplate AI_MEMORY}}\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n` : "";
-
         pathwayResolver.pathwayPrompt = 
         [
             new Prompt({ messages: [
                 {
                     "role": "system",
-                    "content": `${useMemoryPrompt}{{renderTemplate AI_COMMON_INSTRUCTIONS}}\nAs part of a conversation with the user, you have been asked to create one or more images for the user. You have already written the prompts and created the images, but now you need to show them to the user. You can decide which images to display and how to display them - you should do it in a way that is most pleasing to the user. You can use markdown or html and img tags to display and format the images - the UI will render either. You can be creative in your display and layout. Links to the images that you created are in the result of the final tool call below. If you don't see any tool results, it means you didn't create any images.`
+                    "content": `{{renderTemplate AI_COMMON_INSTRUCTIONS}}
+
+{{renderTemplate AI_DIRECTIVES}}
+
+Instructions: As part of a conversation with the user, you have been asked to create one or more images, photos, pictures, selfies, drawings, or other visual content for the user. You have already written the prompts and created the images - links to them are in the most recent tool calls in the chat history. You should display the images in a way that is most pleasing to the user. You can use markdown or HTML and img tags to display and format the images - the UI will render either. If there are no tool results, it means you didn't successfully create any images - in that case, don't show any images and tell the user you weren't able to create images.`
                 },
                 "{{chatHistory}}",
             ]}),
@@ -98,7 +100,7 @@ export default {
                 
                 let model = "replicate-flux-11-pro";
                 if (numberResults > 1 || draft) {
-                    model = "runware-flux-schnell";
+                    model = "replicate-flux-1-schnell";
                 }
                 if (renderText) {
                     return await callPathway('image_recraft', {...args, text: prompt });
@@ -115,7 +117,7 @@ export default {
             });
             
             const result = await runAllPrompts({ ...args });
-
+            pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
             return result;
         } catch (e) {
             pathwayResolver.logError(e.message ?? e);

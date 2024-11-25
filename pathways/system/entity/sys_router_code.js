@@ -3,14 +3,15 @@ import { Prompt } from '../../../server/prompt.js';
 export default {
     inputParameters: {
         chatHistory: [],
-        contextInfo: ``,
     },
     prompt:
     [
         new Prompt({ messages: [
             {
                 "role": "system",
-                "content": `Analyze the conversation history to determine whether a coding task has been requested or if the user's needs can be addressed only by executing the code. Output a JSON object with three fields:
+                "content": `{{renderTemplate AI_CONVERSATION_HISTORY}}
+
+Instructions: You are part of an AI entity named {{{aiName}}}. Your task is to analyze the conversation history to determine whether a coding task has been requested or if the user's needs can be addressed only by executing the code. Output a JSON object with three fields:
 
 1. "codingRequired": Boolean. Set to true if the user asks for or needs code execution. Otherwise, set to false.
 
@@ -23,7 +24,7 @@ General guidelines:
 
 Always output just the valid JSON object with all these fields.`,
             },
-            "{{chatHistory}}",
+            {"role": "user", "content": "Analyze the provided conversation history and determine if you should use code executionto respond to the user. Generate a JSON object to indicate if it is needed."},
         ]}),
     ],
     model: 'oai-gpt4o',
