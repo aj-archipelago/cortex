@@ -52,14 +52,20 @@ class OpenAIDallE3Plugin extends ModelPlugin {
 
         requestPromise
         .then((response) => handleResponse(response))
-        .catch((error) => handleResponse(error));
+        .catch((error) => handleResponse(error, true));
 
-        function handleResponse(response) {
+        function handleResponse(response, isError = false) {
             let status = "succeeded";
-            let data = JSON.stringify(response);
-            if (response.data.error) {
+            let data;
+
+            if (isError) {
+                status = "failed";
+                data = JSON.stringify({ error: response.message || response });
+            } else if (response.data?.error) {
                 status = "failed";
                 data = JSON.stringify(response.data);
+            } else {
+                data = JSON.stringify(response);
             }
 
             const requestProgress = {
@@ -80,12 +86,14 @@ class OpenAIDallE3Plugin extends ModelPlugin {
             let progress =
                 requestDurationEstimator.calculatePercentComplete(callid);
 
+            if (typeof progress === 'number' && !isNaN(progress) && progress >= 0 && progress <= 1) {
                 await publishRequestProgress({
                     requestId,
                     status: "pending",
                     progress,
                     data,
                 });
+            }
 
             if (state.status !== "pending") {
                 break;

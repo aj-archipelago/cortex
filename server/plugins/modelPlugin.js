@@ -249,7 +249,12 @@ class ModelPlugin {
         let length = 0;
         let units = isProd ? 'characters' : 'tokens';
         if (data) {
-           length = isProd ? data.length : encode(data).length;
+            if (isProd || data.length > 5000) {
+                length = data.length;
+                units = 'characters';
+            } else {
+                length = encode(data).length;
+            }
         }
         return {length, units};
     }

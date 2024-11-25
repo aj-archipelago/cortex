@@ -16,23 +16,53 @@ class ReplicateApiPlugin extends ModelPlugin {
       prompt,
     );
 
-    const requestParameters = {
-      input: {
-        aspect_ratio: combinedParameters.aspectRatio || "1:1",
-        output_format: combinedParameters.outputFormat || "webp",
-        output_quality: combinedParameters.outputQuality || 80,
-        prompt: modelPromptText,
-        prompt_upsampling: combinedParameters.promptUpsampling || false,
-        safety_tolerance: combinedParameters.safety_tolerance || 3,
-        go_fast: true,
-        megapixels: "1",
-        num_outputs: combinedParameters.numberResults,
-        width: combinedParameters.width,
-        height: combinedParameters.height,
-        size: combinedParameters.size || "1024x1024",
-        style: combinedParameters.style || "realistic_image",
-      },
+    const isValidSchnellAspectRatio = (ratio) => {
+      const validRatios = [
+        '1:1', '16:9', '21:9', '3:2', '2:3', '4:5',
+        '5:4', '3:4', '4:3', '9:16', '9:21'
+      ];
+      
+      return validRatios.includes(ratio);
     };
+    
+    let requestParameters = {};
+
+    switch (combinedParameters.model) {
+      case "replicate-flux-11-pro":
+        requestParameters = {
+          input: {
+            aspect_ratio: combinedParameters.aspectRatio || "1:1",
+            output_format: combinedParameters.outputFormat || "webp",
+            output_quality: combinedParameters.outputQuality || 80,
+            prompt: modelPromptText,
+            prompt_upsampling: combinedParameters.promptUpsampling || false,
+            safety_tolerance: combinedParameters.safety_tolerance || 3,
+            go_fast: true,
+            megapixels: "1",
+            width: combinedParameters.width,
+            height: combinedParameters.height,
+            size: combinedParameters.size || "1024x1024",
+            style: combinedParameters.style || "realistic_image",
+          },
+        };
+        break;
+      case "replicate-flux-1-schnell":
+        requestParameters = {
+          input: {
+            aspect_ratio: isValidSchnellAspectRatio(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
+            output_format: combinedParameters.outputFormat || "webp",
+            output_quality: combinedParameters.outputQuality || 80,
+            prompt: modelPromptText,
+            go_fast: true,
+            megapixels: "1",
+            num_outputs: combinedParameters.numberResults,
+            num_inference_steps: combinedParameters.steps || 4,
+            disable_safety_checker: true,
+          },
+        };
+        break;
+
+    }
 
     return requestParameters;
   }

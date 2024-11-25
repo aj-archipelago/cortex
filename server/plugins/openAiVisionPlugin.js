@@ -31,8 +31,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                         }
 
                         if (typeof parsedItem === 'object' && parsedItem !== null && parsedItem.type === 'image_url') {
-                            parsedItem.image_url.url = parsedItem.url || parsedItem.image_url.url;
-                            return parsedItem;
+                            return {type: parsedItem.type, image_url: {url: parsedItem.url || parsedItem.image_url.url}};
                         }
                         
                         return parsedItem;
