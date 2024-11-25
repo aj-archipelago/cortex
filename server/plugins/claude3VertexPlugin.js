@@ -2,8 +2,8 @@ import OpenAIVisionPlugin from "./openAiVisionPlugin.js";
 import logger from "../../lib/logger.js";
 
 const allowedMIMETypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-async function convertContentItem(item) {
 
+async function convertContentItem(item, maxImageSize) {
   let imageUrl = "";
 
   try {
@@ -27,6 +27,14 @@ async function convertContentItem(item) {
             try {
               const urlData = imageUrl.startsWith("data:") ? imageUrl : await fetchImageAsDataURL(imageUrl);
               if (!urlData) { return null; }
+              
+              // Check base64 size
+              const base64Size = (urlData.length * 3) / 4;
+              if (base64Size > maxImageSize) {
+                logger.warn(`Image size ${base64Size} bytes exceeds maximum allowed size ${maxImageSize} - skipping image content.`);
+                return null;
+              }
+              
               const [, mimeType = "image/jpeg"] = urlData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/) || [];
               const base64Image = urlData.split(",")[1];
 
@@ -151,7 +159,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     const claude3Messages = await Promise.all(
       finalMessages.map(async (message) => {
         const contentArray = Array.isArray(message.content) ? message.content : [message.content];
-        const claude3Content = await Promise.all(contentArray.map(convertContentItem));
+        const claude3Content = await Promise.all(contentArray.map(item => convertContentItem(item, this.getModelMaxImageSize())));
         return {
           role: message.role,
           content: claude3Content.filter(Boolean),

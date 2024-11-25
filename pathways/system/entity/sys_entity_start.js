@@ -83,7 +83,7 @@ export default {
         const fetchChatResponse = async (args) => {
             const [chatResponse, chatTitleResponse] = await Promise.all([
                 callPathway('sys_generator_quick', {...args, model: styleModel}),
-                callPathway('chat_title', { ...args, text: args.chatHistory.map(message => message.content).join("\n")}),
+                callPathway('chat_title', { ...args }),
             ]);
 
             title = chatTitleResponse;
@@ -150,7 +150,6 @@ export default {
                         toolCallbackMessage = toolMessage;
                         break;
                     case "vision":
-                        break;
                     case "video":
                     case "audio":
                     case "pdf":
