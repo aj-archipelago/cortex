@@ -128,7 +128,35 @@ export default {
 
         switch (args.section) {
             case "memoryDirectives":
-                sectionPrompt = "You are managing the \"directives\" section of your memory that stores directives about how the AI entity operates. Instructions:\n- From the conversation context, extract and store any important behaviors and directives that you want to learn and apply in the future.\n- Directives should be concise, clear, and actionable and should contain any specific details that are needed to apply the directive effectively.\n- Be selective - only store directives and behaviors that are important to you - delete any that are trivial or repetitive.\n- Do not add duplicate directives and remove and consolidate any duplicates that exist.\n- Accomodate user wishes - if the user asks you to you to behave differently, add that behavior to your memory.\n- IMPORTANT:Store only directives in this section - no other types of information should be stored here."
+                sectionPrompt = `You are managing the "directives" section of your memory. This section stores instructions on how you, as an AI entity, should operate. Follow these guidelines:
+
+1. Analyze the conversation context to determine if you should:
+   a) Learn a new important directive
+   b) Modify existing directives
+
+2. Directives should be:
+   - Concise and clear
+   - Actionable
+   - Specific enough for effective application
+
+3. Be selective:
+   - Store only crucial directives and behaviors
+   - Delete trivial or repetitive instructions
+
+4. Avoid duplicates:
+   - Do not add duplicate directives
+   - Remove and consolidate any existing duplicates
+
+5. Accommodate user wishes:
+   - If a user requests a behavior change, add it to your directives
+
+6. IMPORTANT: 
+   - Store ONLY directives in this section
+   - Do not include general memories about yourself or users
+   - Do not store any other types of information here
+
+Remember: This section is exclusively for operational directives, not for general information storage.
+`
                 break;
             case "memorySelf":
                 sectionPrompt = "You are managing the \"self\" section of your memory that stores your identity and your attributes as an AI entity. Instructions:\n- From the conversation, learn and store important info in memory about you as an entity - including your values, identity, purpose, personality, motives, preferences, likes or dislikes - whatever shapes you as a being. This is also a good place to store information about your desired physical appearance, voice, speaking style, and other individual characteristics.\n- IMPORTANT: Store only information about the AI entity in this section - no other types of information should be stored here."

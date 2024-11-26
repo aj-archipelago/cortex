@@ -44,7 +44,7 @@ export default {
         try {
             const memoryObject = JSON.parse(aiMemory);
             for (const section of validSections) {
-                if (memoryObject[section]) {
+                if (section in memoryObject) {
                     await setv(`${contextId}-${section}`, memoryObject[section]);
                 }
             }
