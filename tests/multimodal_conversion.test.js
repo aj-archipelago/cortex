@@ -112,11 +112,10 @@ test('Cortex special properties conversion', async (t) => {
         ]}
     ];
 
-    const parsedOpenAI = openai.tryParseMessages(cortexMessages);
-    const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
+    const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(cortexMessages);
 
-    const { modifiedMessages: geminiMessages } = gemini.convertMessagesToGemini(parsedOpenAI);
-    const { modifiedMessages: geminiMessages15, system: geminiSystem15 } = gemini15.convertMessagesToGemini(parsedOpenAI);
+    const { modifiedMessages: geminiMessages } = gemini.convertMessagesToGemini(cortexMessages);
+    const { modifiedMessages: geminiMessages15, system: geminiSystem15 } = gemini15.convertMessagesToGemini(cortexMessages);
 
     // Check Claude conversion
     t.true(claudeMessages[0].content[1].source.data.startsWith('/9j/4AAQ'));
@@ -142,10 +141,9 @@ test('Mixed content types conversion', async (t) => {
         ]}
     ];
 
-    const parsedOpenAI = openai.tryParseMessages(mixedMessages);
-    const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
-    const { modifiedMessages } = gemini.convertMessagesToGemini(parsedOpenAI);
-    const { modifiedMessages: modifiedMessages15, system: system15 } = gemini15.convertMessagesToGemini(parsedOpenAI);
+    const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(mixedMessages);
+    const { modifiedMessages } = gemini.convertMessagesToGemini(mixedMessages);
+    const { modifiedMessages: modifiedMessages15, system: system15 } = gemini15.convertMessagesToGemini(mixedMessages);
 
     // Check Claude conversion
     t.is(claudeMessages.length, 3);
