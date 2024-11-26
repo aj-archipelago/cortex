@@ -130,13 +130,13 @@ export default {
                             }
                             const { codingRequired } = parsedCodingRequiredResponse;
                             if (codingRequired) {
-                                const { codingMessage, codingTask } = parsedCodingRequiredResponse;
+                                const { codingMessage, codingTask, codingTaskKeywords } = parsedCodingRequiredResponse;
                                 const message = typeof codingTask === 'string' 
                                     ? codingTask 
                                     : JSON.stringify(codingTask);
                                 const { contextId } = args;
                                 logger.info(`Sending task message coding agent: ${message}`);
-                                codeRequestId = await sendMessageToQueue({ message, contextId });
+                                codeRequestId = await sendMessageToQueue({ message, contextId, keywords: codingTaskKeywords });
 
                                 toolCallbackId = codeRequestId;
                                 toolCallbackName = "coding";
