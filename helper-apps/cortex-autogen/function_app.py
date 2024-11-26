@@ -4,14 +4,17 @@ import json
 from azure.storage.queue import QueueClient
 import os
 import redis
-from myautogen import process_message
+from agents import process_message
 import subprocess
 import sys
+import config 
+
+logging.getLogger().setLevel(logging.WARNING)
 
 def install_packages():
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 
-install_packages()
+# install_packages()
 
 app = func.FunctionApp()
 
@@ -31,6 +34,6 @@ def queue_trigger(msg: func.QueueMessage):
         if "requestId" not in message_data:
             message_data['requestId'] = msg.id
         process_message(message_data, msg)
-
+        
     except Exception as e:
         logging.error(f"Error processing message: {str(e)}")

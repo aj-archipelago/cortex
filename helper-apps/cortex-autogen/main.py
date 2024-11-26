@@ -2,8 +2,9 @@ import os
 from azure.storage.queue import QueueClient
 import base64
 import json
-from myautogen import process_message
 import time
+from agents import process_message
+
 
 def main():
     print("Starting message processing loop")
@@ -13,9 +14,8 @@ def main():
     queue_client = QueueClient.from_connection_string(connection_string, queue_name)
     
     attempts = 0
-    max_attempts = 100
+    max_attempts = 1000
     
-
     while attempts < max_attempts:
         messages = queue_client.receive_messages(messages_per_page=1)
         
@@ -32,7 +32,7 @@ def main():
             attempts += 1
             time.sleep(1)  # Wait for 1 second before checking again
 
-    print("No messages received after 100 attempts. Exiting.")
+    print(f"No messages received after {max_attempts} attempts. Exiting.")
 
 if __name__ == "__main__":
     main()
