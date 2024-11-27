@@ -47,6 +47,7 @@ export default {
                     return "";
                 }
             } catch (e) {
+                logger.warn('sys_memory_required returned invalid JSON:', memoryRequired);
                 return "";
             }
 
