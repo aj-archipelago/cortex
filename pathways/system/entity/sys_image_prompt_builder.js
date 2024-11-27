@@ -2,7 +2,7 @@ import { Prompt } from '../../../server/prompt.js';
 
 export default {
     inputParameters: {
-        chatHistory: [],
+        chatHistory: [{role: '', content: []}],
         contextInfo: ``,
         useMemory: true,
         model: 'oai-gpt4o',

@@ -9,7 +9,7 @@ export default {
             ]}),
         ],
     inputParameters: {
-        chatHistory: [],
+        chatHistory: [{role: '', content: []}],
         contextId: ``,
         aiName: "Jarvis",
         language: "English",

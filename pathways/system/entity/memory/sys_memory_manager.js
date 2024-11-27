@@ -10,7 +10,7 @@ const AI_MEMORY_DEFAULTS = `  {
 
 export default {
     inputParameters: {
-        chatHistory: [],
+        chatHistory: [{role: '', content: []}],
         contextId: '',
         aiName: "Jarvis",
     },

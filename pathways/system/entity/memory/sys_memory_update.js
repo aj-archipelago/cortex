@@ -108,7 +108,7 @@ export default {
         ],
 
     inputParameters: {
-        chatHistory: [],
+        chatHistory: [{role: '', content: []}],
         aiName: "Jarvis",
         contextId: ``,
         section: "",

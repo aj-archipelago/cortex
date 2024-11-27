@@ -10,7 +10,7 @@ export default {
             ]}),
         ],
     inputParameters: {
-        chatHistory: [],
+        chatHistory: [{role: '', content: []}],
         model: 'oai-gpt4o',
     },
     tokenRatio: 0.75,

@@ -2,7 +2,7 @@ import { Prompt } from '../../../server/prompt.js';
 
 export default {
     inputParameters: {
-        chatHistory: [],
+        chatHistory: [{role: '', content: []}],
     },
     prompt:
     [
