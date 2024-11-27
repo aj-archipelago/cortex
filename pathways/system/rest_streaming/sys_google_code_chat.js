@@ -1,7 +1,7 @@
-// sys_google_chat.js
-// override handler for palm-chat
+// sys_google_code_chat.js
+// override handler for palm-code-chat
 
-import { Prompt } from '../server/prompt.js';
+import { Prompt } from '../../../server/prompt.js';
 
 export default {
     prompt:
@@ -13,7 +13,7 @@ export default {
     inputParameters: {
         messages: [],
     },
-    model: 'palm-chat',
+    model: 'palm-code-chat',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'palm-chat',
+    emulateOpenAIChatModel: 'palm-code-chat',
 }

@@ -9,6 +9,7 @@ import { config } from '../../config.js';
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETURN_TOKENS = 256;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
+const DEFAULT_MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB default
 
 class ModelPlugin {
     constructor(pathway, model) {
@@ -249,7 +250,12 @@ class ModelPlugin {
         let length = 0;
         let units = isProd ? 'characters' : 'tokens';
         if (data) {
-           length = isProd ? data.length : encode(data).length;
+            if (isProd || data.length > 5000) {
+                length = data.length;
+                units = 'characters';
+            } else {
+                length = encode(data).length;
+            }
         }
         return {length, units};
     }
@@ -341,6 +347,9 @@ class ModelPlugin {
         return requestProgress;
     }
 
+    getModelMaxImageSize() {
+        return (this.promptParameters.maxImageSize ?? this.model.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE);
+    }
 
 }
 

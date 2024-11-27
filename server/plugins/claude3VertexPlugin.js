@@ -1,9 +1,10 @@
 import OpenAIVisionPlugin from "./openAiVisionPlugin.js";
 import logger from "../../lib/logger.js";
+import axios from 'axios';
 
 const allowedMIMETypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-async function convertContentItem(item) {
 
+async function convertContentItem(item, maxImageSize) {
   let imageUrl = "";
 
   try {
@@ -27,6 +28,14 @@ async function convertContentItem(item) {
             try {
               const urlData = imageUrl.startsWith("data:") ? imageUrl : await fetchImageAsDataURL(imageUrl);
               if (!urlData) { return null; }
+              
+              // Check base64 size
+              const base64Size = (urlData.length * 3) / 4;
+              if (base64Size > maxImageSize) {
+                logger.warn(`Image size ${base64Size} bytes exceeds maximum allowed size ${maxImageSize} - skipping image content.`);
+                return null;
+              }
+              
               const [, mimeType = "image/jpeg"] = urlData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/) || [];
               const base64Image = urlData.split(",")[1];
 
@@ -60,25 +69,26 @@ async function convertContentItem(item) {
 // Fetch image and convert to base 64 data URL
 async function fetchImageAsDataURL(imageUrl) {
   try {
-    const response = await fetch(imageUrl, { method: 'HEAD' });
+    // First check headers
+    const headResponse = await axios.head(imageUrl, {
+      timeout: 30000, // 30 second timeout
+      maxRedirects: 5
+    });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const contentType = response.headers.get('content-type');
+    const contentType = headResponse.headers['content-type'];
     if (!contentType || !allowedMIMETypes.includes(contentType)) {
       logger.warn(`Unsupported image type: ${contentType} - skipping image content.`);
       return null;
     }
 
-    const dataResponse = await fetch(imageUrl);
-    if (!dataResponse.ok) {
-      throw new Error(`HTTP error! status: ${dataResponse.status}`);
-    }
+    // Then get the actual image data
+    const dataResponse = await axios.get(imageUrl, {
+      timeout: 30000,
+      responseType: 'arraybuffer',
+      maxRedirects: 5
+    });
 
-    const buffer = await dataResponse.arrayBuffer();
-    const base64Image = Buffer.from(buffer).toString("base64");
+    const base64Image = Buffer.from(dataResponse.data).toString('base64');
     return `data:${contentType};base64,${base64Image}`;
   }
   catch (e) {
@@ -151,7 +161,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     const claude3Messages = await Promise.all(
       finalMessages.map(async (message) => {
         const contentArray = Array.isArray(message.content) ? message.content : [message.content];
-        const claude3Content = await Promise.all(contentArray.map(convertContentItem));
+        const claude3Content = await Promise.all(contentArray.map(item => convertContentItem(item, this.getModelMaxImageSize())));
         return {
           role: message.role,
           content: claude3Content.filter(Boolean),
@@ -301,7 +311,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
   shortenContent(content, maxWords = 40) {
     const words = content.split(" ");
-    if (words.length <= maxWords) {
+    if (words.length <= maxWords || logger.level === 'debug') {
       return content;
     }
     return words.slice(0, maxWords / 2).join(" ") +

@@ -1,5 +1,5 @@
 // Import required modules
-import { Prompt } from "../server/prompt.js" 
+import { Prompt } from '../../../server/prompt.js';
 
 export default {
     prompt: [
@@ -13,8 +13,8 @@ export default {
 
     inputParameters: {
         prompt: "",
-        systemPrompt: "Assistant is an expert journalist's assistant working for a prestigious international news agency. When a user posts a request, Assistant will come up with the best response while upholding the highest journalistic standards.",
+        systemPrompt: "Assistant is an expert journalist's assistant for a prestigious international news agency. When a user posts a request, Assistant will come up with the best response while upholding the highest journalistic standards.",
     },
 
-    model: 'oai-gpturbo',
+    model: 'oai-gpt4-32',
 }

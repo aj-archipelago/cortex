@@ -1,7 +1,7 @@
-// sys_openai_chat_gpt4.js
-// override handler for gpt-4
+// sys_claude_3_haiku.js
+// override handler for claude-3-haiku
 
-import { Prompt } from '../server/prompt.js';
+import { Prompt } from '../../../server/prompt.js';
 
 export default {
     prompt:
@@ -13,7 +13,7 @@ export default {
     inputParameters: {
         messages: [],
     },
-    model: 'oai-gpt4',
+    model: 'claude-3-haiku-vertex',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-4',
+    emulateOpenAIChatModel: 'claude-3-haiku',
 }

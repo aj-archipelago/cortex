@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
 import logger from './lib/logger.js';
 import PathwayManager from './lib/pathwayManager.js';
+import { readdir } from 'fs/promises';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -221,7 +222,7 @@ var config = convict({
                 "type": "REPLICATE-API",
                 "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions",
                 "headers": {
-                    "Prefer": "wait",
+                    "Prefer": "wait=60",
                     "Authorization": "Token {{REPLICATE_API_KEY}}",
                     "Content-Type": "application/json"
                 },
@@ -230,7 +231,7 @@ var config = convict({
                 "type": "REPLICATE-API",
                 "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
                 "headers": {
-                    "Prefer": "wait",
+                    "Prefer": "wait=10",
                     "Authorization": "Token {{REPLICATE_API_KEY}}",
                     "Content-Type": "application/json"
                 },
@@ -411,24 +412,50 @@ const createDynamicPathwayManager = async (config, basePathway) => {
 const buildPathways = async (config) => {
     const { pathwaysPath, corePathwaysPath, basePathwayPath } = config.getProperties();
 
-    const pathwaysURL = pathToFileURL(pathwaysPath).toString();
-    const corePathwaysURL = pathToFileURL(corePathwaysPath).toString();
     const basePathwayURL = pathToFileURL(basePathwayPath).toString();
-
+    
     // Load cortex base pathway 
     const basePathway = await import(basePathwayURL).then(module => module.default);
 
-    // Load core pathways, default from the Cortex package
-    logger.info(`Loading core pathways from ${corePathwaysPath}`)
-    let loadedPathways = await import(`${corePathwaysURL}/index.js`).then(module => module);
+    // Helper function to recursively load pathway files
+    const loadPathwaysFromDir = async (dirPath) => {
+        const pathways = {};
+        try {
+            const files = await readdir(dirPath, { withFileTypes: true });
+            
+            for (const file of files) {
+                const fullPath = path.join(dirPath, file.name);
+                if (file.isDirectory()) {
+                    // Skip the shared directory
+                    if (file.name === 'shared') continue;
+                    
+                    // Recursively load pathways from other subdirectories
+                    const subPathways = await loadPathwaysFromDir(fullPath);
+                    Object.assign(pathways, subPathways);
+                } else if (file.name.endsWith('.js')) {
+                    // Load individual pathway file
+                    const pathwayURL = pathToFileURL(fullPath).toString();
+                    const pathway = await import(pathwayURL).then(module => module.default || module);
+                    const pathwayName = path.basename(file.name, '.js');
+                    pathways[pathwayName] = pathway;
+                }
+            }
+        } catch (error) {
+            logger.error(`Error loading pathways from ${dirPath}: ${error.message}`);
+        }
+        return pathways;
+    };
+
+    // Load core pathways
+    logger.info(`Loading core pathways from ${corePathwaysPath}`);
+    let loadedPathways = await loadPathwaysFromDir(corePathwaysPath);
 
     // Load custom pathways and override core pathways if same
     if (pathwaysPath && fs.existsSync(pathwaysPath)) {
-        logger.info(`Loading custom pathways from ${pathwaysPath}`)
-        const customPathways = await import(`${pathwaysURL}/index.js`).then(module => module);
+        logger.info(`Loading custom pathways from ${pathwaysPath}`);
+        const customPathways = await loadPathwaysFromDir(pathwaysPath);
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
-
 
     const { DYNAMIC_PATHWAYS_CONFIG_FILE, DYNAMIC_PATHWAYS_CONFIG_JSON } = process.env;
 

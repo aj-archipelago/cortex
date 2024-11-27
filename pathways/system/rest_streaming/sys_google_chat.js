@@ -1,7 +1,7 @@
-// sys_claude_3_haiku.js
-// override handler for claude-3-haiku
+// sys_google_chat.js
+// override handler for palm-chat
 
-import { Prompt } from '../server/prompt.js';
+import { Prompt } from '../../../server/prompt.js';
 
 export default {
     prompt:
@@ -13,7 +13,7 @@ export default {
     inputParameters: {
         messages: [],
     },
-    model: 'claude-3-haiku-vertex',
+    model: 'palm-chat',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'claude-3-haiku',
+    emulateOpenAIChatModel: 'palm-chat',
 }

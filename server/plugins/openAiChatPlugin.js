@@ -115,9 +115,10 @@ class OpenAIChatPlugin extends ModelPlugin {
                 const content = message.content === undefined ? JSON.stringify(message) : (Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content);
                 const words = content.split(" ");
                 const { length, units } = this.getLength(content);
-                const preview = words.length < 41 ? content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
-    
-                logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
+                
+                const displayContent = logger.level === 'debug' ? content : (words.length < 41 ? content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" "));
+
+                logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${displayContent}"`);
                 totalLength += length;
                 totalUnits = units;
             });

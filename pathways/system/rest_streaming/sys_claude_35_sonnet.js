@@ -1,7 +1,7 @@
 // sys_claude_35_sonnet.js
 // override handler for claude-35-sonnet
 
-import { Prompt } from '../server/prompt.js';
+import { Prompt } from '../../../server/prompt.js';
 
 export default {
     prompt:

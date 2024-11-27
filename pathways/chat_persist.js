@@ -14,7 +14,7 @@ export default {
             ]}),
         ],
     inputParameters: {
-        chatHistory: [],
+        chatHistory: [{role: '', content: []}],
         contextId: ``,
     },
     model: 'oai-gpt4o',
