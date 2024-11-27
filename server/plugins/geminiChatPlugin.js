@@ -195,7 +195,7 @@ class GeminiChatPlugin extends ModelPlugin {
         } else if (Array.isArray(responseData)) {
             const { mergedResult, safetyRatings } = mergeResults(responseData);
             if (safetyRatings?.length) {
-                logger.warn(`!!! response was blocked because the input or response potentially violates policies`);
+                logger.warn(`response was blocked because the input or response potentially violates policies`);
                 logger.verbose(`Safety Ratings: ${JSON.stringify(safetyRatings, null, 2)}`);
             }
             const { length, units } = this.getLength(mergedResult);

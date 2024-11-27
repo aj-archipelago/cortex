@@ -119,7 +119,7 @@ Here are the information sources that were found:
                 return {
                     text: searchText,
                     filter: dateFilter,
-                    top: titleOnly ? 1000 : 50,
+                    top: titleOnly ? 500 : 50,
                     titleOnly: titleOnly
                 };
             }
@@ -222,7 +222,7 @@ Here are the information sources that were found:
             };
 
             // Sample results from the index searches proportionally to the number of results returned
-            const maxSearchResults = titleOnly ? 1000 : 50;
+            const maxSearchResults = titleOnly ? 500 : 50;
             const promiseResults = await Promise.all(promises);
             const promiseData = promiseResults
                 .filter(r => r !== undefined && r !== null)

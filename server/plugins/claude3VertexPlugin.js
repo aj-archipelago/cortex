@@ -1,5 +1,6 @@
 import OpenAIVisionPlugin from "./openAiVisionPlugin.js";
 import logger from "../../lib/logger.js";
+import axios from 'axios';
 
 const allowedMIMETypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
@@ -68,25 +69,26 @@ async function convertContentItem(item, maxImageSize) {
 // Fetch image and convert to base 64 data URL
 async function fetchImageAsDataURL(imageUrl) {
   try {
-    const response = await fetch(imageUrl, { method: 'HEAD' });
+    // First check headers
+    const headResponse = await axios.head(imageUrl, {
+      timeout: 30000, // 30 second timeout
+      maxRedirects: 5
+    });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const contentType = response.headers.get('content-type');
+    const contentType = headResponse.headers['content-type'];
     if (!contentType || !allowedMIMETypes.includes(contentType)) {
       logger.warn(`Unsupported image type: ${contentType} - skipping image content.`);
       return null;
     }
 
-    const dataResponse = await fetch(imageUrl);
-    if (!dataResponse.ok) {
-      throw new Error(`HTTP error! status: ${dataResponse.status}`);
-    }
+    // Then get the actual image data
+    const dataResponse = await axios.get(imageUrl, {
+      timeout: 30000,
+      responseType: 'arraybuffer',
+      maxRedirects: 5
+    });
 
-    const buffer = await dataResponse.arrayBuffer();
-    const base64Image = Buffer.from(buffer).toString("base64");
+    const base64Image = Buffer.from(dataResponse.data).toString('base64');
     return `data:${contentType};base64,${base64Image}`;
   }
   catch (e) {
