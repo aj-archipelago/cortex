@@ -6,14 +6,14 @@ import uuid
 from datetime import datetime, timezone
 import logging
 
-def search_index(keywords):
+def search_index(keywords, top=5):
     search_client = SearchClient(
         endpoint=os.getenv("AZURE_COGNITIVE_API_URL"),
         index_name="index-autogen",
         credential=AzureKeyCredential(os.getenv("AZURE_COGNITIVE_API_KEY"))
     )
 
-    results = search_client.search(search_text=keywords, top=5)
+    results = search_client.search(search_text=keywords, top=top)
     return [dict(result) for result in results]
 
 def search_cognitive_index(keywords, index_name, context_id=None):

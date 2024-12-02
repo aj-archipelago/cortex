@@ -324,6 +324,11 @@ def process_message_safe(original_request_message_data, original_request_message
         helper_decider_result = {}
 
     context = ""
+
+    code_keywords = original_request_message_data.get("keywords") or original_request_message_data.get("message")
+    if code_keywords:
+        context += f"\n#SECTION_OF_OLD_TASK_CODE_INFO_START:\nHere's code/info from old-tasks that might help:\n{search_index(code_keywords)}\n#SECTION_OF_OLD_TASK_CODE_INFO_END\n"
+
     if helper_decider_result.get("bing_search"):
         bing_search_message = f"Search Bing for more information on the task: {original_request_message}, prepared draft plan to solve task: {prepared_plan}"
         result = chat(prompts.get("BING_SEARCH_PROMPT"), bing_search_message)
