@@ -27,7 +27,7 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
 
     getRequestParameters(_, parameters, __) {
         const excludedParameters = [
-            'text', 'parameters', 'prompt', 'promptParameters', 'previousResult', 'stream'
+            'text', 'parameters', 'prompt', 'promptParameters', 'previousResult', 'stream', 'memoryContext'
         ];
         
         return Object.fromEntries(
