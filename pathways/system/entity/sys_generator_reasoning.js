@@ -19,7 +19,7 @@ export default {
     enableDuplicateRequests: false,
     timeout: 600,
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const result = await runAllPrompts({ ...args });
+        const result = await runAllPrompts({ ...args, stream: false });
         resolver.tool = JSON.stringify({ toolUsed: "reasoning" });
         return result;
     }

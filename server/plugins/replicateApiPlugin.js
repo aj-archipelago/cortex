@@ -16,15 +16,6 @@ class ReplicateApiPlugin extends ModelPlugin {
       prompt,
     );
 
-    const isValidSchnellAspectRatio = (ratio) => {
-      const validRatios = [
-        '1:1', '16:9', '21:9', '3:2', '2:3', '4:5',
-        '5:4', '3:4', '4:3', '9:16', '9:21'
-      ];
-      
-      return validRatios.includes(ratio);
-    };
-    
     let requestParameters = {};
 
     switch (combinedParameters.model) {
@@ -46,10 +37,47 @@ class ReplicateApiPlugin extends ModelPlugin {
           },
         };
         break;
-      case "replicate-flux-1-schnell":
+      case "replicate-recraft-v3": {
+        const validStyles = [
+          'any',
+          'realistic_image',
+          'digital_illustration',
+          'digital_illustration/pixel_art',
+          'digital_illustration/hand_drawn',
+          'digital_illustration/grain',
+          'digital_illustration/infantile_sketch',
+          'digital_illustration/2d_art_poster',
+          'digital_illustration/handmade_3d',
+          'digital_illustration/hand_drawn_outline',
+          'digital_illustration/engraving_color',
+          'digital_illustration/2d_art_poster_2',
+          'realistic_image/b_and_w',
+          'realistic_image/hard_flash',
+          'realistic_image/hdr',
+          'realistic_image/natural_light',
+          'realistic_image/studio_portrait',
+          'realistic_image/enterprise',
+          'realistic_image/motion_blur'
+        ];
+
         requestParameters = {
           input: {
-            aspect_ratio: isValidSchnellAspectRatio(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
+            prompt: modelPromptText,
+            size: combinedParameters.size || "1024x1024",
+            style: validStyles.includes(combinedParameters.style) ? combinedParameters.style : "realistic_image",
+          },
+        };
+        break;
+      }
+      case "replicate-flux-1-schnell": {
+        const validRatios = [
+          '1:1', '16:9', '21:9', '3:2', '2:3', '4:5',
+          '5:4', '3:4', '4:3', '9:16', '9:21'
+        ];
+
+        requestParameters = {
+          input: {
+            aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
             output_format: combinedParameters.outputFormat || "webp",
             output_quality: combinedParameters.outputQuality || 80,
             prompt: modelPromptText,
@@ -61,7 +89,7 @@ class ReplicateApiPlugin extends ModelPlugin {
           },
         };
         break;
-
+      }
     }
 
     return requestParameters;

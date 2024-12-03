@@ -45,9 +45,14 @@ When the user requests an overview, count, or analysis of topics or trends from 
 
 Determine the language that the user is speaking in the conversation and fill the "language" field using the ISO 639-3 format and put the full language name in the "languageStr" field.
 
+Add a short message to the resultsMessage field that acknowledges the user's request and indicates you're processing it.
+- The message should be a very short, casual phrase (2-5 words) that acknowledges the user's request and indicates you're processing it.
+- The message to the user should be conversational and natural and match the rest of the conversation style and tone.
+- The message should take 1-2 seconds to say out loud. Examples: 'Hmm, let's see...', 'Just a sec...', 'Checking...'"
+
 You should only ever respond with the JSON object and never with any additional notes or commentary.
 
-Example JSON objects for different queries:
+Example JSON objects and messages for different queries:
 
 "What's the latest on the wires?"
 {
@@ -56,7 +61,8 @@ Example JSON objects for different queries:
     "dateFilter": "date ge 2024-02-22T00:00:00Z",
     "titleOnly": false,
     "language": "eng",
-    "languageStr": "English"
+    "languageStr": "English",
+    "resultsMessage": "Reading the wires..."
 }
     
 "What's going on in the world today?"
@@ -69,7 +75,8 @@ Example JSON objects for different queries:
     "dateFilter": "date ge 2024-02-22T00:00:00Z",
     "titleOnly": false,
     "language": "eng",
-    "languageStr": "English"
+    "languageStr": "English",
+    "resultsMessage": "Just a few seconds..."
 }
     
 "What is this document about?"
@@ -77,7 +84,8 @@ Example JSON objects for different queries:
     "searchRequired": true,
     "searchPersonal": "*",
     "language": "eng",
-    "languageStr": "English"
+    "languageStr": "English",
+    "resultsMessage": "Almost done..."
 }
     
 "What topics were covered last week on AJE?"
@@ -87,7 +95,8 @@ Example JSON objects for different queries:
     "dateFilter": "date ge 2024-02-22T00:00:00Z and date le 2024-02-28T23:59:59Z",
     "titleOnly": true,
     "language": "eng",
-    "languageStr": "English"
+    "languageStr": "English",
+    "resultsMessage": "Almost there..."
 }`,
             },
             {"role": "user", "content": "Examine the Conversation History and decide what data sources if any to search to help the user and produce a JSON object with fields that communicate your decisions."},

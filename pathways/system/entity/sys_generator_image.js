@@ -103,9 +103,9 @@ Instructions: As part of a conversation with the user, you have been asked to cr
                     model = "replicate-flux-1-schnell";
                 }
                 if (renderText) {
-                    return await callPathway('image_recraft', {...args, text: prompt });
+                    return await callPathway('image_recraft', {...args, text: prompt, stream: false });
                 } else {
-                    return await callPathway('image_flux', {...args, text: prompt, negativePrompt, numberResults, model });
+                    return await callPathway('image_flux', {...args, text: prompt, negativePrompt, numberResults, model, stream: false });
                 }
             })).then(results => results.filter(r => r !== null));
 

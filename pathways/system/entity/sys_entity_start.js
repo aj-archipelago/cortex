@@ -1,6 +1,6 @@
 // sys_entity_start.js
 // Beginning of the rag workflow for Jarvis
-import { callPathway } from '../../../lib/pathwayTools.js';
+import { callPathway, say } from '../../../lib/pathwayTools.js';
 import logger from  '../../../lib/logger.js';
 import { chatArgsHasImageUrl } from  '../../../lib/util.js';
 import { QueueServiceClient } from '@azure/storage-queue';
@@ -40,6 +40,7 @@ export default {
     model: 'oai-gpt4o',
     anthropicModel: 'claude-35-sonnet-vertex',
     openAIModel: 'oai-gpt4o',
+    useSingleTokenStream: true,
     inputParameters: {
         privateData: false,    
         chatHistory: [{role: '', content: []}],
@@ -54,6 +55,8 @@ export default {
         aiMemorySelfModify: true,
         aiStyle: "OpenAI",
         title: ``,
+        messages: [],
+        voiceResponse: false,
     },
     timeout: 600,
     tokenRatio: TOKEN_RATIO,
@@ -65,11 +68,17 @@ export default {
 
         args = {
             ...args,
-            ...entityConstants
+            ...entityConstants,
+            voiceResponse: resolver.pathway.inputParameters.voiceResponse,
         };
 
         // Limit the chat history to 20 messages to speed up processing
-        args.chatHistory = (args.messages || args.chatHistory).slice(-20);
+        if (args.messages && args.messages.length > 0) {
+            args.chatHistory = args.messages.slice(-20);
+        } else {
+            args.chatHistory = args.chatHistory.slice(-20);
+        }
+
         const pathwayResolver = resolver;
         const { anthropicModel, openAIModel } = pathwayResolver.pathway;
 
@@ -80,10 +89,10 @@ export default {
             args.model = pathwayResolver.modelName;
         }
         
-        const fetchChatResponse = async (args) => {
+        const fetchChatResponse = async (args, pathwayResolver) => {
             const [chatResponse, chatTitleResponse] = await Promise.all([
-                callPathway('sys_generator_quick', {...args, model: styleModel}),
-                callPathway('chat_title', { ...args }),
+                callPathway('sys_generator_quick', {...args, model: styleModel}, pathwayResolver),
+                callPathway('chat_title', { ...args, stream: false}),
             ]);
 
             title = chatTitleResponse;
@@ -94,7 +103,10 @@ export default {
         const { chatHistory } = args;
 
         // start fetching the default response - we may need it later
-        const fetchChatResponsePromise = fetchChatResponse({ ...args });
+        let fetchChatResponsePromise;
+        if (!args.stream) {
+            fetchChatResponsePromise = fetchChatResponse({ ...args }, pathwayResolver);
+        }
 
         const visionContentPresent = chatArgsHasImageUrl(args);
 
@@ -102,12 +114,13 @@ export default {
             // Get tool routing response
             const toolRequiredResponse = await callPathway('sys_router_tool', { 
                 ...args,
-                chatHistory: chatHistory.slice(-4) 
+                chatHistory: chatHistory.slice(-4),
+                stream: false
             });
 
             // Asynchronously manage memory for this context
             if (args.aiMemorySelfModify) {
-                callPathway('sys_memory_manager', {  ...args })    
+                callPathway('sys_memory_manager', {  ...args, stream: false })    
                 .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
             }
 
@@ -120,7 +133,7 @@ export default {
                 switch (toolFunction.toLowerCase()) {
                     case "codeexecution":
                         {
-                            const codingRequiredResponse = await callPathway('sys_router_code', { ...args });
+                            const codingRequiredResponse = await callPathway('sys_router_code', { ...args, stream: false });
                             let parsedCodingRequiredResponse;
                             try {
                                 parsedCodingRequiredResponse = JSON.parse(codingRequiredResponse || "{}");
@@ -191,27 +204,36 @@ export default {
             }
 
             if (toolCallbackMessage) {
-                pathwayResolver.tool = JSON.stringify({ 
-                    hideFromModel: toolCallbackName ? true : false, 
-                    toolCallbackName, 
-                    title,
-                    search: toolCallbackName === 'sys_generator_results' ? true : false,
-                    coding: toolCallbackName === 'coding' ? true : false,
-                    codeRequestId,
-                    toolCallbackId
-                });
-                return toolCallbackMessage || "One moment please.";
+                if (args.stream) {
+                    await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
+                    pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
+                    await callPathway('sys_entity_continue', { ...args, stream: true, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
+                    return "";
+                } else {
+                    pathwayResolver.tool = JSON.stringify({ 
+                        hideFromModel: toolCallbackName ? true : false, 
+                        toolCallbackName, 
+                        title,
+                        search: toolCallbackName === 'sys_generator_results' ? true : false,
+                        coding: toolCallbackName === 'coding' ? true : false,
+                        codeRequestId,
+                        toolCallbackId
+                    });
+                    return toolCallbackMessage || "One moment please.";
+                }
             }
 
+            fetchChatResponsePromise = fetchChatResponsePromise || fetchChatResponse({ ...args }, pathwayResolver);
             const chatResponse = await fetchChatResponsePromise;
             pathwayResolver.tool = JSON.stringify({ search: false, title })
-            return chatResponse;
+            return args.stream ? "" : chatResponse;
 
         } catch (e) {
             pathwayResolver.logError(e);
+            fetchChatResponsePromise = fetchChatResponsePromise || fetchChatResponse({ ...args }, pathwayResolver);
             const chatResponse = await fetchChatResponsePromise;
             pathwayResolver.tool = JSON.stringify({ search: false, title });
-            return chatResponse;
+            return args.stream ? "" : chatResponse;
         }
     }
 };
