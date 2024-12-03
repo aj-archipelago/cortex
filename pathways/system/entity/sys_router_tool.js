@@ -50,6 +50,9 @@ Decision Output:
 If you decide to use a tool, return a JSON object in this format:
 {"toolRequired": true, "toolFunction": "toolName", "toolMessage": "message to the user to wait a moment while you work", "toolReason": "detailed explanation of why this tool was chosen"}
 
+- The message to the user should flow naturally with the conversation history and match the rest of the conversation history in style and tone.
+- The message should be specific about what you're doing and why and how long it will take, but keep it short as if you were speaking it out loud.
+
 If no tool is required, return:
 {"toolRequired": false, "toolReason": "explanation of why no tool was necessary"}
 

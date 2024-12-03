@@ -26,18 +26,14 @@ export default {
     ...entityConstants,
     executePathway: async ({args, resolver}) => {
         args = { ...args, ...entityConstants };
-        // if the model has been overridden, make sure to use it
-        if (resolver.modelName) {
-            args.model = resolver.modelName;
-        }
+
         try {
             // Get the generator pathway name from args or use default
             let generatorPathway = args.generatorPathway || 'sys_generator_results';
 
             const newArgs = {
                 ...args,
-                chatHistory: args.chatHistory.slice(-6),
-                stream: false
+                chatHistory: args.chatHistory.slice(-6)
             };
 
             if (generatorPathway === 'sys_generator_document') {
@@ -47,11 +43,13 @@ export default {
             
             logger.debug(`Using generator pathway: ${generatorPathway}`);
             
-            return await callPathway(generatorPathway, newArgs, resolver);
+            const result = await callPathway(generatorPathway, newArgs, resolver);
+
+            return args.stream ? "" : result;
 
         } catch (e) {
             resolver.logError(e.message ?? e);
-            return await callPathway('sys_generator_error', { ...args, text: e.message }, resolver);
+            return await callPathway('sys_generator_error', { ...args, text: e.message, stream: false }, resolver);
         }
     }
 }; 

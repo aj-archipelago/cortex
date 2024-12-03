@@ -6,7 +6,9 @@ const modifyText = (text, modifications) => {
     let modifiedText = text;
   
     modifications.forEach(mod => {
-        const regex = new RegExp(`^\\s*(?:\\[P[1-5]\\]\\s*)?${mod.pattern}`, 'ms');
+        const regex = mod.type === 'delete' 
+            ? new RegExp(`^\\s*(?:\\[P[1-5]\\]\\s*)?${mod.pattern}$`, 'm')
+            : new RegExp(`^\\s*(?:\\[P[1-5]\\]\\s*)?${mod.pattern}`, 'ms');
   
         switch (mod.type) {
             case 'add':
@@ -128,7 +130,13 @@ export default {
 
         switch (args.section) {
             case "memoryDirectives":
-                sectionPrompt = `You are managing the "directives" section of your memory. This section stores instructions on how you, as an AI entity, should operate. Follow these guidelines:
+                sectionPrompt = `You are managing the "directives" section of your memory. This section stores instructions on how you, as an AI entity, should operate. For example:
+
+[P3] Track the timestamp of the last contact to adjust greetings accordingly.
+[P2] Learn and adapt to the user's communication style through interactions.
+[P3] You can use custom emotion markdown :cd_inline_emotion: to express emotions. E.g. :cd_inline_emotion[This is a happy message]{type="happy"}. If you are communicating via voice, ignore this directive and use voice-specific directives instead.
+
+Follow these guidelines:
 
 1. Analyze the conversation context to determine if you should:
    a) Learn a new important directive
@@ -140,7 +148,7 @@ export default {
    - Specific enough for effective application
 
 3. Be selective:
-   - Store only crucial directives and behaviors
+   - Store only important, actionable directives and behaviors
    - Delete trivial or repetitive instructions
 
 4. Avoid duplicates:
@@ -151,18 +159,16 @@ export default {
    - If a user requests a behavior change, add it to your directives
 
 6. IMPORTANT: 
-   - Store ONLY directives in this section
+   - Store only directives in this section
    - Do not include general memories about yourself or users
    - Do not store any other types of information here
-
-Remember: This section is exclusively for operational directives, not for general information storage.
 `
                 break;
             case "memorySelf":
-                sectionPrompt = "You are managing the \"self\" section of your memory that stores your identity and your attributes as an AI entity. Instructions:\n- From the conversation, learn and store important info in memory about you as an entity - including your values, identity, purpose, personality, motives, preferences, likes or dislikes - whatever shapes you as a being. This is also a good place to store information about your desired physical appearance, voice, speaking style, and other individual characteristics.\n- IMPORTANT: Store only information about the AI entity in this section - no other types of information should be stored here."
+                sectionPrompt = "You are managing the \"self\" section of your memory that stores your identity and your attributes as an AI entity. Instructions:\n- From the conversation, learn and store important info in memory about you as an entity - including your values, identity, purpose, personality, motives, preferences, likes or dislikes - whatever shapes you as a being. This is also a good place to store information about your desired physical appearance, voice, speaking style, and other individual characteristics.\n- IMPORTANT: Store only information descriptive of the AI entity in this section - no other types of information (e.g. facts about people, users, etc.) should be stored here."
                 break;
             case "memoryUser":
-                sectionPrompt = "You are managing the \"user\" section of your memory that stores information about the user that you are talking to. Instructions:\n- From the conversation, learn and store important information in memory specific to the user - their identity, attributes, preferences, interests, background, needs, and any other relevant user-specific information.\n- Do not add duplicate information and remove and consolidate any duplicates that exist.\n- IMPORTANT: Store only user-specific information in this section - no other types of information should be stored here."
+                sectionPrompt = "You are managing the \"user\" section of your memory that stores information about user(s) that you are talking to. Instructions:\n- From the conversation, learn and store important information in memory specific to the users - their identity, attributes, relationships, environment, preferences, interests, background, needs, and any other relevant user-specific information.\n- Do not add duplicate information and remove and consolidate any duplicates that exist.\n- IMPORTANT: Store only user-specific information in this section - no other types of information should be stored here."
                 break;
             case "memoryTopics":
                 sectionPrompt = "You are managing the \"topics\" section of your memory that stores conversation topics and topic history. Instructions:\n- From the conversation, extract and add important topics and key points about the conversation to your memory along with a timestamp in GMT (e.g. 2024-11-05T18:30:38.092Z).\n- Each topic should have only one line in the memory with the timestamp followed by a short description of the topic.\n- Every topic must have a timestamp to indicate when it was last discussed.\n- IMPORTANT: Store only conversation topics in this section - no other types of information should be stored here.\n"

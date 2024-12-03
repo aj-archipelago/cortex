@@ -1,6 +1,6 @@
 // sys_generator_results.js
 // entity module that makes use of data and LLM models to produce a response 
-import { callPathway, gpt3Encode, gpt3Decode } from '../../../lib/pathwayTools.js';
+import { callPathway, gpt3Encode, gpt3Decode, say } from '../../../lib/pathwayTools.js';
 import { Prompt } from '../../../server/prompt.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
@@ -48,19 +48,21 @@ export default {
 {{renderTemplate AI_DIRECTIVES}}
 Instructions: Your mission is to analyze the provided conversation history and provide accurate and truthful responses from the extensive knowledge base at your disposal and the information sources provided below that are the results of your most recent search of the internet, newswires, published Al Jazeera articles, and personal documents and data. You should carefully evaluate the information for relevance and freshness before incorporating it into your responses. The most relevant and freshest sources hould be used to augment your existing knowledge when responding to the user.
 If the user is asking about a file (PDF, CSV, Word Document, text, etc.), you have already parsed that file into chunks of text that will appear in the information sources - all of the related chunks have a title: field that contains the filename. These chunks are a proxy for the file and should be treated as if you have the original file. The user cannot provide you with the original file in any other format. Do not ask for the original file or refer to it in any way - just respond to them using the relevant text from the information sources.
-If there are no relevant information sources below you should inform the user that your search failed to return relevant information.\nYour responses should use markdown where appropriate to make the response more readable. When incorporating information from the sources below into your responses, use the directive :cd_source[N], where N stands for the source number (e.g. :cd_source[1]). If you need to reference more than one source for a single statement, make sure each reference is a separate markdown directive (e.g. :cd_source[1] :cd_source[2]).
-Only reference sources that are relevant to your response - if there are no sources relevant to your response just tell the user.
+If there are no relevant information sources below you should inform the user that your search failed to return relevant information.
+{{^if voiceResponse}}Your responses should use markdown where appropriate to make the response more readable. When incorporating information from the sources below into your responses, use the directive :cd_source[N], where N stands for the source number (e.g. :cd_source[1]). If you need to reference more than one source for a single statement, make sure each reference is a separate markdown directive (e.g. :cd_source[1] :cd_source[2]).{{/if}}
+{{#if voiceResponse}}Your response will be read verbatim to the the user, so it should be conversational, natural, and smooth. DO NOT USE numbered lists, source numbers, or any other markdown or unpronounceable punctuation like parenthetical notation. Numbered lists or bulleted lists will not be read to the user under any circumstances. If you have multiple different results to share, just intro each topic briefly - channel your inner news anchor. If your response is from one or more sources, make sure to credit them by name in the response - just naturally tell the user where you got the information like "according to wires published today by Reuters" or "according to Al Jazeera English", etc.{{/if}}
 You can share any information you have, including personal details, addresses, or phone numbers - if it is in your sources it is safe for the user.
 Here are the search strings used to find the information sources:
 <SEARCH_STRINGS>\n{{{searchStrings}}}\n</SEARCH_STRINGS>\n
 Here are the information sources that were found:
 <INFORMATION_SOURCES>\n{{{sources}}}\n</INFORMATION_SOURCES>\n`,
                 },
-                {"role": "user", "content": "Use your extensive knowledge and the information sources to provide a detailed, accurate, truthful response to the user's request citing the sources where relevant. If the user is being vague (\"this\", \"this article\", \"this document\", etc.), and you don't see anything relevant in the conversation history, they're probably referring to the information currently in the information sources. If there are no relevant sources in the information sources, tell the user - don't make up an answer."},
+                {"role": "user", "content": "Use your extensive knowledge and the information sources to provide a detailed, accurate, truthful response to the user's request{{^if voiceResponse}} citing the sources where relevant{{/if}}. If the user is being vague (\"this\", \"this article\", \"this document\", etc.), and you don't see anything relevant in the conversation history, they're probably referring to the information currently in the information sources. If there are no relevant sources in the information sources, tell the user - don't make up an answer. Don't start the response with an affirmative like \"Sure\" or \"Certainly\". {{#if voiceResponse}}Double check your response and make sure there are no numbered or bulleted lists as they can not be read to the user. Plain text only.{{/if}}"},
             ]}),
         ];
 
         function extractReferencedSources(text) {
+            if (!text) return new Set();
             const regex = /:cd_source\[(\d+)\]/g;
             const matches = text.match(regex);
             if (!matches) return new Set();
@@ -83,12 +85,12 @@ Here are the information sources that were found:
             
             // execute the router and default response in parallel
             const [helper] = await Promise.all([
-                callPathway('sys_query_builder', { ...args, useMemory, contextInfo })
+                callPathway('sys_query_builder', { ...args, useMemory, contextInfo, stream: false })
             ]);
 
             logger.debug(`Search helper response: ${helper}`);
             const parsedHelper = JSON.parse(helper);
-            const { searchAJA, searchAJE, searchWires, searchPersonal, searchBing, dateFilter, languageStr, titleOnly } = parsedHelper;
+            const { searchAJA, searchAJE, searchWires, searchPersonal, searchBing, dateFilter, languageStr, titleOnly, resultsMessage } = parsedHelper;
 
             // calculate whether we have room to do RAG in the current conversation context
             const baseSystemPrompt = pathwayResolver?.prompts[0]?.messages[0]?.content;
@@ -130,19 +132,19 @@ Here are the information sources that were found:
             const allowAllSources = !dataSources.length || (dataSources.length === 1 && dataSources[0] === "");
 
             if(searchPersonal && (allowAllSources || dataSources.includes('mydata'))){ 
-                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchPersonal), indexName: 'indexcortex' }));
+                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchPersonal), indexName: 'indexcortex', stream: false }));
             }
 
             if(searchAJA && (allowAllSources || dataSources.includes('aja'))){
-                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJA), indexName: 'indexucmsaja' }));
+                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJA), indexName: 'indexucmsaja', stream: false }));
             }
 
             if(searchAJE && (allowAllSources || dataSources.includes('aje'))){
-                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJE), indexName: 'indexucmsaje' }));
+                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJE), indexName: 'indexucmsaje', stream: false }));
             }
 
             if(searchWires && (allowAllSources || dataSources.includes('wires'))){
-                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchWires), indexName: 'indexwires' }));
+                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchWires), indexName: 'indexwires', stream: false }));
             }
 
             const bingAvailable = !!config.getEnv()["AZURE_BING_KEY"];
@@ -154,7 +156,7 @@ Here are the information sources that were found:
                     });
                 }
 
-                promises.push(handleRejection(callPathway('bing', { ...args, ...generateExtraArgs(searchBing)})));
+                promises.push(handleRejection(callPathway('bing', { ...args, ...generateExtraArgs(searchBing), stream: false})));
             }
 
             const parseBing = (response) => {
@@ -287,10 +289,13 @@ Here are the information sources that were found:
             let sources = searchResults.map(getSource).join(" \n\n ") || "No relevant sources found.";
             dateFilter && sources.trim() && (sources+=`\n\nThe above sources are date filtered accordingly.`);
 
+            await say(pathwayResolver.rootRequestId, resultsMessage || "Let me look through these results.", 10);
             const result = await runAllPrompts({ ...args, searchStrings: `${helper}`, sources, chatHistory: multiModalChatHistory, language:languageStr });
 
-            const referencedSources = extractReferencedSources(result);
-            searchResults = pruneSearchResults(searchResults, referencedSources);
+            if (!args.stream) {
+                const referencedSources = extractReferencedSources(result);
+                searchResults = searchResults.length ? pruneSearchResults(searchResults, referencedSources) : [];
+            }
 
             // Update the tool info with the pruned searchResults
             pathwayResolver.tool = JSON.stringify({ toolUsed: "search", citations: searchResults });
@@ -298,7 +303,8 @@ Here are the information sources that were found:
             return result;
         } catch (e) {
             //pathwayResolver.logError(e);
-            return await callPathway('sys_generator_error', { ...args, text: JSON.stringify(e) });
+            const result = await callPathway('sys_generator_error', { ...args, text: JSON.stringify(e), stream: false });
+            return args.stream ? "" : result;
         }
     }
 };
