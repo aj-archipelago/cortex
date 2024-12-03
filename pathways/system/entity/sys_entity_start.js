@@ -68,8 +68,7 @@ export default {
 
         args = {
             ...args,
-            ...entityConstants,
-            voiceResponse: resolver.pathway.inputParameters.voiceResponse,
+            ...entityConstants
         };
 
         // Limit the chat history to 20 messages to speed up processing
