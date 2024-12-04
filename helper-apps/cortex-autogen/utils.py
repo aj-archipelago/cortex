@@ -26,13 +26,23 @@ def fetch_from_url(url):
     except requests.RequestException as e:
         logging.error(f"Error fetching from URL: {e}")
         return ""
-
+    
 def zip_and_upload_tmp_folder(temp_dir):
+    # Check if no files in temp_dir
+    if not os.listdir(temp_dir) or len(os.listdir(temp_dir)) == 0:
+        logging.info(f"No files in {temp_dir}")
+        return ""
+
     zip_path = os.path.join(temp_dir, "tmp_contents.zip")
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, _, files in os.walk(temp_dir):
             for file in files:
                 file_path = os.path.join(root, file)
+
+                # Skip adding the zip file itself to the archive
+                if file_path == zip_path:
+                    continue
+
                 arcname = os.path.relpath(file_path, temp_dir)
                 zipf.write(file_path, arcname)
 
