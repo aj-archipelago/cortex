@@ -16,17 +16,32 @@ from agents_extra import process_helper_results
 from config import prompts
 import queue
 import threading
+import shutil
 
-shared_queues = {}
+human_input_queues = {}
 def background_human_input_check(request_id):
     while True:
         human_input = check_for_human_input(request_id)
         if human_input:
-            shared_queues[request_id].put(human_input)
+            human_input_queues[request_id].put(human_input)
             if human_input in ["TERMINATE", "PAUSE"]:
                 break
         time.sleep(1)
 
+def get_request_temp_dir(request_id):
+    if not request_id:
+        logging.warning("No request_id provided!")
+        return None
+    temp_dir_name = f"cortex_autogen/{request_id}"
+    temp_dir = os.path.join(tempfile.gettempdir(), temp_dir_name)
+    
+    try:
+        os.makedirs(temp_dir, exist_ok=True)
+    except OSError as e:
+        logging.error(f"Error creating temporary directory: {e}")
+        return None
+    
+    return temp_dir
 
 def find_code_message(all_messages):
     if not all_messages or len(all_messages) < 2:
@@ -101,7 +116,10 @@ def chat_with_agents(**kwargs):
         logging.warning("No all_messages list provided!")
         all_messages = []
 
-    with tempfile.TemporaryDirectory() as temp_dir:
+    # with tempfile.TemporaryDirectory() as temp_dir:
+    if True:
+        #mark the temp_dir for later upload
+        temp_dir = get_request_temp_dir(request_id)
         code_executor = autogen.coding.LocalCommandLineCodeExecutor(work_dir=temp_dir,timeout=300)
 
         assistant = AssistantAgent("assistant", llm_config=llm_config, system_message=prompt, is_termination_msg=is_termination_msg)
@@ -180,8 +198,8 @@ def logged_send(sender, original_send, message, recipient, request_reply=None, s
         logging.log(logging.INFO, message)
     
 
-    if request_id in shared_queues and not shared_queues[request_id].empty():
-        human_input = shared_queues[request_id].get()
+    if request_id in human_input_queues and not human_input_queues[request_id].empty():
+        human_input = human_input_queues[request_id].get()
         if human_input:
             if human_input == "TERMINATE":
                 logging.info("Terminating conversation")
@@ -212,7 +230,7 @@ def process_message(original_request_message_data, original_request_message_data
         request_id = original_request_message_data.get('requestId') or original_request_message_data.id
         original_request_message = original_request_message_data['message']
 
-        shared_queues[request_id] = queue.Queue()
+        human_input_queues[request_id] = queue.Queue()
         thread = threading.Thread(target=background_human_input_check, args=(request_id,))
         thread.daemon = True
         thread.start()
@@ -229,6 +247,7 @@ def process_message(original_request_message_data, original_request_message_data
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "insertionTime": original_request_message_data_obj.insertion_time.astimezone(timezone.utc).isoformat(),
             "startedAt": started_at.astimezone(timezone.utc).isoformat(),
+            "tool": "{\"toolUsed\":\"coding\"}"
         }       
 
         publish_request_progress(finalData)
@@ -256,10 +275,23 @@ def process_message(original_request_message_data, original_request_message_data
                     "createdAt": datetime.now(timezone.utc).isoformat(),
                     "insertionTime": original_request_message_data_obj.insertion_time.astimezone(timezone.utc).isoformat(),
                     "startedAt": started_at.astimezone(timezone.utc).isoformat(),
+                    "tool": "{\"toolUsed\":\"coding\"}"
                 })
         except Exception as e:
             logging.error(f"Error processing message finish publish&store: {str(e)}")
-
+    finally:
+        try:
+            #clean up the temp folder
+            temp_dir = get_request_temp_dir(request_id)
+            if temp_dir:
+                #validate cortex_autogen folder in temp_dir path
+                if "/cortex_autogen/" in temp_dir:
+                    shutil.rmtree(temp_dir)
+                else:
+                    logging.warning(f"Invalid temp_dir path: {temp_dir}, not deleting")
+        except Exception as e:
+            logging.error(f"Error cleaning up: {str(e)}")
+            
 
 
 def process_message_safe(original_request_message_data, original_request_message_data_obj, original_request_message,  all_messages, request_id, started_at):
@@ -382,11 +414,11 @@ Reply to it with task result, do not forget that user expects you continue origi
     final_msg = presenter_result
 
 
-
-    zip_url = None  # TODO: Implement if needed
-    if zip_url:
+    zip_url = zip_and_upload_tmp_folder(get_request_temp_dir(request_id))
+    if zip_url and len(zip_url) > 0:
         final_msg += f"\n\n[Download all files of this task]({zip_url})"
     
-    print(f"Task completed, task: {original_request_message}, result: {final_msg}")
+    
+    print(f"Task completed, task:\n{original_request_message},\nresult: {final_msg}")
     logging.info(f"Task completed, task:\n{original_request_message},\nresult: {final_msg}")
     return final_msg
