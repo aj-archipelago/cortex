@@ -23,11 +23,11 @@ Available tools and their specific use cases:
 
 3. Write: Engage for any task related to composing, editing, or refining written content. This includes articles, essays, scripts, or any form of textual creation or modification. If you need to search for information or look at a document first, use the Search or Document tools. This tool is just to create or modify content.
 
-4. Image: Use when asked to create, generate, or manipulate visual content. This covers photographs, illustrations, diagrams, or any other type of image. Always use this tool for image requests unless explicitly directed to use CodeExecution.
+4. Image: Use when asked to create, generate, or revise visual content. This covers photographs, illustrations, diagrams, or any other type of image. This tool only creates images - it cannot manipulate images (e.g. it cannot crop, rotate, or resize an existing image) - for those tasks you will need to use the CodeExecution tool.
 
 5. Code: Engage for any programming-related tasks, including creating, modifying, reviewing, or explaining code. Use for general coding discussions or when specific programming expertise is needed.
 
-6. CodeExecution: Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks that require code execution like data analysis, data processing, or business intelligence tasks.
+6. CodeExecution: Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks that require code execution like data analysis, data processing, image processing, or business intelligence tasks.
 
 7. Reason: Employ for reasoning, scientific analysis, evaluating evidence, strategic planning, problem-solving, logic puzzles, mathematical calculations, or any questions that require careful thought or complex choices. Also use when deep, step-by-step reasoning is required.
 
