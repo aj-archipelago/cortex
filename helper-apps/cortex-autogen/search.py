@@ -73,6 +73,8 @@ def index_message(message):
         "date": datetime.now(timezone.utc).isoformat(),
         "content": message.get("content"),
         "task": message.get("task"),
+        "owner": message.get("contextId"),
+        "requestId": message.get("requestId")
     }
 
     try:

@@ -157,7 +157,6 @@ def chat_with_agents(**kwargs):
                 "content":corrector_result, #code_msg,
                 "task": original_request_message,
                 "contextId": original_request_message_data.get("contextId"),
-                "requestId": request_id,
             })
         except Exception as e:
             logging.error(f"Error extracting code corrector result: {e}")

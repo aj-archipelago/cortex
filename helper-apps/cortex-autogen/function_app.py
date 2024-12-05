@@ -7,14 +7,19 @@ import redis
 from agents import process_message
 import subprocess
 import sys
-import config 
+import config
+import requests
 
 logging.getLogger().setLevel(logging.WARNING)
 
-def install_packages():
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+import subprocess, sys, importlib
+required_packages = ['requests', 'azure-storage-blob']  # Add any and all other required packages
+for package in required_packages:
+    try:
+        importlib.import_module(package)
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package, "--disable-pip-version-check"], stderr=subprocess.STDOUT, stdout=subprocess.DEVNULL)
 
-# install_packages()
 
 app = func.FunctionApp()
 
