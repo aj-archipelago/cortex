@@ -33,7 +33,7 @@ const modifyText = (text, modifications) => {
     return modifiedText;
 };
 
-const enforceTokenLimit = (text, maxTokens = 5000, isTopicsSection = false) => {
+export const enforceTokenLimit = (text, maxTokens = 5000, isTopicsSection = false) => {
     if (!text) return text;
     
     const lines = text.split('\n')
@@ -77,7 +77,7 @@ const enforceTokenLimit = (text, maxTokens = 5000, isTopicsSection = false) => {
             return true;
         });
 
-    prioritizedLines.sort((a, b) => a.priority - b.priority);
+    prioritizedLines.sort((a, b) => b.priority - a.priority);
 
     let tokens = encode(prioritizedLines.map(x => x.line).join('\n')).length;
     let safetyCounter = 0;
