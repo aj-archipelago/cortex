@@ -55,7 +55,8 @@ You can share any information you have, including personal details, addresses, o
 Here are the search strings used to find the information sources:
 <SEARCH_STRINGS>\n{{{searchStrings}}}\n</SEARCH_STRINGS>\n
 Here are the information sources that were found:
-<INFORMATION_SOURCES>\n{{{sources}}}\n</INFORMATION_SOURCES>\n`,
+<INFORMATION_SOURCES>\n{{{sources}}}\n</INFORMATION_SOURCES>\n\n
+{{renderTemplate AI_DATETIME}}`,
                 },
                 {"role": "user", "content": "Use your extensive knowledge and the information sources to provide a detailed, accurate, truthful response to the user's request{{^if voiceResponse}} citing the sources where relevant{{/if}}. If the user is being vague (\"this\", \"this article\", \"this document\", etc.), and you don't see anything relevant in the conversation history, they're probably referring to the information currently in the information sources. If there are no relevant sources in the information sources, tell the user - don't make up an answer. Don't start the response with an affirmative like \"Sure\" or \"Certainly\". {{#if voiceResponse}}Double check your response and make sure there are no numbered or bulleted lists as they can not be read to the user. Plain text only.{{/if}}"},
             ]}),
@@ -75,13 +76,49 @@ Here are the information sources that were found:
             );
         }
 
+        let timeoutId;
+
+        // Convert chatHistory to single content for rest of the code
+        const multiModalChatHistory = JSON.parse(JSON.stringify(chatHistory));
+        convertToSingleContentChatHistory(chatHistory);       
+
+        // figure out what the user wants us to do
+        const contextInfo = args.chatHistory.filter(message => message.role === "user").slice(0, -1).map(message => message.content).join("\n");
+
+        let fillerResponses = [];
+        if (args.voiceResponse) {
+            const voiceFillerStrings = await callPathway('sys_generator_voice_filler', { ...args, contextInfo, stream: false });
+            try {
+            fillerResponses = JSON.parse(voiceFillerStrings);
+            } catch (e) {
+                console.error("Error parsing voice filler responses", e);
+            }
+            if (fillerResponses.length === 0) {
+                fillerResponses = ["Please wait a moment...", "I'm working on it...", "Just a bit longer..."];
+            }
+        }
+
+        let fillerIndex = 0;
+
+        const calculateFillerTimeout = (fillerIndex) => {
+            const baseTimeout = 6500;
+            const randomTimeout = Math.floor(Math.random() * Math.min((fillerIndex + 1) * 1000, 5000));
+            return baseTimeout + randomTimeout;
+        }
+
+        const sendFillerMessage = async () => {
+            if (args.voiceResponse && Array.isArray(fillerResponses) && fillerResponses.length > 0) {
+                const message = fillerResponses[fillerIndex % fillerResponses.length];
+                await say(resolver.rootRequestId, message, 1);
+                fillerIndex++;
+                // Set next timeout with random interval
+                timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
+            }
+        };
+
         try {
-            // Convert chatHistory to single content for rest of the code
-            const multiModalChatHistory = JSON.parse(JSON.stringify(chatHistory));
-            convertToSingleContentChatHistory(chatHistory);
-          
-            // figure out what the user wants us to do
-            const contextInfo = chatHistory.filter(message => message.role === "user").slice(0, -1).map(message => message.content).join("\n");
+            // Start the first timeout
+            timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
             
             // execute the router and default response in parallel
             const [helper] = await Promise.all([
@@ -90,7 +127,7 @@ Here are the information sources that were found:
 
             logger.debug(`Search helper response: ${helper}`);
             const parsedHelper = JSON.parse(helper);
-            const { searchAJA, searchAJE, searchWires, searchPersonal, searchBing, dateFilter, languageStr, titleOnly, resultsMessage } = parsedHelper;
+            const { searchAJA, searchAJE, searchWires, searchPersonal, searchBing, dateFilter, languageStr, titleOnly } = parsedHelper;
 
             // calculate whether we have room to do RAG in the current conversation context
             const baseSystemPrompt = pathwayResolver?.prompts[0]?.messages[0]?.content;
@@ -289,8 +326,17 @@ Here are the information sources that were found:
             let sources = searchResults.map(getSource).join(" \n\n ") || "No relevant sources found.";
             dateFilter && sources.trim() && (sources+=`\n\nThe above sources are date filtered accordingly.`);
 
-            await say(pathwayResolver.rootRequestId, resultsMessage || "Let me look through these results.", 10);
-            const result = await runAllPrompts({ ...args, searchStrings: `${helper}`, sources, chatHistory: multiModalChatHistory, language:languageStr });
+            let result;
+
+            result = await runAllPrompts({ ...args, searchStrings: `${helper}`, sources, chatHistory: multiModalChatHistory, language:languageStr, stream: false });
+            
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+
+            if (args.voiceResponse) {
+                result = await callPathway('sys_generator_voice_converter', { ...args, text: result, stream: false });
+            }
 
             if (!args.stream) {
                 const referencedSources = extractReferencedSources(result);
@@ -302,9 +348,13 @@ Here are the information sources that were found:
 
             return result;
         } catch (e) {
-            //pathwayResolver.logError(e);
             const result = await callPathway('sys_generator_error', { ...args, text: JSON.stringify(e), stream: false });
-            return args.stream ? "" : result;
+            return result;
+        } finally {
+            // Clean up timeout when done
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
         }
     }
 };

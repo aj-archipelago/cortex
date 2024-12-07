@@ -22,4 +22,5 @@ export default {
     model: 'oai-gpt4o',
     useInputChunking: false,
     temperature: 0,
+    enableDuplicateRequests: false
 };

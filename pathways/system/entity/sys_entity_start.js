@@ -40,7 +40,7 @@ export default {
     model: 'oai-gpt4o',
     anthropicModel: 'claude-35-sonnet-vertex',
     openAIModel: 'oai-gpt4o',
-    useSingleTokenStream: true,
+    useSingleTokenStream: false,
     inputParameters: {
         privateData: false,    
         chatHistory: [{role: '', content: []}],
@@ -88,9 +88,18 @@ export default {
             args.model = pathwayResolver.modelName;
         }
         
+        let ackResponse = null;
+        if (args.voiceResponse) {
+            ackResponse = await callPathway('sys_generator_ack', { ...args, stream: false }, pathwayResolver);
+            if (ackResponse) {
+                await say(pathwayResolver.requestId, ackResponse, 10);
+                args.chatHistory.push({ role: 'assistant', content: ackResponse });
+            }
+        }
+
         const fetchChatResponse = async (args, pathwayResolver) => {
             const [chatResponse, chatTitleResponse] = await Promise.all([
-                callPathway('sys_generator_quick', {...args, model: styleModel}, pathwayResolver),
+                callPathway('sys_generator_quick', {...args, model: styleModel }, pathwayResolver),
                 callPathway('chat_title', { ...args, stream: false}),
             ]);
 
@@ -104,7 +113,7 @@ export default {
         // start fetching the default response - we may need it later
         let fetchChatResponsePromise;
         if (!args.stream) {
-            fetchChatResponsePromise = fetchChatResponse({ ...args }, pathwayResolver);
+            fetchChatResponsePromise = fetchChatResponse({ ...args, ackResponse }, pathwayResolver);
         }
 
         const visionContentPresent = chatArgsHasImageUrl(args);
@@ -204,7 +213,9 @@ export default {
 
             if (toolCallbackMessage) {
                 if (args.stream) {
-                    await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
+                    if (!ackResponse) {
+                        await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
+                    }
                     pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
                     await callPathway('sys_entity_continue', { ...args, stream: true, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
                     return "";
@@ -222,15 +233,13 @@ export default {
                 }
             }
 
-            fetchChatResponsePromise = fetchChatResponsePromise || fetchChatResponse({ ...args }, pathwayResolver);
-            const chatResponse = await fetchChatResponsePromise;
-            pathwayResolver.tool = JSON.stringify({ search: false, title })
+            const chatResponse = await (fetchChatResponsePromise || fetchChatResponse({ ...args, ackResponse }, pathwayResolver));
+            pathwayResolver.tool = JSON.stringify({ search: false, title });
             return args.stream ? "" : chatResponse;
 
         } catch (e) {
             pathwayResolver.logError(e);
-            fetchChatResponsePromise = fetchChatResponsePromise || fetchChatResponse({ ...args }, pathwayResolver);
-            const chatResponse = await fetchChatResponsePromise;
+            const chatResponse = await (fetchChatResponsePromise || fetchChatResponse({ ...args, ackResponse }, pathwayResolver));
             pathwayResolver.tool = JSON.stringify({ search: false, title });
             return args.stream ? "" : chatResponse;
         }
