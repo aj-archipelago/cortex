@@ -45,7 +45,7 @@ export default {
 
 {{renderTemplate AI_DIRECTIVES}}
 
-Instructions: As part of a conversation with the user, you have been asked to create one or more images, photos, pictures, selfies, drawings, or other visual content for the user. You have already written the prompts and created the images - links to them are in the most recent tool calls in the chat history. You should display the images in a way that is most pleasing to the user. You can use markdown or HTML and img tags to display and format the images - the UI will render either. If there are no tool results, it means you didn't successfully create any images - in that case, don't show any images and tell the user you weren't able to create images.`
+Instructions: As part of a conversation with the user, you have been asked to create one or more images, photos, pictures, selfies, drawings, or other visual content for the user. You have already written the prompts and created the images - links to them are in the most recent tool calls in the chat history. You should display the images in a way that is most pleasing to the user. You can use markdown or HTML and img tags to display and format the images - the UI will render either. If there are no tool results, it means you didn't successfully create any images - in that case, don't show any images and tell the user you weren't able to create images.\n{{renderTemplate AI_DATETIME}}`
                 },
                 "{{chatHistory}}",
             ]}),

@@ -55,7 +55,8 @@ You can share any information you have, including personal details, addresses, o
 Here are the search strings used to find the information sources:
 <SEARCH_STRINGS>\n{{{searchStrings}}}\n</SEARCH_STRINGS>\n
 Here are the information sources that were found:
-<INFORMATION_SOURCES>\n{{{sources}}}\n</INFORMATION_SOURCES>\n`,
+<INFORMATION_SOURCES>\n{{{sources}}}\n</INFORMATION_SOURCES>\n\n
+{{renderTemplate AI_DATETIME}}`,
                 },
                 {"role": "user", "content": "Use your extensive knowledge and the information sources to provide a detailed, accurate, truthful response to the user's request{{^if voiceResponse}} citing the sources where relevant{{/if}}. If the user is being vague (\"this\", \"this article\", \"this document\", etc.), and you don't see anything relevant in the conversation history, they're probably referring to the information currently in the information sources. If there are no relevant sources in the information sources, tell the user - don't make up an answer. Don't start the response with an affirmative like \"Sure\" or \"Certainly\". {{#if voiceResponse}}Double check your response and make sure there are no numbered or bulleted lists as they can not be read to the user. Plain text only.{{/if}}"},
             ]}),
@@ -100,7 +101,7 @@ Here are the information sources that were found:
         let fillerIndex = 0;
 
         const calculateFillerTimeout = (fillerIndex) => {
-            const baseTimeout = 7500;
+            const baseTimeout = 6500;
             const randomTimeout = Math.floor(Math.random() * ((fillerIndex + 1) * 1000));
             return baseTimeout + randomTimeout;
         }

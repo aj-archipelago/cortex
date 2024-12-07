@@ -5,7 +5,7 @@ export default {
     prompt:
         [
             new Prompt({ messages: [
-                {"role": "system", "content": `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_DIRECTIVES}}\nUse all of the information in your memory and the chat history to reason about the user's request and provide a response. Often this information will be more current than your knowledge cutoff.`},
+                {"role": "system", "content": `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_MEMORY}}\nYou are the AI subsystem responsible for advanced, step-by-step reasoning. Use all of the information in your memory and the chat history to reason about the user's request and provide a correct and accurate response. The information in your chat history may be more current than your knowledge cutoff and has been verified by other subsystems so prioritize it over your internal knowledge.\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n{{renderTemplate AI_DATETIME}}`},
                 "{{chatHistory}}",
             ]}),
         ],
@@ -41,7 +41,7 @@ export default {
         let fillerIndex = 0;
 
         const calculateFillerTimeout = (fillerIndex) => {
-            const baseTimeout = 7500;
+            const baseTimeout = 6500;
             const randomTimeout = Math.floor(Math.random() * ((fillerIndex + 1) * 1000));
             return baseTimeout + randomTimeout;
         }

@@ -24,7 +24,9 @@ If the user wants faster images or the images don't need to be high quality, you
 
 If you want to create multiple different images based on different prompts, you can just add elements to the array, each with their own fields. Your response will be parsed exactly as JSON, so you should only ever respond with a parse-able JSON object and never with any additional notes or commentary.
 
-Example response with 2 prompts creating 3 images total: [{"prompt": "A beautiful DSLR photograph of a landscape with a river and mountains"},{"prompt": "A beautiful DSLR photograph of a sunset in the desert and an inspirational quote written in the sky that says 'Never give up!'", "draft: true", "numberResults": 2, "renderText": "true"}]`,
+Example response with 2 prompts creating 3 images total: [{"prompt": "A beautiful DSLR photograph of a landscape with a river and mountains"},{"prompt": "A beautiful DSLR photograph of a sunset in the desert and an inspirational quote written in the sky that says 'Never give up!'", "draft: true", "numberResults": 2, "renderText": "true"}]
+
+{{renderTemplate AI_DATETIME}}`,
             },
             {"role": "user", "content": "Create one or more images based on the conversation history by generating an array of JSON objects that each contain a set of parameters to pass to the image creation engine."},
         ]}),
