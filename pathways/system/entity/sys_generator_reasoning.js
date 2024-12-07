@@ -39,7 +39,7 @@ export default {
 
         const calculateFillerTimeout = (fillerIndex) => {
             const baseTimeout = 6500;
-            const randomTimeout = Math.floor(Math.random() * ((fillerIndex + 1) * 1000));
+            const randomTimeout = Math.floor(Math.random() * Math.min((fillerIndex + 1) * 1000, 5000));
             return baseTimeout + randomTimeout;
         }
 
