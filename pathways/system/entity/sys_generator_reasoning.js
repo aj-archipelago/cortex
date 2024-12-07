@@ -22,12 +22,9 @@ export default {
     executePathway: async ({args, runAllPrompts, resolver}) => {
         let timeoutId;
 
-        // figure out what the user wants us to do
-        const contextInfo = args.chatHistory.filter(message => message.role === "user").slice(0, -1).map(message => message.content).join("\n");
-
         let fillerResponses = [];
         if (args.voiceResponse) {
-            const voiceFillerStrings = await callPathway('sys_generator_voice_filler', { ...args, contextInfo, stream: false });
+            const voiceFillerStrings = await callPathway('sys_generator_voice_filler', { ...args, stream: false });
             try {
             fillerResponses = JSON.parse(voiceFillerStrings);
             } catch (e) {

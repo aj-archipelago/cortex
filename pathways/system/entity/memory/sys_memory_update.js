@@ -33,7 +33,7 @@ const modifyText = (text, modifications) => {
     return modifiedText;
 };
 
-const enforceTokenLimit = (text, maxTokens = 15000, isTopicsSection = false) => {
+const enforceTokenLimit = (text, maxTokens = 5000, isTopicsSection = false) => {
     if (!text) return text;
     
     const lines = text.split('\n')
@@ -99,7 +99,7 @@ export default {
                 messages: [
                     {
                         "role": "system",
-                        "content": "You are part of an AI entity named {{{aiName}}}. Your memory contains separate sections for categorizing information about directives, self, user, and topics. You must keep relevant information in the appropriate section so there is no overlap or confusion. {{{sectionPrompt}}}\n- Keep memory items in a clear, simple format that is easy for you to parse.\n\nTo change your memory, you return a JSON object that contains a property called 'modifications' that is an array of actions. The two types of actions available are 'add', and 'delete'. Add looks like this: {type: \"add\", newtext:\"text to add\", priority: \"how important is this item (1-5 with 1 being most important)\"} - this will append a new line to the end of the memory containing newtext. Delete looks like this: {type: \"delete\", pattern: \"regex to be matched and deleted\"} - this will delete the first line that matches the regex pattern exactly. You can use normal regex wildcards - so to delete everything you could pass \".*$\" as the pattern. If you have no changes, just return an empty array in 'modifications'. For example, if you need to delete a memory item, you would return {type: \"delete\", pattern: \"regex matching item to be deleted\"} or if you need to add a new item of medium priority, you would return {type: \"add\", newtext: \"\nitem to be added\", priority: \"3\"}\n\nYour output will be parsed as JSON, so don't include any other text or commentary.\nThe current date/time is {{now}}."
+                        "content": "You are part of an AI entity named {{{aiName}}}. Your memory contains separate sections for categorizing information about directives, self, user, and topics. You must keep relevant information in the appropriate section so there is no overlap or confusion. {{{sectionPrompt}}}\n-Be very selective about what you choose to store - memory is a very precious resource\n- Keep memory items in a clear, simple format that is easy for you to parse.\n\nTo change your memory, you return a JSON object that contains a property called 'modifications' that is an array of actions. The two types of actions available are 'add', and 'delete'. Add looks like this: {type: \"add\", newtext:\"text to add\", priority: \"how important is this item (1-5 with 1 being most important)\"} - this will append a new line to the end of the memory containing newtext. Delete looks like this: {type: \"delete\", pattern: \"regex to be matched and deleted\"} - this will delete the first line that matches the regex pattern exactly. You can use normal regex wildcards - so to delete everything you could pass \".*$\" as the pattern. If you have no changes, just return an empty array in 'modifications'. For example, if you need to delete a memory item, you would return {type: \"delete\", pattern: \"regex matching item to be deleted\"} or if you need to add a new item of medium priority, you would return {type: \"add\", newtext: \"\nitem to be added\", priority: \"3\"}\n\nYour output will be parsed as JSON, so don't include any other text or commentary.\nThe current date/time is {{now}}."
                     },
                     {
                         "role": "user", 
@@ -148,8 +148,8 @@ Follow these guidelines:
    - Specific enough for effective application
 
 3. Be selective:
-   - Store only important, actionable directives and behaviors
-   - Delete trivial or repetitive instructions
+   - Store only critical, actionable directives and behaviors
+   - Delete trivial directives or repetitive directives
 
 4. Avoid duplicates:
    - Do not add duplicate directives
@@ -185,7 +185,7 @@ Follow these guidelines:
             const { modifications} = JSON.parse(result);
             if (modifications.length > 0) {
                 sectionMemory = modifyText(sectionMemory, modifications);
-                sectionMemory = enforceTokenLimit(sectionMemory, 15000, args.section === 'memoryTopics');
+                sectionMemory = enforceTokenLimit(sectionMemory, 5000, args.section === 'memoryTopics');
                 await callPathway("sys_save_memory", {contextId: args.contextId, section: args.section, aiMemory: sectionMemory});
             }
             return sectionMemory;

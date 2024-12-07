@@ -10,7 +10,6 @@ export default {
         ],
     inputParameters: {
         chatHistory: [{role: '', content: []}],
-        contextInfo: ``,
         contextId: ``,
         aiName: "Jarvis",
         language: "English",
