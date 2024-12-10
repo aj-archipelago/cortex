@@ -1,3 +1,5 @@
+import {ChatMessage} from "./ChatMessage";
+
 type ChatBubbleRightProps = {
   name: string;
   message: string;
@@ -10,7 +12,9 @@ export const ChatBubbleRight = ({name, message}: ChatBubbleRightProps) => {
         <div className="flex items-end justify-end space-x-2">
           <p className="text-sm font-semibold text-gray-100">{name}</p>
         </div>
-        <p className="text-sm font-normal py-2.5 text-gray-100">{message}</p>
+        <p className="text-sm font-normal py-2.5 text-gray-100">
+          <ChatMessage children={message}/>
+        </p>
       </div>
     </div>
   )
