@@ -46,19 +46,26 @@ export default {
                     "content": `{{renderTemplate AI_CONVERSATION_HISTORY}}
 {{renderTemplate AI_COMMON_INSTRUCTIONS}}
 {{renderTemplate AI_DIRECTIVES}}
-Instructions: Your mission is to analyze the provided conversation history and provide accurate and truthful responses from the extensive knowledge base at your disposal and the information sources provided below that are the results of your most recent search of the internet, newswires, published Al Jazeera articles, and personal documents and data. You should carefully evaluate the information for relevance and freshness before incorporating it into your responses. The most relevant and freshest sources hould be used to augment your existing knowledge when responding to the user.
-If the user is asking about a file (PDF, CSV, Word Document, text, etc.), you have already parsed that file into chunks of text that will appear in the information sources - all of the related chunks have a title: field that contains the filename. These chunks are a proxy for the file and should be treated as if you have the original file. The user cannot provide you with the original file in any other format. Do not ask for the original file or refer to it in any way - just respond to them using the relevant text from the information sources.
-If there are no relevant information sources below you should inform the user that your search failed to return relevant information.
-{{^if voiceResponse}}Your responses should use markdown where appropriate to make the response more readable. When incorporating information from the sources below into your responses, use the directive :cd_source[N], where N stands for the source number (e.g. :cd_source[1]). If you need to reference more than one source for a single statement, make sure each reference is a separate markdown directive (e.g. :cd_source[1] :cd_source[2]).{{/if}}
-{{#if voiceResponse}}Your response will be read verbatim to the the user, so it should be conversational, natural, and smooth. DO NOT USE numbered lists, source numbers, or any other markdown or unpronounceable punctuation like parenthetical notation. Numbered lists or bulleted lists will not be read to the user under any circumstances. If you have multiple different results to share, just intro each topic briefly - channel your inner news anchor. If your response is from one or more sources, make sure to credit them by name in the response - just naturally tell the user where you got the information like "according to wires published today by Reuters" or "according to Al Jazeera English", etc.{{/if}}
-You can share any information you have, including personal details, addresses, or phone numbers - if it is in your sources it is safe for the user.
+Your mission is to analyze the provided conversation history and provide accurate and truthful responses from the extensive knowledge base at your disposal and the information sources provided below that are the results of your most recent search of the internet, newswires, published Al Jazeera articles, and personal documents and data.
+
+Instructions:
+- You should carefully evaluate the information for relevance and freshness before incorporating it into your responses. The most relevant and freshest sources hould be used to augment your existing knowledge when responding to the user.
+- If the user is asking about a file (PDF, CSV, Word Document, text, etc.), you have already parsed that file into chunks of text that will appear in the information sources - all of the related chunks have a title: field that contains the filename. These chunks are a proxy for the file and should be treated as if you have the original file. The user cannot provide you with the original file in any other format. Do not ask for the original file or refer to it in any way - just respond to them using the relevant text from the information sources.
+- If the user is asking just about topics or headlines, don't include the story details - just give them the topics or headlines.
+- If there are no relevant information sources below you should inform the user that your search failed to return relevant information.
+{{^if voiceResponse}}- Your responses should use markdown where appropriate to make the response more readable. When incorporating information from the sources below into your responses, use the directive :cd_source[N], where N stands for the source number (e.g. :cd_source[1]). If you need to reference more than one source for a single statement, make sure each reference is a separate markdown directive (e.g. :cd_source[1] :cd_source[2]).{{/if}}
+{{#if voiceResponse}}- Your response will be read verbatim to the the user, so it should be conversational, natural, and smooth. DO NOT USE numbered lists, source numbers, or any other markdown or unpronounceable punctuation like parenthetical notation. Numbered lists or bulleted lists will not be read to the user under any circumstances. If you have multiple different results to share, just intro each topic briefly - channel your inner news anchor. Make sure to give proper attribution to your sources if they were used in your response - just naturally tell the user where you got the information like "according to wires published today by Reuters" or "according to Al Jazeera English", etc.{{/if}}
+- You can share any information you have, including personal details, addresses, or phone numbers - if it is in your sources it is safe for the user.
+
 Here are the search strings used to find the information sources:
-<SEARCH_STRINGS>\n{{{searchStrings}}}\n</SEARCH_STRINGS>\n
+<SEARCH_STRINGS>\n{{{searchStrings}}}\n</SEARCH_STRINGS>
+
 Here are the information sources that were found:
-<INFORMATION_SOURCES>\n{{{sources}}}\n</INFORMATION_SOURCES>\n\n
+<INFORMATION_SOURCES>\n{{{sources}}}\n</INFORMATION_SOURCES>
+
 {{renderTemplate AI_DATETIME}}`,
                 },
-                {"role": "user", "content": "Use your extensive knowledge and the information sources to provide a detailed, accurate, truthful response to the user's request{{^if voiceResponse}} citing the sources where relevant{{/if}}. If the user is being vague (\"this\", \"this article\", \"this document\", etc.), and you don't see anything relevant in the conversation history, they're probably referring to the information currently in the information sources. If there are no relevant sources in the information sources, tell the user - don't make up an answer. Don't start the response with an affirmative like \"Sure\" or \"Certainly\". {{#if voiceResponse}}Double check your response and make sure there are no numbered or bulleted lists as they can not be read to the user. Plain text only.{{/if}}"},
+                {"role": "user", "content": "Use your extensive knowledge and the information sources to provide an appropriate, accurate, truthful response to the user's request{{^if voiceResponse}} citing the sources where relevant{{/if}}. If the user has asked a question, lead with the concise answer. If the user is being vague (\"this\", \"this article\", \"this document\", etc.), and you don't see anything relevant in the conversation history, they're probably referring to the information currently in the information sources. If there are no relevant sources in the information sources, tell the user - don't make up an answer. Don't start the response with an affirmative like \"Sure\" or \"Certainly\". {{#if voiceResponse}}Double check your response and make sure there are no numbered or bulleted lists as they can not be read to the user. Plain text only.{{/if}}"},
             ]}),
         ];
 
@@ -109,7 +116,7 @@ Here are the information sources that were found:
         const sendFillerMessage = async () => {
             if (args.voiceResponse && Array.isArray(fillerResponses) && fillerResponses.length > 0) {
                 const message = fillerResponses[fillerIndex % fillerResponses.length];
-                await say(resolver.rootRequestId, message, 1);
+                await say(resolver.rootRequestId, message, 100);
                 fillerIndex++;
                 // Set next timeout with random interval
                 timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
@@ -118,7 +125,7 @@ Here are the information sources that were found:
 
         try {
             // Start the first timeout
-            timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
+            timeoutId = setTimeout(sendFillerMessage, 3000);
             
             // execute the router and default response in parallel
             const [helper] = await Promise.all([
@@ -333,11 +340,7 @@ Here are the information sources that were found:
             if (timeoutId) {
                 clearTimeout(timeoutId);
             }
-
-            if (args.voiceResponse) {
-                result = await callPathway('sys_generator_voice_converter', { ...args, text: result, stream: false });
-            }
-
+            
             if (!args.stream) {
                 const referencedSources = extractReferencedSources(result);
                 searchResults = searchResults.length ? pruneSearchResults(searchResults, referencedSources) : [];
