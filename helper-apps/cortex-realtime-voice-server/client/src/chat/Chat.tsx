@@ -73,6 +73,19 @@ export default function Chat({userId, userName, aiName}: ChatProps) {
         socket.emit('cancelResponse');
       }
     });
+    socket.on('imageCreated', (imageUrl) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: imageUrl,
+          isSelf: false,
+          name: aiName,
+          message: imageUrl,
+          isImage: true,
+          timestamp: Date.now(),
+        }
+      ]);
+    });
     socket.on('conversationUpdated', (item, delta) => {
       if (delta?.audio) {
         const audio = base64ToArrayBuffer(delta.audio);
@@ -108,7 +121,7 @@ export default function Chat({userId, userName, aiName}: ChatProps) {
               {
                 id: item.id,
                 isSelf: item.role === 'user',
-                name: item.role === 'user' ? 'You' : 'News AI',
+                name: item.role === 'user' ? userName : aiName,
                 message: '',
                 isImage: false,
                 timestamp: Date.now(),

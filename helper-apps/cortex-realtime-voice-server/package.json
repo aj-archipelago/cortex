@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "bun --watch run index.ts",
     "start": "bun run index.ts",
+    "start.test": "NODE_ENV=test bun run index.ts",
+    "start.prod": "NODE_ENV=production bun run index.ts",
     "postinstall": "cd client; bun install; cd .."
   },
   "dependencies": {

@@ -12,6 +12,7 @@ export interface ServerToClientEvents {
   ready: () => void;
   conversationUpdated: (item: RealtimeItem, delta: DeltaType) => void;
   conversationInterrupted: () => void;
+  imageCreated: (imageUrl: string) => void;
 }
 
 export interface ClientToServerEvents {

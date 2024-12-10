@@ -29,14 +29,18 @@ export type ChatMessage = { role: string, content: string }
 export type DataSource = "mydata" | "aja" | "aje" | "wires" | "bing"
 export type MemorySection = "memorySelf" | "memoryUser" | "memoryTopics" | "memoryDirectives"
 export type CortextVariables = {
-  contextId: string,
-  aiName: string,
+  contextId?: string,
+  aiName?: string,
   chatHistory?: ChatMessage[],
   text?: string,
   useMemory?: boolean,
   language?: string,
   dataSources?: DataSource[];
   section?: MemorySection;
+  width?: number;
+  height?: number;
+  size?: string;
+  style?: string;
 }
 
 export async function getCortexResponse(

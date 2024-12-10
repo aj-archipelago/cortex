@@ -5,7 +5,7 @@ import type {RealtimeVoiceClient} from "./realtime/client";
 import type {ClientToServerEvents, ServerToClientEvents} from "./realtime/socket";
 import {search} from "./cortex/search";
 import {expert} from "./cortex/expert";
-import {image} from "./cortex/image";
+import {image_replicate} from "./cortex/image";
 import {vision} from "./cortex/vision";
 import {reason} from "./cortex/reason";
 
@@ -84,16 +84,28 @@ export class Tools {
       },
       {
         type: 'function',
-        name: 'Code',
-        description: 'Engage for any programming-related tasks, including creating, modifying, reviewing, or explaining code. Use for general coding discussions or when specific programming expertise is needed.',
+        name: 'Reason',
+        description: 'Employ for reasoning, scientific analysis, evaluating evidence, strategic planning, problem-solving, logic puzzles, mathematical calculations, or any questions that require careful thought or complex choices. Also use when deep, step-by-step reasoning is required.',
         parameters: {
           type: "object",
           properties: {
-            codingPrompt: {type: "string"}
+            reasonPrompt: {type: "string"}
           },
-          required: ["codingPrompt"]
+          required: ["reasonPrompt"]
         },
       },
+      // {
+      //   type: 'function',
+      //   name: 'Code',
+      //   description: 'Engage for any programming-related tasks, including creating, modifying, reviewing, or explaining code. Use for general coding discussions or when specific programming expertise is needed.',
+      //   parameters: {
+      //     type: "object",
+      //     properties: {
+      //       codingPrompt: {type: "string"}
+      //     },
+      //     required: ["codingPrompt"]
+      //   },
+      // },
       // {
       //   type: 'function',
       //   name: 'CodeExecution',
@@ -106,54 +118,42 @@ export class Tools {
       //     required: ["codeExecutionPrompt"]
       //   },
       // },
-      {
-        type: 'function',
-        name: 'Reason',
-        description: 'Employ for reasoning, scientific analysis, evaluating evidence, strategic planning, problem-solving, logic puzzles, mathematical calculations, or any questions that require careful thought or complex choices. Also use when deep, step-by-step reasoning is required.',
-        parameters: {
-          type: "object",
-          properties: {
-            reasonPrompt: {type: "string"}
-          },
-          required: ["reasonPrompt"]
-        },
-      },
-      {
-        type: 'function',
-        name: 'PDF',
-        description: 'Use specifically for processing and answering questions about PDF file content.',
-        parameters: {
-          type: "object",
-          properties: {
-            query: {type: "string"}
-          },
-          required: ["query"]
-        },
-      },
-      {
-        type: 'function',
-        name: 'Vision',
-        description: 'Engage for analyzing and responding to queries about image files (jpg, gif, bmp, png, etc).',
-        parameters: {
-          type: "object",
-          properties: {
-            query: {type: "string"}
-          },
-          required: ["query"]
-        },
-      },
-      {
-        type: 'function',
-        name: 'Video',
-        description: 'Use for processing and answering questions about video or audio file content.',
-        parameters: {
-          type: "object",
-          properties: {
-            query: {type: "string"}
-          },
-          required: ["query"]
-        },
-      }
+      // {
+      //   type: 'function',
+      //   name: 'PDF',
+      //   description: 'Use specifically for processing and answering questions about PDF file content.',
+      //   parameters: {
+      //     type: "object",
+      //     properties: {
+      //       query: {type: "string"}
+      //     },
+      //     required: ["query"]
+      //   },
+      // },
+      // {
+      //   type: 'function',
+      //   name: 'Vision',
+      //   description: 'Engage for analyzing and responding to queries about image files (jpg, gif, bmp, png, etc).',
+      //   parameters: {
+      //     type: "object",
+      //     properties: {
+      //       query: {type: "string"}
+      //     },
+      //     required: ["query"]
+      //   },
+      // },
+      // {
+      //   type: 'function',
+      //   name: 'Video',
+      //   description: 'Use for processing and answering questions about video or audio file content.',
+      //   parameters: {
+      //     type: "object",
+      //     properties: {
+      //       query: {type: "string"}
+      //     },
+      //     required: ["query"]
+      //   },
+      // }
     ];
   }
 
@@ -176,6 +176,7 @@ export class Tools {
       throw new Error(`Call with id ${call_id} not found`);
     }
     const cortexHistory = this.getCortextHistory();
+    console.log('Cortex history', cortexHistory);
     let response;
     switch (call.name.toLowerCase()) {
       case 'search':
@@ -200,12 +201,12 @@ export class Tools {
         break;
 
       case 'image':
-        response = await image(
-          contextId,
-          aiName,
-          cortexHistory,
-          JSON.stringify({query: args})
-        );
+        const argsObject = JSON.parse(args);
+        response = await image_replicate(contextId, argsObject.imageCreationPrompt, 1024, 1024);
+        const imageData = JSON.parse(response.result);
+        if (imageData && imageData.output) {
+          this.socket.emit('imageCreated', imageData.output);
+        }
         break;
 
       case 'pdf':
@@ -236,7 +237,7 @@ export class Tools {
       id: createId(),
       type: 'function_call_output',
       call_id: call.call_id,
-      output: JSON.stringify(response.result),
+      output: response.result,
     });
     this.realtimeClient.createResponse({});
 
