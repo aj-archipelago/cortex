@@ -13,7 +13,7 @@ export const ChatBubbleRight = ({name, message}: ChatBubbleRightProps) => {
           <p className="text-sm font-semibold text-gray-100">{name}</p>
         </div>
         <p className="text-sm font-normal py-2.5 text-gray-100">
-          <ChatMessage children={message}/>
+          <ChatMessage message={message}/>
         </p>
       </div>
     </div>
