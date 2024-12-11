@@ -44,7 +44,7 @@ export default function Chat({userId, userName, aiName}: ChatProps) {
   }, []);
 
   const startConversation = useCallback(() => {
-    console.log('Starting conversation', process.env.NEXT_PUBLIC_SOCKET_URL);
+    console.log('Starting conversation');
     const socket = socketRef.current;
     const wavStreamPlayer = wavStreamPlayerRef.current;
     const wavRecorder = wavRecorderRef.current;
@@ -134,11 +134,11 @@ export default function Chat({userId, userName, aiName}: ChatProps) {
 
     wavRecorder.begin(null).then(() => {
       wavStreamPlayer.connect().then(() => {
-        console.log('Conversation started, connecting to socket:', process.env.NEXT_PUBLIC_SOCKET_URL);
+        console.log('Conversation started, connecting to socket');
         socket.connect();
       });
     });
-  }, [stopConversation]);
+  }, [aiName, stopConversation, userName]);
 
   const postMessage = useCallback(async (message: string) => {
     if (socketRef.current?.connected) {
