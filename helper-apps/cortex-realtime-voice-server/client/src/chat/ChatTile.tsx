@@ -36,7 +36,6 @@ export const ChatTile = ({messages, onSend, onStartStop}: ChatTileProps) => {
           height: size.height,
         }}
       >
-        <h1 className='text-xl font-bold text-center text-white p-3 bg-black'>Chat</h1>
         <div
           ref={containerRef}
           className="h-full overflow-y-auto grow"
