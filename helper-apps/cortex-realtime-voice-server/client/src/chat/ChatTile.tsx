@@ -43,14 +43,18 @@ export const ChatTile = ({messages, onSend, onStartStop}: ChatTileProps) => {
           {messages.map((message, index) => {
             if (message.isImage) {
               return (
-                <img
-                  className="flex ml-3 w-[256] h-[256]"
-                  width={512}
-                  height={512}
-                  key={index}
-                  src={message.message}
-                  alt={message.name}
-                />);
+                <div className="flex flex-row justify-center items-center">
+                  <a target="_blank" rel="noreferrer" href={message.message}>
+                    <img
+                      width={256}
+                      height={256}
+                      key={index}
+                      src={message.message}
+                      alt={message.name}
+                    />
+                  </a>
+                </div>
+              );
             }
             return (
               <ChatBubble
