@@ -1,4 +1,4 @@
-import { RealtimeItem } from './realtimeTypes.ts';
+import { RealtimeItem } from './realtimeTypes';
 
 export class Transcription {
   private readonly items: Record<string, { realtimeItem: RealtimeItem, previousItemId: string }>;
@@ -30,7 +30,7 @@ export class Transcription {
 
   public updateItem(itemId: string, realtimeItem: RealtimeItem): void {
     const newItem = this.getItemCopy(realtimeItem);
-    if (newItem.role === 'assistant') {
+    if (newItem.role === 'assistant' && newItem.content) {
       newItem.content = newItem.content.map((contentPart) => {
         if (contentPart.type === 'audio') {
           return { type: 'text', text: contentPart.transcript || '' };

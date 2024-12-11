@@ -241,14 +241,16 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
     if (!this.isConnected) {
       throw new Error('Not connected');
     }
-    this.ws?.send(JSON.stringify({
+    const message = JSON.stringify({
       event_id: createId(),
       type: 'session.update',
       session: {
         ...this.sessionConfig,
         ...sessionConfig,
       },
-    }));
+    });
+    // console.log('Sending update session message:', message);
+    this.ws?.send(message);
   }
 
   appendInputAudio(base64AudioBuffer: string) {
@@ -360,6 +362,7 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
     delete sessionCopy['object'];
     delete sessionCopy['model'];
     delete sessionCopy['expires_at'];
+    delete sessionCopy['client_secret'];
     this.sessionConfig = sessionCopy;
   }
 

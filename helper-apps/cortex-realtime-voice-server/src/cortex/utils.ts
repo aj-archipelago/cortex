@@ -63,6 +63,6 @@ export async function getCortexResponse(
   }
 
   const responseObject = await res.json();
-  console.log('cortext response', responseObject);
+  // console.log('cortext response', responseObject);
   return responseObject.data;
 }
