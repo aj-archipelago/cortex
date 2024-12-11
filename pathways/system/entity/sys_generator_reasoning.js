@@ -55,7 +55,7 @@ export default {
 
         try {
             // Start the first timeout
-            timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
+            timeoutId = setTimeout(sendFillerMessage, 3000);
 
             let result = await runAllPrompts({ ...args, stream: false });
             if (timeoutId) {

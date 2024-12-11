@@ -33,7 +33,7 @@ const modifyText = (text, modifications) => {
     return modifiedText;
 };
 
-export const enforceTokenLimit = (text, maxTokens = 5000, isTopicsSection = false) => {
+export const enforceTokenLimit = (text, maxTokens = 1000, isTopicsSection = false) => {
     if (!text) return text;
     
     const lines = text.split('\n')
@@ -185,7 +185,7 @@ Follow these guidelines:
             const { modifications} = JSON.parse(result);
             if (modifications.length > 0) {
                 sectionMemory = modifyText(sectionMemory, modifications);
-                sectionMemory = enforceTokenLimit(sectionMemory, 5000, args.section === 'memoryTopics');
+                sectionMemory = enforceTokenLimit(sectionMemory, 1000, args.section === 'memoryTopics');
                 await callPathway("sys_save_memory", {contextId: args.contextId, section: args.section, aiMemory: sectionMemory});
             }
             return sectionMemory;
