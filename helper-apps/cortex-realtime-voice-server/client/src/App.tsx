@@ -1,21 +1,28 @@
-import React, {useEffect} from 'react';
+import {useEffect, useState} from 'react';
+import ClipLoader from "react-spinners/ClipLoader";
 import Chat from "./chat/Chat";
 import {SettingsModal} from "./SettingsModal";
 
 function App() {
-  const [userName, setUserName] = React.useState('ME');
-  const [userId, setUserId] = React.useState('123-456-789');
-  const [aiName, setAiName] = React.useState('Jarvis');
-  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [loading, setLoading] = useState(true);
+  const [userName, setUserName] = useState('');
+  const [userId, setUserId] = useState('');
+  const [aiName, setAiName] = useState('Jarvis');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const onCloseSettings = () => setSettingsOpen(false);
-  const onSaveSettings = (userName: string, userId: string, aiName: string) => {
-    console.log('Saving settings', userName, userId, aiName);
-    setUserName(userName);
-    localStorage.setItem('userName', userName);
-    setUserId(userId);
-    localStorage.setItem('userId', userId);
-    setAiName(aiName);
-    localStorage.setItem('aiName', aiName);
+  const onSaveSettings = (name: string, id: string, ai: string) => {
+    console.log('Saving settings', name, id, ai);
+    setUserName(name);
+    localStorage.setItem('userName', name);
+
+    let newUserId = id;
+    if (!newUserId || newUserId.length === 0) {
+      newUserId = Math.random().toString(36).substring(7);
+    }
+    setUserId(newUserId);
+    localStorage.setItem('userId', newUserId);
+    setAiName(ai);
+    localStorage.setItem('aiName', ai);
   };
 
   useEffect(() => {
@@ -37,14 +44,31 @@ function App() {
     } else {
       setSettingsOpen(true);
     }
+    setLoading(false);
   }, []);
+
+  if (loading) {
+    return (
+      <div className="bg-white dark:bg-slate-800 dark:text-white min-w-72 flex justify-center items-center">
+        <ClipLoader color={'#00FF'} loading={true} size={150}/>
+      </div>
+    );
+  }
+
 
   return (
     <div className="bg-white dark:bg-slate-800 dark:text-white min-w-72">
       <h1 className='text-xl font-bold text-center text-white p-3 bg-black'>AI Chat</h1>
       <div className="flex justify-end text-2xl m-4 -mt-11" onClick={() => setSettingsOpen(true)}>⚙️</div>
-      <Chat userId={userId} userName={userName} aiName={aiName}/>
-      <SettingsModal isOpen={settingsOpen} onClose={onCloseSettings} onSave={onSaveSettings}/>
+      {userName && userName.length > 0 && (
+        <Chat userId={userId} userName={userName} aiName={aiName}/>
+      )}
+      <SettingsModal aiName={aiName}
+                     userName={userName}
+                     userId={userId}
+                     isOpen={settingsOpen}
+                     onClose={onCloseSettings}
+                     onSave={onSaveSettings}/>
     </div>
   );
 }

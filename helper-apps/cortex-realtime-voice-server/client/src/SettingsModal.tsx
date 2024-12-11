@@ -1,20 +1,25 @@
-import React, {ChangeEvent, FormEvent, useState} from 'react';
+import {ChangeEvent, FormEvent, useState} from 'react';
 
 type SettingsModalProps = {
+  aiName: string;
+  userName: string;
+  userId: string;
   isOpen: boolean;
   onClose: () => void;
   onSave: (userName: string, userId: string, aiName: string) => void;
 }
 
-export const SettingsModal = ({ isOpen, onClose, onSave }: SettingsModalProps)=> {
+export const SettingsModal = (
+  {aiName, userName, userId, isOpen, onClose, onSave}: SettingsModalProps
+) => {
   const [formData, setFormData] = useState({
-    aiName: 'Jenny',
-    userName: 'Paul',
-    userId: 'fake',
+    aiName,
+    userName,
+    userId,
   });
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    setFormData({...formData, [e.target.name]: e.target.value});
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -32,7 +37,8 @@ export const SettingsModal = ({ isOpen, onClose, onSave }: SettingsModalProps)=>
 
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
 
-        <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+        <div
+          className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
           <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
             <form onSubmit={handleSubmit} className="p-2 min-w-72">
               <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="userName">
