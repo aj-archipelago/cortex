@@ -1,4 +1,5 @@
 import {ChangeEvent, FormEvent, useState} from 'react';
+import type { Voice, OpenAIVoice, AzureVoice } from '../../src/realtime/realtimeTypes';
 
 type SettingsModalProps = {
   aiName: string;
@@ -6,73 +7,196 @@ type SettingsModalProps = {
   userId: string;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (userName: string, userId: string, aiName: string) => void;
+  onSave: (settings: SettingsData) => void;
 }
+
+export type SettingsData = {
+  userName: string;
+  userId: string;
+  aiName: string;
+  language: string;
+  aiMemorySelfModify: boolean;
+  aiStyle: string;
+  voice: Voice;
+}
+
+// Define voice lists
+const openaiVoices: OpenAIVoice[] = ['alloy', 'echo', 'shimmer', 'ash', 'ballad', 'coral', 'sage', 'verse'];
+const azureVoices: AzureVoice[] = ['amuch', 'dan', 'elan', 'marilyn', 'meadow', 'breeze', 'cove', 'ember', 'jupiter', 'alloy', 'echo', 'shimmer'];
+
+// Check if we're using Azure based on the environment variable
+const isAzure = process.env.REACT_APP_VOICE_PROVIDER === 'azure';
 
 export const SettingsModal = (
   {aiName, userName, userId, isOpen, onClose, onSave}: SettingsModalProps
 ) => {
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<SettingsData>({
     aiName,
     userName,
     userId,
+    language: 'en',
+    aiMemorySelfModify: false,
+    aiStyle: 'Anthropic',
+    voice: 'alloy'
   });
 
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setFormData({...formData, [e.target.name]: e.target.value});
+  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
+    setFormData({
+      ...formData,
+      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
+    });
   };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    onSave(formData.userName, formData.userId, formData.aiName);
+    onSave(formData);
     onClose();
   };
 
   return (
-    <div className={`fixed inset-0 z-10 overflow-y-auto ${isOpen ? 'block' : 'hidden'}`}>
-      <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-        <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-          <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-        </div>
+    <div className={`fixed inset-0 z-50 overflow-y-auto ${isOpen ? 'block' : 'hidden'}`}>
+      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+        <div className="fixed inset-0 transition-opacity bg-gray-900 bg-opacity-75 backdrop-blur-sm" aria-hidden="true" />
 
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
 
-        <div
-          className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-          <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-            <form onSubmit={handleSubmit} className="p-2 min-w-72">
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="userName">
+        <div className="inline-block w-full max-w-md p-6 my-8 overflow-hidden text-left align-middle transition-all transform bg-gray-800 border border-gray-700/50 rounded-2xl shadow-2xl sm:align-middle">
+          <h3 className="text-lg font-medium leading-6 text-gray-100 mb-4">
+            System Configuration
+          </h3>
+          
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
                 Your Name
               </label>
-              <input type="text"
-                     name="userName"
-                     className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                     value={formData.userName}
-                     onChange={handleChange}/>
-              <label className="block text-gray-700 text-sm font-bold my-2" htmlFor="aiName">
+              <input
+                type="text"
+                name="userName"
+                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                value={formData.userName}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
                 AI Name
               </label>
-              <input type="text"
-                     name="aiName"
-                     className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                     value={formData.aiName}
-                     onChange={handleChange}/>
-              <label className="block text-gray-700 text-sm font-bold my-2" htmlFor="userId">
+              <input
+                type="text"
+                name="aiName"
+                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                value={formData.aiName}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Voice
+              </label>
+              <select
+                name="voice"
+                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                value={formData.voice}
+                onChange={handleChange}
+              >
+                {isAzure ? (
+                  <optgroup label="Azure Voices">
+                    {azureVoices.map(voice => (
+                      <option key={voice} value={voice}>
+                        {voice.charAt(0).toUpperCase() + voice.slice(1)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : (
+                  <optgroup label="OpenAI Voices">
+                    {openaiVoices.map(voice => (
+                      <option key={voice} value={voice}>
+                        {voice.charAt(0).toUpperCase() + voice.slice(1)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                Language
+              </label>
+              <select
+                name="language"
+                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                value={formData.language}
+                onChange={handleChange}
+              >
+                <option value="en">English</option>
+                <option value="es">Español</option>
+                <option value="fr">Français</option>
+                <option value="de">Deutsch</option>
+                <option value="it">Italiano</option>
+                <option value="pt">Português</option>
+                <option value="ru">Русский</option>
+                <option value="zh">中文</option>
+                <option value="ja">日本語</option>
+                <option value="ko">한국어</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
+                AI Style
+              </label>
+              <select
+                name="aiStyle"
+                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                value={formData.aiStyle}
+                onChange={handleChange}
+              >
+                <option value="Anthropic">Anthropic</option>
+                <option value="OpenAI">OpenAI</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1">
                 Memory Key
               </label>
-              <input type="text"
-                     name="userId"
-                     className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                     value={formData.userId}
-                     onChange={handleChange}/>
-              <div className="flex flex-col items-end mt-4">
-                <button type="submit"
-                        className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
-                  Save
-                </button>
-              </div>
-            </form>
-          </div>
+              <input
+                type="text"
+                name="userId"
+                className="w-full px-3 py-2 bg-gray-700/50 border border-gray-600/50 rounded-lg text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                value={formData.userId}
+                onChange={handleChange}
+              />
+            </div>
+
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="aiMemorySelfModify"
+                name="aiMemorySelfModify"
+                checked={formData.aiMemorySelfModify}
+                onChange={handleChange}
+                className="w-4 h-4 border-gray-600 rounded bg-gray-700 text-cyan-500 focus:ring-cyan-500/50"
+              />
+              <label htmlFor="aiMemorySelfModify" className="ml-2 text-sm text-gray-300">
+                Enable AI Memory Self-Modification
+              </label>
+            </div>
+
+            <div className="flex justify-end mt-6">
+              <button
+                type="submit"
+                className="px-4 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white rounded-lg shadow-lg shadow-cyan-500/20 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+              >
+                Save Configuration
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>

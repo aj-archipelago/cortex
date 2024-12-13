@@ -1,3 +1,20 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+html, body {
+  background: rgb(17, 24, 39); /* matches from-gray-900 */
+  min-height: 100%;
+  overscroll-behavior: none; /* prevents bounce on some browsers */
+}
+
+/* For Safari/iOS */
+@supports (-webkit-overflow-scrolling: touch) {
+  body {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}

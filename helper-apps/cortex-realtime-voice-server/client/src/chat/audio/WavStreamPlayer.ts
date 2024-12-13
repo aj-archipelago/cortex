@@ -52,8 +52,8 @@ export class WavStreamPlayer {
       throw new Error(`Could not add audioWorklet module: ${this.scriptSrc}`);
     }
     const analyser = this.context.createAnalyser();
-    analyser.fftSize = 8192;
-    analyser.smoothingTimeConstant = 0.1;
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.8;
     this.analyser = analyser;
     return true;
   }
@@ -164,5 +164,12 @@ export class WavStreamPlayer {
    */
   async interrupt(): Promise<TrackSampleOffset | null> {
     return this.getTrackSampleOffset(true);
+  }
+
+  /**
+   * Gets the analyser node
+   */
+  getAnalyser(): AnalyserNode | null {
+    return this.analyser;
   }
 }

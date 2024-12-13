@@ -3,7 +3,7 @@ import type { WebSocket as WS } from 'ws';
 import type { MessageEvent as WS_MessageEvent } from 'ws';
 import { createId } from '@paralleldrive/cuid2';
 import { hasNativeWebSocket, trimDebugEvent } from './utils';
-import {
+import type {
   ConversationCreatedEvent,
   ConversationItemCreatedEvent,
   ConversationItemDeletedEvent,
@@ -17,7 +17,8 @@ import {
   RateLimitsUpdatedEvent,
   RealtimeErrorEvent,
   RealtimeItem,
-  RealtimeResponseConfig, RealtimeSession,
+  RealtimeResponseConfig,
+  RealtimeSession,
   RealtimeSessionConfig,
   ResponseAudioDeltaEvent,
   ResponseAudioDoneEvent,
@@ -35,6 +36,7 @@ import {
   ResponseTextDoneEvent,
   SessionCreatedEvent,
   SessionUpdatedEvent,
+  Voice,
 } from './realtimeTypes';
 import { Transcription } from './transcription';
 import type { ClientRequest } from 'node:http';
@@ -82,11 +84,21 @@ export interface RealtimeVoiceEvents {
   'rate_limits.updated': [RateLimitsUpdatedEvent];
 }
 
+interface RealtimeVoiceClientConfig {
+  sessionConfig?: RealtimeSessionConfig;
+  apiKey?: string;
+  realtimeUrl?: string;
+  model?: string;
+  autoReconnect?: boolean;
+  debug?: boolean;
+}
+
 export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
   private readonly apiKey?: string;
   private readonly autoReconnect: boolean;
   private readonly debug: boolean;
   private readonly url: string = '';
+  private readonly isAzure: boolean = false;
   private readonly transcription: Transcription = new Transcription();
   private ws?: WebSocket | WS;
   private isConnected = false;
@@ -94,27 +106,29 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
   private sessionConfig: RealtimeSessionConfig;
 
   constructor({
-                sessionConfig,
-                apiKey = process.env.OPENAI_API_KEY,
-                model = 'gpt-4o-realtime-preview-2024-10-01',
-                autoReconnect = true,
-                debug = false,
-              }: {
-    sessionConfig?: RealtimeSessionConfig,
-    apiKey?: string,
-    model?: string,
-    autoReconnect?: boolean,
-    debug?: boolean
-  }) {
+    sessionConfig,
+    apiKey = process.env.OPENAI_API_KEY,
+    realtimeUrl = process.env.REALTIME_VOICE_API_URL || REALTIME_VOICE_API_URL,
+    model = 'gpt-4o-realtime-preview-2024-10-01',
+    autoReconnect = true,
+    debug = false,
+  }: RealtimeVoiceClientConfig) {
     super();
-    this.url = `${REALTIME_VOICE_API_URL}?model=${model}`;
+    
+    this.isAzure = realtimeUrl.includes('azure.com');
+    this.url = `${realtimeUrl.replace('https://', 'wss://')}${realtimeUrl.includes('?') ? '&' : '?'}model=${model}`;
+    
     this.apiKey = apiKey;
     this.autoReconnect = autoReconnect;
     this.debug = debug;
+
+    // Default voice based on provider
+    const defaultVoice: Voice = 'alloy';
+    
     this.sessionConfig = {
       modalities: ['text', 'audio'],
       instructions: DEFAULT_INSTRUCTIONS,
-      voice: 'shimmer',
+      voice: sessionConfig?.voice || defaultVoice,
       input_audio_format: 'pcm16',
       output_audio_format: 'pcm16',
       input_audio_transcription: {
@@ -132,30 +146,52 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
       max_response_output_tokens: 4096,
       ...sessionConfig,
     };
+
+    // Validate voice selection based on provider
+    if (this.isAzure) {
+      const azureVoices: Voice[] = ['amuch', 'dan', 'elan', 'marilyn', 'meadow', 'breeze', 'cove', 'ember', 'jupiter', 'alloy', 'echo', 'shimmer'];
+      if (!azureVoices.includes(this.sessionConfig.voice)) {
+        throw new Error(`Invalid voice for Azure: ${this.sessionConfig.voice}. Supported values are: ${azureVoices.join(', ')}`);
+      }
+    } else {
+      const openaiVoices: Voice[] = ['alloy', 'echo', 'shimmer', 'ash', 'ballad', 'coral', 'sage', 'verse'];
+      if (!openaiVoices.includes(this.sessionConfig.voice)) {
+        throw new Error(`Invalid voice for OpenAI: ${this.sessionConfig.voice}. Supported values are: ${openaiVoices.join(', ')}`);
+      }
+    }
   }
 
   async connect() {
     if (this.isConnected) {
       return;
     }
+
     if (hasNativeWebSocket()) {
       if (process.versions.bun) {
+        const headers: Record<string, string> = this.isAzure
+          ? {
+              'api-key': this.apiKey || '',
+              'OpenAI-Beta': 'realtime=v1',
+            }
+          : {
+              'Authorization': `Bearer ${this.apiKey}`,
+              'OpenAI-Beta': 'realtime=v1',
+            };
+
         this.ws = new WebSocket(this.url, {
           // @ts-ignore
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'OpenAI-Beta': 'realtime=v1',
-          },
+          headers,
         });
       } else {
-        this.ws = new WebSocket(
-          this.url,
-          [
-            'realtime',
-            `openai-insecure-api-key.${this.apiKey}`,
-            'openai-beta.realtime-v1',
-          ],
-        );
+        const protocols = this.isAzure
+          ? ['realtime', 'openai-beta.realtime-v1']
+          : [
+              'realtime',
+              `openai-insecure-api-key.${this.apiKey}`,
+              'openai-beta.realtime-v1',
+            ];
+
+        this.ws = new WebSocket(this.url, protocols);
       }
     } else {
       const wsModule = await import('ws');
@@ -164,8 +200,12 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
           request.setHeader('OpenAI-Beta', 'realtime=v1');
 
           if (this.apiKey) {
-            request.setHeader('Authorization', `Bearer ${this.apiKey}`);
-            request.setHeader('api-key', this.apiKey);
+            if (this.isAzure) {
+              request.setHeader('api-key', this.apiKey);
+            } else {
+              request.setHeader('Authorization', `Bearer ${this.apiKey}`);
+              request.setHeader('api-key', this.apiKey);
+            }
           }
           request.end();
         },

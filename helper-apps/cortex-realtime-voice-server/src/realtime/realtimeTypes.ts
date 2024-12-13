@@ -17,7 +17,9 @@ type RealtimeFunctionResponseEvent = RealtimeEvent & {
 }
 
 type AudioFormat = 'pcm16' | 'g711_ulaw' | 'g711_alaw';
-type Voice = 'alloy' | 'ash' | 'ballad' | 'coral' | 'echo' | 'sage' | 'shimmer' | 'verse';
+export type AzureVoice = 'amuch' | 'dan' | 'elan' | 'marilyn' | 'meadow' | 'breeze' | 'cove' | 'ember' | 'jupiter' | 'alloy' | 'echo' | 'shimmer';
+export type OpenAIVoice = 'alloy' | 'echo' | 'shimmer' | 'ash' | 'ballad' | 'coral' | 'sage' | 'verse';
+export type Voice = AzureVoice | OpenAIVoice;
 type Modality = 'text' | 'audio';
 type ToolDefinition = {
   type: string,

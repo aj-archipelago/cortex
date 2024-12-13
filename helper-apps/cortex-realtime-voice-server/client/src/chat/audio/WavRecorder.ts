@@ -180,6 +180,14 @@ export class WavRecorder {
   }
 
   /**
+   * Gets the current MediaStream if one exists
+   * @returns {MediaStream | null} The current MediaStream or null if not recording
+   */
+  getStream(): MediaStream | null {
+    return this.stream;
+  }
+
+  /**
    * Sends an event to the AudioWorklet
    * @private
    * @param {string} name

@@ -7,6 +7,7 @@ import {Tools} from "./Tools";
 import type {ClientToServerEvents, ServerToClientEvents} from "./realtime/socket";
 import {RealtimeVoiceClient} from "./realtime/client";
 import {manageMemory, readMemory} from "./cortex/memory";
+import type { Voice } from './realtime/realtimeTypes';
 
 
 export interface InterServerEvents {
@@ -110,6 +111,7 @@ export class SocketServer {
     socket.data.userId = socket.handshake.query.userId as string;
     socket.data.aiName = socket.handshake.query.aiName as string;
     socket.data.userName = socket.handshake.query.userName as string;
+    const voice = (socket.handshake.query.voice as string || 'alloy') as Voice;
 
     const client = new RealtimeVoiceClient({
       apiKey: this.apiKey,
@@ -240,7 +242,7 @@ export class SocketServer {
 
     client.updateSession({
       instructions,
-      voice: 'coral',
+      voice: (socket.handshake.query.voice as string || 'alloy') as Voice,
       input_audio_transcription: {model: 'whisper-1'},
       turn_detection: {type: 'server_vad', silence_duration_ms: 1500},
       tools: Tools.getToolDefinitions()
