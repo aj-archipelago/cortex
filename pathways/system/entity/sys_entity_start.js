@@ -57,6 +57,7 @@ export default {
         title: ``,
         messages: [],
         voiceResponse: false,
+        codeRequestId: ``,
     },
     timeout: 600,
     tokenRatio: TOKEN_RATIO,
