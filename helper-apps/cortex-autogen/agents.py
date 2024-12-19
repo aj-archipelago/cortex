@@ -20,6 +20,7 @@ import shutil
 
 human_input_queues = {}
 human_input_text_queues = {}
+request_stored_message_queues = {}
 def background_human_input_check(request_id):
     while True:
         human_input = check_for_human_input(request_id)
@@ -176,6 +177,14 @@ def chat_with_agents(**kwargs):
         except Exception as e:
             logging.error(f"Error extracting code corrector result: {e}")
 
+    try:
+        request_stored_message_queues[request_id].put(all_messages[-2]["message"] or all_messages[-2]["content"])
+        request_stored_message_queues[request_id].put(all_messages[-1]["message"] or all_messages[-1]["content"])
+    except Exception as e:
+        logging.error(f"Error storing messages in queue: {e}")
+    
+
+
     if return_type == "chat_history":
         return chat_result.chat_history
     if return_type == "chat_result":
@@ -249,6 +258,9 @@ def process_message(original_request_message_data, original_request_message_data
 
         human_input_queues[request_id] = queue.Queue()
         human_input_text_queues[request_id] = queue.Queue()
+        if not request_stored_message_queues.get(request_id):
+            request_stored_message_queues[request_id] = queue.Queue()
+        request_stored_message_queues[request_id].put(original_request_message)
 
         if first_run:
             thread = threading.Thread(target=background_human_input_check, args=(request_id,))
@@ -275,7 +287,7 @@ def process_message(original_request_message_data, original_request_message_data
 
         #wait for any human input before terminating
         #if you receive human input start the conversation again
-        for i in range(16*6): # 15+1 minutes
+        for i in range(31*6): # 30+1 minutes
             if human_input_queues[request_id].empty():
                 time.sleep(1)
             else:
@@ -284,10 +296,27 @@ def process_message(original_request_message_data, original_request_message_data
                     logging.info(f"Human input to assistant: {human_input}")
                     #update request with human input
                     new_message_data = original_request_message_data.copy()
-                    new_message_data['message'] = human_input
+
+                    old_task = original_request_message_data.get("message")
+
+                    #get request_stored_message_queues
+                    old_messages = []
+                    if request_stored_message_queues.get(request_id):
+                        while not request_stored_message_queues[request_id].empty():
+                            old_messages.append(request_stored_message_queues[request_id].get())
+
+
+                    #convert to text, limit to max 2000 characters, keep most recent
+                    old_messages_text = "\n".join(old_messages)
+                    old_messages_text = old_messages_text[-2000:]
+
+
+                    new_message_data['message'] = f"NEW TASK: {human_input}\n\nPREV TASK: {old_task} STUFF DONE IN PREV TASK: {old_messages_text}\n\n{final_msg}\n\n"
                     new_message_data['keywords'] = ''
                     # new_message_data_obj = original_request_message_data_obj.copy()
                     # new_message_data_obj['message'] = new_message_data['message']
+
+
 
                     process_message(new_message_data, original_request_message_data_obj, first_run=False)
                     return
