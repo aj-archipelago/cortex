@@ -109,22 +109,22 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
     sessionConfig,
     apiKey = process.env.OPENAI_API_KEY,
     realtimeUrl = process.env.REALTIME_VOICE_API_URL || REALTIME_VOICE_API_URL,
-    model = 'gpt-4o-realtime-preview-2024-10-01',
+    model = 'gpt-4o-realtime-preview-2024-12-17',
     autoReconnect = true,
     debug = false,
   }: RealtimeVoiceClientConfig) {
     super();
-    
+
     this.isAzure = realtimeUrl.includes('azure.com');
     this.url = `${realtimeUrl.replace('https://', 'wss://')}${realtimeUrl.includes('?') ? '&' : '?'}model=${model}`;
-    
+
     this.apiKey = apiKey;
     this.autoReconnect = autoReconnect;
     this.debug = debug;
 
     // Default voice based on provider
     const defaultVoice: Voice = 'alloy';
-    
+
     this.sessionConfig = {
       modalities: ['text', 'audio'],
       instructions: DEFAULT_INSTRUCTIONS,
