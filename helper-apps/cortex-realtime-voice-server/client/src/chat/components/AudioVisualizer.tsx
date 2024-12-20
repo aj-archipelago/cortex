@@ -3,9 +3,16 @@ import { useEffect, useRef } from 'react';
 type AudioVisualizerProps = {
   audioContext: AudioContext | null;
   analyserNode: AnalyserNode | null;
+  width?: number;
+  height?: number;
 };
 
-export function AudioVisualizer({ audioContext, analyserNode }: AudioVisualizerProps) {
+export function AudioVisualizer({ 
+  audioContext, 
+  analyserNode,
+  width = 300,
+  height = 300 
+}: AudioVisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rotationRef = useRef(0);
   const colorShiftRef = useRef(0);
@@ -13,6 +20,12 @@ export function AudioVisualizer({ audioContext, analyserNode }: AudioVisualizerP
 
   useEffect(() => {
     if (!audioContext || !analyserNode || !canvasRef.current) return;
+
+    // Update canvas size when width/height props change
+    if (canvasRef.current) {
+      canvasRef.current.width = width;
+      canvasRef.current.height = height;
+    }
 
     const draw = () => {
       const canvas = canvasRef.current;
@@ -121,16 +134,18 @@ export function AudioVisualizer({ audioContext, analyserNode }: AudioVisualizerP
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [audioContext, analyserNode]);
+  }, [audioContext, analyserNode, width, height]);
 
   return (
-    <div className="flex justify-center items-center">
-      <canvas 
-        ref={canvasRef} 
-        width="300" 
-        height="300" 
-        className="bg-gray-900 rounded-lg"
-      />
+    <div className="w-full h-full flex items-center justify-center pointer-events-none">
+      <div className="aspect-square w-full max-h-full">
+        <canvas 
+          ref={canvasRef} 
+          width={width}
+          height={height}
+          className="bg-gray-900 rounded-lg w-full h-full object-contain pointer-events-none"
+        />
+      </div>
     </div>
   );
 } 

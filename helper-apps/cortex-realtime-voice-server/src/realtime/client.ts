@@ -93,7 +93,28 @@ interface RealtimeVoiceClientConfig {
   debug?: boolean;
 }
 
-export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
+// Create a type for the emit method
+type TypedEmitter = {
+  emit<K extends keyof RealtimeVoiceEvents>(
+    event: K,
+    ...args: RealtimeVoiceEvents[K]
+  ): boolean;
+  on<K extends keyof RealtimeVoiceEvents>(
+    event: K,
+    listener: (...args: RealtimeVoiceEvents[K]) => void
+  ): TypedEmitter;
+  once<K extends keyof RealtimeVoiceEvents>(
+    event: K,
+    listener: (...args: RealtimeVoiceEvents[K]) => void
+  ): TypedEmitter;
+  off<K extends keyof RealtimeVoiceEvents>(
+    event: K,
+    listener: (...args: RealtimeVoiceEvents[K]) => void
+  ): TypedEmitter;
+};
+
+// Change the class declaration to use intersection types
+export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
   private readonly apiKey?: string;
   private readonly autoReconnect: boolean;
   private readonly debug: boolean;

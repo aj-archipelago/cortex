@@ -2,7 +2,7 @@ import {SocketServer} from './src/SocketServer';
 import {ApiServer} from "./src/ApiServer";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const CORS_HOSTS = process.env.CORS_HOSTS ? JSON.parse(process.env.CORS_HOSTS) : 'http://localhost:3000';
+const CORS_HOSTS = process.env.CORS_HOSTS ? JSON.parse(process.env.CORS_HOSTS) : 'http://localhost:5173';
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 8081;
 
 if (!OPENAI_API_KEY) {

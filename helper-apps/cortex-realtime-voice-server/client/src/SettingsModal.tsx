@@ -25,7 +25,7 @@ const openaiVoices: OpenAIVoice[] = ['alloy', 'echo', 'shimmer', 'ash', 'ballad'
 const azureVoices: AzureVoice[] = ['amuch', 'dan', 'elan', 'marilyn', 'meadow', 'breeze', 'cove', 'ember', 'jupiter', 'alloy', 'echo', 'shimmer'];
 
 // Check if we're using Azure based on the environment variable
-const isAzure = process.env.REACT_APP_VOICE_PROVIDER === 'azure';
+const isAzure = import.meta.env.VITE_VOICE_PROVIDER === 'azure';
 
 export const SettingsModal = (
   {aiName, userName, userId, isOpen, onClose, onSave}: SettingsModalProps
