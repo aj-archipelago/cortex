@@ -1,4 +1,4 @@
-import {type ChatMessage, type CortextVariables, getCortexResponse} from "./utils";
+import {type ChatMessage, type CortexVariables, getCortexResponse} from "./utils";
 
 const VISION_QUERY = `
 query Vision($text: String, $contextId: String, $chatHistory: [MultiMessage], $aiName: String) {
@@ -16,7 +16,7 @@ export async function vision(contextId: string,
                              chatHistory: ChatMessage[],
                              text: string) {
 
-  const variables: CortextVariables = {
+  const variables: CortexVariables = {
     chatHistory,
     contextId,
     aiName,

@@ -112,6 +112,9 @@ function App() {
         aiName={aiName}
         userName={userName}
         userId={userId}
+        voice={voice}
+        aiStyle={aiStyle}
+        language={language}
         isOpen={settingsOpen}
         onClose={onCloseSettings}
         onSave={onSaveSettings}

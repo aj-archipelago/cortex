@@ -1,8 +1,8 @@
-import {type ChatMessage, type CortextVariables, getCortexResponse} from "./utils";
+import {type ChatMessage, type CortexVariables, getCortexResponse} from "./utils";
 
 const WRITE_QUERY = `
 query Reason($text: String, $contextId: String, $chatHistory: [MultiMessage], $aiName: String) {
-  sys_generator_reasoning(text: $text, contextId: $contextId, chatHistory: $chatHistory, aiName: $aiName) {
+  sys_entity_continue(text: $text, contextId: $contextId, chatHistory: $chatHistory, aiName: $aiName, generatorPathway: "sys_generator_reasoning", voiceResponse: true) {
     result
     tool
     errors
@@ -16,7 +16,7 @@ export async function reason(contextId: string,
                              chatHistory: ChatMessage[],
                              text: string) {
 
-  const variables: CortextVariables = {
+  const variables: CortexVariables = {
     chatHistory,
     contextId,
     aiName,
@@ -25,5 +25,5 @@ export async function reason(contextId: string,
 
   const res = await getCortexResponse(variables, WRITE_QUERY);
 
-  return res.sys_generator_reasoning;
+  return res.sys_entity_continue;
 }

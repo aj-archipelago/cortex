@@ -28,7 +28,7 @@ function getHeaders() {
 export type ChatMessage = { role: string, content: string }
 export type DataSource = "mydata" | "aja" | "aje" | "wires" | "bing"
 export type MemorySection = "memorySelf" | "memoryUser" | "memoryTopics" | "memoryDirectives"
-export type CortextVariables = {
+export type CortexVariables = {
   contextId?: string,
   aiName?: string,
   chatHistory?: ChatMessage[],
@@ -44,7 +44,7 @@ export type CortextVariables = {
 }
 
 export async function getCortexResponse(
-  variables: CortextVariables,
+  variables: CortexVariables,
   query: string) {
   const headers = getHeaders();
   const body = {
@@ -63,6 +63,6 @@ export async function getCortexResponse(
   }
 
   const responseObject = await res.json();
-  // console.log('cortext response', responseObject);
+  // console.log('cortex response', responseObject);
   return responseObject.data;
 }

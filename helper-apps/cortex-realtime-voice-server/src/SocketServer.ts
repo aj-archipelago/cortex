@@ -17,6 +17,8 @@ export interface SocketData {
   userId: string;
   aiName: string;
   userName: string;
+  aiStyle: string;
+  language: string;
 }
 
 const INSTRUCTIONS = `Instructions:
@@ -41,6 +43,8 @@ Tool Selection Guidelines:
 
 If you decide to use a tool, make sure you tell the user what you are doing and why they are waiting. For example, "I'm going to search for that information now. This may take a moment."
 You must do so before you call the tool.  This is very important!
+
+If the tool takes more than a few seconds to complete, you should tell the user that you are stillworking on it and that they should wait. Update the user every few seconds so they know you are still working on it.
 
 The user is talking to you using voice.
 
@@ -108,10 +112,26 @@ export class SocketServer {
       InterServerEvents,
       SocketData>) {
     this.log(`Connecting socket ${socket.id} with key "${this.apiKey.slice(0, 3)}..."`);
-    socket.data.userId = socket.handshake.query.userId as string;
-    socket.data.aiName = socket.handshake.query.aiName as string;
-    socket.data.userName = socket.handshake.query.userName as string;
-    const voice = (socket.handshake.query.voice as string || 'alloy') as Voice;
+    
+    // Extract and log all client parameters
+    const clientParams = {
+      userId: socket.handshake.query.userId as string,
+      aiName: socket.handshake.query.aiName as string,
+      userName: socket.handshake.query.userName as string,
+      voice: (socket.handshake.query.voice as string || 'alloy') as Voice,
+      aiStyle: socket.handshake.query.aiStyle as string,
+      language: socket.handshake.query.language as string,
+    };
+    
+    this.log('Client parameters:', clientParams);
+    
+    // Assign to socket.data
+    socket.data.userId = clientParams.userId;
+    socket.data.aiName = clientParams.aiName;
+    socket.data.userName = clientParams.userName;
+    socket.data.aiStyle = clientParams.aiStyle;
+    socket.data.language = clientParams.language;
+    const voice = clientParams.voice;
 
     const client = new RealtimeVoiceClient({
       apiKey: this.apiKey,
@@ -191,7 +211,7 @@ export class SocketServer {
       }
       if (item.content && item.content[0]) {
         socket.emit('conversationUpdated', item, {});
-        const cortexHistory = tools.getCortextHistory();
+        const cortexHistory = tools.getCortexHistory();
         await manageMemory(socket.data.userId, socket.data.aiName, cortexHistory);
       }
     });

@@ -5,6 +5,9 @@ type SettingsModalProps = {
   aiName: string;
   userName: string;
   userId: string;
+  voice: Voice;
+  aiStyle: string;
+  language: string;
   isOpen: boolean;
   onClose: () => void;
   onSave: (settings: SettingsData) => void;
@@ -28,7 +31,7 @@ const azureVoices: AzureVoice[] = ['amuch', 'dan', 'elan', 'marilyn', 'meadow', 
 const isAzure = import.meta.env.VITE_VOICE_PROVIDER === 'azure';
 
 export const SettingsModal = (
-  {aiName, userName, userId, isOpen, onClose, onSave}: SettingsModalProps
+  {aiName, userName, userId, voice, aiStyle, language, isOpen, onClose, onSave}: SettingsModalProps
 ) => {
   const [formData, setFormData] = useState<SettingsData>({
     aiName,

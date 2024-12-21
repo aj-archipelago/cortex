@@ -1,4 +1,4 @@
-import {type ChatMessage, type CortextVariables, getCortexResponse, type MemorySection} from "./utils";
+import {type ChatMessage, type CortexVariables, getCortexResponse, type MemorySection} from "./utils";
 
 const MANAGE_MEMORY_QUERY = `
 query ManageMemory($contextId: String, $chatHistory: [MultiMessage], $aiName: String) {
@@ -27,7 +27,7 @@ export async function manageMemory(contextId: string,
                                    chatHistory: ChatMessage[]
 ) {
   console.log('Managing memory', contextId, aiName, chatHistory);
-  const variables: CortextVariables = {
+  const variables: CortexVariables = {
     chatHistory,
     contextId,
     aiName,
@@ -43,7 +43,7 @@ export async function readMemory(contextId: string,
                                  section: MemorySection
 ) {
 
-  const variables: CortextVariables = {
+  const variables: CortexVariables = {
     section,
     contextId,
     aiName,

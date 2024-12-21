@@ -5,7 +5,7 @@ import type {RealtimeVoiceClient} from "./realtime/client";
 import type {ClientToServerEvents, ServerToClientEvents} from "./realtime/socket";
 import {search} from "./cortex/search";
 import {expert} from "./cortex/expert";
-import {image_replicate} from "./cortex/image";
+import {image} from "./cortex/image";
 import {vision} from "./cortex/vision";
 import {reason} from "./cortex/reason";
 
@@ -175,7 +175,7 @@ export class Tools {
     if (!call) {
       throw new Error(`Call with id ${call_id} not found`);
     }
-    const cortexHistory = this.getCortextHistory();
+    const cortexHistory = this.getCortexHistory();
     console.log('Cortex history', cortexHistory);
     let response;
     switch (call.name.toLowerCase()) {
@@ -202,11 +202,34 @@ export class Tools {
 
       case 'image':
         const argsObject = JSON.parse(args);
-        response = await image_replicate(contextId, argsObject.imageCreationPrompt, 1024, 1024);
-        const imageData = JSON.parse(response.result);
-        if (imageData && imageData.output) {
-          this.socket.emit('imageCreated', imageData.output);
+        response = await image(
+          contextId,
+          aiName,
+          cortexHistory,
+          JSON.stringify({query: args})
+        );
+        
+        // Extract image URLs from markdown ![...](url) or HTML <img src="url">
+        const markdownPattern = /!\[.*?\]\((.*?)\)/g;
+        const htmlPattern = /<img.*?src=["'](.*?)["']/g;
+        
+        let match;
+        const imageUrls = new Set<string>();
+        
+        // Find markdown image URLs
+        while ((match = markdownPattern.exec(response.result)) !== null) {
+          imageUrls.add(match[1]);
         }
+        
+        // Find HTML image URLs
+        while ((match = htmlPattern.exec(response.result)) !== null) {
+          imageUrls.add(match[1]);
+        }
+        
+        // Emit events for each unique image URL found
+        imageUrls.forEach(url => {
+          this.socket.emit('imageCreated', url);
+        });
         break;
 
       case 'pdf':
@@ -244,7 +267,7 @@ export class Tools {
     this.callList = this.callList.filter((c) => c.call_id !== call_id);
   }
 
-  public getCortextHistory() {
+  public getCortexHistory() {
     return this.realtimeClient.getConversationItems()
       .filter((item) => item.type === "message")
       .map((item) => {

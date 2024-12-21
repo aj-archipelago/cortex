@@ -20,7 +20,8 @@ export default {
         chatId: ``,
         dataSources: [""],
         model: 'oai-gpt4o',
-        generatorPathway: 'sys_generator_results'
+        generatorPathway: 'sys_generator_results',
+        voiceResponse: false,
     },
     timeout: 300,
     ...entityConstants,

@@ -50,7 +50,7 @@ export default function Chat({
   );
   const socketRef =
     useRef<Socket<ServerToClientEvents, ClientToServerEvents>>(
-      io(`/?userId=${userId}&userName=${userName}&aiName=${aiName}&voice=${voice}`, {autoConnect: false})
+      io(`/?userId=${userId}&userName=${userName}&aiName=${aiName}&voice=${voice}&aiStyle=${aiStyle}&language=${language}`, {autoConnect: false})
     );
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
