@@ -37,7 +37,7 @@ export class Tools {
       {
         type: 'function',
         name: 'Search',
-        description: 'Use for current events, news, fact-checking, and information requiring citation. This tool can search the internet, all Al Jazeera news articles and the latest news wires from multiple sources. Only search when necessary for current events, user documents, latest news, or complex topics needing grounding. Don\'t search for remembered information or general knowledge within your capabilities. You should read the output of this tool verbatim to the user.',
+        description: 'Use for current events, news, fact-checking, and information requiring citation. This tool can search the internet, all Al Jazeera news articles and the latest news wires from multiple sources. Only search when necessary for current events, user documents, latest news, or complex topics needing grounding. Don\'t search for remembered information or general knowledge within your capabilities.',
         parameters: {
           type: "object",
           properties: {
@@ -169,6 +169,19 @@ export class Tools {
     call.arguments = args;
   }
 
+  promptModel(prompt: string) {
+    this.realtimeClient.createConversationItem({
+      id: createId(),
+      type: 'message',
+      role: 'system',
+      content: [
+        {type: 'input_text', text: prompt}
+      ]
+    });
+
+    this.realtimeClient.createResponse({});
+  }
+
   async executeCall(call_id: string, args: string, contextId: string, aiName: string) {
     const call = this.callList.find((c) => c.call_id === call_id);
     console.log('Executing call', call, 'with args', args);
@@ -176,20 +189,29 @@ export class Tools {
       throw new Error(`Call with id ${call_id} not found`);
     }
 
-    // Add status update timer
-    /*
-    const statusTimer = setInterval(() => {
-      this.realtimeClient.createConversationItem({
-        id: createId(),
-        type: 'function_call',
-        name: call.name,
-        arguments: args,
-        call_id: call_id,
-        status: 'incomplete'
-      });
-      this.realtimeClient.createResponse({});
-    }, 7000);
-    */
+    let fillerIndex = 0;
+    let timeoutId: NodeJS.Timer | undefined;
+
+    const calculateFillerTimeout = (fillerIndex: number) => {
+      const baseTimeout = 6500;
+      const randomTimeout = Math.floor(Math.random() * Math.min((fillerIndex + 1) * 1000, 5000));
+      return baseTimeout + randomTimeout;
+    }
+
+    const sendFillerMessage = async () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      this.promptModel("You are currently using a tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Don't make another tool call until you have the result of the first one.");
+      fillerIndex++;
+      // Set next timeout with random interval
+      timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
+    }
+
+    // Update the user if it takes a while to complete
+    timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
+
+    let finishPrompt ='You have finished working on the user\'s request. Respond to the user via audio';
 
     try {
       const cortexHistory = this.getCortexHistory();
@@ -205,6 +227,7 @@ export class Tools {
             call.name === 'Search' ? ['aje', 'bing', 'wires', 'mydata'] : ['mydata'],
             JSON.stringify({query: args})
           );
+          finishPrompt += ' by reading the output of the tool to the user verbatim'
           break;
 
         case 'write':
@@ -215,6 +238,7 @@ export class Tools {
             cortexHistory,
             JSON.stringify({query: args})
           );
+          finishPrompt += ' by reading the output of the tool to the user verbatim'
           break;
 
         case 'image':
@@ -277,6 +301,7 @@ export class Tools {
             cortexHistory,
             JSON.stringify({query: args})
           );
+          finishPrompt += ' by reading the output of the tool to the user verbatim'
           break;
 
         default:
@@ -285,7 +310,9 @@ export class Tools {
       console.log(response);
 
       // Clear timer before creating final output
-      //clearInterval(statusTimer);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       
       this.realtimeClient.createConversationItem({
         id: createId(),
@@ -293,12 +320,16 @@ export class Tools {
         call_id: call.call_id,
         output: response?.result || '',
       });
-      this.realtimeClient.createResponse({});
+
+      finishPrompt += '.';
+      this.promptModel(finishPrompt);
 
       this.callList = this.callList.filter((c) => c.call_id !== call_id);
     } catch (error) {
       // Make sure to clear timer if there's an error
-      //clearInterval(statusTimer);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       throw error;
     }
   }

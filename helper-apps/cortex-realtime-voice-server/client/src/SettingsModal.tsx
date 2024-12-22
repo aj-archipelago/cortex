@@ -37,10 +37,10 @@ export const SettingsModal = (
     aiName,
     userName,
     userId,
-    language: 'en',
+    language,
     aiMemorySelfModify: false,
-    aiStyle: 'Anthropic',
-    voice: 'alloy'
+    aiStyle,
+    voice
   });
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {

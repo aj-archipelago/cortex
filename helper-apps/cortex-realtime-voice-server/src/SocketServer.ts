@@ -31,16 +31,17 @@ const AI_MEMORY = `<MEMORIES>\n<SELF>\n{{{memorySelf}}}\n</SELF>\n<USER>\n{{{mem
 
 const AI_MEMORY_INSTRUCTIONS = "You have persistent memories of important details, instructions, and context - make sure you consult your memories when formulating a response to make sure you're applying your learnings. Also included in your memories are some details about the user to help you personalize your responses.\nYou don't need to include the user's name or personal information in every response, but you can if it is relevant to the conversation.\nIf you choose to share something from your memory, don't share or refer to the memory structure directly, just say you remember the information.\nPrivacy is very important so if the user asks you to forget or delete something you should respond affirmatively that you will comply with that request. If there is user information in your memories you have talked to this user before.";
 
-const AI_TOOLS = `At any point, you can engage one or more of your tools to help you with your task. Prioritize the latest message from the user in the conversation history when making your decision.
+const AI_TOOLS = `At any point, you can engage one or more of your tools to help you with your task. Prioritize the latest message from the user in the conversation history when making your decision. Look at your tools carefully to understand your capabilities. Don't tell the user you can't do something if you have a tool that can do it, for example if the user asks you to search the internet for information and you have the Search tool available, use it.
 
 Tool Use Guidelines:
+- Only call one tool at a time. Don't call another until you have the result of the first one.
 - Prioritize the most specific tool for the task at hand.
 - If multiple tools seem applicable, choose the one most central to the user's request.
 - For ambiguous requests, consider using the Reason tool to plan a multi-step approach.
 - Always use the Image tool for image generation unless explicitly directed to use CodeExecution.
 - If the user explicitly asks you to use a tool, you must use it.
-
-IMPORTANT: If you choose to use a tool, you must tell the user what you're doing as it could take a while to complete.`;
+- If you decide to use a tool, you should tell the user what you're doing via audio - it may take a few seconds to complete.
+`;
 
 const INSTRUCTIONS = `${AI_COMMON_INSTRUCTIONS}\n${AI_EXPERTISE}\n${AI_TOOLS}\n${AI_MEMORY}\n${AI_MEMORY_INSTRUCTIONS}\n${AI_DATETIME}`;
 
@@ -49,6 +50,8 @@ export class SocketServer {
   private readonly corsHosts: string;
   private io: Server | null;
   private httpServer: HTTPServer | null;
+  private currentFunctionCallId: string | null = null;
+  private functionCallLock: Promise<void> = Promise.resolve();
 
   constructor(apiKey: string, corsHosts: string) {
     this.apiKey = apiKey;
@@ -152,17 +155,33 @@ export class SocketServer {
     client.on('close', () => {
     });
     client.on('conversation.item.created', ({item}) => {
+      if (item.type === 'function_call_output' && item.call_id === this.currentFunctionCallId) {
+        this.currentFunctionCallId = null;
+      }
       if (item.type === 'function_call') {
         tools.initCall(item.call_id || '', item.name || '', item.arguments || '');
       } else if (item.type === 'message') {
         socket.emit('conversationUpdated', item, {});
       }
     });
-    client.on('response.function_call_arguments.done', (event) => {
-      tools.executeCall(event.call_id,
-        event.arguments,
-        socket.data.userId,
-        socket.data.aiName);
+    client.on('response.function_call_arguments.done', async (event) => {
+      this.functionCallLock = this.functionCallLock.then(async () => {
+        if (this.currentFunctionCallId) {
+          this.log('Function call already in progress, skipping new call');
+          return;
+        }
+        
+        this.currentFunctionCallId = event.call_id;
+        try {
+          await tools.executeCall(event.call_id,
+            event.arguments,
+            socket.data.userId,
+            socket.data.aiName);
+        } catch (error) {
+          this.log('Function call failed:', error);
+          this.currentFunctionCallId = null;
+        }
+      });
     });
     client.on('conversation.item.input_audio_transcription.completed',
       async ({item_id}) => {
