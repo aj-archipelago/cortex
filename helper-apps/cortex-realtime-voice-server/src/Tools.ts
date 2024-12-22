@@ -37,7 +37,7 @@ export class Tools {
       {
         type: 'function',
         name: 'Search',
-        description: 'Search for current events, news, fact-checking, and information requiring citation. This tool can search the internet, all Al Jazeera news articles and the latest news wires from multiple sources.',
+        description: 'Use for current events, news, fact-checking, and information requiring citation. This tool can search the internet, all Al Jazeera news articles and the latest news wires from multiple sources. Only search when necessary for current events, user documents, latest news, or complex topics needing grounding. Don\'t search for remembered information or general knowledge within your capabilities. You should read the output of this tool verbatim to the user.',
         parameters: {
           type: "object",
           properties: {
@@ -61,7 +61,7 @@ export class Tools {
       {
         type: 'function',
         name: 'Write',
-        description: 'Write a piece of content: Use for any task related to composing, editing, or refining written content. This includes articles, essays, scripts, or any form of textual creation or modification. If you need to search for information or look at a document first, use the Search or Document tools. This tool is just to create or modify content.',
+        description: 'Engage for any task related to composing, editing, or refining written content. This includes articles, essays, scripts, or any form of textual creation or modification. If you need to search for information or look at a document first, use the Search or Document tools. This tool is just to create or modify content.',
         parameters: {
           type: "object",
           properties: {
@@ -73,7 +73,7 @@ export class Tools {
       {
         type: 'function',
         name: 'Image',
-        description: 'Create an Image: Use when asked to create, generate, or revise visual content. This covers photographs, illustrations, diagrams, or any other type of image. This tool only creates new images - it cannot manipulate images (e.g. it cannot crop, rotate, or resize an existing image) - for those tasks you will need to use the CodeExecution tool.',
+        description: 'Use when asked to create, generate, or revise visual content. This covers photographs, illustrations, diagrams, or any other type of image. This tool only creates images - it cannot manipulate images (e.g. it cannot crop, rotate, or resize an existing image) - for those tasks you will need to use the CodeExecution tool.',
         parameters: {
           type: "object",
           properties: {
@@ -175,96 +175,132 @@ export class Tools {
     if (!call) {
       throw new Error(`Call with id ${call_id} not found`);
     }
-    const cortexHistory = this.getCortexHistory();
-    console.log('Cortex history', cortexHistory);
-    let response;
-    switch (call.name.toLowerCase()) {
-      case 'search':
-      case 'document':
-        response = await search(
-          contextId,
-          aiName,
-          cortexHistory,
-          call.name === 'Search' ? ['aje', 'bing', 'wires', 'mydata'] : ['mydata'],
-          JSON.stringify({query: args})
-        );
-        break;
 
-      case 'write':
-      case 'code':
-        response = await expert(
-          contextId,
-          aiName,
-          cortexHistory,
-          JSON.stringify({query: args})
-        );
-        break;
+    // Add status update timer
+    /*
+    const statusTimer = setInterval(() => {
+      this.realtimeClient.createConversationItem({
+        id: createId(),
+        type: 'function_call',
+        name: call.name,
+        arguments: args,
+        call_id: call_id,
+        status: 'incomplete'
+      });
+      this.realtimeClient.createResponse({});
+    }, 7000);
+    */
 
-      case 'image':
-        const argsObject = JSON.parse(args);
-        response = await image(
-          contextId,
-          aiName,
-          cortexHistory,
-          JSON.stringify({query: args})
-        );
-        
-        // Extract image URLs from markdown ![...](url) or HTML <img src="url">
-        const markdownPattern = /!\[.*?\]\((.*?)\)/g;
-        const htmlPattern = /<img.*?src=["'](.*?)["']/g;
-        
-        let match;
-        const imageUrls = new Set<string>();
-        
-        // Find markdown image URLs
-        while ((match = markdownPattern.exec(response.result)) !== null) {
-          imageUrls.add(match[1]);
-        }
-        
-        // Find HTML image URLs
-        while ((match = htmlPattern.exec(response.result)) !== null) {
-          imageUrls.add(match[1]);
-        }
-        
-        // Emit events for each unique image URL found
-        imageUrls.forEach(url => {
-          this.socket.emit('imageCreated', url);
-        });
-        break;
+    try {
+      const cortexHistory = this.getCortexHistory();
+      console.log('Cortex history', cortexHistory);
+      let response;
+      switch (call.name.toLowerCase()) {
+        case 'search':
+        case 'document':
+          response = await search(
+            contextId,
+            aiName,
+            cortexHistory,
+            call.name === 'Search' ? ['aje', 'bing', 'wires', 'mydata'] : ['mydata'],
+            JSON.stringify({query: args})
+          );
+          break;
 
-      case 'pdf':
-      case 'vision':
-      case 'video':
-        response = await vision(
-          contextId,
-          aiName,
-          cortexHistory,
-          JSON.stringify({query: args})
-        );
-        break;
+        case 'write':
+        case 'code':
+          response = await expert(
+            contextId,
+            aiName,
+            cortexHistory,
+            JSON.stringify({query: args})
+          );
+          break;
 
-      case 'reason':
-        response = await reason(
-          contextId,
-          aiName,
-          cortexHistory,
-          JSON.stringify({query: args})
-        );
-        break;
+        case 'image':
+          const argsObject = JSON.parse(args);
+          response = await image(
+            contextId,
+            aiName,
+            cortexHistory,
+            JSON.stringify({query: args})
+          );
+          
+          // Extract image URLs from markdown ![...](url), HTML <img src="url">, and standard markdown links [text](url)
+          const markdownImagePattern = /!\[.*?\]\((.*?)\)/g;
+          const htmlPattern = /<img.*?src=["'](.*?)["']/g;
+          const markdownLinkPattern = /\[.*?\]\((.*?)\)/g;
+          
+          let match;
+          const imageUrls = new Set<string>();
+          
+          // Find markdown image URLs
+          while ((match = markdownImagePattern.exec(response.result)) !== null) {
+            imageUrls.add(match[1]);
+          }
+          
+          // Find HTML image URLs
+          while ((match = htmlPattern.exec(response.result)) !== null) {
+            imageUrls.add(match[1]);
+          }
+          
+          // Find standard markdown link URLs
+          while ((match = markdownLinkPattern.exec(response.result)) !== null) {
+            const url = match[1];
+            // Only add URLs that appear to be image files
+            if (url.match(/\.(jpg|jpeg|png|gif|webp|bmp)$/i)) {
+              imageUrls.add(url);
+            }
+          }
+          
+          // Emit events for each unique image URL found
+          imageUrls.forEach(url => {
+            this.socket.emit('imageCreated', url);
+          });
+          break;
 
-      default:
-        console.log('Unknown function call', call);
+        case 'pdf':
+        case 'vision':
+        case 'video':
+          response = await vision(
+            contextId,
+            aiName,
+            cortexHistory,
+            JSON.stringify({query: args})
+          );
+          break;
+
+        case 'reason':
+          response = await reason(
+            contextId,
+            aiName,
+            cortexHistory,
+            JSON.stringify({query: args})
+          );
+          break;
+
+        default:
+          console.log('Unknown function call', call);
+      }
+      console.log(response);
+
+      // Clear timer before creating final output
+      //clearInterval(statusTimer);
+      
+      this.realtimeClient.createConversationItem({
+        id: createId(),
+        type: 'function_call_output',
+        call_id: call.call_id,
+        output: response?.result || '',
+      });
+      this.realtimeClient.createResponse({});
+
+      this.callList = this.callList.filter((c) => c.call_id !== call_id);
+    } catch (error) {
+      // Make sure to clear timer if there's an error
+      //clearInterval(statusTimer);
+      throw error;
     }
-    console.log(response);
-    this.realtimeClient.createConversationItem({
-      id: createId(),
-      type: 'function_call_output',
-      call_id: call.call_id,
-      output: response.result,
-    });
-    this.realtimeClient.createResponse({});
-
-    this.callList = this.callList.filter((c) => c.call_id !== call_id);
   }
 
   public getCortexHistory() {
