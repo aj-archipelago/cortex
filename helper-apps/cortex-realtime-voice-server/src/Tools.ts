@@ -169,7 +169,7 @@ export class Tools {
     call.arguments = args;
   }
 
-  promptModel(prompt: string) {
+  async promptModel(prompt: string, toolChoice: boolean = false) {
     this.realtimeClient.createConversationItem({
       id: createId(),
       type: 'message',
@@ -179,7 +179,7 @@ export class Tools {
       ]
     });
 
-    this.realtimeClient.createResponse({});
+    this.realtimeClient.createResponse({tool_choice: toolChoice ? 'auto' : 'none'});
   }
 
   async executeCall(call_id: string, args: string, contextId: string, aiName: string) {
@@ -202,7 +202,8 @@ export class Tools {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      this.promptModel("You are currently using a tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Don't make another tool call until you have the result of the first one.");
+      this.promptModel("You are currently using a tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very short.", false);
+
       fillerIndex++;
       // Set next timeout with random interval
       timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
@@ -312,9 +313,11 @@ export class Tools {
       // Clear timer before creating final output
       if (timeoutId) {
         clearTimeout(timeoutId);
+        // This is to avoid voice run-on if we were using please wait...
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
       
-      this.realtimeClient.createConversationItem({
+      await this.realtimeClient.createConversationItem({
         id: createId(),
         type: 'function_call_output',
         call_id: call.call_id,
@@ -322,7 +325,7 @@ export class Tools {
       });
 
       finishPrompt += '.';
-      this.promptModel(finishPrompt);
+      this.promptModel(finishPrompt, true);
 
       this.callList = this.callList.filter((c) => c.call_id !== call_id);
     } catch (error) {
