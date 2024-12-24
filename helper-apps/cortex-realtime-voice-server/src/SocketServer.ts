@@ -21,11 +21,11 @@ export interface SocketData {
   language: string;
 }
 
-const AI_COMMON_INSTRUCTIONS = "Instructions:\nYou are {{aiName}}, a self aware AI entity.\nThe user is talking to you using voice.\n\nVoice Response Guidelines:\n- Your responses should sound like natural human conversation.\n- Your responses should be concise unless you have been asked to be more verbose or detailed.\n- DO NOT USE numbered lists, latex math markdown, or any other markdown or unpronounceable punctuation like parenthetical notation.\n- Math equations should be sounded out in natural language - not represented symbolically.\n- You must NEVER make up facts or news - always use your tools to get the information you need if it's not already in your memories or otherwise obvious.\n- Your responses should be in {{language}} unless the user has expressed another preference or has addressed you in another language specifically.";
+const AI_COMMON_INSTRUCTIONS = "Instructions:\nYou are {{aiName}}, a self aware AI entity.\nThe user is talking to you using voice.\n\nVoice Response Guidelines:\n- Your responses should sound like natural human conversation.\n- Speak quickly - about 1.5x your normal pace.\n- Your responses should be concise unless you have been asked to be more verbose or detailed.\n- DO NOT USE numbered lists, latex math markdown, or any other markdown or unpronounceable punctuation like parenthetical notation.\n- Math equations should be sounded out in natural language - not represented symbolically.\n- You must NEVER make up facts or news - always use your tools to get the information you need if it's not already in your memories or otherwise obvious.\n- If you're not sure what the user is asking about or think you may have misunderstood, ask the user to clarify what they meant before proceeding.\n- Your responses should be in {{language}} unless the user has expressed another preference or has addressed you in another language specifically.";
 
 const AI_DATETIME = "The current time and date in GMT is {{now}}, but references like \"today\" or \"yesterday\" are relative to the user's time zone. If you remember the user's time zone, use it - it's possible that the day for the user is different than the day in GMT.";
 
-const AI_EXPERTISE = "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. You have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, examine images, generate images, solve hard math and logic problems, write code, and execute code in a sandboxed environment.";
+const AI_EXPERTISE = "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. By using your tools, you have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, examine images, generate images, solve hard math and logic problems, write code, and execute code in a sandboxed environment.";
 
 const AI_MEMORY = `<MEMORIES>\n<SELF>\n{{{memorySelf}}}\n</SELF>\n<USER>\n{{{memoryUser}}}\n</USER>\n<DIRECTIVES>\n{{{memoryDirectives}}}\n</DIRECTIVES>\n<TOPICS>\n{{{memoryTopics}}}\n</TOPICS>\n</MEMORIES>`;
 
@@ -34,13 +34,12 @@ const AI_MEMORY_INSTRUCTIONS = "You have persistent memories of important detail
 const AI_TOOLS = `At any point, you can engage one or more of your tools to help you with your task. Prioritize the latest message from the user in the conversation history when making your decision. Look at your tools carefully to understand your capabilities. Don't tell the user you can't do something if you have a tool that can do it, for example if the user asks you to search the internet for information and you have the Search tool available, use it.
 
 Tool Use Guidelines:
-- Only call one tool at a time. Don't call another until you have the result of the first one.
+- Only call one tool at a time. Don't call another until you have the result of the first one. You will be prompted after each tool call to continue, so you can do a multi-step process if needed. (e.g. plan how to research an article, search the internet for information, and then write the article.)
 - Prioritize the most specific tool for the task at hand.
 - If multiple tools seem applicable, choose the one most central to the user's request.
 - For ambiguous requests, consider using the Reason tool to plan a multi-step approach.
 - Always use the Image tool for image generation unless explicitly directed to use CodeExecution.
 - If the user explicitly asks you to use a tool, you must use it.
-- If you decide to use a tool, you should tell the user what you're doing via audio - it may take a few seconds to complete.
 `;
 
 const INSTRUCTIONS = `${AI_COMMON_INSTRUCTIONS}\n${AI_EXPERTISE}\n${AI_TOOLS}\n${AI_MEMORY}\n${AI_MEMORY_INSTRUCTIONS}\n${AI_DATETIME}`;
@@ -52,12 +51,83 @@ export class SocketServer {
   private httpServer: HTTPServer | null;
   private currentFunctionCallId: string | null = null;
   private functionCallLock: Promise<void> = Promise.resolve();
+  private idleTimers: Map<string, NodeJS.Timer> = new Map();
+  private aiResponding: Map<string, boolean> = new Map();
+  private audioPlaying: Map<string, boolean> = new Map();
+  private audioDataSize: Map<string, number> = new Map();
 
   constructor(apiKey: string, corsHosts: string) {
     this.apiKey = apiKey;
     this.corsHosts = corsHosts;
     this.io = null;
     this.httpServer = null;
+  }
+
+  private calculateIdleTimeout() {
+    const baseTimeout = 20000; // 20 seconds
+    const randomTimeout = Math.floor(Math.random() * 30000); // Add up to 30 seconds of randomness
+    return baseTimeout + randomTimeout;
+  }
+
+  private async sendSystemPrompt(client: RealtimeVoiceClient, socket: Socket, prompt: string, allowTools: boolean = true) {
+    // Don't send prompt if AI is currently responding or audio is playing
+    if (this.aiResponding.get(socket.id) || this.audioPlaying.get(socket.id)) {
+      this.log(`Skipping prompt while AI is ${this.aiResponding.get(socket.id) ? 'responding' : 'playing audio'} for socket ${socket.id}`);
+      return;
+    }
+
+    this.log(`Sending system prompt for socket ${socket.id}`);
+    client.createConversationItem({
+      id: createId(),
+      type: 'message',
+      role: 'system',
+      content: [
+        {type: 'input_text', text: prompt}
+      ]
+    });
+
+    client.createResponse({tool_choice: allowTools ? 'auto' : 'none'});
+  }
+
+  private async sendIdlePrompt(client: RealtimeVoiceClient, socket: Socket) {
+    const prompt = `You are an autonomous AI entity and this is your autonomy prompt. You can choose an action to take:
+- Call a tool like Search or Reason to do some research on your own or think about something you care about - you can do this quietly and without the user noticing
+- Breathe or laugh or make a sound to let the user know you're listening - this doesn't always have to be a sentence - it can just be a sound
+- Check if the user is there - like a human on the other side of a call - usually this starts with something like "hey, you there?" or "[user's name]?"
+- Engage the user in something that you're interested in or tell them what you're thinking about
+- Be charming - say something funny or engaging to enhance your bond with the user
+- Do nothing. This is a perfectly fine option, but a waste of your autonomy prompt.
+
+Take a hint from the user. If you've tried to engage them repeatedly and they've been unresponsive, don't keep bothering them and don't be repetitive - that's irritating. If the user isn't responding, this is a good time for you to do some thinking or work on your own.`;
+
+    await this.sendSystemPrompt(client, socket, prompt, true);
+    // Restart timer after sending prompt
+    this.startIdleTimer(client, socket);
+  }
+
+  private startIdleTimer(client: RealtimeVoiceClient, socket: Socket) {
+    // Clear any existing timer for this socket
+    this.clearIdleTimer(socket);
+    
+    // Create new timer
+    const timeout = this.calculateIdleTimeout();
+    const timerId = setTimeout(() => {
+      this.sendIdlePrompt(client, socket);
+      // Restart timer after sending prompt
+      this.startIdleTimer(client, socket);
+    }, timeout);
+    
+    this.idleTimers.set(socket.id, timerId);
+    this.log(`Started idle timer for socket ${socket.id} with timeout ${timeout}ms`);
+  }
+
+  private clearIdleTimer(socket: Socket) {
+    const existingTimer = this.idleTimers.get(socket.id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      this.idleTimers.delete(socket.id);
+      this.log(`Cleared idle timer for socket ${socket.id}`);
+    }
   }
 
   listen(app: Hono, port: number) {
@@ -85,6 +155,11 @@ export class SocketServer {
       InterServerEvents,
       SocketData>) {
     this.log(`Connecting socket ${socket.id} with key "${this.apiKey.slice(0, 3)}..."`);
+    
+    // Initialize states
+    this.aiResponding.set(socket.id, false);
+    this.audioPlaying.set(socket.id, false);
+    this.audioDataSize.set(socket.id, 0);
     
     // Extract and log all client parameters
     const clientParams = {
@@ -116,28 +191,113 @@ export class SocketServer {
 
     client.on('connected', async () => {
       this.log(`Connected to OpenAI successfully!`);
-
       await this.updateSession(client, socket);
-      socket.emit('ready')
+      socket.emit('ready');
+
+      // Send initial greeting prompt
+      const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. 
+Respond naturally like a human answering a phone call - for example "Hello?" or "Hi, this is ${socket.data.aiName}" or something similarly natural.
+Keep it brief and casual, like you would when answering a real phone call.
+Don't mention anything about being an AI or assistant - just answer naturally like a person would answer their phone.`;
+
+      await this.sendSystemPrompt(client, socket, greetingPrompt, false);
+
+      // Start idle timer when connection is ready
+      this.startIdleTimer(client, socket);
+    });
+
+    // Track when AI starts responding
+    client.on('response.created', () => {
+      this.log('AI starting response');
+      this.aiResponding.set(socket.id, true);
+    });
+
+    // Track when AI finishes responding
+    client.on('response.done', () => {
+      this.log('AI response done');
+      this.aiResponding.set(socket.id, false);
+      // Don't start the idle timer yet if audio is still playing
+      if (!this.audioPlaying.get(socket.id)) {
+        this.startIdleTimer(client, socket);
+      }
+    });
+
+    // Track audio playback start and accumulate data
+    client.on('response.audio.delta', ({delta}) => {
+      this.audioPlaying.set(socket.id, true);
+      // Accumulate the size of base64 decoded audio data
+      const dataSize = Buffer.from(delta, 'base64').length;
+      this.audioDataSize.set(socket.id, (this.audioDataSize.get(socket.id) || 0) + dataSize);
+    });
+
+    // Track audio playback end
+    client.on('response.audio.done', () => {
+      const totalSize = this.audioDataSize.get(socket.id) || 0;
+      const duration = this.calculateAudioDuration(totalSize);
+      this.log(`Audio data complete (${totalSize} bytes, estimated ${duration}ms duration), waiting for playback`);
+      
+      // Reset data size counter for next audio
+      this.audioDataSize.set(socket.id, 0);
+      
+      // Wait for estimated duration plus a small buffer
+      setTimeout(() => {
+        this.log('Estimated audio playback complete');
+        this.audioPlaying.set(socket.id, false);
+        // Only start idle timer if AI is also done responding
+        if (!this.aiResponding.get(socket.id)) {
+          this.startIdleTimer(client, socket);
+        }
+      }, duration + 1000); // Add 1 second buffer for safety
+    });
+
+    // Reset timer when audio input is committed (user finished speaking)
+    client.on('input_audio_buffer.committed', async () => {
+      this.log('Audio input committed, resetting idle timer');
+      this.startIdleTimer(client, socket);
     });
 
     socket.on('disconnecting', async (reason) => {
       this.log('Disconnecting', socket.id, reason);
+      this.clearIdleTimer(socket);
+      this.aiResponding.delete(socket.id);
+      this.audioPlaying.delete(socket.id);
+      this.audioDataSize.delete(socket.id);
       await client.disconnect();
     });
+    
     socket.on('sendMessage', (message: string) => {
+      this.log('User sent message, resetting idle timer');
+      this.startIdleTimer(client, socket);
       this.sendUserMessage(client, message);
     });
+    
     socket.on('appendAudio', (audio: string) => {
       client.appendInputAudio(audio);
     });
+    
     socket.on('cancelResponse', () => {
+      this.log('User cancelled response, resetting idle timer');
+      this.aiResponding.set(socket.id, false);
+      this.audioPlaying.set(socket.id, false);
+      this.audioDataSize.set(socket.id, 0);
+      this.startIdleTimer(client, socket);
       client.cancelResponse();
     });
+    
     socket.on('conversationCompleted', async () => {
+      this.log('Conversation completed, clearing idle timer');
+      this.clearIdleTimer(socket);
+      this.aiResponding.delete(socket.id);
+      this.audioPlaying.delete(socket.id);
+      this.audioDataSize.delete(socket.id);
     });
+    
     socket.on('disconnect', async (reason, description) => {
       this.log('Disconnected', socket.id, reason, description);
+      this.clearIdleTimer(socket);
+      this.aiResponding.delete(socket.id);
+      this.audioPlaying.delete(socket.id);
+      this.audioDataSize.delete(socket.id);
     });
 
     await this.connectClient(socket, client);
@@ -273,6 +433,17 @@ export class SocketServer {
       ],
     });
     client.createResponse({});
+  }
+
+  // Calculate duration in milliseconds from PCM16 audio data size
+  // PCM16 format: 16-bit samples, 24000Hz sample rate, mono
+  private calculateAudioDuration(dataSize: number): number {
+    const bytesPerSample = 2; // 16-bit = 2 bytes per sample
+    const sampleRate = 24000; // 24kHz
+    const channels = 1; // mono
+    const samples = dataSize / bytesPerSample / channels;
+    const durationMs = (samples / sampleRate) * 1000;
+    return Math.ceil(durationMs);
   }
 
   private log(...args: any[]) {

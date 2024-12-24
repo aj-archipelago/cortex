@@ -17,6 +17,7 @@ import CallEndIcon from '@mui/icons-material/CallEnd';
 import CloseIcon from '@mui/icons-material/Close';
 import ChatIcon from '@mui/icons-material/Chat';
 import type { Voice } from '../../../src/realtime/realtimeTypes';
+import {SoundEffects} from './audio/SoundEffects';
 
 type ChatProps = {
   userId: string;
@@ -80,6 +81,7 @@ export default function Chat({
     if (wavRecorder.getStatus() === "recording") {
       await wavRecorder.end();
       await wavStreamPlayer.interrupt();
+      await SoundEffects.playDisconnect();
       socketRef.current.emit('conversationCompleted');
       socketRef.current.removeAllListeners();
       socketRef.current.disconnect();
@@ -169,6 +171,7 @@ export default function Chat({
 
     socket.on('connect', () => {
       console.log('Connected', socket.id);
+      SoundEffects.playConnect();
     });
     socket.on('disconnect', () => {
       console.log('Disconnected', socket.id);
@@ -342,6 +345,11 @@ export default function Chat({
     mounted,
     classes: chatPanelClasses
   });
+
+  useEffect(() => {
+    // Initialize sound effects when component mounts
+    SoundEffects.init().catch(console.error);
+  }, []);
 
   return (
     <div className="h-screen flex items-center justify-center p-4">

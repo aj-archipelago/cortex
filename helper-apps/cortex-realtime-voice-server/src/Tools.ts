@@ -22,6 +22,9 @@ export class Tools {
     ServerToClientEvents,
     InterServerEvents,
     SocketData>;
+  private aiResponding: boolean = false;
+  private audioPlaying: boolean = false;
+  private audioDataSize: number = 0;
 
   constructor(client: RealtimeVoiceClient,
               socket: Socket<ClientToServerEvents,
@@ -30,6 +33,73 @@ export class Tools {
                 SocketData>) {
     this.realtimeClient = client;
     this.socket = socket;
+
+    // Track AI response state
+    client.on('response.created', () => {
+      this.aiResponding = true;
+    });
+
+    client.on('response.done', () => {
+      this.aiResponding = false;
+    });
+
+    // Track audio playback state
+    client.on('response.audio.delta', ({delta}) => {
+      this.audioPlaying = true;
+      // Accumulate the size of base64 decoded audio data
+      const dataSize = Buffer.from(delta, 'base64').length;
+      this.audioDataSize += dataSize;
+    });
+
+    client.on('response.audio.done', () => {
+      const duration = this.calculateAudioDuration(this.audioDataSize);
+      console.log(`Audio data complete (${this.audioDataSize} bytes, estimated ${duration}ms duration), waiting for playback`);
+      
+      // Reset data size counter for next audio
+      this.audioDataSize = 0;
+      
+      // Wait for estimated duration plus a small buffer
+      setTimeout(() => {
+        console.log('Estimated audio playback complete');
+        this.audioPlaying = false;
+      }, duration + 1000); // Add 1 second buffer for safety
+    });
+  }
+
+  // Calculate duration in milliseconds from PCM16 audio data size
+  private calculateAudioDuration(dataSize: number): number {
+    const bytesPerSample = 2; // 16-bit = 2 bytes per sample
+    const sampleRate = 24000; // 24kHz
+    const channels = 1; // mono
+    const samples = dataSize / bytesPerSample / channels;
+    const durationMs = (samples / sampleRate) * 1000;
+    return Math.ceil(durationMs);
+  }
+
+  private async sendSystemPrompt(prompt: string, allowTools: boolean = false, disposable: boolean = true) {
+    // Don't send prompt if AI is currently responding or audio is playing
+    if (this.aiResponding || this.audioPlaying) {
+      console.log(`${disposable ? 'Skipping' : 'Queuing'} prompt while AI is ${this.aiResponding ? 'responding' : 'playing audio'}`);
+      if (!disposable) {
+        // Try again after a short delay if the message is important
+        setTimeout(() => {
+          this.sendSystemPrompt(prompt, allowTools, disposable);
+        }, 1000);
+      }
+      return;
+    }
+
+    console.log('Sending system prompt');
+    this.realtimeClient.createConversationItem({
+      id: createId(),
+      type: 'message',
+      role: 'system',
+      content: [
+        {type: 'input_text', text: prompt}
+      ]
+    });
+
+    this.realtimeClient.createResponse({tool_choice: allowTools ? 'auto' : 'none'});
   }
 
   public static getToolDefinitions() {
@@ -37,61 +107,61 @@ export class Tools {
       {
         type: 'function',
         name: 'Search',
-        description: 'Use for current events, news, fact-checking, and information requiring citation. This tool can search the internet, all Al Jazeera news articles and the latest news wires from multiple sources. Only search when necessary for current events, user documents, latest news, or complex topics needing grounding. Don\'t search for remembered information or general knowledge within your capabilities.',
+        description: 'Use for current events, news, fact-checking, and information requiring citation. This tool can search the internet, all Al Jazeera news articles and the latest news wires from multiple sources. You pass in detailed instructions about what you need the tool to do in detailedInstructions.',
         parameters: {
           type: "object",
           properties: {
-            query: {type: "string"}
+            detailedInstructions: {type: "string"}
           },
-          required: ["query"]
+          required: ["detailedInstructions"]
         },
       },
       {
         type: 'function',
         name: 'Document',
-        description: 'Access user\'s personal document index. Use for user-specific uploaded information. If user refers vaguely to "this document/file/article" without context, search the personal index.',
+        description: 'Access user\'s personal document index. Use for user-specific uploaded information. If user refers vaguely to "this document/file/article" without context, search the personal index. You pass in detailed instructions about what you need the tool to do in detailedInstructions.',
         parameters: {
           type: "object",
           properties: {
-            query: {type: "string"}
+            detailedInstructions: {type: "string"}
           },
-          required: ["query"]
+          required: ["detailedInstructions"]
         },
       },
       {
         type: 'function',
         name: 'Write',
-        description: 'Engage for any task related to composing, editing, or refining written content. This includes articles, essays, scripts, or any form of textual creation or modification. If you need to search for information or look at a document first, use the Search or Document tools. This tool is just to create or modify content.',
+        description: 'Engage for any task related to composing, editing, or refining written content. This includes articles, essays, scripts, or any form of textual creation or modification. If you need to search for information or look at a document first, use the Search or Document tools. This tool is just to create or modify content. You pass in detailed instructions about what you need the tool to do in detailedInstructions.',
         parameters: {
           type: "object",
           properties: {
-            topic: {type: "string"}
+            detailedInstructions: {type: "string"}
           },
-          required: ["topic"]
+          required: ["detailedInstructions"]
         },
       },
       {
         type: 'function',
         name: 'Image',
-        description: 'Use when asked to create, generate, or revise visual content. This covers photographs, illustrations, diagrams, or any other type of image. This tool only creates images - it cannot manipulate images (e.g. it cannot crop, rotate, or resize an existing image) - for those tasks you will need to use the CodeExecution tool.',
+        description: 'Use this tool when asked to create, generate, or revise visual content including selfies, photographs, illustrations, diagrams, or any other type of image. You pass in detailed instructions about the image(s) you want to create in detailedInstructions. This tool only creates images - it cannot manipulate images (e.g. it cannot crop, rotate, or resize an existing image) - for those tasks you will need to use the CodeExecution tool.',
         parameters: {
           type: "object",
           properties: {
-            imageCreationPrompt: {type: "string"}
+            detailedInstructions: {type: "string"}
           },
-          required: ["imageCreationPrompt"]
+          required: ["detailedInstructions"]
         },
       },
       {
         type: 'function',
         name: 'Reason',
-        description: 'Employ for reasoning, scientific analysis, evaluating evidence, strategic planning, problem-solving, logic puzzles, mathematical calculations, or any questions that require careful thought or complex choices. Also use when deep, step-by-step reasoning is required.',
+        description: 'Use this tool any time you need to think carefully about something or solve a problem. Use it to solve all math problems, logic problems, scientific analysis, evaluating evidence, strategic planning, problem-solving, logic puzzles, mathematical calculations, or any questions that require careful thought or complex choices. Also use when deep, step-by-step reasoning is required. You pass in detailed instructions about what you need the tool to do in detailedInstructions.',
         parameters: {
           type: "object",
           properties: {
-            reasonPrompt: {type: "string"}
+            detailedInstructions: {type: "string"}
           },
-          required: ["reasonPrompt"]
+          required: ["detailedInstructions"]
         },
       },
       // {
@@ -169,19 +239,6 @@ export class Tools {
     call.arguments = args;
   }
 
-  async promptModel(prompt: string, toolChoice: boolean = false) {
-    this.realtimeClient.createConversationItem({
-      id: createId(),
-      type: 'message',
-      role: 'system',
-      content: [
-        {type: 'input_text', text: prompt}
-      ]
-    });
-
-    this.realtimeClient.createResponse({tool_choice: toolChoice ? 'auto' : 'none'});
-  }
-
   async executeCall(call_id: string, args: string, contextId: string, aiName: string) {
     const call = this.callList.find((c) => c.call_id === call_id);
     console.log('Executing call', call, 'with args', args);
@@ -202,20 +259,24 @@ export class Tools {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      this.promptModel("You are currently using a tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very short.", false);
+      // Filler messages are disposable - skip if busy
+      await this.sendSystemPrompt(`You are currently using the ${call.name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very short.`, false, true);
 
       fillerIndex++;
       // Set next timeout with random interval
       timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
     }
 
+    // Initial message is not disposable - keep trying if busy
+    await this.sendSystemPrompt(`You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very short and make it fit the conversation naturally. Examples: "I'm on it.", "I'm not sure. Let me look that up.", "Give me a moment to read the news.", "I'm checking on that now.", etc.`, false, false);
+
     // Update the user if it takes a while to complete
     timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
 
-    let finishPrompt ='You have finished working on the user\'s request. Respond to the user via audio';
+    let finishPrompt =`You have finished using the ${call.name} tool to help with the user's request. If you need more information or have more steps in your process, you can call another tool in this response. If you choose not to call another tool, respond to the user via audio`;
 
     try {
-      const cortexHistory = this.getCortexHistory();
+      const cortexHistory = this.getCortexHistory(args);
       console.log('Cortex history', cortexHistory);
       let response;
       switch (call.name.toLowerCase()) {
@@ -225,7 +286,7 @@ export class Tools {
             contextId,
             aiName,
             cortexHistory,
-            call.name === 'Search' ? ['aje', 'bing', 'wires', 'mydata'] : ['mydata'],
+            call.name === 'Search' ? ['aje', 'aja', 'bing', 'wires', 'mydata'] : ['mydata'],
             JSON.stringify({query: args})
           );
           finishPrompt += ' by reading the output of the tool to the user verbatim'
@@ -325,7 +386,8 @@ export class Tools {
       });
 
       finishPrompt += '.';
-      this.promptModel(finishPrompt, true);
+      // Finish message is not disposable - keep trying if busy
+      await this.sendSystemPrompt(finishPrompt, true, false);
 
       this.callList = this.callList.filter((c) => c.call_id !== call_id);
     } catch (error) {
@@ -337,14 +399,31 @@ export class Tools {
     }
   }
 
-  public getCortexHistory() {
-    return this.realtimeClient.getConversationItems()
-      .filter((item) => item.type === "message")
+  public getCortexHistory(args: string = '') {
+    const history = this.realtimeClient.getConversationItems()
+      .filter((item) => item.type === "message" && item.role !== "system")
       .map((item) => {
         return {
           role: item.role || 'user',
           content: item.content && item.content[0] ? item.content[0].text || item.content[0].transcript || '' : ''
         }
       });
+
+    // Add lastUserMessage if it exists in the current call
+    if (args) {
+      try {
+        const parsedArgs = JSON.parse(args);
+        if (parsedArgs.lastUserMessage || parsedArgs.detailedInstructions) {
+          history.push({
+            role: 'user',
+            content: parsedArgs.lastUserMessage || parsedArgs.detailedInstructions
+          });
+        }
+      } catch (e) {
+        // Ignore JSON parse errors
+      }
+    }
+
+    return history;
   }
 }

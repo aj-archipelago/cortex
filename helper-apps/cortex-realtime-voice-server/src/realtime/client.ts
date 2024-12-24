@@ -130,7 +130,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
     sessionConfig,
     apiKey = process.env.OPENAI_API_KEY,
     realtimeUrl = process.env.REALTIME_VOICE_API_URL || REALTIME_VOICE_API_URL,
-    model = 'gpt-4o-realtime-preview-2024-10-01',
+    model = 'gpt-4o-realtime-preview-2024-12-17',
     autoReconnect = true,
     debug = false,
   }: RealtimeVoiceClientConfig) {
