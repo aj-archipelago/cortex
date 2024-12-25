@@ -3,6 +3,7 @@ import { AudioAnalysis, AudioAnalysisOutputType } from './analysis/AudioAnalysis
 
 interface WavStreamPlayerOptions {
   sampleRate?: number;
+  minBufferSize?: number;
 }
 
 interface TrackSampleOffset {
@@ -17,24 +18,28 @@ interface TrackSampleOffset {
 export class WavStreamPlayer {
   private readonly scriptSrc: string;
   private readonly sampleRate: number;
+  private readonly minBufferSize: number;
   private context: AudioContext | null;
   private stream: AudioWorkletNode | null;
   private analyser: AnalyserNode | null;
   private trackSampleOffsets: Record<string, TrackSampleOffset>;
   private interruptedTrackIds: Record<string, boolean>;
+  private isRestarting: boolean;
 
   /**
    * Creates a new WavStreamPlayer instance
    * @param options
    */
-  constructor({ sampleRate = 44100 }: WavStreamPlayerOptions = {}) {
+  constructor({ sampleRate = 44100, minBufferSize = 3 }: WavStreamPlayerOptions = {}) {
     this.scriptSrc = StreamProcessorSrc;
     this.sampleRate = sampleRate;
+    this.minBufferSize = minBufferSize;
     this.context = null;
     this.stream = null;
     this.analyser = null;
     this.trackSampleOffsets = {};
     this.interruptedTrackIds = {};
+    this.isRestarting = false;
   }
 
   /**
@@ -90,25 +95,60 @@ export class WavStreamPlayer {
     if (!this.context) {
       throw new Error('AudioContext not initialized');
     }
-    const streamNode = new AudioWorkletNode(this.context, 'stream_processor');
-    streamNode.connect(this.context.destination);
-    streamNode.port.onmessage = (e: MessageEvent) => {
-      const { event } = e.data;
-      if (event === 'stop') {
-        streamNode.disconnect();
-        this.stream = null;
-      } else if (event === 'offset') {
-        const { requestId, trackId, offset } = e.data;
-        const currentTime = offset / this.sampleRate;
-        this.trackSampleOffsets[requestId] = { trackId, offset, currentTime };
-      }
-    };
-    if (this.analyser) {
-      this.analyser.disconnect();
-      streamNode.connect(this.analyser);
+    if (this.isRestarting) {
+      return false;
     }
-    this.stream = streamNode;
-    return true;
+    try {
+      const streamNode = new AudioWorkletNode(this.context, 'stream_processor');
+      streamNode.connect(this.context.destination);
+      streamNode.port.onmessage = (e: MessageEvent) => {
+        const { event } = e.data;
+        if (event === 'stop') {
+          streamNode.disconnect();
+          this.stream = null;
+          this.isRestarting = false;
+        } else if (event === 'offset') {
+          const { requestId, trackId, offset } = e.data;
+          const currentTime = offset / this.sampleRate;
+          this.trackSampleOffsets[requestId] = { trackId, offset, currentTime };
+        } else if (event === 'error') {
+          console.error('Stream processor error:', e.data.error);
+          this._handleStreamError();
+        }
+      };
+      if (this.analyser) {
+        this.analyser.disconnect();
+        streamNode.connect(this.analyser);
+      }
+      this.stream = streamNode;
+      // Send minBufferSize to the worklet
+      streamNode.port.postMessage({ event: 'config', minBufferSize: this.minBufferSize });
+      return true;
+    } catch (error) {
+      console.error('Error starting stream:', error);
+      this.isRestarting = false;
+      return false;
+    }
+  }
+
+  /**
+   * Handles stream errors by attempting to restart
+   * @private
+   */
+  private async _handleStreamError() {
+    if (this.isRestarting) return;
+    
+    this.isRestarting = true;
+    try {
+      if (this.stream) {
+        this.stream.disconnect();
+        this.stream = null;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+      this._start();
+    } finally {
+      this.isRestarting = false;
+    }
   }
 
   /**
@@ -118,20 +158,54 @@ export class WavStreamPlayer {
    * @param trackId
    */
   add16BitPCM(arrayBuffer: ArrayBuffer | Int16Array, trackId: string = 'default'): Int16Array {
-    if (this.interruptedTrackIds[trackId]) {
+    try {
+      if (this.interruptedTrackIds[trackId]) {
+        return new Int16Array();
+      }
+      
+      if (!this.stream && !this._start()) {
+        throw new Error('Failed to start audio stream');
+      }
+
+      let buffer: Int16Array;
+      try {
+        if (arrayBuffer instanceof Int16Array) {
+          buffer = arrayBuffer;
+        } else {
+          buffer = new Int16Array(arrayBuffer);
+        }
+      } catch (error) {
+        console.error('Error creating Int16Array:', error);
+        return new Int16Array();
+      }
+
+      if (!buffer.length) {
+        console.warn('Received empty buffer for track:', trackId);
+        return buffer;
+      }
+
+      this.stream?.port.postMessage({ event: 'write', buffer, trackId });
+      return buffer;
+    } catch (error) {
+      console.error('Error processing audio chunk:', error);
+      this._handleStreamError();
       return new Int16Array();
     }
-    if (!this.stream) {
-      this._start();
-    }
-    let buffer: Int16Array;
-    if (arrayBuffer instanceof Int16Array) {
-      buffer = arrayBuffer;
-    } else {
-      buffer = new Int16Array(arrayBuffer);
-    }
-    this.stream?.port.postMessage({ event: 'write', buffer, trackId });
-    return buffer;
+  }
+
+  /**
+   * Clears the interrupted state for a track
+   * @param trackId
+   */
+  clearInterruptedState(trackId: string): void {
+    delete this.interruptedTrackIds[trackId];
+  }
+
+  /**
+   * Clears all interrupted states
+   */
+  clearAllInterruptedStates(): void {
+    this.interruptedTrackIds = {};
   }
 
   /**

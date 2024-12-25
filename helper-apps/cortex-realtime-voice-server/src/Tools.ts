@@ -111,9 +111,10 @@ export class Tools {
         parameters: {
           type: "object",
           properties: {
-            detailedInstructions: {type: "string"}
+            detailedInstructions: {type: "string"},
+            silent: {type: "boolean", default: false}
           },
-          required: ["detailedInstructions"]
+          required: ["detailedInstructions", "silent"]
         },
       },
       {
@@ -123,9 +124,10 @@ export class Tools {
         parameters: {
           type: "object",
           properties: {
-            detailedInstructions: {type: "string"}
+            detailedInstructions: {type: "string"},
+            silent: {type: "boolean", default: false}
           },
-          required: ["detailedInstructions"]
+          required: ["detailedInstructions", "silent"]
         },
       },
       {
@@ -135,7 +137,8 @@ export class Tools {
         parameters: {
           type: "object",
           properties: {
-            detailedInstructions: {type: "string"}
+            detailedInstructions: {type: "string"},
+            silent: {type: "boolean", default: false}
           },
           required: ["detailedInstructions"]
         },
@@ -147,7 +150,8 @@ export class Tools {
         parameters: {
           type: "object",
           properties: {
-            detailedInstructions: {type: "string"}
+            detailedInstructions: {type: "string"},
+            silent: {type: "boolean", default: false}
           },
           required: ["detailedInstructions"]
         },
@@ -159,9 +163,10 @@ export class Tools {
         parameters: {
           type: "object",
           properties: {
-            detailedInstructions: {type: "string"}
+            detailedInstructions: {type: "string"},
+            silent: {type: "boolean", default: false}
           },
-          required: ["detailedInstructions"]
+          required: ["detailedInstructions", "silent"]
         },
       },
       // {
@@ -248,6 +253,15 @@ export class Tools {
 
     let fillerIndex = 0;
     let timeoutId: NodeJS.Timer | undefined;
+    let isSilent = false;
+
+    // Check if silent parameter is true in args
+    try {
+      const parsedArgs = JSON.parse(args);
+      isSilent = parsedArgs.silent === true;
+    } catch (e) {
+      // Ignore JSON parse errors
+    }
 
     const calculateFillerTimeout = (fillerIndex: number) => {
       const baseTimeout = 6500;
@@ -259,26 +273,34 @@ export class Tools {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      // Filler messages are disposable - skip if busy
-      await this.sendSystemPrompt(`You are currently using the ${call.name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very short.`, false, true);
+      // Skip filler messages if silent
+      if (!isSilent) {
+        // Filler messages are disposable - skip if busy
+        await this.sendSystemPrompt(`You are currently using the ${call.name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very short.`, false, true);
+      }
 
       fillerIndex++;
       // Set next timeout with random interval
       timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
     }
 
-    // Initial message is not disposable - keep trying if busy
-    await this.sendSystemPrompt(`You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very short and make it fit the conversation naturally. Examples: "I'm on it.", "I'm not sure. Let me look that up.", "Give me a moment to read the news.", "I'm checking on that now.", etc.`, false, false);
+    // Skip initial message if silent
+    if (!isSilent) {
+      // Initial message is not disposable - keep trying if busy
+      await this.sendSystemPrompt(`You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very short and make it fit the conversation naturally. Examples: "I'm on it.", "I'm not sure. Let me look that up.", "Give me a moment to read the news.", "I'm checking on that now.", etc.`, false, false);
+    }
 
     // Update the user if it takes a while to complete
     timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
 
-    let finishPrompt =`You have finished using the ${call.name} tool to help with the user's request. If you need more information or have more steps in your process, you can call another tool in this response. If you choose not to call another tool, respond to the user via audio`;
+    let finishPrompt =`You have finished using the ${call.name} tool to help with the user's request. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. If you choose not to call another tool because you have everything you need, respond to the user via audio`;
 
     try {
       const cortexHistory = this.getCortexHistory(args);
       console.log('Cortex history', cortexHistory);
       let response;
+      // Declare imageUrls at a higher scope
+      const imageUrls = new Set<string>();
       switch (call.name.toLowerCase()) {
         case 'search':
         case 'document':
@@ -318,7 +340,6 @@ export class Tools {
           const markdownLinkPattern = /\[.*?\]\((.*?)\)/g;
           
           let match;
-          const imageUrls = new Set<string>();
           
           // Find markdown image URLs
           while ((match = markdownImagePattern.exec(response.result)) !== null) {
@@ -338,11 +359,6 @@ export class Tools {
               imageUrls.add(url);
             }
           }
-          
-          // Emit events for each unique image URL found
-          imageUrls.forEach(url => {
-            this.socket.emit('imageCreated', url);
-          });
           break;
 
         case 'pdf':
@@ -385,9 +401,19 @@ export class Tools {
         output: response?.result || '',
       });
 
+      if (isSilent) {
+        finishPrompt = `You have finished using the ${call.name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now`;
+      }
+
       finishPrompt += '.';
-      // Finish message is not disposable - keep trying if busy
       await this.sendSystemPrompt(finishPrompt, true, false);
+
+      // Send image events after finish prompt if we collected any
+      if (call.name.toLowerCase() === 'image' && imageUrls.size > 0) {
+        imageUrls.forEach(url => {
+          this.socket.emit('imageCreated', url);
+        });
+      }
 
       this.callList = this.callList.filter((c) => c.call_id !== call_id);
     } catch (error) {

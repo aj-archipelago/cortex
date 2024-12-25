@@ -1,5 +1,4 @@
 import { Prompt } from '../../../server/prompt.js';
-import { callPathway } from '../../../lib/pathwayTools.js';
 
 export default {
     prompt:
@@ -23,7 +22,6 @@ export default {
         let result;
         if (args.voiceResponse) {
             result = await runAllPrompts({ ...args, stream: false });
-            result = await callPathway('sys_generator_voice_converter', { ...args, text: result, stream: false });
         } else {
             result = await runAllPrompts({ ...args });
         }

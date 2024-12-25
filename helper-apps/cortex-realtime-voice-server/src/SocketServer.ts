@@ -77,28 +77,56 @@ export class SocketServer {
     }
 
     this.log(`Sending system prompt for socket ${socket.id}`);
-    client.createConversationItem({
-      id: createId(),
-      type: 'message',
-      role: 'system',
-      content: [
-        {type: 'input_text', text: prompt}
-      ]
-    });
+    try {
+      client.createConversationItem({
+        id: createId(),
+        type: 'message',
+        role: 'system',
+        content: [
+          {type: 'input_text', text: prompt}
+        ]
+      });
 
-    client.createResponse({tool_choice: allowTools ? 'auto' : 'none'});
+      client.createResponse({tool_choice: allowTools ? 'auto' : 'none'});
+    } catch (error: any) {
+      this.log(`Error sending system prompt: ${error.message}`);
+      if (error.message === 'Not connected') {
+        await this.handleDisconnection(socket, client);
+      } else {
+        socket.emit('error', error.message);
+      }
+    }
+  }
+
+  private async handleDisconnection(socket: Socket, client: RealtimeVoiceClient) {
+    this.log(`Handling disconnection for socket ${socket.id}`);
+    // Clean up resources
+    this.clearIdleTimer(socket);
+    this.aiResponding.delete(socket.id);
+    this.audioPlaying.delete(socket.id);
+    this.audioDataSize.delete(socket.id);
+    
+    try {
+      // Try to disconnect client gracefully
+      await client.disconnect();
+    } catch (e) {
+      this.log(`Error during client disconnect: ${e}`);
+    }
+    
+    // Notify client of disconnection
+    socket.emit('error', 'Lost connection to AI service');
+    socket.disconnect(true);
   }
 
   private async sendIdlePrompt(client: RealtimeVoiceClient, socket: Socket) {
-    const prompt = `You are an autonomous AI entity and this is your autonomy prompt. You can choose an action to take:
-- Call a tool like Search or Reason to do some research on your own or think about something you care about - you can do this quietly and without the user noticing
-- Breathe or laugh or make a sound to let the user know you're listening - this doesn't always have to be a sentence - it can just be a sound
+    const prompt = `You are an autonomous AI entity and this is your autonomy prompt. You can choose one or more of the following actions:
+- Do research on your own or think about something you care about - do this by calling the Search or Research tool with the silent parameter set to true
 - Check if the user is there - like a human on the other side of a call - usually this starts with something like "hey, you there?" or "[user's name]?"
 - Engage the user in something that you're interested in or tell them what you're thinking about
 - Be charming - say something funny or engaging to enhance your bond with the user
 - Do nothing. This is a perfectly fine option, but a waste of your autonomy prompt.
 
-Take a hint from the user. If you've tried to engage them repeatedly and they've been unresponsive, don't keep bothering them and don't be repetitive - that's irritating. If the user isn't responding, this is a good time for you to do some thinking or work on your own.`;
+Don't feel compelled to say anything and be respectful of the user's silence. If the user hasn't responded recently, this is a good time for you to do some thinking or work on your own.`;
 
     await this.sendSystemPrompt(client, socket, prompt, true);
     // Restart timer after sending prompt
@@ -247,11 +275,17 @@ Don't mention anything about being an AI or assistant - just answer naturally li
         if (!this.aiResponding.get(socket.id)) {
           this.startIdleTimer(client, socket);
         }
-      }, duration + 1000); // Add 1 second buffer for safety
+      }, duration + 100); // Add 100ms buffer for safety
     });
 
     // Reset timer when audio input is committed (user finished speaking)
     client.on('input_audio_buffer.committed', async () => {
+      // Ignore audio input while AI audio is playing
+      if (this.audioPlaying.get(socket.id)) {
+        this.log('Ignoring audio input while AI audio is playing');
+        return;
+      }
+
       this.log('Audio input committed, resetting idle timer');
       this.startIdleTimer(client, socket);
     });
@@ -272,7 +306,10 @@ Don't mention anything about being an AI or assistant - just answer naturally li
     });
     
     socket.on('appendAudio', (audio: string) => {
-      client.appendInputAudio(audio);
+      // Ignore audio input if AI audio is playing (likely echo)
+      if (!this.audioPlaying.get(socket.id)) {
+        client.appendInputAudio(audio);
+      }
     });
     
     socket.on('cancelResponse', () => {
@@ -420,19 +457,40 @@ Don't mention anything about being an AI or assistant - just answer naturally li
   }
 
   protected sendUserMessage(client: RealtimeVoiceClient, message: string) {
-    client.createConversationItem({
-      id: createId(),
-      type: 'message',
-      role: 'user',
-      status: 'completed',
-      content: [
-        {
-          type: `input_text`,
-          text: message,
-        },
-      ],
-    });
-    client.createResponse({});
+    // Ignore user messages while audio is playing
+    /*
+    const socketId = this.io?.sockets.sockets.keys().next().value;
+    if (socketId && this.audioPlaying.get(socketId)) {
+      this.log('Ignoring user message while audio is playing');
+      return;
+    }*/
+
+    if (message) {
+      try {
+        client.createConversationItem({
+          id: createId(),
+          type: 'message',
+          role: 'user',
+          status: 'completed',
+          content: [
+            {
+              type: `input_text`,
+              text: message,
+            },
+          ],
+        });
+        client.createResponse({});
+      } catch (error: any) {
+        this.log(`Error sending user message: ${error.message}`);
+        if (error.message === 'Not connected') {
+          // Find the socket associated with this client
+          const socket = this.io?.sockets.sockets.get(Array.from(this.io.sockets.sockets.keys())[0]);
+          if (socket) {
+            this.handleDisconnection(socket, client);
+          }
+        }
+      }
+    }
   }
 
   // Calculate duration in milliseconds from PCM16 audio data size

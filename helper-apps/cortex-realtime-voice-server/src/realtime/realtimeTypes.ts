@@ -30,6 +30,8 @@ type ToolDefinition = {
 type ToolChoice = 'auto' | 'none' | 'required' | { type: 'function'; name: string };
 
 export type RealtimeResponseConfig = {
+  conversation: string,
+  metadata: Record<string, any>,
   modalities: Array<Modality>,
   instructions: string,
   voice: Voice,

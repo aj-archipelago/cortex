@@ -154,13 +154,19 @@ export default function Chat({
             item.content?.[0]?.text || 
             '';
 
+          // For user messages, use a timestamp slightly before now
+          // For AI messages, use current timestamp
+          const timestamp = item.role === 'user' ? 
+            Date.now() - 500 : // 500ms earlier for user messages
+            Date.now();
+
           return [...prev, {
-            id: item.id || `local-${item.timestamp}`,
+            id: item.id || `local-${timestamp}`,
             isSelf: item.role === 'user',
             name: item.role === 'user' ? userName : aiName,
             message: messageContent,
             isImage: false,
-            timestamp: item.timestamp || Date.now(),
+            timestamp,
           }];
         }
         return prev;
