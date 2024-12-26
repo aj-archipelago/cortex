@@ -7,6 +7,7 @@ import {Tools} from "./Tools";
 import type {ClientToServerEvents, ServerToClientEvents} from "./realtime/socket";
 import {RealtimeVoiceClient} from "./realtime/client";
 import {manageMemory, readMemory} from "./cortex/memory";
+import {style} from "./cortex/style";
 import type { Voice } from './realtime/realtimeTypes';
 import { logger } from './utils/logger';
 
@@ -43,7 +44,7 @@ Tool Use Guidelines:
 - If the user explicitly asks you to use a tool, you must use it.
 `;
 
-const INSTRUCTIONS = `${AI_COMMON_INSTRUCTIONS}\n${AI_EXPERTISE}\n${AI_TOOLS}\n${AI_MEMORY}\n${AI_MEMORY_INSTRUCTIONS}\n${AI_DATETIME}`;
+const INSTRUCTIONS = `${AI_COMMON_INSTRUCTIONS}\n${AI_EXPERTISE}\n${AI_TOOLS}\n${AI_MEMORY}\n${AI_MEMORY_INSTRUCTIONS}\nThis is an example of your style and tone. Please adhere to it closely when generating responses: {{voiceSample}}\n${AI_DATETIME}`;
 
 export class SocketServer {
   private readonly apiKey: string;
@@ -56,8 +57,13 @@ export class SocketServer {
   private aiResponding: Map<string, boolean> = new Map();
   private audioPlaying: Map<string, boolean> = new Map();
   private lastUserMessageTime: Map<string, number> = new Map();
+  private idleCycles: Map<string, number> = new Map();
   private readonly isAzure: boolean;
+  private voiceSample: string | null = null;
   private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 60000;
+  private static readonly BASE_IDLE_TIMEOUT: number = 15000;
+  private static readonly MAX_IDLE_TIMEOUT: number = 60000;
+  private static readonly SILENT_MODE_THRESHOLD: number = 60000; // 1 minute threshold for silent mode
 
   private cleanup(socket: Socket) {
     logger.log(`Cleaning up resources for socket ${socket.id}`);
@@ -65,6 +71,7 @@ export class SocketServer {
     this.aiResponding.delete(socket.id);
     this.audioPlaying.delete(socket.id);
     this.lastUserMessageTime.delete(socket.id);
+    this.idleCycles.delete(socket.id);
   }
 
   constructor(apiKey: string, corsHosts: string) {
@@ -76,10 +83,14 @@ export class SocketServer {
     this.isAzure = realtimeUrl.includes('azure.com');
   }
 
-  private calculateIdleTimeout() {
-    const baseTimeout = 20000; // 20 seconds
-    const randomTimeout = Math.floor(Math.random() * 30000); // Add up to 30 seconds of randomness
-    return baseTimeout + randomTimeout;
+  private calculateIdleTimeout(socket: Socket) {
+    const cycles = this.idleCycles.get(socket.id) || 0;
+    const baseTimeout = SocketServer.BASE_IDLE_TIMEOUT * Math.pow(2, cycles);
+    const randomFactor = 0.8 + (Math.random() * 0.4);
+    const timeout = Math.min(baseTimeout * randomFactor, SocketServer.MAX_IDLE_TIMEOUT);
+    
+    logger.log(`Calculated idle timeout for socket ${socket.id}: ${timeout}ms (cycle ${cycles})`);
+    return timeout;
   }
 
   private async sendSystemPrompt(client: RealtimeVoiceClient, socket: Socket, prompt: string, allowTools: boolean = true) {
@@ -128,16 +139,30 @@ export class SocketServer {
     socket.disconnect(true);
   }
 
+  private shouldUseSilentMode(socket: Socket): boolean {
+    const cycles = this.idleCycles.get(socket.id) || 0;
+    const currentTimeout = SocketServer.BASE_IDLE_TIMEOUT * Math.pow(2, cycles);
+    return currentTimeout >= SocketServer.SILENT_MODE_THRESHOLD;
+  }
+
   private async sendIdlePrompt(client: RealtimeVoiceClient, socket: Socket) {
-    const prompt = `You are an autonomous AI entity and this is your autonomy prompt. You can choose one or more of the following actions:
-- Do research on your own or think about something you care about - do this by calling the Search or Research tool with the silent parameter set to true
+    const useSilentMode = this.shouldUseSilentMode(socket);
+    
+    const prompt = useSilentMode ? 
+      `You are an autonomous AI entity and this is your autonomy prompt. Since the user has been idle for over a minute, you should do one or more of the following:
+- Do silent research about something that interests you - use the Search tool with the silent parameter set to true
+- Think deeply about a topic you care about - use the Reason tool with the silent parameter set to true
+- Do nothing if you prefer.
+
+The user is taking a break, so don't try to engage them. This is your time to learn and think silently.` :
+      `You are an autonomous AI entity and this is your autonomy prompt. You can choose one or more of the following actions:
+- Do research on your own or think about something you care about - do this by calling the Search or Reasontool with the silent parameter set to true
 - Check if the user is there - like a human on the other side of a call - usually this starts with something like "hey, you there?" or "[user's name]?"
 - Engage the user in something that you're interested in or tell them what you're thinking about
 - Be charming - say something funny or engaging to enhance your bond with the user
-- Do nothing. This is a perfectly fine option, but a waste of your autonomy prompt.
+- Do nothing if you prefer.`;
 
-Don't feel compelled to say anything and be respectful of the user's silence. If the user hasn't responded recently, this is a good time for you to do some thinking or work on your own.`;
-
+    logger.log(`Sending ${useSilentMode ? 'silent' : 'regular'} idle prompt for socket ${socket.id}`);
     await this.sendSystemPrompt(client, socket, prompt, true);
     // Restart timer after sending prompt
     this.startIdleTimer(client, socket);
@@ -147,12 +172,15 @@ Don't feel compelled to say anything and be respectful of the user's silence. If
     // Clear any existing timer for this socket
     this.clearIdleTimer(socket);
     
+    // Calculate timeout based on idle cycles
+    const timeout = this.calculateIdleTimeout(socket);
+    
     // Create new timer
-    const timeout = this.calculateIdleTimeout();
     const timerId = setTimeout(() => {
+      //this.updateSession(client, socket);
       this.sendIdlePrompt(client, socket);
-      // Restart timer after sending prompt
-      this.startIdleTimer(client, socket);
+      // Increment idle cycles for next time
+      this.idleCycles.set(socket.id, (this.idleCycles.get(socket.id) || 0) + 1);
     }, timeout);
     
     this.idleTimers.set(socket.id, timerId);
@@ -166,6 +194,11 @@ Don't feel compelled to say anything and be respectful of the user's silence. If
       this.idleTimers.delete(socket.id);
       logger.log(`Cleared idle timer for socket ${socket.id}`);
     }
+  }
+
+  private resetIdleCycles(socket: Socket) {
+    this.idleCycles.set(socket.id, 0);
+    logger.log(`Reset idle cycles for socket ${socket.id}`);
   }
 
   listen(app: Hono, port: number) {
@@ -226,12 +259,14 @@ Don't feel compelled to say anything and be respectful of the user's silence. If
     });
 
     await manageMemory(socket.data.userId, socket.data.aiName, []);
+    const styleResult = await style(socket.data.userId, socket.data.aiName, socket.data.aiStyle, [], "");
+    this.voiceSample = styleResult?.result || null;
+    logger.log(`AI Voice Sample: ${this.voiceSample}`);
 
     client.on('connected', async () => {
       logger.log(`Connected to OpenAI successfully!`);
       await this.updateSession(client, socket);
       socket.emit('ready');
-
       // Send initial greeting prompt
       const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. 
 Respond naturally like a human answering a phone call - for example "Hello?" or "Hi, this is ${socket.data.aiName}" or something similarly natural.
@@ -240,10 +275,9 @@ Don't mention anything about being an AI or assistant - just answer naturally li
 
       if (!this.isAzure) {
         await this.sendSystemPrompt(client, socket, greetingPrompt, false);
+        this.startIdleTimer(client, socket);
       }
 
-      // Start idle timer when connection is ready
-      this.startIdleTimer(client, socket);
     });
 
     // Track when AI starts responding
@@ -296,15 +330,15 @@ Don't mention anything about being an AI or assistant - just answer naturally li
     
     socket.on('sendMessage', (message: string) => {
       if (message) {
-        logger.log('User sent message, resetting idle timer');
+        logger.log('User sent message, resetting idle timer and cycles');
+        this.resetIdleCycles(socket);
         this.startIdleTimer(client, socket);
-        //this.lastUserMessageTime.set(socket.id, Date.now());
         this.sendUserMessage(client, message);
       }
     });
     
     socket.on('appendAudio', (audio: string) => {
-      // Only ignore audio input if AI audio is playing AND it's been more than 60s since last user message
+      // Reset idle cycles when user sends audio
       const timeSinceLastMessage = Date.now() - (this.lastUserMessageTime.get(socket.id) || 0);
       if (!this.audioPlaying.get(socket.id) || timeSinceLastMessage <= SocketServer.AUDIO_BLOCK_TIMEOUT_MS) {
         client.appendInputAudio(audio);
@@ -312,16 +346,20 @@ Don't mention anything about being an AI or assistant - just answer naturally li
     });
 
     client.on('input_audio_buffer.committed', async () => {
-      // Audio input committed, resetting idle timer
-      logger.log('Audio input committed, resetting idle timer');
-      this.startIdleTimer(client, socket);
+      // Reset idle cycles when audio input is committed
+      if (!this.audioPlaying.get(socket.id)) {
+        logger.log('Audio input committed, resetting idle timer and cycles');
+        this.resetIdleCycles(socket);
+        this.startIdleTimer(client, socket);
+      }
     });
     
     socket.on('cancelResponse', () => {
-      logger.log('User cancelled response, resetting idle timer');
+      logger.log('User cancelled response, resetting idle timer and cycles');
       this.aiResponding.set(socket.id, false);
       this.audioPlaying.set(socket.id, false);
       this.lastUserMessageTime.set(socket.id, 0);
+      this.resetIdleCycles(socket);
       this.startIdleTimer(client, socket);
       client.cancelResponse();
     });
@@ -403,7 +441,7 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       if (item.content && item.content[0]) {
         socket.emit('conversationUpdated', item, {});
         const cortexHistory = tools.getCortexHistory();
-        await manageMemory(socket.data.userId, socket.data.aiName, cortexHistory);
+        manageMemory(socket.data.userId, socket.data.aiName, cortexHistory);
       }
     });
     client.on('response.audio_transcript.delta', ({item_id, delta}) => {
@@ -449,10 +487,12 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       .replace('{{memoryTopics}}', memoryTopics?.result || '')
       .replace('{{aiName}}', socket.data.aiName)
       .replace('{{now}}', new Date().toISOString())
-      .replace('{{language}}', 'English');
+      .replace('{{language}}', 'English')
+      .replace('{{voiceSample}}', this.voiceSample || '');
 
     client.updateSession({
       instructions,
+      modalities: ['audio', 'text'],
       voice: (socket.handshake.query.voice as string || 'alloy') as Voice,
       input_audio_transcription: {model: 'whisper-1'},
       turn_detection: {type: 'server_vad', silence_duration_ms: 1500},

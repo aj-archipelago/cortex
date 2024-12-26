@@ -138,6 +138,12 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
     super();
     
     this.isAzure = realtimeUrl.includes('azure.com');
+    if (this.isAzure) {
+      model = 'gpt-4o-realtime-preview-2024-10-01';
+    } else {
+      model = 'gpt-4o-realtime-preview-2024-12-17';
+    }
+
     this.url = `${realtimeUrl.replace('https://', 'wss://')}${realtimeUrl.includes('?') ? '&' : '?'}model=${model}`;
     
     this.apiKey = apiKey;
@@ -148,7 +154,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
     const defaultVoice: Voice = 'alloy';
     
     this.sessionConfig = {
-      modalities: ['text', 'audio'],
+      modalities: ['audio', 'text'],
       instructions: DEFAULT_INSTRUCTIONS,
       voice: sessionConfig?.voice || defaultVoice,
       input_audio_format: 'pcm16',
@@ -160,7 +166,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
         type: 'server_vad',
         threshold: 0.5,
         prefix_padding_ms: 300,
-        silence_duration_ms: 500,
+        silence_duration_ms: 1500,
       },
       tools: [],
       tool_choice: 'auto',
@@ -312,6 +318,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
       },
     });
     // No need to log session update messages as they can be noisy
+    logger.log('Sending session update message:', message);
     this.ws?.send(message);
   }
 

@@ -45,36 +45,19 @@ export class Tools {
     });
 
     // Track audio playback state
-    client.on('response.audio.delta', ({delta}) => {
+    client.on('response.audio.delta', () => {
       this.audioPlaying = true;
-      // Accumulate the size of base64 decoded audio data
-      const dataSize = Buffer.from(delta, 'base64').length;
-      this.audioDataSize += dataSize;
     });
 
     client.on('response.audio.done', () => {
-      const duration = this.calculateAudioDuration(this.audioDataSize);
-      logger.log(`Audio data complete (${this.audioDataSize} bytes, estimated ${duration}ms duration), waiting for playback`);
-      
-      // Reset data size counter for next audio
-      this.audioDataSize = 0;
-      
-      // Wait for estimated duration plus a small buffer
-      setTimeout(() => {
-        logger.log('Estimated audio playback complete');
-        this.audioPlaying = false;
-      }, duration + 1000); // Add 1 second buffer for safety
+      logger.log('Audio data complete, waiting for playback');
     });
-  }
 
-  // Calculate duration in milliseconds from PCM16 audio data size
-  private calculateAudioDuration(dataSize: number): number {
-    const bytesPerSample = 2; // 16-bit = 2 bytes per sample
-    const sampleRate = 24000; // 24kHz
-    const channels = 1; // mono
-    const samples = dataSize / bytesPerSample / channels;
-    const durationMs = (samples / sampleRate) * 1000;
-    return Math.ceil(durationMs);
+    // Listen for audio playback completion from client
+    socket.on('audioPlaybackComplete', () => {
+      logger.log('Audio playback complete');
+      this.audioPlaying = false;
+    });
   }
 
   private async sendSystemPrompt(prompt: string, allowTools: boolean = false, disposable: boolean = true) {
@@ -108,7 +91,7 @@ export class Tools {
       {
         type: 'function',
         name: 'Search',
-        description: 'Use for current events, news, fact-checking, and information requiring citation. This tool can search the internet, all Al Jazeera news articles and the latest news wires from multiple sources. You pass in detailed instructions about what you need the tool to do in detailedInstructions.',
+        description: 'Use for current events, news, fact-checking, and information requiring citation. This tool allows you to search the internet, all Al Jazeera news articles and the latest news wires from multiple sources. You pass in detailed instructions about what you need the tool to do in detailedInstructions.',
         parameters: {
           type: "object",
           properties: {

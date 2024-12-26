@@ -32,6 +32,7 @@ export type MemorySection = "memorySelf" | "memoryUser" | "memoryTopics" | "memo
 export type CortexVariables = {
   contextId?: string,
   aiName?: string,
+  aiStyle?: string,
   chatHistory?: ChatMessage[],
   text?: string,
   useMemory?: boolean,
@@ -52,6 +53,9 @@ export async function getCortexResponse(
     query,
     variables
   }
+  logger.log(`Cortex URL: ${getCortexUrl()}`);
+  logger.log(`Cortex Body: ${JSON.stringify(body)}`);
+  logger.log(`Cortex Headers: ${JSON.stringify(headers)}`);
   const res = await fetch(getCortexUrl(), {
     method: 'POST',
     headers,
