@@ -25,12 +25,13 @@ export class WavStreamPlayer {
   private trackSampleOffsets: Record<string, TrackSampleOffset>;
   private interruptedTrackIds: Record<string, boolean>;
   private isRestarting: boolean;
+  public onTrackComplete?: (trackId: string) => void;
 
   /**
    * Creates a new WavStreamPlayer instance
    * @param options
    */
-  constructor({ sampleRate = 44100, minBufferSize = 3 }: WavStreamPlayerOptions = {}) {
+  constructor({ sampleRate = 44100, minBufferSize = 10 }: WavStreamPlayerOptions = {}) {
     this.scriptSrc = StreamProcessorSrc;
     this.sampleRate = sampleRate;
     this.minBufferSize = minBufferSize;
@@ -107,13 +108,24 @@ export class WavStreamPlayer {
           streamNode.disconnect();
           this.stream = null;
           this.isRestarting = false;
+          if (e.data.reason === 'max_underruns_reached') {
+            console.warn(`Audio stream stopped due to ${e.data.finalCount} consecutive underruns`);
+          }
         } else if (event === 'offset') {
           const { requestId, trackId, offset } = e.data;
           const currentTime = offset / this.sampleRate;
           this.trackSampleOffsets[requestId] = { trackId, offset, currentTime };
+        } else if (event === 'track_complete') {
+          const { trackId } = e.data;
+          this.onTrackComplete?.(trackId);
         } else if (event === 'error') {
           console.error('Stream processor error:', e.data.error);
           this._handleStreamError();
+        } else if (event === 'underrun') {
+          console.warn(
+            `Audio buffer underrun: ${e.data.count} frames without data. ` +
+            `Buffer size: ${e.data.bufferSize}/${e.data.maxBuffers}`
+          );
         }
       };
       if (this.analyser) {
@@ -245,5 +257,13 @@ export class WavStreamPlayer {
    */
   getAnalyser(): AnalyserNode | null {
     return this.analyser;
+  }
+
+  /**
+   * Sets a callback to be called when a track completes playback
+   * @param callback The callback function that receives the trackId
+   */
+  setTrackCompleteCallback(callback: (trackId: string) => void) {
+    this.onTrackComplete = callback;
   }
 }

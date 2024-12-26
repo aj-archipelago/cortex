@@ -13,7 +13,8 @@ class StreamProcessor extends AudioWorkletProcessor {
     this.lastErrorTime = 0;
     this.errorCount = 0;
     this.noBufferCount = 0;
-    this.maxNoBufferFrames = 50; // Number of empty frames before stopping
+    this.maxNoBufferFrames = 100;
+    this.lastUnderrunLog = 0;
 
     this.port.onmessage = (event) => {
       try {
@@ -23,7 +24,7 @@ class StreamProcessor extends AudioWorkletProcessor {
             const int16Array = payload.buffer;
             const float32Array = new Float32Array(int16Array.length);
             for (let i = 0; i < int16Array.length; i++) {
-              float32Array[i] = int16Array[i] / 0x8000; // Convert Int16 to Float32
+              float32Array[i] = int16Array[i] / 0x8000;
             }
             this.writeData(float32Array, payload.trackId);
           } else if (payload.event === 'config') {
@@ -88,18 +89,15 @@ class StreamProcessor extends AudioWorkletProcessor {
       
       // If we have a partial buffer at the end, push it too
       if (offset > 0) {
-        // Create a new buffer of exact size needed
-        const finalBuffer = new Float32Array(offset);
+        const finalBuffer = new Float32Array(this.bufferLength);
         finalBuffer.set(buffer.subarray(0, offset));
         this.outputBuffers.push({ buffer: finalBuffer, trackId });
-        // Reset write buffer
         this.write = { buffer: new Float32Array(this.bufferLength), trackId };
         this.writeOffset = 0;
       } else {
         this.writeOffset = offset;
       }
       
-      // Reset no buffer counter since we just got data
       this.noBufferCount = 0;
       return true;
     } catch (error) {
@@ -119,39 +117,53 @@ class StreamProcessor extends AudioWorkletProcessor {
         return false;
       } else if (!this.hasStarted && outputBuffers.length < this.minBufferSize) {
         // Wait for more buffers before starting
+        outputChannelData.fill(0);
         return true;
       } else if (outputBuffers.length > 0) {
         this.hasStarted = true;
         this.noBufferCount = 0;
+        this.lastUnderrunLog = 0;
         
         const { buffer, trackId } = outputBuffers.shift();
-        // Handle potentially smaller final buffer
-        const samplesToCopy = Math.min(buffer.length, outputChannelData.length);
-        for (let i = 0; i < samplesToCopy; i++) {
-          outputChannelData[i] = buffer[i];
-        }
-        // Zero-fill any remaining samples in the output buffer
-        for (let i = samplesToCopy; i < outputChannelData.length; i++) {
-          outputChannelData[i] = 0;
-        }
+        outputChannelData.set(buffer);
         
         if (trackId) {
           this.trackSampleOffsets[trackId] =
             this.trackSampleOffsets[trackId] || 0;
           this.trackSampleOffsets[trackId] += buffer.length;
+          
+          // If this was the last buffer for this track, notify completion
+          if (outputBuffers.length === 0 || outputBuffers[0].trackId !== trackId) {
+            this.port.postMessage({ 
+              event: 'track_complete',
+              trackId,
+              finalOffset: this.trackSampleOffsets[trackId]
+            });
+          }
         }
         return true;
       } else if (this.hasStarted) {
-        // Count empty frames and only stop after a significant gap
         this.noBufferCount++;
+        
+        if (this.noBufferCount >= 5 && currentTime - this.lastUnderrunLog > 1) {
+          this.port.postMessage({ 
+            event: 'underrun', 
+            count: this.noBufferCount,
+            bufferSize: this.outputBuffers.length,
+            maxBuffers: this.maxNoBufferFrames
+          });
+          this.lastUnderrunLog = currentTime;
+        }
+        
         if (this.noBufferCount >= this.maxNoBufferFrames) {
-          this.port.postMessage({ event: 'stop' });
+          this.port.postMessage({ 
+            event: 'stop',
+            reason: 'max_underruns_reached',
+            finalCount: this.noBufferCount
+          });
           return false;
         }
-        // Zero-fill the output while waiting
-        for (let i = 0; i < outputChannelData.length; i++) {
-          outputChannelData[i] = 0;
-        }
+        outputChannelData.fill(0);
       }
       return true;
     } catch (error) {

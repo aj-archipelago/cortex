@@ -18,6 +18,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import ChatIcon from '@mui/icons-material/Chat';
 import type { Voice } from '../../../src/realtime/realtimeTypes';
 import {SoundEffects} from './audio/SoundEffects';
+import { logger } from '../utils/logger';
 
 type ChatProps = {
   userId: string;
@@ -60,21 +61,21 @@ export default function Chat({
   const [mounted, setMounted] = useState(false);
 
   // Log on every render
-  console.log('Chat rendering, showChat:', showChat);
+  logger.log('Chat rendering, showChat:', showChat);
 
   // Log on mount only
   useEffect(() => {
-    console.log('Chat mounted');
-    return () => console.log('Chat unmounted');
+    logger.log('Chat mounted');
+    return () => logger.log('Chat unmounted');
   }, []);
 
   // Existing effect to track showChat changes
   useEffect(() => {
-    console.log('showChat changed:', showChat);
+    logger.log('showChat changed:', showChat);
   }, [showChat]);
 
   const stopConversation = useCallback(async () => {
-    console.log('Stopping conversation');
+    logger.log('Stopping conversation');
     const wavRecorder = wavRecorderRef.current;
     const wavStreamPlayer = wavStreamPlayerRef.current;
 
@@ -107,7 +108,7 @@ export default function Chat({
   }, []);
 
   const startConversation = useCallback(() => {
-    console.log('Starting conversation');
+    logger.log('Starting conversation');
     const socket = socketRef.current;
     const wavStreamPlayer = wavStreamPlayerRef.current;
     const wavRecorder = wavRecorderRef.current;
@@ -176,13 +177,13 @@ export default function Chat({
     audioContextRef.current = new AudioContext();
 
     socket.on('connect', () => {
-      console.log('Connected', socket.id);
+      logger.log('Connected', socket.id);
       SoundEffects.playConnect();
     });
     socket.on('disconnect', () => {
-      console.log('Disconnected', socket.id);
+      logger.log('Disconnected', socket.id);
       stopConversation().then(() => {
-        console.log('Conversation stopped by disconnect');
+        logger.log('Conversation stopped by disconnect');
       });
     });
     socket.on('ready', () => {
@@ -193,23 +194,23 @@ export default function Chat({
           sourceNodeRef.current = audioContextRef.current!.createMediaStreamSource(wavRecorder.getStream()!);
         }
       }).then(() => {
-        console.log('Recording started')
+        logger.log('Recording started')
         setIsRecording(true);
       });
     });
     socket.on('conversationInterrupted', async () => {
-      console.log('conversationInterrupted');
+      logger.log('conversationInterrupted');
       const trackSampleOffset = await wavStreamPlayer.interrupt();
       if (trackSampleOffset?.trackId) {
         socket.emit('cancelResponse');
       }
     });
     socket.on('imageCreated', (imageUrl) => {
-      console.log('imageCreated event received:', imageUrl);
+      logger.log('imageCreated event received:', imageUrl);
       setImageUrls(prev => {
-        console.log('setImageUrls called with prev:', prev);
+        logger.log('setImageUrls called with prev:', prev);
         const next = prev.length === 0 ? [imageUrl] : [...prev, imageUrl];
-        console.log('setImageUrls returning next:', next);
+        logger.log('setImageUrls returning next:', next);
         if (prev.length === 0) {
           setOverlayKey(k => k + 1);
         }
@@ -217,15 +218,23 @@ export default function Chat({
       });
     });
     socket.on('conversationUpdated', (item, delta) => {
-      console.log('Conversation updated:', { item, delta });
+      logger.log('Conversation updated:', { item, delta });
 
       if (delta?.audio) {
         const audio = base64ToArrayBuffer(delta.audio);
         wavStreamPlayer.add16BitPCM(audio, item.id);
+        
+        // Set up track completion callback if not already set
+        if (!wavStreamPlayer.onTrackComplete) {
+          wavStreamPlayer.setTrackCompleteCallback((trackId) => {
+            logger.log('Audio track completed:', trackId);
+            socket.emit('audioPlaybackComplete', trackId);
+          });
+        }
         return;
       } else {
-        console.log('Raw delta:', JSON.stringify(delta));
-        console.log('Raw item:', JSON.stringify(item));
+        logger.log('Raw delta:', JSON.stringify(delta));
+        logger.log('Raw item:', JSON.stringify(item));
       }
 
       // For user messages, filter out audio-only updates
@@ -237,7 +246,7 @@ export default function Chat({
           (item.content?.[0]?.type === 'input_text' && item.content[0].text);
 
         if (!hasUserContent) {
-          console.log('Filtering audio-only message');
+          logger.log('Filtering audio-only message');
           return;
         }
       }
@@ -257,7 +266,7 @@ export default function Chat({
     wavRecorder.begin(null).then(() => {
       wavStreamPlayer.connect().then(() => {
         outputAnalyserRef.current = wavStreamPlayer.getAnalyser();
-        console.log('Conversation started, connecting to socket');
+        logger.log('Conversation started, connecting to socket');
         socket.connect();
       });
     });
@@ -273,7 +282,7 @@ export default function Chat({
   const onStartStop = useCallback(() => {
     if (isRecording) {
       stopConversation().then(() => {
-        console.log('Conversation stopped by user');
+        logger.log('Conversation stopped by user');
       });
     } else {
       startConversation();
@@ -295,10 +304,10 @@ export default function Chat({
 
   useEffect(() => {
     const unloadCallback = (event: BeforeUnloadEvent) => {
-      console.log('Unloading', event);
+      logger.log('Unloading', event);
       if (isRecording) {
         stopConversation().then(() => {
-          console.log('Conversation stopped by unmount');
+          logger.log('Conversation stopped by unmount');
         });
       }
       return "";
@@ -313,7 +322,7 @@ export default function Chat({
   useEffect(() => {
     return () => {
       stopConversation().then(() => {
-        console.log('Conversation stopped by effect cleanup');
+        logger.log('Conversation stopped by effect cleanup');
         if (audioContextRef.current) {
           audioContextRef.current.close();
           audioContextRef.current = null;
@@ -324,14 +333,14 @@ export default function Chat({
   }, [stopConversation]);
 
   useEffect(() => {
-    console.log('imageUrls changed:', imageUrls);
+    logger.log('imageUrls changed:', imageUrls);
   }, [imageUrls]);
 
   // Log in toggle
   const toggleChat = () => {
-    console.log('Toggle clicked, current showChat:', showChat);
+    logger.log('Toggle clicked, current showChat:', showChat);
     setShowChat(prev => {
-      console.log('Setting showChat from', prev, 'to', !prev);
+      logger.log('Setting showChat from', prev, 'to', !prev);
       return !prev;
     });
   };
@@ -346,7 +355,7 @@ export default function Chat({
                            rounded-t-2xl z-50 transition-transform duration-300 ease-in-out
                            transform translate-y-full ${showChat ? 'translate-y-0' : ''}`;
   
-  console.log('Render state:', {
+  logger.log('Render state:', {
     showChat,
     mounted,
     classes: chatPanelClasses

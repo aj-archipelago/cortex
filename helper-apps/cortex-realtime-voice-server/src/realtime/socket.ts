@@ -20,4 +20,5 @@ export interface ClientToServerEvents {
   appendAudio: (audio: string) => void;
   cancelResponse: () => void;
   conversationCompleted: () => void;
+  audioPlaybackComplete: (trackId: string) => void;
 }

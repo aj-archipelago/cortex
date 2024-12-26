@@ -8,6 +8,7 @@ import {expert} from "./cortex/expert";
 import {image} from "./cortex/image";
 import {vision} from "./cortex/vision";
 import {reason} from "./cortex/reason";
+import { logger } from './utils/logger';
 
 type Call = {
   call_id: string;
@@ -53,14 +54,14 @@ export class Tools {
 
     client.on('response.audio.done', () => {
       const duration = this.calculateAudioDuration(this.audioDataSize);
-      console.log(`Audio data complete (${this.audioDataSize} bytes, estimated ${duration}ms duration), waiting for playback`);
+      logger.log(`Audio data complete (${this.audioDataSize} bytes, estimated ${duration}ms duration), waiting for playback`);
       
       // Reset data size counter for next audio
       this.audioDataSize = 0;
       
       // Wait for estimated duration plus a small buffer
       setTimeout(() => {
-        console.log('Estimated audio playback complete');
+        logger.log('Estimated audio playback complete');
         this.audioPlaying = false;
       }, duration + 1000); // Add 1 second buffer for safety
     });
@@ -79,7 +80,7 @@ export class Tools {
   private async sendSystemPrompt(prompt: string, allowTools: boolean = false, disposable: boolean = true) {
     // Don't send prompt if AI is currently responding or audio is playing
     if (this.aiResponding || this.audioPlaying) {
-      console.log(`${disposable ? 'Skipping' : 'Queuing'} prompt while AI is ${this.aiResponding ? 'responding' : 'playing audio'}`);
+      logger.log(`${disposable ? 'Skipping' : 'Queuing'} prompt while AI is ${this.aiResponding ? 'responding' : 'playing audio'}`);
       if (!disposable) {
         // Try again after a short delay if the message is important
         setTimeout(() => {
@@ -89,7 +90,7 @@ export class Tools {
       return;
     }
 
-    console.log('Sending system prompt');
+    logger.log('Sending system prompt');
     this.realtimeClient.createConversationItem({
       id: createId(),
       type: 'message',
@@ -246,7 +247,7 @@ export class Tools {
 
   async executeCall(call_id: string, args: string, contextId: string, aiName: string) {
     const call = this.callList.find((c) => c.call_id === call_id);
-    console.log('Executing call', call, 'with args', args);
+    logger.log('Executing call', call, 'with args', args);
     if (!call) {
       throw new Error(`Call with id ${call_id} not found`);
     }
@@ -297,7 +298,7 @@ export class Tools {
 
     try {
       const cortexHistory = this.getCortexHistory(args);
-      console.log('Cortex history', cortexHistory);
+      logger.log('Cortex history', cortexHistory);
       let response;
       // Declare imageUrls at a higher scope
       const imageUrls = new Set<string>();
@@ -383,9 +384,9 @@ export class Tools {
           break;
 
         default:
-          console.log('Unknown function call', call);
+          logger.log('Unknown function call', call);
       }
-      console.log(response);
+      logger.log(response);
 
       // Clear timer before creating final output
       if (timeoutId) {

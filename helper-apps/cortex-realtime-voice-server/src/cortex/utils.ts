@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 
 function getCortexApiKey() {
   if (process.env.NODE_ENV === 'production') {
@@ -58,11 +59,12 @@ export async function getCortexResponse(
   });
 
   if (!res.ok) {
-    console.log(res)
+    logger.error('Failed to fetch data:', res);
     throw new Error('Failed to fetch data')
   }
 
   const responseObject = await res.json();
-  // console.log('cortex response', responseObject);
+  // Debug logging can be enabled/disabled via logger's environment control
+  logger.debug('cortex response', responseObject);
   return responseObject.data;
 }

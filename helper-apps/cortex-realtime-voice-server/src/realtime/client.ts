@@ -3,6 +3,7 @@ import type { WebSocket as WS } from 'ws';
 import type { MessageEvent as WS_MessageEvent } from 'ws';
 import { createId } from '@paralleldrive/cuid2';
 import { hasNativeWebSocket, trimDebugEvent } from './utils';
+import { logger } from '../utils/logger';
 import type {
   ConversationCreatedEvent,
   ConversationItemCreatedEvent,
@@ -130,7 +131,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
     sessionConfig,
     apiKey = process.env.OPENAI_API_KEY,
     realtimeUrl = process.env.REALTIME_VOICE_API_URL || REALTIME_VOICE_API_URL,
-    model = 'gpt-4o-realtime-preview-2024-12-17',
+    model = 'gpt-4o-realtime-preview-2024-10-01',
     autoReconnect = true,
     debug = false,
   }: RealtimeVoiceClientConfig) {
@@ -275,7 +276,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
   }
 
   async disconnect(reconnect: boolean = false): Promise<boolean> {
-    console.log('Disconnect called:', this.isConnected, reconnect);
+    logger.log('Disconnect called:', this.isConnected, reconnect);
     this.isReconnecting = reconnect;
     if (this.isConnected) {
       this.isConnected = false;
@@ -310,7 +311,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
         ...sessionConfig,
       },
     });
-    // console.log('Sending update session message:', message);
+    // No need to log session update messages as they can be noisy
     this.ws?.send(message);
   }
 
@@ -471,6 +472,6 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
         return arg;
       }
     });
-    console.log(...logs);
+    logger.log(...logs);
   }
 }
