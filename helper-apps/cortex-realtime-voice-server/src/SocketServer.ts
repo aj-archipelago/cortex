@@ -10,6 +10,7 @@ import {manageMemory, readMemory} from "./cortex/memory";
 import {style} from "./cortex/style";
 import type { Voice } from './realtime/realtimeTypes';
 import { logger } from './utils/logger';
+import {sendPrompt} from "./utils/prompt";
 
 
 export interface InterServerEvents {
@@ -58,6 +59,7 @@ export class SocketServer {
   private audioPlaying: Map<string, boolean> = new Map();
   private lastUserMessageTime: Map<string, number> = new Map();
   private idleCycles: Map<string, number> = new Map();
+  private userSpeaking: Map<string, boolean> = new Map();
   private readonly isAzure: boolean;
   private voiceSample: string | null = null;
   private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 60000;
@@ -72,6 +74,7 @@ export class SocketServer {
     this.audioPlaying.delete(socket.id);
     this.lastUserMessageTime.delete(socket.id);
     this.idleCycles.delete(socket.id);
+    this.userSpeaking.delete(socket.id);
   }
 
   constructor(apiKey: string, corsHosts: string) {
@@ -93,25 +96,16 @@ export class SocketServer {
     return timeout;
   }
 
-  private async sendSystemPrompt(client: RealtimeVoiceClient, socket: Socket, prompt: string, allowTools: boolean = true) {
-    // Don't send prompt if AI is currently responding or audio is playing
-    if (this.aiResponding.get(socket.id) || this.audioPlaying.get(socket.id)) {
-      logger.log(`Skipping prompt while AI is ${this.aiResponding.get(socket.id) ? 'responding' : 'playing audio'} for socket ${socket.id}`);
-      return;
-    }
-
-    logger.log(`Sending system prompt for socket ${socket.id}`);
+  private async sendPrompt(client: RealtimeVoiceClient, socket: Socket, prompt: string, allowTools: boolean = true) {
+    logger.log(`Sending prompt for socket ${socket.id}`);
     try {
-      client.createConversationItem({
-        id: createId(),
-        type: 'message',
-        role: 'system',
-        content: [
-          {type: 'input_text', text: prompt}
-        ]
-      });
-
-      client.createResponse({tool_choice: allowTools ? 'auto' : 'none'});
+      await sendPrompt(client, prompt, () => ({
+        allowTools,
+        aiResponding: this.aiResponding.get(socket.id) || false,
+        audioPlaying: this.audioPlaying.get(socket.id) || false,
+        lastUserMessageTime: this.lastUserMessageTime.get(socket.id) || 0,
+        userSpeaking: this.userSpeaking.get(socket.id) || false
+      }));
     } catch (error: any) {
       logger.error(`Error sending system prompt: ${error.message}`);
       if (error.message === 'Not connected') {
@@ -163,7 +157,7 @@ The user is taking a break, so don't try to engage them. This is your time to le
 - Do nothing if you prefer.`;
 
     logger.log(`Sending ${useSilentMode ? 'silent' : 'regular'} idle prompt for socket ${socket.id}`);
-    await this.sendSystemPrompt(client, socket, prompt, true);
+    await this.sendPrompt(client, socket, prompt, true);
     // Restart timer after sending prompt
     this.startIdleTimer(client, socket);
   }
@@ -177,7 +171,6 @@ The user is taking a break, so don't try to engage them. This is your time to le
     
     // Create new timer
     const timerId = setTimeout(() => {
-      //this.updateSession(client, socket);
       this.sendIdlePrompt(client, socket);
       // Increment idle cycles for next time
       this.idleCycles.set(socket.id, (this.idleCycles.get(socket.id) || 0) + 1);
@@ -231,6 +224,7 @@ The user is taking a break, so don't try to engage them. This is your time to le
     this.aiResponding.set(socket.id, false);
     this.audioPlaying.set(socket.id, false);
     this.lastUserMessageTime.set(socket.id, 0);
+    this.userSpeaking.set(socket.id, false);
     
     // Extract and log all client parameters
     const clientParams = {
@@ -273,11 +267,8 @@ Respond naturally like a human answering a phone call - for example "Hello?" or 
 Keep it brief and casual, like you would when answering a real phone call.
 Don't mention anything about being an AI or assistant - just answer naturally like a person would answer their phone.`;
 
-      if (!this.isAzure) {
-        await this.sendSystemPrompt(client, socket, greetingPrompt, false);
-        this.startIdleTimer(client, socket);
-      }
-
+      await this.sendPrompt(client, socket, greetingPrompt, false);
+      this.startIdleTimer(client, socket);
     });
 
     // Track when AI starts responding
@@ -310,24 +301,29 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       }
     });
 
-    // Reset timer when audio input is committed (user finished speaking)
-    client.on('input_audio_buffer.committed', async () => {
-      // Ignore audio input while AI audio is playing
-      if (this.audioPlaying.get(socket.id)) {
+    client.on('input_audio_buffer.speech_started', () => {
+      this.userSpeaking.set(socket.id, true);
+    });
+
+    client.on('input_audio_buffer.cancelled', () => {
+      this.userSpeaking.set(socket.id, false);
+    });
+
+    client.on('input_audio_buffer.committed', () => {
+      // Update speaking state and last message time
+      this.userSpeaking.set(socket.id, false);
+      this.lastUserMessageTime.set(socket.id, Date.now());
+
+      // Handle idle timer and cycles if not playing audio
+      if (!this.audioPlaying.get(socket.id)) {
+        logger.log('Audio input committed, resetting idle timer and cycles');
+        this.resetIdleCycles(socket);
+        this.startIdleTimer(client, socket);
+      } else {
         logger.log('Ignoring audio input while AI audio is playing');
-        return;
       }
-
-      logger.log('Audio input committed, resetting idle timer');
-      this.startIdleTimer(client, socket);
     });
 
-    socket.on('disconnecting', async (reason) => {
-      logger.log('Disconnecting', socket.id, reason);
-      this.cleanup(socket);
-      await client.disconnect();
-    });
-    
     socket.on('sendMessage', (message: string) => {
       if (message) {
         logger.log('User sent message, resetting idle timer and cycles');
@@ -344,15 +340,6 @@ Don't mention anything about being an AI or assistant - just answer naturally li
         client.appendInputAudio(audio);
       }
     });
-
-    client.on('input_audio_buffer.committed', async () => {
-      // Reset idle cycles when audio input is committed
-      if (!this.audioPlaying.get(socket.id)) {
-        logger.log('Audio input committed, resetting idle timer and cycles');
-        this.resetIdleCycles(socket);
-        this.startIdleTimer(client, socket);
-      }
-    });
     
     socket.on('cancelResponse', () => {
       logger.log('User cancelled response, resetting idle timer and cycles');
@@ -363,15 +350,22 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       this.startIdleTimer(client, socket);
       client.cancelResponse();
     });
-    
+
     socket.on('conversationCompleted', async () => {
       logger.log('Conversation completed, clearing idle timer');
       this.cleanup(socket);
     });
     
-    socket.on('disconnect', async (reason, description) => {
-      logger.log('Disconnected', socket.id, reason, description);
+    // Handle cleanup and client disconnect before socket closes
+    socket.on('disconnecting', async (reason) => {
+      logger.log('Socket disconnecting', socket.id, reason);
       this.cleanup(socket);
+      await client.disconnect();
+    });
+
+    // Log the final disconnect event
+    socket.on('disconnect', (reason) => {
+      logger.log('Socket disconnected', socket.id, reason);
     });
 
     await this.connectClient(socket, client);

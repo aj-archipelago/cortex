@@ -9,6 +9,7 @@ import {image} from "./cortex/image";
 import {vision} from "./cortex/vision";
 import {reason} from "./cortex/reason";
 import { logger } from './utils/logger';
+import {sendPrompt} from "./utils/prompt";
 
 type Call = {
   call_id: string;
@@ -25,7 +26,8 @@ export class Tools {
     SocketData>;
   private aiResponding: boolean = false;
   private audioPlaying: boolean = false;
-  private audioDataSize: number = 0;
+  private lastUserMessageTime: number = 0;
+  private userSpeaking: boolean = false;
 
   constructor(client: RealtimeVoiceClient,
               socket: Socket<ClientToServerEvents,
@@ -58,32 +60,31 @@ export class Tools {
       logger.log('Audio playback complete');
       this.audioPlaying = false;
     });
-  }
 
-  private async sendSystemPrompt(prompt: string, allowTools: boolean = false, disposable: boolean = true) {
-    // Don't send prompt if AI is currently responding or audio is playing
-    if (this.aiResponding || this.audioPlaying) {
-      logger.log(`${disposable ? 'Skipping' : 'Queuing'} prompt while AI is ${this.aiResponding ? 'responding' : 'playing audio'}`);
-      if (!disposable) {
-        // Try again after a short delay if the message is important
-        setTimeout(() => {
-          this.sendSystemPrompt(prompt, allowTools, disposable);
-        }, 1000);
-      }
-      return;
-    }
-
-    logger.log('Sending system prompt');
-    this.realtimeClient.createConversationItem({
-      id: createId(),
-      type: 'message',
-      role: 'system',
-      content: [
-        {type: 'input_text', text: prompt}
-      ]
+    // Track user speaking state
+    client.on('input_audio_buffer.speech_started', () => {
+      this.userSpeaking = true;
     });
 
-    this.realtimeClient.createResponse({tool_choice: allowTools ? 'auto' : 'none'});
+    client.on('input_audio_buffer.committed', () => {
+      this.userSpeaking = false;
+      this.lastUserMessageTime = Date.now();
+    });
+
+    client.on('input_audio_buffer.cancelled', () => {
+      this.userSpeaking = false;
+    });
+  }
+
+  private async sendPrompt(prompt: string, allowTools: boolean = false, disposable: boolean = true) {
+    await sendPrompt(this.realtimeClient, prompt, () => ({
+      allowTools,
+      disposable,
+      aiResponding: this.aiResponding,
+      audioPlaying: this.audioPlaying,
+      lastUserMessageTime: this.lastUserMessageTime,
+      userSpeaking: this.userSpeaking
+    }));
   }
 
   public static getToolDefinitions() {
@@ -260,7 +261,7 @@ export class Tools {
       // Skip filler messages if silent
       if (!isSilent) {
         // Filler messages are disposable - skip if busy
-        await this.sendSystemPrompt(`You are currently using the ${call.name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very short.`, false, true);
+        await this.sendPrompt(`You are currently using the ${call.name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very short.`, false, true);
       }
 
       fillerIndex++;
@@ -271,7 +272,7 @@ export class Tools {
     // Skip initial message if silent
     if (!isSilent) {
       // Initial message is not disposable - keep trying if busy
-      await this.sendSystemPrompt(`You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very short and make it fit the conversation naturally. Examples: "I'm on it.", "I'm not sure. Let me look that up.", "Give me a moment to read the news.", "I'm checking on that now.", etc.`, false, false);
+      await this.sendPrompt(`You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very short and make it fit the conversation naturally. Examples: "I'm on it.", "I'm not sure. Let me look that up.", "Give me a moment to read the news.", "I'm checking on that now.", etc.`, false, false);
     }
 
     // Update the user if it takes a while to complete
@@ -390,7 +391,7 @@ export class Tools {
       }
 
       finishPrompt += '.';
-      await this.sendSystemPrompt(finishPrompt, true, false);
+      await this.sendPrompt(finishPrompt, true, false);
 
       // Send image events after finish prompt if we collected any
       if (call.name.toLowerCase() === 'image' && imageUrls.size > 0) {
