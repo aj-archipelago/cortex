@@ -387,7 +387,7 @@ export class Tools {
       });
 
       if (isSilent) {
-        finishPrompt = `You have finished using the ${call.name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now`;
+        finishPrompt = `You have finished using the ${call.name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. Don't talk to the user about the results of this tool right now as you're operating in silent mode.`;
       }
 
       finishPrompt += '.';
