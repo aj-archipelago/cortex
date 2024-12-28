@@ -115,6 +115,14 @@ export default function Chat({
 
     const updateOrCreateMessage = (item: any, delta: any, isNewMessage = false) => {
       setMessages((prev) => {
+        // Skip messages that start with <INSTRUCTIONS>
+        if (item.role === 'user' && 
+            (item.content?.[0]?.text?.startsWith('<INSTRUCTIONS>') || 
+             delta.text?.startsWith('<INSTRUCTIONS>') || 
+             delta.transcript?.startsWith('<INSTRUCTIONS>'))) {
+          return prev;
+        }
+
         // Try to find an existing message from the same turn
         const existingIndex = prev.findIndex(m => 
           m.id === item.id || 

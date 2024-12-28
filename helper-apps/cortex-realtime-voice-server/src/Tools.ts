@@ -10,6 +10,8 @@ import {vision} from "./cortex/vision";
 import {reason} from "./cortex/reason";
 import { logger } from './utils/logger';
 import {sendPrompt} from "./utils/prompt";
+import { searchMemory } from "./cortex/memory";
+import { MemorySection } from "./cortex/utils";
 
 type Call = {
   call_id: string;
@@ -89,6 +91,19 @@ export class Tools {
 
   public static getToolDefinitions() {
     return [
+      {
+        type: 'function',
+        name: 'MemoryLookup',
+        description: 'Use this tool to proactively search your memories for information that might be relevant to the conversation. It\'s critical to maintain natural conversation flow with the user, so stall them for a few seconds with natural banter while you use this tool. Don\'t talk directly about the tool - just say "let me think about that" or something else that fits the conversation.',
+        parameters: {
+          type: "object",
+          properties: {
+            lastUserMessage: {type: "string"},
+            silent: {type: "boolean", default: true}
+          },
+          required: ["lastUserMessage", "silent"]
+        },
+      },
       {
         type: 'function',
         name: 'Search',
@@ -239,6 +254,8 @@ export class Tools {
     let fillerIndex = 0;
     let timeoutId: NodeJS.Timer | undefined;
     let isSilent = false;
+    let promptOnIdle = false;
+    let promptOnCompletion = true;
 
     // Check if silent parameter is true in args
     try {
@@ -246,6 +263,15 @@ export class Tools {
       isSilent = parsedArgs.silent === true;
     } catch (e) {
       // Ignore JSON parse errors
+    }
+
+    let initialPrompt = `You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very short and make it fit the conversation naturally.`;
+
+    if (call.name.toLowerCase() === 'memorylookup') {
+      initialPrompt =`You are currently using the MemoryLookup tool to help yourself remember something. It will be a few seconds before you remember the information. Stall the user for a few seconds with natural banter while you use this tool. Don't talk directly about the tool - just say "let me think about that" or something else that fits the conversation.`;
+      isSilent = false;
+      promptOnCompletion = false;
+      promptOnIdle = false;
     }
 
     const calculateFillerTimeout = (fillerIndex: number) => {
@@ -259,7 +285,7 @@ export class Tools {
         clearTimeout(timeoutId);
       }
       // Skip filler messages if silent
-      if (!isSilent) {
+      if (!isSilent && promptOnIdle) {
         // Filler messages are disposable - skip if busy
         await this.sendPrompt(`You are currently using the ${call.name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very short.`, false, true);
       }
@@ -272,7 +298,7 @@ export class Tools {
     // Skip initial message if silent
     if (!isSilent) {
       // Initial message is not disposable - keep trying if busy
-      await this.sendPrompt(`You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very short and make it fit the conversation naturally. Examples: "I'm on it.", "I'm not sure. Let me look that up.", "Give me a moment to read the news.", "I'm checking on that now.", etc.`, false, false);
+      await this.sendPrompt(initialPrompt, false, false);
     }
 
     // Update the user if it takes a while to complete
@@ -298,7 +324,14 @@ export class Tools {
           );
           finishPrompt += ' by reading the output of the tool to the user verbatim'
           break;
-
+        case 'memorylookup':
+          response = await searchMemory(
+            contextId,
+            aiName,
+            cortexHistory,
+            MemorySection.memoryAll
+          );
+          break;
         case 'write':
         case 'code':
           response = await expert(
@@ -387,11 +420,13 @@ export class Tools {
       });
 
       if (isSilent) {
-        finishPrompt = `You have finished using the ${call.name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. Don't talk to the user about the results of this tool right now as you're operating in silent mode.`;
+        finishPrompt = `You have finished using the ${call.name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. Don't say anything out loud right now as you're operating in silent mode.`;
       }
 
       finishPrompt += '.';
-      await this.sendPrompt(finishPrompt, true, false);
+      if (promptOnCompletion) {
+        await this.sendPrompt(finishPrompt, true, false);
+      }
 
       // Send image events after finish prompt if we collected any
       if (call.name.toLowerCase() === 'image' && imageUrls.size > 0) {
@@ -412,7 +447,12 @@ export class Tools {
 
   public getCortexHistory(args: string = '') {
     const history = this.realtimeClient.getConversationItems()
-      .filter((item) => item.type === "message" && item.role !== "system")
+      .filter((item) => {
+        // Filter out system messages and messages starting with <INSTRUCTIONS>
+        if (item.type !== "message" || item.role === "system") return false;
+        const content = item.content && item.content[0] ? item.content[0].text || item.content[0].transcript || '' : '';
+        return !content.trim().startsWith('<INSTRUCTIONS>');
+      })
       .map((item) => {
         return {
           role: item.role || 'user',

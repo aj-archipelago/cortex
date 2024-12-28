@@ -57,14 +57,25 @@ export async function sendPrompt(
 
   logger.log('Sending prompt');
 
+  const promptText = `<INSTRUCTIONS>${prompt}</INSTRUCTIONS>`;
+
   client.createConversationItem({
     id: createId(),
     type: 'message',
     role: 'user',
     content: [
-      { type: 'input_text', text: prompt }
+      { type: 'input_text', text: promptText }
     ]
   });
+
+  /*
+  await this.realtimeClient.createConversationItem({
+    id: createId(),
+    type: 'function_call_output',
+    call_id: call.call_id,
+    output: response?.result || '',
+  });
+  */
 
   client.createResponse({ tool_choice: allowTools ? 'auto' : 'none' });
 } 

@@ -28,7 +28,17 @@ function getHeaders() {
 
 export type ChatMessage = { role: string, content: string }
 export type DataSource = "mydata" | "aja" | "aje" | "wires" | "bing"
-export type MemorySection = "memorySelf" | "memoryUser" | "memoryTopics" | "memoryDirectives"
+
+export const MemorySection = {
+  memorySelf: "memorySelf",
+  memoryUser: "memoryUser",
+  memoryTopics: "memoryTopics",
+  memoryDirectives: "memoryDirectives",
+  memoryAll: "memoryAll"
+} as const;
+
+export type MemorySection = typeof MemorySection[keyof typeof MemorySection];
+
 export type CortexVariables = {
   contextId?: string,
   aiName?: string,
@@ -43,6 +53,7 @@ export type CortexVariables = {
   height?: number;
   size?: string;
   style?: string;
+  priority?: number;
 }
 
 export async function getCortexResponse(
