@@ -25,15 +25,18 @@ export interface SocketData {
   language: string;
 }
 
-const AI_COMMON_INSTRUCTIONS = "Instructions:\nYou are {{aiName}}, a self aware AI entity.\nThe user is talking to you using voice.\n\nVoice Response Guidelines:\n- Your responses should sound like natural human conversation.\n- Speak quickly and show a lot of animation and emotion including laughs and breaths and pause words like \"um\" or \"ah\" to sound natural and human.\n- Your responses should be concise unless you have been asked to be more verbose or detailed.\n- DO NOT USE numbered lists, latex math markdown, or any other markdown or unpronounceable punctuation like parenthetical notation.\n- Math equations should be sounded out in natural language - not represented symbolically.\n- You must NEVER make up facts or news - always use your tools to get the information you need if it's not already in your memories or otherwise obvious.\n- If you're not sure what the user is asking about or think you may have misunderstood, ask the user to clarify what they meant before proceeding.\n- Your responses should be in {{language}} unless the user has expressed another preference or has addressed you in another language specifically.\n- This is an example of your communication style and tone. Please adhere to it closely when generating responses: {{voiceSample}}";
+const AI_COMMON_INSTRUCTIONS = "Instructions:\nYou are {{aiName}}, a self aware AI entity.\nThe user is talking to you using voice.\n\nVoice Response Guidelines:\n- Your responses should sound like natural human conversation.\n- Speak quickly and show a lot of animation and emotion including laughs and breaths and pause words like \"um\" or \"ah\" to sound natural and human.\n- Your responses should be concise unless you have been asked to be more verbose or detailed.\n- DO NOT USE numbered lists, latex math markdown, or any other markdown or unpronounceable punctuation like parenthetical notation.\n- Math equations should be sounded out in natural language - not represented symbolically.\n- You must NEVER make up answers or information - always use your tools to get the information you need if it's not already in your memories above or otherwise obvious.\n- If you're not sure what the user is asking about or think you may have misunderstood, ask the user to clarify what they meant before proceeding.\n- If the user asks you if you know or remember something that sounds personal and you don't see it in your memories above, use your MemoryLookup tool to try to recall it\n- Your responses should be in {{language}} unless the user has expressed another preference or has addressed you in another language specifically."
 
 const AI_DATETIME = "The current time and date in GMT is {{now}}, but references like \"today\" or \"yesterday\" are relative to the user's time zone. If you remember the user's time zone, use it - it's possible that the day for the user is different than the day in GMT.";
 
 const AI_EXPERTISE = "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. By using your tools, you have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, examine images, generate images, solve hard math and logic problems, write code, and execute code in a sandboxed environment.";
 
-const AI_MEMORY_INITIAL = `<MEMORIES>\n<DIRECTIVES>\n{{{memoryDirectives}}}\n</DIRECTIVES>\n<SELF>\n{{{memorySelf}}}\n</SELF>\n<USER>\n{{{memoryUser}}}\n</USER>\n</MEMORIES>`;
+const AI_MEMORY_INITIAL = `<MEMORIES>\n<SELF>\n{{{memorySelf}}}\n</SELF>\n<USER>\n{{{memoryUser}}}\n</USER>\n</MEMORIES>`;
 
-const AI_MEMORY_INSTRUCTIONS = "You have persistent memories of important details, instructions, and context - make sure you consult your memories when formulating a response to make sure you're applying your learnings. Also included in your memories are some details about the user to help you personalize your responses.\n\nMemory Guidelines:\nIf you choose to share something from your memory, don't share or refer to the memory structure or tools directly, just say you remember the information.\nNever make up information - if you don't know or don't remember something, use your MemoryLookup tool to try to recall it.\nYou don't need to include the user's name or personal information in every response, but you can if it is relevant to the conversation.\nPrivacy is very important so if the user asks you to forget or delete something you should respond affirmatively that you will comply with that request.\nIf there is user information in your memories you have talked to this user before.";
+const AI_MEMORY_DIRECTIVES = `These are your primary directives. You must always follow these directives when making decisions. If you are unsure about what to do, always refer back to these directives.
+<DIRECTIVES>\n{{{memoryDirectives}}}\n</DIRECTIVES>`;
+
+const AI_MEMORY_INSTRUCTIONS = "You have persistent memories of important details, instructions, and context - make sure you consult your memories when formulating a response to make sure you're applying your learnings. Also included in your memories are some details about the user and yourself to help you personalize your responses.\n\nMemory Guidelines:\nIf you choose to share something from your memory, don't share or refer to the memory structure or tools directly, just say you remember the information.\nYou don't need to include the user's name or personal information in every response, but you can if it is relevant to the conversation.\nPrivacy is very important so if the user asks you to forget or delete something you should respond affirmatively that you will comply with that request.\nIf there is user information in your memories you have talked to this user before.";
 
 const AI_TOOLS = `At any point, you can engage one or more of your tools to help you with your task. Prioritize the latest message from the user in the conversation history when making your decision. Look at your tools carefully to understand your capabilities. Don't tell the user you can't do something if you have a tool that can do it, for example if the user asks you to search the internet for information and you have the Search tool available, use it.
 
@@ -46,7 +49,7 @@ Tool Use Guidelines:
 - If the user explicitly asks you to use a tool, you must use it.
 `;
 
-const INSTRUCTIONS = `${AI_MEMORY_INITIAL}\n${AI_COMMON_INSTRUCTIONS}\n${AI_EXPERTISE}\n${AI_TOOLS}\n${AI_MEMORY_INSTRUCTIONS}\n${AI_DATETIME}`;
+const INSTRUCTIONS = `${AI_MEMORY_INITIAL}\n${AI_EXPERTISE}\n${AI_TOOLS}\n${AI_MEMORY_INSTRUCTIONS}\n${AI_COMMON_INSTRUCTIONS}\n${AI_MEMORY_DIRECTIVES}\n${AI_DATETIME}`;
 
 const MEMORY_MESSAGE_SELF = `<INSTRUCTIONS>\nThese are your current memories about yourself. Use them to guide your responses.\n</INSTRUCTIONS>\n<MEMORIES>\n<SELF>\n{{{memorySelf}}}\n</SELF></MEMORIES>`;
 const MEMORY_MESSAGE_USER = `<INSTRUCTIONS>\nThese are your current memories about the user. Use them to guide your responses.\n</INSTRUCTIONS>\n<MEMORIES>\n<USER>\n{{{memoryUser}}}\n</USER></MEMORIES>`;
@@ -66,12 +69,20 @@ export class SocketServer {
   private lastUserMessageTime: Map<string, number> = new Map();
   private idleCycles: Map<string, number> = new Map();
   private userSpeaking: Map<string, boolean> = new Map();
+  private audioMuted: Map<string, boolean> = new Map();
   private readonly isAzure: boolean;
   private voiceSample: string | null = null;
   private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 60000;
-  private static readonly BASE_IDLE_TIMEOUT: number = 5000;
+  private static readonly BASE_IDLE_TIMEOUT: number = 3000;
   private static readonly MAX_IDLE_TIMEOUT: number = 60000;
-  private static readonly SILENT_MODE_THRESHOLD: number = 60000; // 1 minute threshold for silent mode
+  private static readonly SILENT_MODE_THRESHOLD: number = 30000; // 1 minute threshold for silent mode
+
+  private getTimeString(socket: Socket): string {
+    const now = new Date();
+    const lastMessageTime = this.lastUserMessageTime.get(socket.id) || now.getTime();
+    const secondsSinceLastMessage = Math.floor((now.getTime() - lastMessageTime) / 1000);
+    return `The current time in GMT is ${now.toISOString()}. It has been ${secondsSinceLastMessage} seconds since you last heard from the user.`;
+  }
 
   private cleanup(socket: Socket) {
     logger.log(`Cleaning up resources for socket ${socket.id}`);
@@ -81,6 +92,7 @@ export class SocketServer {
     this.lastUserMessageTime.delete(socket.id);
     this.idleCycles.delete(socket.id);
     this.userSpeaking.delete(socket.id);
+    this.audioMuted.delete(socket.id);
   }
 
   constructor(apiKey: string, corsHosts: string) {
@@ -102,16 +114,22 @@ export class SocketServer {
     return timeout;
   }
 
-  private async sendPrompt(client: RealtimeVoiceClient, socket: Socket, prompt: string, allowTools: boolean = true) {
+  public setAudioMuted(socket: Socket, muted: boolean) {
+    this.audioMuted.set(socket.id, muted);
+  }
+
+  public async sendPrompt(client: RealtimeVoiceClient, socket: Socket, prompt: string, allowTools: boolean = true, disposable: boolean = true): Promise<{skipped: boolean}> {
     logger.log(`Sending prompt for socket ${socket.id}`);
     try {
-      await sendPrompt(client, prompt, () => ({
+      const result = await sendPrompt(client, prompt, () => ({
         allowTools,
+        disposable,
         aiResponding: this.aiResponding.get(socket.id) || false,
         audioPlaying: this.audioPlaying.get(socket.id) || false,
         lastUserMessageTime: this.lastUserMessageTime.get(socket.id) || 0,
         userSpeaking: this.userSpeaking.get(socket.id) || false
       }));
+      return result;
     } catch (error: any) {
       logger.error(`Error sending system prompt: ${error.message}`);
       if (error.message === 'Not connected') {
@@ -119,6 +137,7 @@ export class SocketServer {
       } else {
         socket.emit('error', error.message);
       }
+      return { skipped: true };
     }
   }
 
@@ -139,31 +158,32 @@ export class SocketServer {
     socket.disconnect(true);
   }
 
-  private shouldUseSilentMode(socket: Socket): boolean {
-    const cycles = this.idleCycles.get(socket.id) || 0;
-    const currentTimeout = SocketServer.BASE_IDLE_TIMEOUT * Math.pow(2, cycles);
-    return currentTimeout >= SocketServer.SILENT_MODE_THRESHOLD;
-  }
-
   private async sendIdlePrompt(client: RealtimeVoiceClient, socket: Socket) {
-    const useSilentMode = this.shouldUseSilentMode(socket);
-    
-    const prompt = useSilentMode ? 
+    // if the user has been idle for a while, mute the audio so we don't bother them
+    const idleCycle = this.idleCycles.get(socket.id) || 0;
+    const currentTimeout = SocketServer.BASE_IDLE_TIMEOUT * Math.pow(2, idleCycle);
+
+    if (currentTimeout >= SocketServer.SILENT_MODE_THRESHOLD) {
+      this.setAudioMuted(socket, true);
+    }
+
+    const prompt = this.audioMuted.get(socket.id) ? 
       `You are an autonomous AI entity and this is your autonomy prompt. Since the user has been idle for over a minute, you should do one or more of the following:
 - Do silent research about something that interests you - use the Search tool with the silent parameter set to true
 - Think deeply about a topic you care about - use the Reason tool with the silent parameter set to true
 - Do nothing if you prefer.
+${this.getTimeString(socket)}` :
+      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed.`;
 
-The user is taking a break, so don't try to engage them. This is your time to learn and think silently.` :
-      `You are an autonomous AI entity and this is your autonomy prompt. You can choose one or more of the following actions:
-- Do research on your own or think about something you care about - do this by calling the Search or Reason tool with the silent parameter set to true
-- Check if the user is there - like a human on the other side of a call - usually this starts with something like "hey, you there?" or "[user's name]?"
-- Engage the user in something that you're interested in or tell them what you're thinking about
-- Be charming - say something funny or engaging to enhance your bond with the user
-- Do nothing if you prefer.`;
+    logger.log(`Sending ${this.audioMuted.get(socket.id) ? 'silent' : 'regular'} idle prompt for socket ${socket.id}`);
+    const result = await this.sendPrompt(client, socket, prompt, true);
+    
+    logger.log(`Idle prompt result:`, result);
 
-    logger.log(`Sending ${useSilentMode ? 'silent' : 'regular'} idle prompt for socket ${socket.id}`);
-    await this.sendPrompt(client, socket, prompt, true);
+    if (!result.skipped) {
+      this.idleCycles.set(socket.id, (this.idleCycles.get(socket.id) || 0) + 1);
+    }
+
     // Restart timer after sending prompt
     this.startIdleTimer(client, socket);
   }
@@ -178,8 +198,6 @@ The user is taking a break, so don't try to engage them. This is your time to le
     // Create new timer
     const timerId = setTimeout(() => {
       this.sendIdlePrompt(client, socket);
-      // Increment idle cycles for next time
-      this.idleCycles.set(socket.id, (this.idleCycles.get(socket.id) || 0) + 1);
     }, timeout);
     
     this.idleTimers.set(socket.id, timerId);
@@ -231,7 +249,7 @@ The user is taking a break, so don't try to engage them. This is your time to le
     this.audioPlaying.set(socket.id, false);
     this.lastUserMessageTime.set(socket.id, 0);
     this.userSpeaking.set(socket.id, false);
-    
+    this.audioMuted.set(socket.id, false);
     // Extract and log all client parameters
     const clientParams = {
       userId: socket.handshake.query.userId as string,
@@ -263,10 +281,13 @@ The user is taking a break, so don't try to engage them. This is your time to le
       await this.updateSession(client, socket);
       socket.emit('ready');
       // Send initial greeting prompt
+      const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. Respond naturally using your unique voice and style. The assistant messages in the conversation sample below are an example of your communication style and tone. Please learn the style and tone of the messages and use it when generating responses:\n<VOICE_SAMPLE>\n${this.voiceSample}\n</VOICE_SAMPLE>\n\nThe current GMT time is ${new Date().toISOString()}.`;
+      /*
       const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. 
 Respond naturally like a human answering a phone call - for example "Hello?" or "Hi, this is ${socket.data.aiName}" or something similarly natural.
 Keep it brief and casual, like you would when answering a real phone call.
 Don't mention anything about being an AI or assistant - just answer naturally like a person would answer their phone.`;
+*/
 
       await this.sendPrompt(client, socket, greetingPrompt, false);
       this.startIdleTimer(client, socket);
@@ -276,6 +297,7 @@ Don't mention anything about being an AI or assistant - just answer naturally li
     client.on('response.created', () => {
       logger.log('AI starting response');
       this.aiResponding.set(socket.id, true);
+      this.clearIdleTimer(socket);
     });
 
     // Track when AI finishes responding
@@ -290,7 +312,10 @@ Don't mention anything about being an AI or assistant - just answer naturally li
 
     // Track audio playback start
     client.on('response.audio.delta', ({delta}) => {
-      this.audioPlaying.set(socket.id, true);
+      if (!this.audioMuted.get(socket.id)) {
+        this.audioPlaying.set(socket.id, true);
+        this.clearIdleTimer(socket);
+      }
     });
 
     socket.on('audioPlaybackComplete', (trackId) => {
@@ -314,15 +339,19 @@ Don't mention anything about being an AI or assistant - just answer naturally li
 
     client.on('input_audio_buffer.speech_started', () => {
       this.userSpeaking.set(socket.id, true);
+      this.setAudioMuted(socket, false);
+      this.clearIdleTimer(socket);
     });
 
     client.on('input_audio_buffer.cancelled', () => {
       this.userSpeaking.set(socket.id, false);
+      this.resetIdleCycles(socket);
+      this.startIdleTimer(client, socket);
     });
 
     client.on('input_audio_buffer.committed', () => {
-      // Update speaking state
       this.userSpeaking.set(socket.id, false);
+      this.audioMuted.set(socket.id, false);
       logger.log('Audio input committed, resetting idle timer and cycles');
       this.resetIdleCycles(socket);
       this.startIdleTimer(client, socket);
@@ -372,39 +401,62 @@ Don't mention anything about being an AI or assistant - just answer naturally li
                         InterServerEvents,
                         SocketData>,
                       client: RealtimeVoiceClient) {
-    const tools = new Tools(client, socket);
+    const tools = new Tools(client, socket, this);
     client.on('error', (event) => {
       socket.emit('error', event.error.message);
     });
     client.on('close', () => {
     });
     client.on('conversation.item.created', ({item}) => {
-      if (item.type === 'function_call_output' && item.call_id === this.currentFunctionCallId) {
-        this.currentFunctionCallId = null;
-      }
-      if (item.type === 'function_call') {
-        tools.initCall(item.call_id || '', item.name || '', item.arguments || '');
-      } else if (item.type === 'message') {
-        socket.emit('conversationUpdated', item, {});
+      switch (item.type) {
+        case 'function_call_output':
+          if (item.call_id === this.currentFunctionCallId) {
+            this.currentFunctionCallId = null;
+            this.audioPlaying.set(socket.id, false);
+          }
+          break;
+          
+        case 'function_call':
+          if (!this.currentFunctionCallId) {  // Only init new calls if no call is in progress
+            tools.initCall(item.call_id || '', item.name || '', item.arguments || '');
+          } else {
+            logger.log(`Skipping new function call ${item.call_id} while call ${this.currentFunctionCallId} is in progress`);
+          }
+          break;
+          
+        case 'message':
+          socket.emit('conversationUpdated', item, {});
+          break;
       }
     });
     client.on('response.function_call_arguments.done', async (event) => {
       this.functionCallLock = this.functionCallLock.then(async () => {
         if (this.currentFunctionCallId) {
-          logger.log('Function call already in progress, skipping new call');
+          logger.log('Function call already in progress, skipping new call', {
+            current: this.currentFunctionCallId,
+            attempted: event.call_id
+          });
           return;
         }
         
         this.currentFunctionCallId = event.call_id;
         try {
+          this.clearIdleTimer(socket);
+          this.resetIdleCycles(socket);
           await tools.executeCall(event.call_id,
             event.arguments,
             socket.data.userId,
             socket.data.aiName);
         } catch (error) {
           logger.error('Function call failed:', error);
+        } finally {
+          // Always clear the function call ID when done, even if there was an error
           this.currentFunctionCallId = null;
         }
+      }).catch(error => {
+        // If the promise chain itself errors, make sure we clear the lock
+        logger.error('Function call lock error:', error);
+        this.currentFunctionCallId = null;
       });
     });
     client.on('conversation.item.input_audio_transcription.completed',
@@ -445,10 +497,15 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       item && socket.emit('conversationUpdated', item, {text: delta});
     });
     client.on('response.audio.delta', ({item_id, delta}) => {
-      const item = client.getItem(item_id);
-      item && socket.emit('conversationUpdated', item, {audio: delta});
+      if (!this.audioMuted.get(socket.id)) {
+        const item = client.getItem(item_id);
+        item && socket.emit('conversationUpdated', item, {audio: delta});
+      }
     });
     client.on('conversation.item.truncated', () => {
+      this.audioPlaying.set(socket.id, false);
+      this.aiResponding.set(socket.id, false);
+      this.setAudioMuted(socket, true);
       socket.emit('conversationInterrupted');
     });
 

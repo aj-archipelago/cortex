@@ -18,7 +18,7 @@ export async function sendPrompt(
   client: RealtimeVoiceClient,
   prompt: string,
   getOptions: (() => SendPromptOptions) | SendPromptOptions
-) {
+): Promise<{ skipped: boolean }> {
   const options = typeof getOptions === 'function' ? getOptions() : getOptions;
   
   const {
@@ -45,14 +45,13 @@ export async function sendPrompt(
     }`);
     if (!disposable) {
       // Try again after a short delay if the message is important
-      // Pass the getOptions callback to get fresh state on retry
       return new Promise((resolve) => {
         setTimeout(() => {
           sendPrompt(client, prompt, getOptions).then(resolve);
         }, 1000);
       });
     }
-    return;
+    return { skipped: true };
   }
 
   logger.log('Sending prompt');
@@ -78,4 +77,5 @@ export async function sendPrompt(
   */
 
   client.createResponse({ tool_choice: allowTools ? 'auto' : 'none' });
+  return { skipped: false };
 } 

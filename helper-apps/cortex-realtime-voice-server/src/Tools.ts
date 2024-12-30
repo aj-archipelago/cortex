@@ -9,9 +9,9 @@ import {image} from "./cortex/image";
 import {vision} from "./cortex/vision";
 import {reason} from "./cortex/reason";
 import { logger } from './utils/logger';
-import {sendPrompt} from "./utils/prompt";
 import { searchMemory } from "./cortex/memory";
 import { MemorySection } from "./cortex/utils";
+import type {SocketServer} from "./SocketServer";
 
 type Call = {
   call_id: string;
@@ -26,67 +26,21 @@ export class Tools {
     ServerToClientEvents,
     InterServerEvents,
     SocketData>;
-  private aiResponding: boolean = false;
-  private audioPlaying: boolean = false;
-  private lastUserMessageTime: number = 0;
-  private userSpeaking: boolean = false;
+  private socketServer: SocketServer;
 
   constructor(client: RealtimeVoiceClient,
               socket: Socket<ClientToServerEvents,
                 ServerToClientEvents,
                 InterServerEvents,
-                SocketData>) {
+                SocketData>,
+              socketServer: SocketServer) {
     this.realtimeClient = client;
     this.socket = socket;
-
-    // Track AI response state
-    client.on('response.created', () => {
-      this.aiResponding = true;
-    });
-
-    client.on('response.done', () => {
-      this.aiResponding = false;
-    });
-
-    // Track audio playback state
-    client.on('response.audio.delta', () => {
-      this.audioPlaying = true;
-    });
-
-    client.on('response.audio.done', () => {
-      logger.log('Audio data complete, waiting for playback');
-    });
-
-    // Listen for audio playback completion from client
-    socket.on('audioPlaybackComplete', () => {
-      logger.log('Audio playback complete');
-      this.audioPlaying = false;
-    });
-
-    // Track user speaking state
-    client.on('input_audio_buffer.speech_started', () => {
-      this.userSpeaking = true;
-    });
-
-    client.on('input_audio_buffer.committed', () => {
-      this.userSpeaking = false;
-      this.lastUserMessageTime = Date.now();
-    });
-
-    client.on('input_audio_buffer.cancelled', () => {
-      this.userSpeaking = false;
-    });
+    this.socketServer = socketServer;
   }
 
   private async sendPrompt(prompt: string, allowTools: boolean = false, disposable: boolean = true) {
-    await sendPrompt(this.realtimeClient, prompt, () => ({
-      allowTools,
-      disposable,
-      aiResponding: this.aiResponding,
-      audioPlaying: this.audioPlaying,
-      lastUserMessageTime: this.lastUserMessageTime,
-      userSpeaking: this.userSpeaking
-    }));
+    await this.socketServer.sendPrompt(this.realtimeClient, this.socket, prompt, allowTools, disposable);
   }
 
   public static getToolDefinitions() {
@@ -167,6 +121,18 @@ export class Tools {
             silent: {type: "boolean", default: false}
           },
           required: ["detailedInstructions", "silent"]
+        },
+      },
+      {
+        type: 'function',
+        name: 'MuteAudio',
+        description: 'Use this tool to enable or disable audio output (your voice) to the user. If you want to be quiet or the user has asked you to be quiet, use this tool with the argument mute="true". If you are muted and want to talk, use this tool with the argument mute="false".',
+        parameters: {
+          type: "object",
+          properties: {
+            mute: {type: "boolean"},
+          },
+          required: ["mute"]
         },
       },
       // {
@@ -253,26 +219,18 @@ export class Tools {
 
     let fillerIndex = 0;
     let timeoutId: NodeJS.Timer | undefined;
-    let isSilent = false;
     let promptOnIdle = false;
     let promptOnCompletion = true;
 
-    // Check if silent parameter is true in args
+    let parsedArgs;
     try {
-      const parsedArgs = JSON.parse(args);
-      isSilent = parsedArgs.silent === true;
+      parsedArgs = JSON.parse(args);
     } catch (e) {
       // Ignore JSON parse errors
     }
 
-    let initialPrompt = `You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very short and make it fit the conversation naturally.`;
-
-    if (call.name.toLowerCase() === 'memorylookup') {
-      initialPrompt =`You are currently using the MemoryLookup tool to help yourself remember something. It will be a few seconds before you remember the information. Stall the user for a few seconds with natural banter while you use this tool. Don't talk directly about the tool - just say "let me think about that" or something else that fits the conversation.`;
-      isSilent = false;
-      promptOnCompletion = false;
-      promptOnIdle = false;
-    }
+    let isSilent = parsedArgs?.silent === true;
+    const mute = parsedArgs?.mute === true;
 
     const calculateFillerTimeout = (fillerIndex: number) => {
       const baseTimeout = 6500;
@@ -284,15 +242,29 @@ export class Tools {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      // Skip filler messages if silent
-      if (!isSilent && promptOnIdle) {
-        // Filler messages are disposable - skip if busy
-        await this.sendPrompt(`You are currently using the ${call.name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very short.`, false, true);
-      }
+      // Filler messages are disposable - skip if busy
+      await this.sendPrompt(`You are currently using the ${call.name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very brief.`, false, true);
 
       fillerIndex++;
       // Set next timeout with random interval
       timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
+    }
+
+    let initialPrompt = `You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very brief and make it fit the conversation naturally.`;
+
+    // tool specific initializations
+    switch (call.name.toLowerCase()) {
+      case 'memorylookup':
+        initialPrompt =`You are currently using the MemoryLookup tool to help yourself remember something. It will be a few seconds before you remember the information. Stall the user for a few seconds with natural banter while you use this tool. Don't talk directly about the tool - just say "let me think about that" or something else that fits the conversation.`;
+        isSilent = false;
+        promptOnCompletion = true;
+        promptOnIdle = false;
+        break;
+      case 'muteaudio':
+        isSilent = true;
+        promptOnCompletion = false;
+        promptOnIdle = false;
+        break;
     }
 
     // Skip initial message if silent
@@ -301,17 +273,19 @@ export class Tools {
       await this.sendPrompt(initialPrompt, false, false);
     }
 
-    // Update the user if it takes a while to complete
-    timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
+    // Set up idle updates if not silent and idle messages are enabled
+    if (!isSilent && promptOnIdle) {
+      timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
+    }
 
     let finishPrompt =`You have finished using the ${call.name} tool to help with the user's request. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. If you choose not to call another tool because you have everything you need, respond to the user via audio`;
 
     try {
-      const cortexHistory = this.getCortexHistory(args);
-      logger.log('Cortex history', cortexHistory);
+      const cortexHistory = this.getCortexHistory(parsedArgs);
+      //logger.log('Cortex history', cortexHistory);
       let response;
-      // Declare imageUrls at a higher scope
       const imageUrls = new Set<string>();
+      // tool specific execution logic
       switch (call.name.toLowerCase()) {
         case 'search':
         case 'document':
@@ -324,6 +298,7 @@ export class Tools {
           );
           finishPrompt += ' by reading the output of the tool to the user verbatim'
           break;
+
         case 'memorylookup':
           response = await searchMemory(
             contextId,
@@ -332,6 +307,7 @@ export class Tools {
             MemorySection.memoryAll
           );
           break;
+
         case 'write':
         case 'code':
           response = await expert(
@@ -400,6 +376,10 @@ export class Tools {
           finishPrompt += ' by reading the output of the tool to the user verbatim'
           break;
 
+        case 'muteaudio':
+          this.socketServer.setAudioMuted(this.socket, mute);
+          break;
+
         default:
           logger.log('Unknown function call', call);
       }
@@ -420,7 +400,7 @@ export class Tools {
       });
 
       if (isSilent) {
-        finishPrompt = `You have finished using the ${call.name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. Don't say anything out loud right now as you're operating in silent mode.`;
+        finishPrompt = `You have finished using the ${call.name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. You are operating in silent mode, so don't respond with any voice or text output until the user speaks again.`;
       }
 
       finishPrompt += '.';
@@ -445,7 +425,7 @@ export class Tools {
     }
   }
 
-  public getCortexHistory(args: string = '') {
+  public getCortexHistory(parsedArgs: any = {}) {
     const history = this.realtimeClient.getConversationItems()
       .filter((item) => {
         // Filter out system messages and messages starting with <INSTRUCTIONS>
@@ -460,20 +440,13 @@ export class Tools {
         }
       });
 
-    // Add lastUserMessage if it exists in the current call
-    if (args) {
-      try {
-        const parsedArgs = JSON.parse(args);
-        if (parsedArgs.lastUserMessage || parsedArgs.detailedInstructions) {
-          history.push({
-            role: 'user',
-            content: parsedArgs.lastUserMessage || parsedArgs.detailedInstructions
-          });
-        }
-      } catch (e) {
-        // Ignore JSON parse errors
+      // Add lastUserMessage or detailedInstructions if they were provided
+      if (parsedArgs.lastUserMessage || parsedArgs.detailedInstructions) {
+        history.push({
+          role: 'user',
+          content: parsedArgs.lastUserMessage || parsedArgs.detailedInstructions
+        });
       }
-    }
 
     return history;
   }
