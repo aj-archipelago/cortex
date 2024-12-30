@@ -211,6 +211,10 @@ export default function Chat({
       const trackSampleOffset = await wavStreamPlayer.interrupt();
       if (trackSampleOffset?.trackId) {
         socket.emit('cancelResponse');
+        if (wavStreamPlayer.currentTrackId) {
+          await wavStreamPlayer.fadeOut(150);
+          socket.emit('audioPlaybackComplete', trackSampleOffset.trackId);
+        }
       }
     });
     socket.on('imageCreated', (imageUrl) => {

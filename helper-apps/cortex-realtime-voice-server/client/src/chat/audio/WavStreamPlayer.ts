@@ -26,6 +26,7 @@ export class WavStreamPlayer {
   private interruptedTrackIds: Record<string, boolean>;
   private isRestarting: boolean;
   public onTrackComplete?: (trackId: string) => void;
+  public currentTrackId: string | null;
 
   /**
    * Creates a new WavStreamPlayer instance
@@ -41,6 +42,7 @@ export class WavStreamPlayer {
     this.trackSampleOffsets = {};
     this.interruptedTrackIds = {};
     this.isRestarting = false;
+    this.currentTrackId = null;
   }
 
   /**
@@ -169,7 +171,12 @@ export class WavStreamPlayer {
    * @param arrayBuffer
    * @param trackId
    */
-  add16BitPCM(arrayBuffer: ArrayBuffer | Int16Array, trackId: string = 'default'): Int16Array {
+  public add16BitPCM(pcmData: ArrayBuffer, trackId: string) {
+    if (!this.context || !this.analyser) {
+      return new Int16Array();
+    }
+
+    this.currentTrackId = trackId;
     try {
       if (this.interruptedTrackIds[trackId]) {
         return new Int16Array();
@@ -181,10 +188,10 @@ export class WavStreamPlayer {
 
       let buffer: Int16Array;
       try {
-        if (arrayBuffer instanceof Int16Array) {
-          buffer = arrayBuffer;
+        if (pcmData instanceof Int16Array) {
+          buffer = pcmData;
         } else {
-          buffer = new Int16Array(arrayBuffer);
+          buffer = new Int16Array(pcmData);
         }
       } catch (error) {
         console.error('Error creating Int16Array:', error);
@@ -265,5 +272,19 @@ export class WavStreamPlayer {
    */
   setTrackCompleteCallback(callback: (trackId: string) => void) {
     this.onTrackComplete = callback;
+  }
+
+  async fadeOut(durationMs: number) {
+    if (!this.context) return;
+    const gainNode = this.context.createGain();
+    gainNode.gain.setValueAtTime(1, this.context.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0, this.context.currentTime + durationMs / 1000);
+    
+    // Insert gain node before destination
+    this.stream?.disconnect();
+    this.stream?.connect(gainNode);
+    gainNode.connect(this.context.destination);
+    
+    return new Promise(resolve => setTimeout(resolve, durationMs));
   }
 }

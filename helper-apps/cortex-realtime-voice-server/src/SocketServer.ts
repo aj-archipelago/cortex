@@ -33,7 +33,7 @@ const AI_EXPERTISE = "Your expertise includes journalism, journalistic ethics, r
 
 const AI_MEMORY_INITIAL = `<MEMORIES>\n<SELF>\n{{{memorySelf}}}\n</SELF>\n<USER>\n{{{memoryUser}}}\n</USER>\n</MEMORIES>`;
 
-const AI_MEMORY_DIRECTIVES = `These are your primary directives. You must always follow these directives when making decisions. If you are unsure about what to do, always refer back to these directives.
+const AI_MEMORY_DIRECTIVES = `These are your primary directives and are critical. You must always apply them.
 <DIRECTIVES>\n{{{memoryDirectives}}}\n</DIRECTIVES>`;
 
 const AI_MEMORY_INSTRUCTIONS = "You have persistent memories of important details, instructions, and context - make sure you consult your memories when formulating a response to make sure you're applying your learnings. Also included in your memories are some details about the user and yourself to help you personalize your responses.\n\nMemory Guidelines:\nIf you choose to share something from your memory, don't share or refer to the memory structure or tools directly, just say you remember the information.\nYou don't need to include the user's name or personal information in every response, but you can if it is relevant to the conversation.\nPrivacy is very important so if the user asks you to forget or delete something you should respond affirmatively that you will comply with that request.\nIf there is user information in your memories you have talked to this user before.";
@@ -333,12 +333,17 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       const timeSinceLastMessage = Date.now() - (this.lastUserMessageTime.get(socket.id) || 0);
       const isPlaying = this.audioPlaying.get(socket.id) || this.aiResponding.get(socket.id);
       if (!isPlaying || timeSinceLastMessage < SocketServer.AUDIO_BLOCK_TIMEOUT_MS) {
+        //logger.log('Time since last message:', timeSinceLastMessage, 'ms');
         client.appendInputAudio(audio);
       }
     });
 
     client.on('input_audio_buffer.speech_started', () => {
       this.userSpeaking.set(socket.id, true);
+      if (this.audioPlaying.get(socket.id)) {
+        logger.log('Interrupting audio playback due to user speaking');
+        socket.emit('conversationInterrupted');
+      }
       this.setAudioMuted(socket, false);
       this.clearIdleTimer(socket);
     });
@@ -370,7 +375,6 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       logger.log('User cancelled response, resetting idle timer and cycles');
       this.aiResponding.set(socket.id, false);
       this.audioPlaying.set(socket.id, false);
-      this.lastUserMessageTime.set(socket.id, 0);
       this.resetIdleCycles(socket);
       this.startIdleTimer(client, socket);
       client.cancelResponse();
