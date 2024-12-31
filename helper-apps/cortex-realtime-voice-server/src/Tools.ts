@@ -320,7 +320,8 @@ export class Tools {
           break;
 
         case 'image':
-          const argsObject = JSON.parse(args);
+          finishPrompt = 'You have finished using the Image tool to help with the user\'s request. Please respond to the user via audio';
+
           response = await image(
             contextId,
             aiName,

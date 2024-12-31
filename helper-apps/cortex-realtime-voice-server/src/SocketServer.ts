@@ -61,8 +61,10 @@ export class SocketServer {
   private readonly corsHosts: string;
   private io: Server | null;
   private httpServer: HTTPServer | null;
-  private currentFunctionCallId: string | null = null;
-  private functionCallLock: Promise<void> = Promise.resolve();
+  private functionCallStates: Map<string, {
+    currentCallId: string | null;
+    lock: Promise<void>;
+  }> = new Map();
   private idleTimers: Map<string, NodeJS.Timer> = new Map();
   private aiResponding: Map<string, boolean> = new Map();
   private audioPlaying: Map<string, boolean> = new Map();
@@ -93,6 +95,7 @@ export class SocketServer {
     this.idleCycles.delete(socket.id);
     this.userSpeaking.delete(socket.id);
     this.audioMuted.delete(socket.id);
+    this.functionCallStates.delete(socket.id);
   }
 
   constructor(apiKey: string, corsHosts: string) {
@@ -250,6 +253,11 @@ ${this.getTimeString(socket)}` :
     this.lastUserMessageTime.set(socket.id, 0);
     this.userSpeaking.set(socket.id, false);
     this.audioMuted.set(socket.id, false);
+    // Initialize function call state for this socket
+    this.functionCallStates.set(socket.id, {
+      currentCallId: null,
+      lock: Promise.resolve()
+    });
     // Extract and log all client parameters
     const clientParams = {
       userId: socket.handshake.query.userId as string,
@@ -389,6 +397,7 @@ Don't mention anything about being an AI or assistant - just answer naturally li
     socket.on('disconnecting', async (reason) => {
       logger.log('Socket disconnecting', socket.id, reason);
       this.cleanup(socket);
+      this.functionCallStates.delete(socket.id);
       await client.disconnect();
     });
 
@@ -414,17 +423,23 @@ Don't mention anything about being an AI or assistant - just answer naturally li
     client.on('conversation.item.created', ({item}) => {
       switch (item.type) {
         case 'function_call_output':
-          if (item.call_id === this.currentFunctionCallId) {
-            this.currentFunctionCallId = null;
+          const outputState = this.functionCallStates.get(socket.id);
+          if (outputState && item.call_id === outputState.currentCallId) {
+            outputState.currentCallId = null;
             this.audioPlaying.set(socket.id, false);
           }
           break;
           
         case 'function_call':
-          if (!this.currentFunctionCallId) {  // Only init new calls if no call is in progress
+          const callState = this.functionCallStates.get(socket.id);
+          if (!callState) {
+            logger.error('No function call state found for socket', socket.id);
+            break;
+          }
+          if (!callState.currentCallId) {  // Only init new calls if no call is in progress
             tools.initCall(item.call_id || '', item.name || '', item.arguments || '');
           } else {
-            logger.log(`Skipping new function call ${item.call_id} while call ${this.currentFunctionCallId} is in progress`);
+            logger.log(`Skipping new function call ${item.call_id} while call ${callState.currentCallId} is in progress`);
           }
           break;
           
@@ -434,16 +449,22 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       }
     });
     client.on('response.function_call_arguments.done', async (event) => {
-      this.functionCallLock = this.functionCallLock.then(async () => {
-        if (this.currentFunctionCallId) {
+      const state = this.functionCallStates.get(socket.id);
+      if (!state) {
+        logger.error('No function call state found for socket', socket.id);
+        return;
+      }
+
+      state.lock = state.lock.then(async () => {
+        if (state.currentCallId) {
           logger.log('Function call already in progress, skipping new call', {
-            current: this.currentFunctionCallId,
+            current: state.currentCallId,
             attempted: event.call_id
           });
           return;
         }
         
-        this.currentFunctionCallId = event.call_id;
+        state.currentCallId = event.call_id;
         try {
           this.clearIdleTimer(socket);
           this.resetIdleCycles(socket);
@@ -455,12 +476,15 @@ Don't mention anything about being an AI or assistant - just answer naturally li
           logger.error('Function call failed:', error);
         } finally {
           // Always clear the function call ID when done, even if there was an error
-          this.currentFunctionCallId = null;
+          state.currentCallId = null;
         }
       }).catch(error => {
         // If the promise chain itself errors, make sure we clear the lock
         logger.error('Function call lock error:', error);
-        this.currentFunctionCallId = null;
+        const state = this.functionCallStates.get(socket.id);
+        if (state) {
+          state.currentCallId = null;
+        }
       });
     });
     client.on('conversation.item.input_audio_transcription.completed',
