@@ -296,7 +296,7 @@ export class Tools {
             call.name === 'Search' ? ['aje', 'aja', 'bing', 'wires', 'mydata'] : ['mydata'],
             JSON.stringify({query: args})
           );
-          finishPrompt += ' by reading the output of the tool to the user verbatim'
+          //finishPrompt += ' by reading the output of the tool to the user verbatim'
           break;
 
         case 'memorylookup':

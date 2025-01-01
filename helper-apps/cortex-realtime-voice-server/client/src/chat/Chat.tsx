@@ -41,6 +41,8 @@ export default function Chat({
 }: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const cleanupPromiseRef = useRef<Promise<void> | null>(null);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [overlayKey, setOverlayKey] = useState(0);
@@ -102,6 +104,10 @@ export default function Chat({
         audioContextRef.current = null;
       }
 
+      // Reset recorder and player
+      wavRecorderRef.current = new WavRecorder({sampleRate: 24000});
+      wavStreamPlayerRef.current = new WavStreamPlayer({sampleRate: 24000});
+
       setIsRecording(false);
       setIsMuted(false);  // Reset mute state
       setImageUrls([]); // Clear images on disconnect
@@ -110,7 +116,19 @@ export default function Chat({
 
   const startConversation = useCallback(() => {
     logger.log('Starting conversation');
+    
     const socket = socketRef.current;
+
+    // Remove ALL existing listeners before adding new ones
+    socket.removeAllListeners();
+    
+    // Create fresh audio context
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    audioContextRef.current = new AudioContext();
+
     const wavStreamPlayer = wavStreamPlayerRef.current;
     const wavRecorder = wavRecorderRef.current;
 
@@ -183,8 +201,6 @@ export default function Chat({
       });
     };
 
-    audioContextRef.current = new AudioContext();
-
     socket.on('connect', () => {
       logger.log('Connected', socket.id);
       SoundEffects.playConnect();
@@ -205,6 +221,7 @@ export default function Chat({
       }).then(() => {
         logger.log('Recording started')
         setIsRecording(true);
+        setIsLoading(false);  // Clear loading only when fully set up
       });
     });
     socket.on('conversationInterrupted', async () => {
@@ -285,6 +302,12 @@ export default function Chat({
         socket.connect();
       });
     });
+
+    // Add error handler to clear loading state if setup fails
+    socket.on('connect_error', () => {
+      logger.log('Connection error');
+      setIsLoading(false);
+    });
   }, [aiName, stopConversation, userName]);
 
   const postMessage = useCallback(async (message: string) => {
@@ -294,15 +317,21 @@ export default function Chat({
     }
   }, []);
 
-  const onStartStop = useCallback(() => {
-    if (isRecording) {
-      stopConversation().then(() => {
+  const onStartStop = useCallback(async () => {
+    if (isLoading) return;  // Prevent any action while loading
+    
+    try {
+      if (isRecording) {
+        setIsLoading(true);
+        await stopConversation();
         logger.log('Conversation stopped by user');
-      });
-    } else {
-      startConversation();
+      } else {
+        startConversation();  // startConversation now handles its own loading state
+      }
+    } finally {
+      setIsLoading(false);
     }
-  }, [isRecording, startConversation, stopConversation]);
+  }, [isRecording, startConversation, stopConversation, isLoading]);
 
   const handleImagesComplete = useCallback(() => {
     // Don't clear the array anymore
@@ -467,7 +496,9 @@ export default function Chat({
 
               <button 
                 onClick={onStartStop}
+                disabled={isLoading}
                 className={`flex items-center justify-center ${showChat ? 'w-12 h-12' : 'w-16 h-16'} rounded-full transition duration-300 shadow-lg ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' :
                   isRecording 
                     ? 'bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 shadow-red-500/20'
                     : 'bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 shadow-cyan-500/20'
