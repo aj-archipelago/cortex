@@ -684,10 +684,7 @@ ${this.getTimeString(socket)}` :
       logger.log(`Attempting to remove ${itemsToRemove.length} old audio messages`);
       for (const oldItemId of itemsToRemove) {
         try {
-          client.emit('conversation.item.delete', {
-            type: 'conversation.item.delete',
-            item_id: oldItemId
-          });
+          client.deleteConversationItem(oldItemId);
           logger.log(`Sent delete request for item: ${oldItemId}`);
         } catch (error) {
           logger.error(`Failed to delete conversation item ${oldItemId}:`, error);
