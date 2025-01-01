@@ -427,18 +427,14 @@ ${this.getTimeString(socket)}` :
           const outputState = this.functionCallStates.get(socket.id);
           if (outputState && item.call_id === outputState.currentCallId) {
             outputState.currentCallId = null;
-            this.audioPlaying.set(socket.id, false);
           }
           break;
           
         case 'function_call':
-          const callState = this.functionCallStates.get(socket.id);
-          if (!callState) {
-            logger.error('No function call state found for socket', socket.id);
-            break;
-          }
+          const callState = this.functionCallStates.get(socket.id)!;
           if (!callState.currentCallId) {  // Only init new calls if no call is in progress
             tools.initCall(item.call_id || '', item.name || '', item.arguments || '');
+            this.clearIdleTimer(socket);
           } else {
             logger.log(`Skipping new function call ${item.call_id} while call ${callState.currentCallId} is in progress`);
           }
