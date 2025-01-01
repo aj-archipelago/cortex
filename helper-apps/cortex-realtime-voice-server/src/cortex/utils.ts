@@ -54,6 +54,7 @@ export type CortexVariables = {
   size?: string;
   style?: string;
   priority?: number;
+  recentHours?: number;
 }
 
 export async function getCortexResponse(

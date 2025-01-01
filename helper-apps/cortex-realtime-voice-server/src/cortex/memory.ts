@@ -24,8 +24,8 @@ query ManageMemory($contextId: String, $chatHistory: [MultiMessage], $aiName: St
 `
 
 const READ_MEMORY = `
-query ReadMemory($contextId: String, $aiName: String, $section: String, $priority: Int) {
-  sys_read_memory(contextId: $contextId, aiName: $aiName, section: $section, priority: $priority) {
+query ReadMemory($contextId: String, $aiName: String, $section: String, $priority: Int, $recentHours: Int) {
+  sys_read_memory(contextId: $contextId, aiName: $aiName, section: $section, priority: $priority, recentHours: $recentHours) {
     result
     tool
     warnings
@@ -71,14 +71,16 @@ export async function manageMemory(contextId: string,
 export async function readMemory(contextId: string,
                                  aiName: string,
                                  section: MemorySection,
-                                 priority: number
+                                 priority: number = 0,
+                                 recentHours: number = 0
 ) {
 
   const variables: CortexVariables = {
     section,
     contextId,
     aiName,
-    priority
+    priority,
+    recentHours
   }
 
   const res = await getCortexResponse(variables, READ_MEMORY);

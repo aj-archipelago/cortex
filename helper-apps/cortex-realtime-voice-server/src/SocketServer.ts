@@ -54,7 +54,7 @@ const INSTRUCTIONS = `${AI_MEMORY_INITIAL}\n${AI_EXPERTISE}\n${AI_TOOLS}\n${AI_M
 const MEMORY_MESSAGE_SELF = `<INSTRUCTIONS>\nThese are your current memories about yourself. Use them to guide your responses.\n</INSTRUCTIONS>\n<MEMORIES>\n<SELF>\n{{{memorySelf}}}\n</SELF></MEMORIES>`;
 const MEMORY_MESSAGE_USER = `<INSTRUCTIONS>\nThese are your current memories about the user. Use them to guide your responses.\n</INSTRUCTIONS>\n<MEMORIES>\n<USER>\n{{{memoryUser}}}\n</USER></MEMORIES>`;
 const MEMORY_MESSAGE_DIRECTIVES = `<INSTRUCTIONS>\nThese are your current memories about your directives. These are crucial and should be your top priority in guiding actions and responses.\n</INSTRUCTIONS>\n<MEMORIES>\n<DIRECTIVES>\n{{{memoryDirectives}}}\n</DIRECTIVES></MEMORIES>`;
-const MEMORY_MESSAGE_TOPICS = `<INSTRUCTIONS>\nThese are your current memories about the topics you've been discussing. Use them to guide your responses.\n</INSTRUCTIONS>\n<MEMORIES>\n<TOPICS>\n{{{memoryTopics}}}\n</TOPICS></MEMORIES>`;
+const MEMORY_MESSAGE_TOPICS = `<INSTRUCTIONS>\nThese are your most recent memories about the topics you've been discussing. Use them to guide your responses.\n</INSTRUCTIONS>\n<MEMORIES>\n<TOPICS>\n{{{memoryTopics}}}\n</TOPICS></MEMORIES>`;
 
 export class SocketServer {
   private readonly apiKey: string;
@@ -178,7 +178,7 @@ export class SocketServer {
 - Think deeply about a topic you care about - use the Reason tool with the silent parameter set to true
 - Do nothing if you prefer.
 ${this.getTimeString(socket)}` :
-      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed. If you've tried a few times and the user isn't responding, or if the user has asked you to be quiet or give them a minute, tell the user that you'll be silent for a while and use your MuteAudio tool to mute your audio.`;
+      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed. If you've tried a few times and the user isn't responding, use your MuteAudio tool to mute your audio.`;
 
     logger.log(`Sending ${this.audioMuted.get(socket.id) ? 'silent' : 'regular'} idle prompt for socket ${socket.id}`);
     const result = await this.sendPrompt(client, socket, prompt, true);
@@ -576,35 +576,45 @@ ${this.getTimeString(socket)}` :
                                 ServerToClientEvents,
                                 InterServerEvents,
                                 SocketData>,
-                              writeToConversation: boolean = false) {
+                              writeToConversation: MemorySection[] = []) {
 
     // Parallelize memory reads
-    const [memorySelf, memoryUser, memoryDirectives, voiceSample] = await Promise.all([
+    const [memorySelf, memoryUser, memoryDirectives, memoryTopics, voiceSample] = await Promise.all([
       readMemory(socket.data.userId, socket.data.aiName, "memorySelf", 1),
       readMemory(socket.data.userId, socket.data.aiName, "memoryUser", 1),
       readMemory(socket.data.userId, socket.data.aiName, "memoryDirectives", 1),
+      readMemory(socket.data.userId, socket.data.aiName, "memoryTopics", 0, 48),
       style(socket.data.userId, socket.data.aiName, socket.data.aiStyle, [], "")
     ]);
 
-    if (writeToConversation) {
-      const memoryMessages = [
-        MEMORY_MESSAGE_SELF.replace('{{memorySelf}}', memorySelf?.result || ''),
-        MEMORY_MESSAGE_USER.replace('{{memoryUser}}', memoryUser?.result || ''),
-        MEMORY_MESSAGE_DIRECTIVES.replace('{{memoryDirectives}}', memoryDirectives?.result || '')
-      ];
+    if (writeToConversation.length > 0) {
+      // If memoryAll is present, we'll send all sections
+      const sectionsToSend = writeToConversation.includes('memoryAll') ? 
+        ['memorySelf', 'memoryUser', 'memoryDirectives', 'memoryTopics'] as const : 
+        writeToConversation;
 
-      // Send all memory messages
-      for (const message of memoryMessages) {
-        this.sendUserMessage(client, message, false);
-      }
-    } else {
-      return {
-        memorySelf: memorySelf?.result || '',
-        memoryUser: memoryUser?.result || '',
-        memoryDirectives: memoryDirectives?.result || '',
-        voiceSample: voiceSample?.result || ''
+      const memoryMessages: Record<Exclude<MemorySection, 'memoryAll'>, string> = {
+        memorySelf: MEMORY_MESSAGE_SELF.replace('{{memorySelf}}', memorySelf?.result || ''),
+        memoryUser: MEMORY_MESSAGE_USER.replace('{{memoryUser}}', memoryUser?.result || ''),
+        memoryDirectives: MEMORY_MESSAGE_DIRECTIVES.replace('{{memoryDirectives}}', memoryDirectives?.result || ''),
+        memoryTopics: MEMORY_MESSAGE_TOPICS.replace('{{memoryTopics}}', memoryTopics?.result || '')
       };
+
+      // Send the requested sections
+      sectionsToSend.forEach(section => {
+        if (section in memoryMessages) {
+          this.sendUserMessage(client, memoryMessages[section as keyof typeof memoryMessages], false);
+        }
+      });
     }
+
+    return {
+      memorySelf: memorySelf?.result || '',
+      memoryUser: memoryUser?.result || '',
+      memoryDirectives: memoryDirectives?.result || '',
+      memoryTopics: memoryTopics?.result || '',
+      voiceSample: voiceSample?.result || ''
+    };
   }
 
   protected async updateSession(client: RealtimeVoiceClient,
@@ -613,7 +623,7 @@ ${this.getTimeString(socket)}` :
                                   InterServerEvents,
                                   SocketData>) {
 
-    const memory = await this.fetchMemory(client, socket, false);
+    const memory = await this.fetchMemory(client, socket, ['memoryTopics']);
 
     const instructions = INSTRUCTIONS
       .replace('{{aiName}}', socket.data.aiName)
