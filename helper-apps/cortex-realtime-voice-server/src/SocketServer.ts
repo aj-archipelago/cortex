@@ -13,7 +13,6 @@ import type { Voice } from './realtime/realtimeTypes';
 import { logger } from './utils/logger';
 import {sendPrompt} from "./utils/prompt";
 
-
 export interface InterServerEvents {
 }
 
@@ -149,19 +148,17 @@ export class SocketServer {
 
   private async handleDisconnection(socket: Socket, client: RealtimeVoiceClient) {
     logger.log(`Handling disconnection for socket ${socket.id}`);
-    // Clean up resources
-    this.cleanup(socket);
     
-    try {
-      // Try to disconnect client gracefully
-      await client.disconnect();
-    } catch (e) {
-      logger.error(`Error during client disconnect: ${e}`);
-    }
-    
-    // Notify client of disconnection
-    socket.emit('error', 'Lost connection to AI service');
-    socket.disconnect(true);
+    // Let the client handle reconnection since autoReconnect is true
+    // Only clean up if the client explicitly disconnects
+    client.once('close', (event) => {
+      if (!event.error) {
+        // Only clean up on intentional disconnects
+        this.cleanup(socket);
+        socket.emit('error', 'Lost connection to AI service');
+        socket.disconnect(true);
+      }
+    });
   }
 
   private async sendIdlePrompt(client: RealtimeVoiceClient, socket: Socket) {
