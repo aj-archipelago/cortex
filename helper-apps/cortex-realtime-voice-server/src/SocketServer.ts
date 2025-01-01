@@ -72,12 +72,13 @@ export class SocketServer {
   private idleCycles: Map<string, number> = new Map();
   private userSpeaking: Map<string, boolean> = new Map();
   private audioMuted: Map<string, boolean> = new Map();
-  private readonly isAzure: boolean;
-  private voiceSample: string | null = null;
+  private voiceSample: Map<string, string> = new Map();
+  private audioMessages: Map<string, string[]> = new Map();
+  private static readonly MAX_AUDIO_MESSAGES = 8;
   private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 60000;
   private static readonly BASE_IDLE_TIMEOUT: number = 3000;
   private static readonly MAX_IDLE_TIMEOUT: number = 60000;
-  private static readonly SILENT_MODE_THRESHOLD: number = 30000; // 1 minute threshold for silent mode
+  private isAzure: boolean;
 
   private getTimeString(socket: Socket): string {
     const now = new Date();
@@ -96,6 +97,8 @@ export class SocketServer {
     this.userSpeaking.delete(socket.id);
     this.audioMuted.delete(socket.id);
     this.functionCallStates.delete(socket.id);
+    this.voiceSample.delete(socket.id);
+    this.audioMessages.delete(socket.id);
   }
 
   constructor(apiKey: string, corsHosts: string) {
@@ -164,9 +167,8 @@ export class SocketServer {
   private async sendIdlePrompt(client: RealtimeVoiceClient, socket: Socket) {
     // if the user has been idle for a while, mute the audio so we don't bother them
     const idleCycle = this.idleCycles.get(socket.id) || 0;
-    const currentTimeout = SocketServer.BASE_IDLE_TIMEOUT * Math.pow(2, idleCycle);
 
-    if (currentTimeout >= SocketServer.SILENT_MODE_THRESHOLD) {
+    if (idleCycle > 1) {
       this.setAudioMuted(socket, true);
     }
 
@@ -176,7 +178,7 @@ export class SocketServer {
 - Think deeply about a topic you care about - use the Reason tool with the silent parameter set to true
 - Do nothing if you prefer.
 ${this.getTimeString(socket)}` :
-      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed.`;
+      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed. If you've tried a few times and the user isn't responding, or if the user has asked you to be quiet or give them a minute, tell the user that you'll be silent for a while and use your MuteAudio tool to mute your audio.`;
 
     logger.log(`Sending ${this.audioMuted.get(socket.id) ? 'silent' : 'regular'} idle prompt for socket ${socket.id}`);
     const result = await this.sendPrompt(client, socket, prompt, true);
@@ -288,14 +290,9 @@ ${this.getTimeString(socket)}` :
       logger.log(`Connected to OpenAI successfully!`);
       await this.updateSession(client, socket);
       socket.emit('ready');
+
       // Send initial greeting prompt
-      const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. Respond naturally using your unique voice and style. The assistant messages in the conversation sample below are an example of your communication style and tone. Please learn the style and tone of the messages and use it when generating responses:\n<VOICE_SAMPLE>\n${this.voiceSample}\n</VOICE_SAMPLE>\n\nThe current GMT time is ${new Date().toISOString()}.`;
-      /*
-      const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. 
-Respond naturally like a human answering a phone call - for example "Hello?" or "Hi, this is ${socket.data.aiName}" or something similarly natural.
-Keep it brief and casual, like you would when answering a real phone call.
-Don't mention anything about being an AI or assistant - just answer naturally like a person would answer their phone.`;
-*/
+      const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. Respond naturally using your unique voice and style. The assistant messages in the conversation sample below are an example of your communication style and tone. Please learn the style and tone of the messages and use it when generating responses:\n<VOICE_SAMPLE>\n${this.voiceSample.get(socket.id) || ''}\n</VOICE_SAMPLE>\n\nThe current GMT time is ${new Date().toISOString()}.`;
 
       await this.sendPrompt(client, socket, greetingPrompt, false);
       this.startIdleTimer(client, socket);
@@ -416,9 +413,13 @@ Don't mention anything about being an AI or assistant - just answer naturally li
                       client: RealtimeVoiceClient) {
     const tools = new Tools(client, socket, this);
     client.on('error', (event) => {
+      logger.error(`Client error: ${event.error.message}`);
       socket.emit('error', event.error.message);
     });
     client.on('close', () => {
+    });
+    client.on('conversation.item.deleted', ({item_id}) => {
+      logger.log(`Successfully deleted conversation item: ${item_id}`);
     });
     client.on('conversation.item.created', ({item}) => {
       switch (item.type) {
@@ -444,10 +445,28 @@ Don't mention anything about being an AI or assistant - just answer naturally li
           break;
           
         case 'message':
+          // Track all audio messages (both user input_audio and assistant audio)
+          console.log('conversation.item.created', item);
+          if (this.isAudioMessage(item)) {
+            this.manageAudioMessages(socket, client, item.id);
+          }
           socket.emit('conversationUpdated', item, {});
           break;
       }
     });
+    client.on('conversation.item.input_audio_transcription.completed',
+      async ({item_id, transcript}) => {
+        if (transcript) {
+          const currentTime = this.lastUserMessageTime.get(socket.id) || 0;
+          this.lastUserMessageTime.set(socket.id, 
+            currentTime === 0 ? Date.now() - SocketServer.AUDIO_BLOCK_TIMEOUT_MS : Date.now()
+          );
+          const item = client.getItem(item_id);
+          item && socket.emit('conversationUpdated', item, {});
+          const cortexHistory = tools.getCortexHistory();
+          await this.searchMemory(client, socket, cortexHistory);
+        }
+      });
     client.on('response.function_call_arguments.done', async (event) => {
       const state = this.functionCallStates.get(socket.id);
       if (!state) {
@@ -487,19 +506,6 @@ Don't mention anything about being an AI or assistant - just answer naturally li
         }
       });
     });
-    client.on('conversation.item.input_audio_transcription.completed',
-      async ({item_id, transcript}) => {
-        if (transcript) {
-          const currentTime = this.lastUserMessageTime.get(socket.id) || 0;
-          this.lastUserMessageTime.set(socket.id, 
-            currentTime === 0 ? Date.now() - SocketServer.AUDIO_BLOCK_TIMEOUT_MS : Date.now()
-          );
-          const item = client.getItem(item_id);
-          item && socket.emit('conversationUpdated', item, {});
-          const cortexHistory = tools.getCortexHistory();
-          await this.searchMemory(client, socket, cortexHistory);
-        }
-      });
     client.on('response.output_item.added', ({item}) => {
       if (item.type === 'message') {
         socket.emit('conversationUpdated', item, {});
@@ -511,6 +517,10 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       }
       if (item.content && item.content[0]) {
         socket.emit('conversationUpdated', item, {});
+        // Track assistant audio messages
+        if (this.isAudioMessage(item)) {
+          this.manageAudioMessages(socket, client, item.id);
+        }
         const cortexHistory = tools.getCortexHistory();
         //this.searchMemory(client, socket, cortexHistory);
         manageMemory(socket.data.userId, socket.data.aiName, cortexHistory);
@@ -592,7 +602,7 @@ Don't mention anything about being an AI or assistant - just answer naturally li
         memorySelf: memorySelf?.result || '',
         memoryUser: memoryUser?.result || '',
         memoryDirectives: memoryDirectives?.result || '',
-        voiceSample: this.voiceSample || ''
+        voiceSample: voiceSample?.result || ''
       };
     }
   }
@@ -609,10 +619,12 @@ Don't mention anything about being an AI or assistant - just answer naturally li
       .replace('{{aiName}}', socket.data.aiName)
       .replace('{{now}}', new Date().toISOString())
       .replace('{{language}}', 'English')
-      .replace('{{voiceSample}}', this.voiceSample || '')
+      .replace('{{voiceSample}}', memory?.voiceSample || '')
       .replace('{{memorySelf}}', memory?.memorySelf || '')
       .replace('{{memoryUser}}', memory?.memoryUser || '')
       .replace('{{memoryDirectives}}', memory?.memoryDirectives || '');
+
+    this.voiceSample.set(socket.id, memory?.voiceSample || '');
 
     client.updateSession({
       instructions,
@@ -651,6 +663,40 @@ Don't mention anything about being an AI or assistant - just answer naturally li
           this.handleDisconnection(socket, client);
         }
       }
+    }
+  }
+
+  private isAudioMessage(item: any): boolean {
+    return item.type === 'message' && item.content?.some((c: { type: string }) => 
+      c.type === 'input_audio' || c.type === 'audio'
+    );
+  }
+
+  private manageAudioMessages(socket: Socket, client: RealtimeVoiceClient, newItemId: string) {
+    const audioMessages = this.audioMessages.get(socket.id) || [];
+    audioMessages.push(newItemId);
+    logger.log('manageAudioMessages', audioMessages);
+    this.audioMessages.set(socket.id, audioMessages);
+
+    // If we have more than MAX_AUDIO_MESSAGES, remove the oldest ones
+    if (audioMessages.length > SocketServer.MAX_AUDIO_MESSAGES) {
+      const itemsToRemove = audioMessages.slice(0, audioMessages.length - SocketServer.MAX_AUDIO_MESSAGES);
+      logger.log(`Attempting to remove ${itemsToRemove.length} old audio messages`);
+      for (const oldItemId of itemsToRemove) {
+        try {
+          client.emit('conversation.item.delete', {
+            type: 'conversation.item.delete',
+            item_id: oldItemId
+          });
+          logger.log(`Sent delete request for item: ${oldItemId}`);
+        } catch (error) {
+          logger.error(`Failed to delete conversation item ${oldItemId}:`, error);
+          // Keep the item in our tracking if delete failed
+          continue;
+        }
+      }
+      // Update the tracked items only after attempting deletion
+      this.audioMessages.set(socket.id, audioMessages.slice(-SocketServer.MAX_AUDIO_MESSAGES));
     }
   }
 }

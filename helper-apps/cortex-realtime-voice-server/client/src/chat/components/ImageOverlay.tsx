@@ -6,17 +6,17 @@ const DISPLAY_DURATION = 10000; // milliseconds (10 seconds)
 type ImageOverlayProps = {
   imageUrls: string[];
   onComplete?: () => void;
+  isAudioPlaying?: boolean;
 };
 
-export function ImageOverlay({ imageUrls, onComplete }: ImageOverlayProps) {
+export function ImageOverlay({ imageUrls, onComplete, isAudioPlaying = false }: ImageOverlayProps) {
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [shownImages, setShownImages] = useState<Set<string>>(new Set());
   const [isVisible, setIsVisible] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const previousAudioPlaying = useRef(isAudioPlaying);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const remainingTimeRef = useRef<number>(DISPLAY_DURATION);
-  const startTimeRef = useRef<number | null>(null);
+  const displayStartTimeRef = useRef<number | null>(null);
   
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -25,24 +25,60 @@ export function ImageOverlay({ imageUrls, onComplete }: ImageOverlayProps) {
     }
   }, []);
 
-  const scheduleNextImage = useCallback(() => {
-    if (currentIndex >= 0 && !isPaused) {
-      const currentUrl = imageUrls[currentIndex];
-      
+  // Start display timer when image becomes visible
+  useEffect(() => {
+    if (isVisible && currentIndex >= 0) {
+      displayStartTimeRef.current = Date.now();
+    }
+  }, [isVisible, currentIndex]);
+
+  // Handle image transitions when audio stops and minimum time has passed
+  useEffect(() => {
+    if (previousAudioPlaying.current && !isAudioPlaying && currentIndex >= 0) {
+      const timeElapsed = displayStartTimeRef.current ? Date.now() - displayStartTimeRef.current : 0;
+      const remainingTime = Math.max(0, DISPLAY_DURATION - timeElapsed);
+
       clearTimer();
-      timerRef.current = setTimeout(() => {
+      
+      if (remainingTime > 0) {
+        // If minimum display time hasn't elapsed, wait for the remaining time
+        timerRef.current = setTimeout(() => {
+          const currentUrl = imageUrls[currentIndex];
+          setIsVisible(false);
+          setTimeout(() => {
+            setShownImages(prev => new Set(Array.from(prev).concat([currentUrl])));
+            setCurrentIndex(-1);
+          }, FADE_DURATION);
+        }, remainingTime);
+      } else {
+        // If minimum time has elapsed, start fade immediately
+        const currentUrl = imageUrls[currentIndex];
         setIsVisible(false);
         setTimeout(() => {
           setShownImages(prev => new Set(Array.from(prev).concat([currentUrl])));
           setCurrentIndex(-1);
-          remainingTimeRef.current = DISPLAY_DURATION;
         }, FADE_DURATION);
-      }, remainingTimeRef.current);
-
-      // Set start time for pause tracking
-      startTimeRef.current = Date.now();
+      }
     }
-  }, [currentIndex, isPaused, imageUrls, clearTimer]);
+    previousAudioPlaying.current = isAudioPlaying;
+  }, [isAudioPlaying, currentIndex, imageUrls, clearTimer]);
+
+  // Start timer when new image is shown
+  useEffect(() => {
+    if (currentIndex >= 0 && !isAudioPlaying) {
+      clearTimer();
+      timerRef.current = setTimeout(() => {
+        const currentUrl = imageUrls[currentIndex];
+        setIsVisible(false);
+        setTimeout(() => {
+          setShownImages(prev => new Set(Array.from(prev).concat([currentUrl])));
+          setCurrentIndex(-1);
+        }, FADE_DURATION);
+      }, DISPLAY_DURATION);
+
+      return () => clearTimer();
+    }
+  }, [currentIndex, imageUrls, isAudioPlaying, clearTimer]);
 
   // Handle image transitions
   useEffect(() => {
@@ -57,29 +93,19 @@ export function ImageOverlay({ imageUrls, onComplete }: ImageOverlayProps) {
     }
   }, [imageUrls, shownImages, currentIndex, onComplete]);
 
-  // Handle pause/resume
-  useEffect(() => {
-    if (isPaused) {
-      clearTimer();
-      if (startTimeRef.current) {
-        const elapsed = Date.now() - startTimeRef.current;
-        remainingTimeRef.current = Math.max(0, remainingTimeRef.current - elapsed);
-        startTimeRef.current = null;
-      }
-    } else {
-      scheduleNextImage();
-    }
-
-    return () => clearTimer();
-  }, [isPaused, clearTimer, scheduleNextImage]);
-
   const handleImageSelect = (index: number) => {
     clearTimer();
+    displayStartTimeRef.current = Date.now();
     setCurrentIndex(index);
     // Start with image invisible for manual selection too
     setIsVisible(false);
     setTimeout(() => setIsVisible(true), 50);
   };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => clearTimer();
+  }, [clearTimer]);
 
   if (!imageUrls.length) {
     return null;
@@ -89,13 +115,9 @@ export function ImageOverlay({ imageUrls, onComplete }: ImageOverlayProps) {
     <div 
       className="absolute inset-0 flex items-center justify-center"
       onMouseEnter={() => {
-        console.log('Mouse enter - pausing');
-        setIsPaused(true);
         setShowControls(true);
       }}
       onMouseLeave={() => {
-        console.log('Mouse leave - resuming');
-        setIsPaused(false);
         setShowControls(false);
       }}
     >

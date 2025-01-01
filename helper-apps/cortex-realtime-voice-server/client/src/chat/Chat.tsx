@@ -44,6 +44,7 @@ export default function Chat({
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [overlayKey, setOverlayKey] = useState(0);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const wavRecorderRef = useRef<WavRecorder>(
     new WavRecorder({sampleRate: 24000}),
   );
@@ -235,11 +236,13 @@ export default function Chat({
       if (delta?.audio) {
         const audio = base64ToArrayBuffer(delta.audio);
         wavStreamPlayer.add16BitPCM(audio, item.id);
+        setIsAudioPlaying(true);
         
         // Set up track completion callback if not already set
         if (!wavStreamPlayer.onTrackComplete) {
           wavStreamPlayer.setTrackCompleteCallback((trackId) => {
             logger.log('Audio track completed:', trackId);
+            setIsAudioPlaying(false);
             socket.emit('audioPlaybackComplete', trackId);
           });
         }
@@ -427,6 +430,7 @@ export default function Chat({
                   key={overlayKey}
                   imageUrls={imageUrls}
                   onComplete={handleImagesComplete}
+                  isAudioPlaying={isAudioPlaying}
                 />
               </div>
             </div>
