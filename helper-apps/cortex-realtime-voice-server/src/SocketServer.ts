@@ -63,6 +63,7 @@ export class SocketServer {
   private functionCallStates: Map<string, {
     currentCallId: string | null;
     lock: Promise<void>;
+    isShuttingDown: boolean;
   }> = new Map();
   private idleTimers: Map<string, NodeJS.Timer> = new Map();
   private aiResponding: Map<string, boolean> = new Map();
@@ -89,13 +90,21 @@ export class SocketServer {
   private cleanup(socket: Socket) {
     logger.log(`Cleaning up resources for socket ${socket.id}`);
     this.clearIdleTimer(socket);
+    // Mark the function call state as shutting down before deletion
+    const state = this.functionCallStates.get(socket.id);
+    if (state) {
+      state.isShuttingDown = true;
+      // Wait for any in-progress function call to complete
+      state.lock.finally(() => {
+        this.functionCallStates.delete(socket.id);
+      });
+    }
     this.aiResponding.delete(socket.id);
     this.audioPlaying.delete(socket.id);
     this.lastUserMessageTime.delete(socket.id);
     this.idleCycles.delete(socket.id);
     this.userSpeaking.delete(socket.id);
     this.audioMuted.delete(socket.id);
-    this.functionCallStates.delete(socket.id);
     this.voiceSample.delete(socket.id);
     this.audioMessages.delete(socket.id);
   }
@@ -253,10 +262,7 @@ ${this.getTimeString(socket)}` :
     this.userSpeaking.set(socket.id, false);
     this.audioMuted.set(socket.id, false);
     // Initialize function call state for this socket
-    this.functionCallStates.set(socket.id, {
-      currentCallId: null,
-      lock: Promise.resolve()
-    });
+    this.initFunctionCallState(socket.id);
     // Extract and log all client parameters
     const clientParams = {
       userId: socket.handshake.query.userId as string,
@@ -428,12 +434,22 @@ ${this.getTimeString(socket)}` :
           break;
           
         case 'function_call':
-          const callState = this.functionCallStates.get(socket.id)!;
-          if (!callState.currentCallId) {  // Only init new calls if no call is in progress
+          const callState = this.functionCallStates.get(socket.id);
+          if (!callState) {
+            const state = this.initFunctionCallState(socket.id);
+            if (state.isShuttingDown) {
+              logger.log(`Skipping function call for shutting down socket ${socket.id}`);
+              break;
+            }
+          }
+          
+          const state = this.functionCallStates.get(socket.id)!;
+          if (!state.currentCallId) {  // Only init new calls if no call is in progress
             tools.initCall(item.call_id || '', item.name || '', item.arguments || '');
+            state.currentCallId = item.call_id;
             this.clearIdleTimer(socket);
           } else {
-            logger.log(`Skipping new function call ${item.call_id} while call ${callState.currentCallId} is in progress`);
+            logger.log(`Skipping new function call ${item.call_id} while call ${state.currentCallId} is in progress`);
           }
           break;
           
@@ -462,14 +478,14 @@ ${this.getTimeString(socket)}` :
       });
     client.on('response.function_call_arguments.done', async (event) => {
       const state = this.functionCallStates.get(socket.id);
-      if (!state) {
-        logger.error('No function call state found for socket', socket.id);
+      if (!state || state.isShuttingDown) {
+        logger.error('No function call state found for socket or socket is shutting down', socket.id);
         return;
       }
 
       state.lock = state.lock.then(async () => {
-        if (state.currentCallId) {
-          logger.log('Function call already in progress, skipping new call', {
+        if (state.currentCallId && state.currentCallId !== event.call_id) {
+          logger.log('Function call mismatch or already in progress, skipping', {
             current: state.currentCallId,
             attempted: event.call_id
           });
@@ -487,15 +503,17 @@ ${this.getTimeString(socket)}` :
         } catch (error) {
           logger.error('Function call failed:', error);
         } finally {
-          // Always clear the function call ID when done, even if there was an error
-          state.currentCallId = null;
+          if (!state.isShuttingDown) {
+            state.currentCallId = null;
+          }
         }
       }).catch(error => {
         // If the promise chain itself errors, make sure we clear the lock
         logger.error('Function call lock error:', error);
         const state = this.functionCallStates.get(socket.id);
-        if (state) {
+        if (state && !state.isShuttingDown) {
           state.currentCallId = null;
+          state.lock = Promise.resolve(); // Reset the lock
         }
       });
     });
@@ -698,5 +716,17 @@ ${this.getTimeString(socket)}` :
       // Update the tracked items only after attempting deletion
       this.audioMessages.set(socket.id, audioMessages.slice(-SocketServer.MAX_AUDIO_MESSAGES));
     }
+  }
+
+  private initFunctionCallState(socketId: string) {
+    if (!this.functionCallStates.has(socketId)) {
+      this.functionCallStates.set(socketId, {
+        currentCallId: null,
+        lock: Promise.resolve(),
+        isShuttingDown: false
+      });
+      logger.log(`Initialized function call state for socket ${socketId}`);
+    }
+    return this.functionCallStates.get(socketId)!;
   }
 }
