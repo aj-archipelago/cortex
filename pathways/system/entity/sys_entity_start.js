@@ -57,6 +57,7 @@ export default {
         title: ``,
         messages: [],
         voiceResponse: false,
+        codeRequestId: ``,
     },
     timeout: 600,
     tokenRatio: TOKEN_RATIO,
@@ -91,8 +92,8 @@ export default {
         let ackResponse = null;
         if (args.voiceResponse) {
             ackResponse = await callPathway('sys_generator_ack', { ...args, stream: false }, pathwayResolver);
-            if (ackResponse) {
-                await say(pathwayResolver.requestId, ackResponse, 10);
+            if (ackResponse && ackResponse !== "none") {
+                await say(pathwayResolver.requestId, ackResponse, 100);
                 args.chatHistory.push({ role: 'assistant', content: ackResponse });
             }
         }

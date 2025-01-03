@@ -33,7 +33,7 @@ const modifyText = (text, modifications) => {
     return modifiedText;
 };
 
-export const enforceTokenLimit = (text, maxTokens = 5000, isTopicsSection = false) => {
+export const enforceTokenLimit = (text, maxTokens = 1000, isTopicsSection = false) => {
     if (!text) return text;
     
     const lines = text.split('\n')
