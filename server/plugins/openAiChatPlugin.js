@@ -61,7 +61,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         }
     
         // Check if the token length exceeds the model's max token length
-        if (tokenLength > modelTargetTokenLength) {
+        if (tokenLength > modelTargetTokenLength && this.promptParameters?.manageTokenLength) {
             // Remove older messages until the token length is within the model's limit
             requestMessages = this.truncateMessagesToTargetLength(requestMessages, modelTargetTokenLength);
         }
@@ -112,11 +112,11 @@ class OpenAIChatPlugin extends ModelPlugin {
             let totalUnits;
             messages.forEach((message, index) => {
                 //message.content string or array
-                const content = message.content === undefined ? JSON.stringify(message) : (Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content);
-                const words = content.split(" ");
+                const content = message.content === undefined ? JSON.stringify(message) : (Array.isArray(message.content) ? message.content.map(item => {
+                    return JSON.stringify(item);
+                }).join(', ') : message.content);
                 const { length, units } = this.getLength(content);
-                
-                const displayContent = logger.level === 'debug' ? content : (words.length < 41 ? content : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" "));
+                const displayContent = this.shortenContent(content);
 
                 logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${displayContent}"`);
                 totalLength += length;
@@ -125,10 +125,12 @@ class OpenAIChatPlugin extends ModelPlugin {
             logger.info(`[chat request contained ${totalLength} ${totalUnits}]`);
         } else {
             const message = messages[0];
-            const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(item)).join(', ') : message.content;
+            const content = Array.isArray(message.content) ? message.content.map(item => {
+                return JSON.stringify(item);
+            }).join(', ') : message.content;
             const { length, units } = this.getLength(content);
             logger.info(`[request sent containing ${length} ${units}]`);
-            logger.verbose(`${content}`);
+            logger.verbose(`${this.shortenContent(content)}`);
         }
     
         if (stream) {
@@ -137,7 +139,7 @@ class OpenAIChatPlugin extends ModelPlugin {
             const responseText = this.parseResponse(responseData);
             const { length, units } = this.getLength(responseText);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${responseText}`);
+            logger.verbose(`${this.shortenContent(responseText)}`);
         }
 
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
