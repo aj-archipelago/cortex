@@ -6,17 +6,39 @@ import type {ClientToServerEvents, ServerToClientEvents} from "./realtime/socket
 import {search} from "./cortex/search";
 import {expert} from "./cortex/expert";
 import {image} from "./cortex/image";
-import {vision} from "./cortex/vision";
+import {vision, type MultiMessage} from "./cortex/vision";
 import {reason} from "./cortex/reason";
 import { logger } from './utils/logger';
 import { searchMemory } from "./cortex/memory";
-import { MemorySection } from "./cortex/utils";
+import { MemorySection, type ChatMessage } from "./cortex/utils";
 import type {SocketServer} from "./SocketServer";
 
 type Call = {
   call_id: string;
   name: string;
   arguments: string;
+}
+
+interface ScreenshotArgs {
+  lastUserMessage: string;
+  silent?: boolean;
+}
+
+interface ImageContent {
+  type: 'image_url';
+  image_url: {
+    url: string;
+  };
+}
+
+interface TextContent {
+  type: 'text';
+  text: string;
+}
+
+interface ImageMessage {
+  role: string;
+  content: (TextContent | ImageContent)[];
 }
 
 export class Tools {
@@ -133,6 +155,19 @@ export class Tools {
             mute: {type: "boolean"},
           },
           required: ["mute"]
+        },
+      },
+      {
+        type: 'function',
+        name: 'Screenshot',
+        description: 'Use this tool to capture a screenshot of what the user is currently seeing in their browser window or on their computer screen. Any time the user asks you to take a look at something on their screen, use this tool. The tool will request a screenshot from the client and send the image data and the conversation history to your visual processing core for a detailed analysis and response.',
+        parameters: {
+          type: "object",
+          properties: {
+            lastUserMessage: {type: "string"},
+            silent: {type: "boolean", default: true}
+          },
+          required: ["lastUserMessage", "silent"]
         },
       },
       // {
@@ -379,6 +414,63 @@ export class Tools {
 
         case 'muteaudio':
           this.socketServer.setAudioMuted(this.socket, mute);
+          break;
+
+        case 'screenshot':
+          const parsedScreenshotArgs = JSON.parse(args) as ScreenshotArgs;
+          
+          // Create a Promise that will resolve when we get the screenshot
+          const screenshotPromise = new Promise((resolve, reject) => {
+            // Set up one-time listeners for the screenshot events
+            this.socket.once('screenshotCaptured', async (imageData: string) => {
+              try {
+                // Add the screenshot to the cortex history as a user message with image
+                const imageMessage: MultiMessage = {
+                  role: 'user',
+                  content: [
+                    JSON.stringify({
+                      type: 'text',
+                      text: parsedScreenshotArgs.lastUserMessage || 'Please analyze this screenshot.'
+                    }),
+                    JSON.stringify({
+                      type: 'image_url',
+                      image_url: {
+                        url: imageData
+                      }
+                    })
+                  ]
+                };
+                
+                // Get current history and append the image message
+                const baseHistory = this.getCortexHistory();
+                const updatedHistory = [...baseHistory, imageMessage];
+                
+                // Send to vision for analysis
+                const visionResponse = await vision(
+                  contextId,
+                  aiName,
+                  updatedHistory,
+                  JSON.stringify({query: parsedScreenshotArgs.lastUserMessage})
+                );
+                
+                resolve(visionResponse);
+              } catch (error) {
+                reject(error);
+              }
+            });
+            
+            this.socket.once('screenshotError', (error: string) => {
+              reject(new Error(error));
+            });
+            
+            // Request the screenshot
+            logger.log('Requesting screenshot');
+            this.socket.emit('requestScreenshot');
+          });
+          
+          // Wait for the screenshot and analysis
+          response = await screenshotPromise;
+          finishPrompt += ' by reading the output of the tool to the user verbatim - make sure to read it in your signature voice and style'
           break;
 
         default:

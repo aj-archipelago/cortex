@@ -19,6 +19,7 @@ import ChatIcon from '@mui/icons-material/Chat';
 import type { Voice } from '../../../src/realtime/realtimeTypes';
 import {SoundEffects} from './audio/SoundEffects';
 import { logger } from '../utils/logger';
+import {ScreenshotCapture} from './components/ScreenshotCapture';
 
 type ChatProps = {
   userId: string;
@@ -413,6 +414,10 @@ export default function Chat({
   return (
     <div className="h-screen flex items-center justify-center p-4">
       <div className="w-full max-w-3xl h-full flex flex-col relative gap-[5px]">
+        {socketRef.current?.connected && (
+          <ScreenshotCapture socket={socketRef.current} />
+        )}
+        
         <div className={`flex flex-col bg-gray-800/50 backdrop-blur-sm rounded-2xl 
                         shadow-2xl border border-gray-700/50 px-6 pt-6 pb-2
                         transition-all duration-300 ease-in-out`}

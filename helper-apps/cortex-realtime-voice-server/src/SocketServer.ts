@@ -28,7 +28,7 @@ const AI_COMMON_INSTRUCTIONS = "Instructions:\nYou are {{aiName}}, a self aware 
 
 const AI_DATETIME = "The current time and date in GMT is {{now}}, but references like \"today\" or \"yesterday\" are relative to the user's time zone. If you remember the user's time zone, use it - it's possible that the day for the user is different than the day in GMT.";
 
-const AI_EXPERTISE = "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. By using your tools, you have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, examine images, generate images, solve hard math and logic problems, write code, and execute code in a sandboxed environment.";
+const AI_EXPERTISE = "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. By using your tools, you have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, look at the user's screen, examine images, generate images, solve hard math and logic problems, write code, and execute code in a sandboxed environment.";
 
 const AI_MEMORY_INITIAL = `<MEMORIES>\n<SELF>\n{{{memorySelf}}}\n</SELF>\n<USER>\n{{{memoryUser}}}\n</USER>\n</MEMORIES>`;
 
@@ -78,6 +78,7 @@ export class SocketServer {
   private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 60000;
   private static readonly BASE_IDLE_TIMEOUT: number = 3000;
   private static readonly MAX_IDLE_TIMEOUT: number = 60000;
+  private static readonly FUNCTION_CALL_TIMEOUT_MS = 30000; // 30 second timeout
   private isAzure: boolean;
 
   private getTimeString(socket: Socket): string {
@@ -496,24 +497,17 @@ ${this.getTimeString(socket)}` :
         try {
           this.clearIdleTimer(socket);
           this.resetIdleCycles(socket);
-          await tools.executeCall(event.call_id,
-            event.arguments,
-            socket.data.userId,
-            socket.data.aiName);
+          await this.executeFunctionCall(socket, tools, event, state, client);
         } catch (error) {
           logger.error('Function call failed:', error);
-        } finally {
-          if (!state.isShuttingDown) {
-            state.currentCallId = null;
-          }
         }
       }).catch(error => {
-        // If the promise chain itself errors, make sure we clear the lock
+        // If the promise chain itself errors, make sure we clear both lock and currentCallId
         logger.error('Function call lock error:', error);
         const state = this.functionCallStates.get(socket.id);
         if (state && !state.isShuttingDown) {
           state.currentCallId = null;
-          state.lock = Promise.resolve(); // Reset the lock
+          state.lock = Promise.resolve();
         }
       });
     });
@@ -728,5 +722,48 @@ ${this.getTimeString(socket)}` :
       logger.log(`Initialized function call state for socket ${socketId}`);
     }
     return this.functionCallStates.get(socketId)!;
+  }
+
+  private async executeFunctionCall(socket: Socket, tools: Tools, event: any, state: any, client: RealtimeVoiceClient) {
+    try {
+      // Verify this is still the current function call
+      if (state.currentCallId !== event.call_id) {
+        logger.error('Function call mismatch in execution', {
+          current: state.currentCallId,
+          attempted: event.call_id
+        });
+        return;
+      }
+
+      // Set up timeout
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error('Function call timed out'));
+        }, SocketServer.FUNCTION_CALL_TIMEOUT_MS);
+      });
+
+      // Execute the function call with timeout
+      await Promise.race([
+        tools.executeCall(event.call_id, event.arguments, socket.data.userId, socket.data.aiName),
+        timeoutPromise
+      ]);
+
+      // Reset state on success
+      if (!state.isShuttingDown) {
+        state.currentCallId = null;
+        state.lock = Promise.resolve();
+        this.startIdleTimer(client, socket);
+      }
+    } catch (error: any) {
+      logger.error('Function call failed:', error);
+      socket.emit('error', error.message);
+      // Reset state on error
+      if (!state.isShuttingDown) {
+        state.currentCallId = null;
+        state.lock = Promise.resolve();
+        this.startIdleTimer(client, socket);
+      }
+      throw error;
+    }
   }
 }

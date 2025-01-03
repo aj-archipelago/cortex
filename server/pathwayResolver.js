@@ -344,6 +344,11 @@ class PathwayResolver {
 
     // Calculate the maximum token length for a chunk
     getChunkMaxTokenLength() {
+        // Skip expensive calculations if not using input chunking
+        if (!this.useInputChunking) {
+            return this.modelExecutor.plugin.getModelMaxTokenLength();
+        }
+
         // find the longest prompt
         const maxPromptTokenLength = Math.max(...this.prompts.map((promptData) => this.modelExecutor.plugin.getCompiledPrompt('', this.args, promptData).tokenLength));
         
