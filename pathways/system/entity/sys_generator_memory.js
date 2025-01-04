@@ -12,7 +12,6 @@ export default {
     model: 'oai-gpt4o',
     useInputChunking: false,
     enableDuplicateRequests: false,
-    timeout: 600,
     executePathway: async ({args, resolver}) => {
         const memoryContext = await callPathway('sys_search_memory', { ...args, section: 'memoryAll', updateContext: true });
         if (memoryContext) {

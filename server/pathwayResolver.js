@@ -223,27 +223,42 @@ class PathwayResolver {
         this.savedContextId = contextId ? contextId : uuidv4();
         
         const loadMemory = async () => {
-            // Load saved context and core memory if it exists
-            const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
-                (getv && getv(contextId)) || {},
-                callPathway('sys_read_memory', { contextId, section: 'memorySelf', priority: 1, recentHours: 0 }),
-                callPathway('sys_read_memory', { contextId, section: 'memoryDirectives', priority: 1, recentHours: 0 }),
-                callPathway('sys_read_memory', { contextId, section: 'memoryTopics', priority: 0, recentHours: 48 }),
-                callPathway('sys_read_memory', { contextId, section: 'memoryUser', priority: 1, recentHours: 0 }),
-                callPathway('sys_read_memory', { contextId, section: 'memoryContext', priority: 0, recentHours: 0 }),
-            ]);
+            try {
+                // Load saved context and core memory if it exists
+                const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
+                    (getv && getv(contextId)) || {},
+                    callPathway('sys_read_memory', { contextId, section: 'memorySelf', priority: 1}),
+                    callPathway('sys_read_memory', { contextId, section: 'memoryDirectives', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId, section: 'memoryTopics', priority: 0, numResults: 10 }),
+                    callPathway('sys_read_memory', { contextId, section: 'memoryUser', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId, section: 'memoryContext', priority: 0 }),
+                ]).catch(error => {
+                    this.logError(`Failed to load memory: ${error.message}`);
+                    return [{},'','','','',''];
+                });
 
-            this.savedContext = savedContext;
-            this.memorySelf = memorySelf || '';
-            this.memoryDirectives = memoryDirectives || '';
-            this.memoryTopics = memoryTopics || '';
-            this.memoryUser = memoryUser || '';
-            this.memoryContext = memoryContext || '';
+                this.savedContext = savedContext;
+                this.memorySelf = memorySelf || '';
+                this.memoryDirectives = memoryDirectives || '';
+                this.memoryTopics = memoryTopics || '';
+                this.memoryUser = memoryUser || '';
+                this.memoryContext = memoryContext || '';
 
-            // Store initial state for comparison
-            this.initialState = {
-                savedContext: this.savedContext,
-            };
+                // Store initial state for comparison
+                this.initialState = {
+                    savedContext: this.savedContext,
+                };
+            } catch (error) {
+                this.logError(`Error in loadMemory: ${error.message}`);
+                // Set default values in case of error
+                this.savedContext = {};
+                this.memorySelf = '';
+                this.memoryDirectives = '';
+                this.memoryTopics = '';
+                this.memoryUser = '';
+                this.memoryContext = '';
+                this.initialState = { savedContext: {} };
+            }
         };
 
         const saveChangedMemory = async () => {
