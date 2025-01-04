@@ -53,7 +53,8 @@ export default {
             sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section}); 
         }
 
-        const result = await runAllPrompts({...args, sectionMemory});
+        let result = await runAllPrompts({...args, sectionMemory});
+        result = `${result}\n\nThe last time you spoke to the user was ${new Date().toISOString()}`;
 
         if (args.updateContext) {
             await setv(`${args.contextId}-memoryContext`, result);

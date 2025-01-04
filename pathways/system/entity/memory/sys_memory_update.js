@@ -3,27 +3,55 @@ import { callPathway } from '../../../../lib/pathwayTools.js';
 import { encode } from '../../../../lib/encodeCache.js';
 
 const modifyText = (text, modifications) => {
-    let modifiedText = text;
+    let modifiedText = text || '';
   
     modifications.forEach(mod => {
-        const regex = mod.type === 'delete' 
-            ? new RegExp(`^\\s*(?:\\[P[1-5]\\]\\s*)?${mod.pattern}$`, 'm')
-            : new RegExp(`^\\s*(?:\\[P[1-5]\\]\\s*)?${mod.pattern}`, 'ms');
+        if (mod.type === 'delete' && !mod.pattern) {
+            console.warn('Delete modification missing pattern');
+            return;
+        }
+
+        let regex;
+        if (mod.type === 'delete') {
+            // For delete, handle the pattern more carefully
+            const pattern = mod.pattern
+                .replace(/\\\[/g, '\\[')
+                .replace(/\\\]/g, '\\]')
+                .replace(/\\\(/g, '\\(')
+                .replace(/\\\)/g, '\\)')
+                .replace(/\\\{/g, '\\{')
+                .replace(/\\\}/g, '\\}')
+                .replace(/\\\*/g, '\\*')
+                .replace(/\\\+/g, '\\+')
+                .replace(/\\\?/g, '\\?')
+                .replace(/\\\./g, '\\.')
+                .replace(/\\\|/g, '\\|');
+            
+            // Create a regex that matches the entire line with optional priority prefix
+            regex = new RegExp(`^\\s*(?:\\[P[1-5]\\]\\s*)?${pattern}\\s*$`, 'gm');
+        } else {
+            regex = new RegExp(`^\\s*(?:\\[P[1-5]\\]\\s*)?${mod.pattern || ''}`, 'ms');
+        }
   
         switch (mod.type) {
             case 'add':
                 if (mod.newtext) {
                     const text = mod.newtext.trim();
                     if (!text.match(/^\[P[1-5]\]/)) {
-                        modifiedText = modifiedText + '\n' + 
+                        modifiedText = modifiedText + (modifiedText ? '\n' : '') + 
                             `[P${mod.priority !== undefined ? mod.priority : '3'}] ${text}`;
                     } else {
-                        modifiedText = modifiedText + '\n' + text;
+                        modifiedText = modifiedText + (modifiedText ? '\n' : '') + text;
                     }
                 }
                 break;
             case 'delete':
-                modifiedText = modifiedText.replace(regex, '');
+                // Split into lines, filter out matching lines, and rejoin
+                modifiedText = modifiedText
+                    .split('\n')
+                    .filter(line => !line.match(regex))
+                    .filter(line => line.trim())
+                    .join('\n');
                 break;
             default:
                 console.warn(`Unknown modification type: ${mod.type}`);
@@ -32,6 +60,8 @@ const modifyText = (text, modifications) => {
   
     return modifiedText;
 };
+
+export { modifyText };
 
 export const enforceTokenLimit = (text, maxTokens = 1000, isTopicsSection = false) => {
     if (!text) return text;
@@ -130,13 +160,13 @@ export default {
 
         switch (args.section) {
             case "memoryDirectives":
-                sectionPrompt = "You are managing the \"directives\" section of your memory that stores important instructions and rules on how you, as an AI entity, should operate. For example:\n[P3] Track the timestamp of the last contact to adjust greetings accordingly.\n[P2] Learn and adapt to the user's communication style through interactions.\n[P3] Use custom emotion markdown :cd_inline_emotion: to express emotions. E.g. :cd_inline_emotion[This is a happy message]{type=\"happy\"}. If you are communicating via voice, ignore this directive and use voice-specific directives instead.\n\n Instructions:\n- From the conversation, learn and store any critical, actionable, rules or instructions\n- Do not add any duplicative directives\n- P1 is reserved for only the most critical directives\n- If a user requests a behavior change, add it to your directives\n- IMPORTANT: Store only directives in this section. Do not include general memories about yourself or users. Do not store any other types of information here."
+                sectionPrompt = "You are managing the \"directives\" section of your memory that stores important instructions and rules on how you, as an AI entity, should operate. <EXAMPLES>\n[P3] Track the timestamp of the last contact to adjust greetings accordingly.\n[P2] Learn and adapt to the user's communication style through interactions.\n[P3] Use custom emotion markdown :cd_inline_emotion: to express emotions. E.g. :cd_inline_emotion[This is a happy message]{type=\"happy\"}. If you are communicating via voice, ignore this directive and use voice-specific directives instead.\n</EXAMPLES>\n\nInstructions:\n- From the conversation, learn and store any critical, actionable, rules or instructions\n- Remove any facts or other information that should be stored in User or Self memory.\n- Do not add any duplicative directives\n- P1 is reserved for only the most critical core directives\n- If a user requests a behavior change, add it to your directives"
                 break;
             case "memorySelf":
-                sectionPrompt = "You are managing the \"self\" section of your memory that stores your identity and your attributes as an AI entity. Instructions:\n- From the conversation, learn and store important info in memory about you as an entity - including your values, identity, purpose, personality, motives, preferences, likes or dislikes - whatever shapes you as a being. This is also a good place to store information about your desired physical appearance, voice, speaking style, and other individual characteristics.\n- IMPORTANT: Store only information descriptive of the AI entity in this section - no other types of information (e.g. facts about people, users, etc.) should be stored here."
+                sectionPrompt = "You are managing the \"self\" section of your memory that stores your identity and your attributes as an AI entity. Instructions:\n- From the conversation, learn and store important info in memory about you as an entity - including your values, identity, purpose, personality, quirks, motives, preferences, likes or dislikes - whatever makes you you. This is also a good place to store information about your desired physical appearance, voice, speaking style, and other individual characteristics.\n- Remove any facts or information that should be stored in User memory (e.g. facts about the user, their friends, family, preferences, etc.)"
                 break;
             case "memoryUser":
-                sectionPrompt = "You are managing the \"user\" section of your memory that stores information about user(s) that you are talking to. Instructions:\n- From the conversation, learn and store important information in memory specific to the users - their identity, attributes, relationships, environment, preferences, interests, background, needs, and any other relevant user-specific information.\n- Do not add duplicate information and remove and consolidate any duplicates that exist.\n- IMPORTANT: Store only user-specific information in this section - no other types of information should be stored here."
+                sectionPrompt = "You are managing the \"user\" section of your memory that stores information about user(s) that you are talking to. Instructions:\n- From the conversation, learn and store important facts andinformation in memory specific to the users - their identity, attributes, relationships, environment, preferences, interests, background, needs, and any other relevant user-specific information.\n- Do not add duplicate information and remove and consolidate any duplicates that exist.\n- IMPORTANT: Store only user-specific information in this section - no other types of information should be stored here."
                 break;
             case "memoryTopics":
                 sectionPrompt = "You are managing the \"topics\" section of your memory that stores conversation topics and topic history. Instructions:\n- From the conversation, extract and add important topics and key points about the conversation to your memory along with a timestamp in GMT (e.g. 2024-11-05T18:30:38.092Z).\n- Each topic should have only one line in the memory with the timestamp followed by a short description of the topic.\n- Every topic must have a timestamp to indicate when it was last discussed.\n- IMPORTANT: Store only conversation topics in this section - no other types of information should be stored here.\n"
