@@ -1,5 +1,5 @@
 import test from 'ava';
-import { enforceTokenLimit } from '../pathways/system/entity/memory/sys_memory_update.js';
+import { enforceTokenLimit, modifyText } from '../pathways/system/entity/memory/sys_memory_update.js';
 
 test('enforceTokenLimit preserves priority order correctly', t => {
     const input = `
@@ -61,4 +61,76 @@ Item without priority
     
     t.true(result.includes('[P3] Item without priority'));
     t.true(result.includes('[P1] Item with priority'));
+});
+
+test('modifyText handles delete operations with escaped characters', t => {
+    const input = '[P2] Pizza Connection: Has special appreciation for Pisanello\'s';
+    const modifications = [{
+        type: 'delete',
+        pattern: '\\[P2\\] Pizza Connection: Has special appreciation for Pisanello\'s'
+    }];
+    
+    const result = modifyText(input, modifications);
+    t.false(result.includes('Pizza Connection'));
+});
+
+test('modifyText handles delete with partial priority match', t => {
+    const input = '[P3] Test memory item';
+    const modifications = [{
+        type: 'delete',
+        pattern: 'Test memory item'
+    }];
+    
+    const result = modifyText(input, modifications);
+    t.false(result.includes('Test memory item'));
+});
+
+test('modifyText handles multiple modifications in sequence', t => {
+    const input = '[P2] Keep this line\n[P3] Delete this line\n[P1] Also keep this';
+    const modifications = [
+        { type: 'delete', pattern: 'Delete this line' },
+        { type: 'add', newtext: 'New line added', priority: '2' }
+    ];
+    
+    const result = modifyText(input, modifications);
+    t.true(result.includes('Keep this line'));
+    t.true(result.includes('Also keep this'));
+    t.true(result.includes('[P2] New line added'));
+    t.false(result.includes('Delete this line'));
+});
+
+test('modifyText handles delete with whitespace variations', t => {
+    const input = '  [P2]  Item with spaces  \n[P3]Item without spaces';
+    const modifications = [
+        { type: 'delete', pattern: 'Item with spaces' },
+        { type: 'delete', pattern: 'Item without spaces' }
+    ];
+    
+    const result = modifyText(input, modifications);
+    t.false(result.includes('Item with spaces'));
+    t.false(result.includes('Item without spaces'));
+});
+
+test('modifyText preserves existing priority when adding with priority in text', t => {
+    const input = '';
+    const modifications = [{
+        type: 'add',
+        newtext: '[P1] High priority item',
+        priority: '3' // This should be ignored since priority is in text
+    }];
+    
+    const result = modifyText(input, modifications);
+    t.true(result.includes('[P1] High priority item'));
+    t.false(result.includes('[P3] [P1] High priority item'));
+});
+
+test('modifyText handles delete with regex special characters', t => {
+    const input = '[P2] Special (chars) [test] {here} *star*';
+    const modifications = [{
+        type: 'delete',
+        pattern: 'Special \\(chars\\) \\[test\\] \\{here\\} \\*star\\*'
+    }];
+    
+    const result = modifyText(input, modifications);
+    t.false(result.includes('Special (chars)'));
 });
