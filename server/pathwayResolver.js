@@ -227,11 +227,11 @@ class PathwayResolver {
                 // Load saved context and core memory if it exists
                 const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
                     (getv && getv(contextId)) || {},
-                    callPathway('sys_read_memory', { contextId, section: 'memorySelf', priority: 1}),
-                    callPathway('sys_read_memory', { contextId, section: 'memoryDirectives', priority: 1 }),
-                    callPathway('sys_read_memory', { contextId, section: 'memoryTopics', priority: 0, numResults: 10 }),
-                    callPathway('sys_read_memory', { contextId, section: 'memoryUser', priority: 1 }),
-                    callPathway('sys_read_memory', { contextId, section: 'memoryContext', priority: 0 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1}),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryTopics', priority: 0, numResults: 10 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryContext', priority: 0 }),
                 ]).catch(error => {
                     this.logError(`Failed to load memory: ${error.message}`);
                     return [{},'','','','',''];
