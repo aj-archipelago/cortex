@@ -36,6 +36,9 @@ export default {
                 await callPathway('sys_save_memory', { ...args, aiMemory: AI_MEMORY_DEFAULTS });
             }
 
+            // Update context for the conversation turn
+            callPathway('sys_search_memory', { ...args, section: 'memoryAll',updateContext: true });
+
             // Check if this conversation turn requires memory updates
             const memoryRequired = await callPathway('sys_memory_required', { 
                 ...args,

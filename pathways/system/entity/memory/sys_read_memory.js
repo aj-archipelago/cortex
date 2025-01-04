@@ -55,7 +55,7 @@ export default {
             return savedContext.memoryContext || "";
         }
 
-        const validSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser'];
+        const validSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser', 'memoryContext'];
 
         if (section !== 'memoryAll') {
             if (validSections.includes(section)) {
@@ -90,7 +90,10 @@ export default {
                 content = filterByRecent(content, recentHours);
             }
             
-            memoryContents[section] = content;
+            // memoryContext is a special section that does not belong in the returned memory object
+            if (section !== 'memoryContext') {
+                memoryContents[section] = content;
+            }
         }
         const returnValue = JSON.stringify(memoryContents, null, 2);
         return returnValue;

@@ -1,5 +1,6 @@
 import { Prompt } from '../../../../server/prompt.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
+import { setv } from '../../../../lib/keyValueStorageClient.js';
 
 export default {
     prompt:
@@ -23,6 +24,7 @@ export default {
         aiName: "Jarvis",
         contextId: ``,
         section: "memoryAll",
+        updateContext: false
     },
     model: 'oai-gpt4o',
     useInputChunking: false,
@@ -52,6 +54,10 @@ export default {
         }
 
         const result = await runAllPrompts({...args, sectionMemory});
+
+        if (args.updateContext) {
+            await setv(`${args.contextId}-memoryContext`, result);
+        }   
 
         return result;
     }

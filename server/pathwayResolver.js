@@ -223,20 +223,26 @@ class PathwayResolver {
         this.savedContextId = contextId ? contextId : uuidv4();
         
         const loadMemory = async () => {
-            // Load initial values
-            this.savedContext = (getv && await getv(contextId)) || {};
-            this.memorySelf = (getv && await getv(`${contextId}-memorySelf`)) || "";
-            this.memoryDirectives = (getv && await getv(`${contextId}-memoryDirectives`)) || "";
-            this.memoryTopics = (getv && await getv(`${contextId}-memoryTopics`)) || "";
-            this.memoryUser = (getv && await getv(`${contextId}-memoryUser`)) || "";
+            // Load saved context and core memory if it exists
+            const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
+                (getv && getv(contextId)) || {},
+                callPathway('sys_read_memory', { contextId, section: 'memorySelf', priority: 1, recentHours: 0 }),
+                callPathway('sys_read_memory', { contextId, section: 'memoryDirectives', priority: 1, recentHours: 0 }),
+                callPathway('sys_read_memory', { contextId, section: 'memoryTopics', priority: 0, recentHours: 48 }),
+                callPathway('sys_read_memory', { contextId, section: 'memoryUser', priority: 1, recentHours: 0 }),
+                callPathway('sys_read_memory', { contextId, section: 'memoryContext', priority: 0, recentHours: 0 }),
+            ]);
+
+            this.savedContext = savedContext;
+            this.memorySelf = memorySelf || '';
+            this.memoryDirectives = memoryDirectives || '';
+            this.memoryTopics = memoryTopics || '';
+            this.memoryUser = memoryUser || '';
+            this.memoryContext = memoryContext || '';
 
             // Store initial state for comparison
             this.initialState = {
                 savedContext: this.savedContext,
-                memorySelf: this.memorySelf,
-                memoryDirectives: this.memoryDirectives,
-                memoryTopics: this.memoryTopics,
-                memoryUser: this.memoryUser
             };
         };
 
@@ -245,26 +251,10 @@ class PathwayResolver {
             
             const currentState = {
                 savedContext: this.savedContext,
-                memorySelf: this.memorySelf,
-                memoryDirectives: this.memoryDirectives,
-                memoryTopics: this.memoryTopics,
-                memoryUser: this.memoryUser
             };
 
             if (currentState.savedContext !== this.initialState.savedContext) {
                 setv && await setv(this.savedContextId, this.savedContext);
-            }
-            if (currentState.memorySelf !== this.initialState.memorySelf) {
-                setv && await setv(`${this.savedContextId}-memorySelf`, this.memorySelf);
-            }
-            if (currentState.memoryDirectives !== this.initialState.memoryDirectives) {
-                setv && await setv(`${this.savedContextId}-memoryDirectives`, this.memoryDirectives);
-            }
-            if (currentState.memoryTopics !== this.initialState.memoryTopics) {
-                setv && await setv(`${this.savedContextId}-memoryTopics`, this.memoryTopics);
-            }
-            if (currentState.memoryUser !== this.initialState.memoryUser) {
-                setv && await setv(`${this.savedContextId}-memoryUser`, this.memoryUser);
             }
         };
 

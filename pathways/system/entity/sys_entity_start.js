@@ -79,6 +79,11 @@ export default {
             args.chatHistory = args.chatHistory.slice(-20);
         }
 
+        const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0 });
+        if (memoryContext) {
+            args.chatHistory.splice(-1, 0, { role: 'assistant', content: memoryContext });
+        }
+
         const pathwayResolver = resolver;
         const { anthropicModel, openAIModel } = pathwayResolver.pathway;
 
@@ -201,6 +206,11 @@ export default {
                         break;
                     case "clarify":
                         toolCallbackName = null;
+                        toolCallbackId = null;
+                        toolCallbackMessage = toolMessage;
+                        break;
+                    case "memory":
+                        toolCallbackName = 'sys_generator_memory';
                         toolCallbackId = null;
                         toolCallbackMessage = toolMessage;
                         break;
