@@ -331,7 +331,7 @@ export class Tools {
           break;
 
         case 'image':
-          finishPrompt = 'You have finished using the Image tool to help with the user\'s request. Please respond to the user via audio';
+          finishPrompt = 'You have finished using the Image tool to help with the user\'s request. The image is being shown to the user right now. Please respond to the user via audio';
 
           response = await image(
             contextId,
@@ -389,7 +389,7 @@ export class Tools {
           break;
 
         case 'muteaudio':
-          this.socketServer.setAudioMuted(this.socket, mute);
+          this.socketServer.setInteractiveState(this.socket, !mute);
           break;
 
         case 'screenshot':

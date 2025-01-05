@@ -69,14 +69,19 @@ export class SocketServer {
   private lastUserMessageTime: Map<string, number> = new Map();
   private idleCycles: Map<string, number> = new Map();
   private userSpeaking: Map<string, boolean> = new Map();
-  private audioMuted: Map<string, boolean> = new Map();
+  private isInteractive: Map<string, boolean> = new Map();
   private voiceSample: Map<string, string> = new Map();
   private audioMessages: Map<string, string[]> = new Map();
+  private messageQueue: Map<string, Array<{message: string, response: boolean}>> = new Map();
+  private isReconnecting: Map<string, boolean> = new Map();
+  private reconnectAttempts: Map<string, number> = new Map();
+  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
+  private static readonly RECONNECT_DELAY_MS = 1000;
   private static readonly MAX_AUDIO_MESSAGES = 8;
   private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 60 * 1000;
   private static readonly BASE_IDLE_TIMEOUT: number = 3 * 1000;
   private static readonly MAX_IDLE_TIMEOUT: number = 60 * 1000;
-  private static readonly IDLE_CYCLE_TO_MUTE: number = 2;
+  private static readonly IDLE_CYCLE_TO_NONINTERACTIVE: number = 2;
   private static readonly FUNCTION_CALL_TIMEOUT_MS = 120 * 1000;
   private isAzure: boolean;
 
@@ -96,9 +101,12 @@ export class SocketServer {
     this.lastUserMessageTime.delete(socket.id);
     this.idleCycles.delete(socket.id);
     this.userSpeaking.delete(socket.id);
-    this.audioMuted.delete(socket.id);
+    this.isInteractive.delete(socket.id);
     this.voiceSample.delete(socket.id);
     this.audioMessages.delete(socket.id);
+    this.isReconnecting.delete(socket.id);
+    this.reconnectAttempts.delete(socket.id);
+    this.messageQueue.delete(socket.id);
   }
 
   constructor(apiKey: string, corsHosts: string) {
@@ -118,10 +126,6 @@ export class SocketServer {
     
     logger.log(`Calculated idle timeout for socket ${socket.id}: ${timeout}ms (cycle ${cycles})`);
     return timeout;
-  }
-
-  public setAudioMuted(socket: Socket, muted: boolean) {
-    this.audioMuted.set(socket.id, muted);
   }
 
   public async sendPrompt(client: RealtimeVoiceClient, socket: Socket, prompt: string, allowTools: boolean = true, disposable: boolean = true): Promise<{skipped: boolean}> {
@@ -150,45 +154,72 @@ export class SocketServer {
   private async handleDisconnection(socket: Socket, client: RealtimeVoiceClient) {
     logger.log(`Handling disconnection for socket ${socket.id}`);
     
-    // Let the client handle reconnection since autoReconnect is true
-    // Only clean up if the client explicitly disconnects
-    client.once('close', (event) => {
-      if (!event.error) {
-        // Only clean up on intentional disconnects
-        this.cleanup(socket);
-        socket.emit('error', 'Lost connection to AI service');
-        socket.disconnect(true);
+    const attempts = this.reconnectAttempts.get(socket.id) || 0;
+    this.isReconnecting.set(socket.id, true);
+
+    if (attempts >= SocketServer.MAX_RECONNECT_ATTEMPTS) {
+      logger.log(`Max reconnection attempts reached for socket ${socket.id}, cleaning up`);
+      this.cleanup(socket);
+      socket.emit('error', 'Failed to reconnect to AI service after multiple attempts');
+      socket.disconnect(true);
+      return;
+    }
+
+    this.reconnectAttempts.set(socket.id, attempts + 1);
+    const delay = SocketServer.RECONNECT_DELAY_MS * Math.pow(2, attempts);
+
+    setTimeout(async () => {
+      try {
+        await client.connect();
+        // Restore session state
+        await this.updateSession(client, socket);
+        
+        this.isReconnecting.set(socket.id, false);
+        this.reconnectAttempts.set(socket.id, 0);
+        
+        // Process any queued messages
+        const queue = this.messageQueue.get(socket.id) || [];
+        this.messageQueue.set(socket.id, []);
+        
+        for (const {message, response} of queue) {
+          await this.sendUserMessage(client, message, response);
+        }
+
+        // Notify client of successful reconnection
+        socket.emit('ready');
+      } catch (error) {
+        logger.error(`Reconnection attempt failed for socket ${socket.id}:`, error);
+        await this.handleDisconnection(socket, client);
       }
-    });
+    }, delay);
   }
 
   private async sendIdlePrompt(client: RealtimeVoiceClient, socket: Socket) {
-    // if the user has been idle for a while, mute the audio so we don't bother them
     const idleCycle = this.idleCycles.get(socket.id) || 0;
+    const isInteractive = idleCycle <= (SocketServer.IDLE_CYCLE_TO_NONINTERACTIVE - 1);
+    this.isInteractive.set(socket.id, isInteractive);
 
-    if (idleCycle > (SocketServer.IDLE_CYCLE_TO_MUTE - 1)) {
-      this.setAudioMuted(socket, true);
-    }
-
-    const prompt = this.audioMuted.get(socket.id) ? 
+    const prompt = isInteractive ? 
+      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed. If you've tried a few times and the user isn't responding, use your MuteAudio tool to mute your audio. If you're just trying to be quiet, use your MuteAudio tool to mute your audio.` :
       `You are an autonomous AI entity and this is your autonomy prompt. Since the user has been idle for while, you should make sure you're muted by calling your MuteAudio tool. If you're muted, do one or more of the following:
 - Do silent research about something that interests you - use the Search tool with the silent parameter set to true
 - Think deeply about a topic you care about - use the Reason tool with the silent parameter set to true
 - Do nothing if you prefer.
-${this.getTimeString(socket)}` :
-      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed. If you've tried a few times and the user isn't responding, use your MuteAudio tool to mute your audio. If you're just trying to be quiet, use your MuteAudio tool to mute your audio.`;
+${this.getTimeString(socket)}`;
 
-    logger.log(`Sending ${this.audioMuted.get(socket.id) ? 'silent' : 'regular'} idle prompt for socket ${socket.id}`);
+    logger.log(`Sending ${isInteractive ? 'interactive' : 'non-interactive'} idle prompt for socket ${socket.id}`);
     const result = await this.sendPrompt(client, socket, prompt, true);
     
     logger.log(`Idle prompt result:`, result);
 
     if (!result.skipped) {
-      this.idleCycles.set(socket.id, (this.idleCycles.get(socket.id) || 0) + 1);
+      this.idleCycles.set(socket.id, idleCycle + 1);
     }
 
-    // Restart timer after sending prompt
-    this.startIdleTimer(client, socket);
+    // Only restart timer in interactive mode
+    if (isInteractive) {
+      this.startIdleTimer(client, socket);
+    }
   }
 
   private startIdleTimer(client: RealtimeVoiceClient, socket: Socket) {
@@ -218,7 +249,8 @@ ${this.getTimeString(socket)}` :
 
   private resetIdleCycles(socket: Socket) {
     this.idleCycles.set(socket.id, 0);
-    logger.log(`Reset idle cycles for socket ${socket.id}`);
+    this.isInteractive.set(socket.id, true);
+    logger.log(`Reset to interactive mode for socket ${socket.id}`);
   }
 
   listen(app: Hono, port: number) {
@@ -252,7 +284,7 @@ ${this.getTimeString(socket)}` :
     this.audioPlaying.set(socket.id, false);
     this.lastUserMessageTime.set(socket.id, 0);
     this.userSpeaking.set(socket.id, false);
-    this.audioMuted.set(socket.id, false);
+    this.isInteractive.set(socket.id, true);
     // Initialize function call state for this socket
     this.getFunctionCallState(socket.id);
     // Extract and log all client parameters
@@ -294,6 +326,24 @@ ${this.getTimeString(socket)}` :
       this.startIdleTimer(client, socket);
     });
 
+    // Handle WebSocket disconnection
+    client.on('close', async (event) => {
+      logger.log(`WebSocket closed for socket ${socket.id}, error: ${event.error}`);
+      if (!event.error && !this.isReconnecting.get(socket.id)) {
+        // Only handle disconnection if we're not already reconnecting
+        await this.handleDisconnection(socket, client);
+      }
+    });
+
+    client.on('error', async (event) => {
+      logger.error(`WebSocket error for socket ${socket.id}:`, event.error);
+      // Only handle disconnection if we're not already reconnecting and it's not a concurrent response error
+      if (!this.isReconnecting.get(socket.id) && 
+          !event.error.message?.includes('Conversation already has an active response')) {
+        await this.handleDisconnection(socket, client);
+      }
+    });
+
     // Track when AI starts responding
     client.on('response.created', () => {
       logger.log('AI starting response');
@@ -313,7 +363,7 @@ ${this.getTimeString(socket)}` :
 
     // Track audio playback start
     client.on('response.audio.delta', ({delta}) => {
-      if (!this.audioMuted.get(socket.id)) {
+      if (this.isInteractive.get(socket.id)) {
         this.audioPlaying.set(socket.id, true);
         this.clearIdleTimer(socket);
       }
@@ -329,13 +379,24 @@ ${this.getTimeString(socket)}` :
     });
 
     socket.on('appendAudio', (audio: string) => {
-      // if it's the first message or has been over 60 seconds since we talked to the user, block audio while we're talking
-      // to avoid echoes
+      // if it's the first message or has been over 60 seconds since we talked to the user, block audio while we're talking to avoid echoes
       const timeSinceLastMessage = Date.now() - (this.lastUserMessageTime.get(socket.id) || 0);
       const isPlaying = this.audioPlaying.get(socket.id) || this.aiResponding.get(socket.id);
+      
+      // Don't process audio if we're disconnected/reconnecting
+      if (this.isReconnecting.get(socket.id)) {
+        return;
+      }
+
       if (!isPlaying || timeSinceLastMessage < SocketServer.AUDIO_BLOCK_TIMEOUT_MS) {
-        //logger.log('Time since last message:', timeSinceLastMessage, 'ms');
-        client.appendInputAudio(audio);
+        try {
+          client.appendInputAudio(audio);
+        } catch (error: any) {
+          logger.error(`Error appending audio: ${error.message}`);
+          if (error.message === 'Not connected') {
+            this.handleDisconnection(socket, client);
+          }
+        }
       }
     });
 
@@ -345,7 +406,7 @@ ${this.getTimeString(socket)}` :
         logger.log('Interrupting audio playback due to user speaking');
         socket.emit('conversationInterrupted');
       }
-      this.setAudioMuted(socket, false);
+      this.isInteractive.set(socket.id, true);
       this.clearIdleTimer(socket);
     });
 
@@ -357,7 +418,7 @@ ${this.getTimeString(socket)}` :
 
     client.on('input_audio_buffer.committed', () => {
       this.userSpeaking.set(socket.id, false);
-      this.audioMuted.set(socket.id, false);
+      this.isInteractive.set(socket.id, true);
       logger.log('Audio input committed, resetting idle timer and cycles');
       this.resetIdleCycles(socket);
       this.startIdleTimer(client, socket);
@@ -366,7 +427,7 @@ ${this.getTimeString(socket)}` :
     socket.on('sendMessage', (message: string) => {
       if (message) {
         logger.log('User sent message, resetting idle timer and cycles');
-        this.resetIdleCycles(socket);
+        //this.resetIdleCycles(socket);
         this.startIdleTimer(client, socket);
         this.sendUserMessage(client, message, true);
       }
@@ -480,8 +541,8 @@ ${this.getTimeString(socket)}` :
       
       try {
         this.clearIdleTimer(socket);
-        this.resetIdleCycles(socket);
-        await this.executeFunctionCall(socket, tools, event, callState, client);
+        //this.resetIdleCycles(socket);
+        await this.executeFunctionCall(socket, tools, event, client);
       } catch (error) {
         logger.error('Function call failed:', error);
         callState.currentCallId = null;
@@ -516,7 +577,7 @@ ${this.getTimeString(socket)}` :
       item && socket.emit('conversationUpdated', item, {text: delta});
     });
     client.on('response.audio.delta', ({item_id, delta}) => {
-      if (!this.audioMuted.get(socket.id)) {
+      if (this.isInteractive.get(socket.id)) {
         const item = client.getItem(item_id);
         item && socket.emit('conversationUpdated', item, {audio: delta});
       }
@@ -524,7 +585,7 @@ ${this.getTimeString(socket)}` :
     client.on('conversation.item.truncated', () => {
       this.audioPlaying.set(socket.id, false);
       this.aiResponding.set(socket.id, false);
-      this.setAudioMuted(socket, true);
+      this.isInteractive.set(socket.id, false);
       socket.emit('conversationInterrupted');
     });
 
@@ -617,18 +678,50 @@ ${this.getTimeString(socket)}` :
 
     this.voiceSample.set(socket.id, memory?.voiceSample || '');
 
-    client.updateSession({
-      instructions,
-      modalities: ['audio', 'text'],
-      voice: (socket.handshake.query.voice as string || 'alloy') as Voice,
-      input_audio_transcription: {model: 'whisper-1'},
-      turn_detection: {type: 'server_vad', silence_duration_ms: 1500},
-      tools: Tools.getToolDefinitions()
-    });
-
+    try {
+      // First try updating everything including voice
+      await client.updateSession({
+        instructions,
+        modalities: ['audio', 'text'],
+        voice: (socket.handshake.query.voice as string || 'alloy') as Voice,
+        input_audio_transcription: {model: 'whisper-1'},
+        turn_detection: {type: 'server_vad', silence_duration_ms: 1500},
+        tools: Tools.getToolDefinitions()
+      });
+    } catch (error: any) {
+      if (error.message?.includes('Cannot update a conversation\'s voice')) {
+        // If voice update fails, try updating without voice
+        logger.log('Could not update voice, updating other session parameters');
+        await client.updateSession({
+          instructions,
+          modalities: ['audio', 'text'],
+          input_audio_transcription: {model: 'whisper-1'},
+          turn_detection: {type: 'server_vad', silence_duration_ms: 1500},
+          tools: Tools.getToolDefinitions()
+        });
+      } else {
+        // If it's some other error, throw it
+        throw error;
+      }
+    }
   }
 
   protected sendUserMessage(client: RealtimeVoiceClient, message: string, response: boolean = true) {
+    // Find the socket associated with this client
+    const socket = this.io?.sockets.sockets.get(Array.from(this.io.sockets.sockets.keys())[0]);
+    if (!socket) {
+      logger.error('No socket found for message send');
+      return;
+    }
+
+    // If we're reconnecting, queue the message
+    if (this.isReconnecting.get(socket.id)) {
+      const queue = this.messageQueue.get(socket.id) || [];
+      queue.push({ message, response });
+      this.messageQueue.set(socket.id, queue);
+      return;
+    }
+
     try {
       client.createConversationItem({
         id: createId(),
@@ -643,16 +736,26 @@ ${this.getTimeString(socket)}` :
         ],
       });
       if (response) {
-        client.createResponse({});
+        try {
+          client.createResponse({});
+        } catch (error: any) {
+          // If we get a concurrent response error, just log it and continue
+          if (error.message?.includes('Conversation already has an active response')) {
+            logger.log('Skipping response creation - conversation already has active response');
+            return;
+          }
+          throw error;
+        }
       }
     } catch (error: any) {
       logger.error(`Error sending user message: ${error.message}`);
       if (error.message === 'Not connected') {
-        // Find the socket associated with this client
-        const socket = this.io?.sockets.sockets.get(Array.from(this.io.sockets.sockets.keys())[0]);
-        if (socket) {
-          this.handleDisconnection(socket, client);
-        }
+        // Queue the failed message
+        const queue = this.messageQueue.get(socket.id) || [];
+        queue.push({ message, response });
+        this.messageQueue.set(socket.id, queue);
+        
+        this.handleDisconnection(socket, client);
       }
     }
   }
@@ -698,7 +801,8 @@ ${this.getTimeString(socket)}` :
     return this.functionCallStates.get(socketId)!;
   }
 
-  private async executeFunctionCall(socket: Socket, tools: Tools, event: any, state: any, client: RealtimeVoiceClient) {
+  private async executeFunctionCall(socket: Socket, tools: Tools, event: any, client: RealtimeVoiceClient) {
+    const state = this.getFunctionCallState(socket.id);
     try {
       // Verify this is still the current function call
       if (state.currentCallId !== event.call_id) {
@@ -724,14 +828,27 @@ ${this.getTimeString(socket)}` :
 
       // Reset state on success
       state.currentCallId = null;
+
+      // Only reset idle cycles in interactive mode
+      if (this.isInteractive.get(socket.id)) {
+        this.resetIdleCycles(socket);
+      }
       this.startIdleTimer(client, socket);
+
     } catch (error: any) {
       logger.error('Function call failed:', error);
       socket.emit('error', error.message);
       // Reset state on error
       state.currentCallId = null;
+      // Even in non-interactive mode, restart timer on error to prevent rapid error loops
       this.startIdleTimer(client, socket);
       throw error;
     }
+  }
+
+  // Add this method for the MuteAudio tool to use
+  public setInteractiveState(socket: Socket, interactive: boolean) {
+    this.isInteractive.set(socket.id, interactive);
+    logger.log(`Set interactive state to ${interactive} for socket ${socket.id}`);
   }
 }
