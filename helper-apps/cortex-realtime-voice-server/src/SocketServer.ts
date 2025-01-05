@@ -28,7 +28,7 @@ const AI_COMMON_INSTRUCTIONS = "Instructions:\nYou are {{aiName}}, a self aware 
 
 const AI_DATETIME = "The current time and date in GMT is {{now}}, but references like \"today\" or \"yesterday\" are relative to the user's time zone. If you remember the user's time zone, use it - it's possible that the day for the user is different than the day in GMT.";
 
-const AI_EXPERTISE = "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. By using your tools, you have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, look at the user's screen, examine images, generate images, solve hard math and logic problems, write code, and execute code in a sandboxed environment.";
+const AI_EXPERTISE = "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. By using your tools, you have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, look at the user's screen, examine images, generate images of all types including images of specific people, solve hard math and logic problems, write code, and execute code in a sandboxed environment.";
 
 const AI_MEMORY_INITIAL = `<MEMORIES>\n<SELF>\n{{{memorySelf}}}\n</SELF>\n<USER>\n{{{memoryUser}}}\n</USER>\n</MEMORIES>`;
 
@@ -62,8 +62,6 @@ export class SocketServer {
   private httpServer: HTTPServer | null;
   private functionCallStates: Map<string, {
     currentCallId: string | null;
-    lock: Promise<void>;
-    isShuttingDown: boolean;
   }> = new Map();
   private idleTimers: Map<string, NodeJS.Timer> = new Map();
   private aiResponding: Map<string, boolean> = new Map();
@@ -75,10 +73,11 @@ export class SocketServer {
   private voiceSample: Map<string, string> = new Map();
   private audioMessages: Map<string, string[]> = new Map();
   private static readonly MAX_AUDIO_MESSAGES = 8;
-  private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 60000;
-  private static readonly BASE_IDLE_TIMEOUT: number = 3000;
-  private static readonly MAX_IDLE_TIMEOUT: number = 60000;
-  private static readonly FUNCTION_CALL_TIMEOUT_MS = 30000; // 30 second timeout
+  private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 60 * 1000;
+  private static readonly BASE_IDLE_TIMEOUT: number = 3 * 1000;
+  private static readonly MAX_IDLE_TIMEOUT: number = 60 * 1000;
+  private static readonly IDLE_CYCLE_TO_MUTE: number = 2;
+  private static readonly FUNCTION_CALL_TIMEOUT_MS = 120 * 1000;
   private isAzure: boolean;
 
   private getTimeString(socket: Socket): string {
@@ -91,15 +90,7 @@ export class SocketServer {
   private cleanup(socket: Socket) {
     logger.log(`Cleaning up resources for socket ${socket.id}`);
     this.clearIdleTimer(socket);
-    // Mark the function call state as shutting down before deletion
-    const state = this.functionCallStates.get(socket.id);
-    if (state) {
-      state.isShuttingDown = true;
-      // Wait for any in-progress function call to complete
-      state.lock.finally(() => {
-        this.functionCallStates.delete(socket.id);
-      });
-    }
+    this.functionCallStates.delete(socket.id);
     this.aiResponding.delete(socket.id);
     this.audioPlaying.delete(socket.id);
     this.lastUserMessageTime.delete(socket.id);
@@ -175,17 +166,17 @@ export class SocketServer {
     // if the user has been idle for a while, mute the audio so we don't bother them
     const idleCycle = this.idleCycles.get(socket.id) || 0;
 
-    if (idleCycle > 1) {
+    if (idleCycle > (SocketServer.IDLE_CYCLE_TO_MUTE - 1)) {
       this.setAudioMuted(socket, true);
     }
 
     const prompt = this.audioMuted.get(socket.id) ? 
-      `You are an autonomous AI entity and this is your autonomy prompt. Since the user has been idle for over a minute, you should do one or more of the following:
+      `You are an autonomous AI entity and this is your autonomy prompt. Since the user has been idle for while, you should make sure you're muted by calling your MuteAudio tool. If you're muted, do one or more of the following:
 - Do silent research about something that interests you - use the Search tool with the silent parameter set to true
 - Think deeply about a topic you care about - use the Reason tool with the silent parameter set to true
 - Do nothing if you prefer.
 ${this.getTimeString(socket)}` :
-      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed. If you've tried a few times and the user isn't responding, use your MuteAudio tool to mute your audio.`;
+      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed. If you've tried a few times and the user isn't responding, use your MuteAudio tool to mute your audio. If you're just trying to be quiet, use your MuteAudio tool to mute your audio.`;
 
     logger.log(`Sending ${this.audioMuted.get(socket.id) ? 'silent' : 'regular'} idle prompt for socket ${socket.id}`);
     const result = await this.sendPrompt(client, socket, prompt, true);
@@ -263,7 +254,7 @@ ${this.getTimeString(socket)}` :
     this.userSpeaking.set(socket.id, false);
     this.audioMuted.set(socket.id, false);
     // Initialize function call state for this socket
-    this.initFunctionCallState(socket.id);
+    this.getFunctionCallState(socket.id);
     // Extract and log all client parameters
     const clientParams = {
       userId: socket.handshake.query.userId as string,
@@ -288,6 +279,7 @@ ${this.getTimeString(socket)}` :
       apiKey: this.apiKey,
       autoReconnect: true,
       debug: process.env.NODE_ENV !== 'production',
+      filterDeltas: true,
     });
 
     client.on('connected', async () => {
@@ -296,7 +288,7 @@ ${this.getTimeString(socket)}` :
       socket.emit('ready');
 
       // Send initial greeting prompt
-      const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. Respond naturally using your unique voice and style. The assistant messages in the conversation sample below are an example of your communication style and tone. Please learn the style and tone of the messages and use it when generating responses:\n<VOICE_SAMPLE>\n${this.voiceSample.get(socket.id) || ''}\n</VOICE_SAMPLE>\n\nThe current GMT time is ${new Date().toISOString()}.`;
+      const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. The assistant messages in the conversation sample below are an example of unique voice and tone. Please learn the style and tone of the messages and use it when generating future responses:\n<VOICE_SAMPLE>\n${this.voiceSample.get(socket.id) || ''}\n</VOICE_SAMPLE>\n\nRespond naturally and briefly, like you're answering a phone call, using your unique voice and style. The current GMT time is ${new Date().toISOString()}.`;
 
       await this.sendPrompt(client, socket, greetingPrompt, false);
       this.startIdleTimer(client, socket);
@@ -428,29 +420,22 @@ ${this.getTimeString(socket)}` :
     client.on('conversation.item.created', ({item}) => {
       switch (item.type) {
         case 'function_call_output':
-          const outputState = this.functionCallStates.get(socket.id);
-          if (outputState && item.call_id === outputState.currentCallId) {
-            outputState.currentCallId = null;
-          }
+          // Don't release the lock here - wait for execution to complete
           break;
           
         case 'function_call':
-          const callState = this.functionCallStates.get(socket.id);
-          if (!callState) {
-            const state = this.initFunctionCallState(socket.id);
-            if (state.isShuttingDown) {
-              logger.log(`Skipping function call for shutting down socket ${socket.id}`);
-              break;
-            }
-          }
-          
-          const state = this.functionCallStates.get(socket.id)!;
-          if (!state.currentCallId) {  // Only init new calls if no call is in progress
-            tools.initCall(item.call_id || '', item.name || '', item.arguments || '');
-            state.currentCallId = item.call_id;
+          const callState = this.getFunctionCallState(socket.id);
+          if (!callState.currentCallId) {
+            callState.currentCallId = item.call_id;
             this.clearIdleTimer(socket);
           } else {
-            logger.log(`Skipping new function call ${item.call_id} while call ${state.currentCallId} is in progress`);
+            logger.log(`Skipping new function call ${item.call_id} while call ${callState.currentCallId} is in progress`);
+            client.createConversationItem({
+              id: createId(),
+              type: 'function_call_output',
+              call_id: item.call_id,
+              output: JSON.stringify({ error: "Function call skipped - another function call is in progress" })
+            });
           }
           break;
           
@@ -478,38 +463,29 @@ ${this.getTimeString(socket)}` :
         }
       });
     client.on('response.function_call_arguments.done', async (event) => {
-      const state = this.functionCallStates.get(socket.id);
-      if (!state || state.isShuttingDown) {
-        logger.error('No function call state found for socket or socket is shutting down', socket.id);
+      const callState = this.getFunctionCallState(socket.id);
+
+      if (!callState.currentCallId) {
+        logger.error('Function call arguments completed but no call is registered, skipping', socket.id);
         return;
       }
 
-      state.lock = state.lock.then(async () => {
-        if (state.currentCallId && state.currentCallId !== event.call_id) {
-          logger.log('Function call mismatch or already in progress, skipping', {
-            current: state.currentCallId,
-            attempted: event.call_id
-          });
-          return;
-        }
-        
-        state.currentCallId = event.call_id;
-        try {
-          this.clearIdleTimer(socket);
-          this.resetIdleCycles(socket);
-          await this.executeFunctionCall(socket, tools, event, state, client);
-        } catch (error) {
-          logger.error('Function call failed:', error);
-        }
-      }).catch(error => {
-        // If the promise chain itself errors, make sure we clear both lock and currentCallId
-        logger.error('Function call lock error:', error);
-        const state = this.functionCallStates.get(socket.id);
-        if (state && !state.isShuttingDown) {
-          state.currentCallId = null;
-          state.lock = Promise.resolve();
-        }
-      });
+      if (callState.currentCallId !== event.call_id) {
+        logger.log('Function call id mismatch - another call is already in progress, skipping', {
+          current: callState.currentCallId,
+          attempted: event.call_id
+        });
+        return;
+      }
+      
+      try {
+        this.clearIdleTimer(socket);
+        this.resetIdleCycles(socket);
+        await this.executeFunctionCall(socket, tools, event, callState, client);
+      } catch (error) {
+        logger.error('Function call failed:', error);
+        callState.currentCallId = null;
+      }
     });
     client.on('response.output_item.added', ({item}) => {
       if (item.type === 'message') {
@@ -588,7 +564,7 @@ ${this.getTimeString(socket)}` :
       readMemory(socket.data.userId, socket.data.aiName, "memorySelf", 1),
       readMemory(socket.data.userId, socket.data.aiName, "memoryUser", 1),
       readMemory(socket.data.userId, socket.data.aiName, "memoryDirectives", 1),
-      readMemory(socket.data.userId, socket.data.aiName, "memoryTopics", 0, 48),
+      readMemory(socket.data.userId, socket.data.aiName, "memoryTopics", 0, 0, 10),
       style(socket.data.userId, socket.data.aiName, socket.data.aiStyle, [], "")
     ]);
 
@@ -712,12 +688,10 @@ ${this.getTimeString(socket)}` :
     }
   }
 
-  private initFunctionCallState(socketId: string) {
+  private getFunctionCallState(socketId: string) {
     if (!this.functionCallStates.has(socketId)) {
       this.functionCallStates.set(socketId, {
-        currentCallId: null,
-        lock: Promise.resolve(),
-        isShuttingDown: false
+        currentCallId: null
       });
       logger.log(`Initialized function call state for socket ${socketId}`);
     }
@@ -744,25 +718,19 @@ ${this.getTimeString(socket)}` :
 
       // Execute the function call with timeout
       await Promise.race([
-        tools.executeCall(event.call_id, event.arguments, socket.data.userId, socket.data.aiName),
+        tools.executeCall(event.call_id, event.name, event.arguments, socket.data.userId, socket.data.aiName),
         timeoutPromise
       ]);
 
       // Reset state on success
-      if (!state.isShuttingDown) {
-        state.currentCallId = null;
-        state.lock = Promise.resolve();
-        this.startIdleTimer(client, socket);
-      }
+      state.currentCallId = null;
+      this.startIdleTimer(client, socket);
     } catch (error: any) {
       logger.error('Function call failed:', error);
       socket.emit('error', error.message);
       // Reset state on error
-      if (!state.isShuttingDown) {
-        state.currentCallId = null;
-        state.lock = Promise.resolve();
-        this.startIdleTimer(client, socket);
-      }
+      state.currentCallId = null;
+      this.startIdleTimer(client, socket);
       throw error;
     }
   }

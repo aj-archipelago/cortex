@@ -55,6 +55,7 @@ export type CortexVariables = {
   style?: string;
   priority?: number;
   recentHours?: number;
+  numResults?: number;
 }
 
 function truncateBody(body: any): string {
@@ -74,8 +75,8 @@ export async function getCortexResponse(
     variables
   }
   logger.log(`Cortex URL: ${getCortexUrl()}`);
-  logger.log(`Cortex Body: ${truncateBody(body)}`);
-  logger.log(`Cortex Headers: ${JSON.stringify(headers)}`);
+  // logger.log(`Cortex Body: ${truncateBody(body)}`);
+  // logger.log(`Cortex Headers: ${JSON.stringify(headers)}`);
   const res = await fetch(getCortexUrl(), {
     method: 'POST',
     headers,

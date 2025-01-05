@@ -92,6 +92,7 @@ interface RealtimeVoiceClientConfig {
   model?: string;
   autoReconnect?: boolean;
   debug?: boolean;
+  filterDeltas?: boolean;
 }
 
 // Create a type for the emit method
@@ -119,6 +120,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
   private readonly apiKey?: string;
   private readonly autoReconnect: boolean;
   private readonly debug: boolean;
+  private readonly filterDeltas: boolean;
   private readonly url: string = '';
   private readonly isAzure: boolean = false;
   private readonly transcription: Transcription = new Transcription();
@@ -134,6 +136,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
     model = 'gpt-4o-realtime-preview-2024-10-01',
     autoReconnect = true,
     debug = false,
+    filterDeltas = false,
   }: RealtimeVoiceClientConfig) {
     super();
     
@@ -149,6 +152,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
     this.apiKey = apiKey;
     this.autoReconnect = autoReconnect;
     this.debug = debug;
+    this.filterDeltas = filterDeltas;
 
     // Default voice based on provider
     const defaultVoice: Voice = 'alloy';
@@ -469,6 +473,17 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
   protected _log(...args: any[]) {
     if (!this.debug) {
       return;
+    }
+
+    // Filter out delta messages if filterDeltas is enabled
+    if (this.filterDeltas) {
+      const firstArg = args[0];
+      if (typeof firstArg === 'object' && firstArg?.type?.includes('.delta')) {
+        return;
+      }
+      if (typeof firstArg === 'string' && firstArg === 'Received message:' && args[1]?.type?.includes('.delta')) {
+        return;
+      }
     }
 
     const date = new Date().toISOString();
