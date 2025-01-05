@@ -471,7 +471,7 @@ ${this.getTimeString(socket)}` :
       }
 
       if (callState.currentCallId !== event.call_id) {
-        logger.log('Function call id mismatch - another call isalready in progress, skipping', {
+        logger.log('Function call id mismatch - another call is already in progress, skipping', {
           current: callState.currentCallId,
           attempted: event.call_id
         });
