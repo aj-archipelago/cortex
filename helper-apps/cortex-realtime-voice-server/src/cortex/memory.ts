@@ -24,8 +24,8 @@ query ManageMemory($contextId: String, $chatHistory: [MultiMessage], $aiName: St
 `
 
 const READ_MEMORY = `
-query ReadMemory($contextId: String, $aiName: String, $section: String, $priority: Int, $recentHours: Int) {
-  sys_read_memory(contextId: $contextId, aiName: $aiName, section: $section, priority: $priority, recentHours: $recentHours) {
+query ReadMemory($contextId: String, $aiName: String, $section: String, $priority: Int, $recentHours: Int, $numResults: Int) {
+  sys_read_memory(contextId: $contextId, aiName: $aiName, section: $section, priority: $priority, recentHours: $recentHours, numResults: $numResults) {
     result
     tool
     warnings
@@ -39,7 +39,7 @@ export async function searchMemory(contextId: string,
   chatHistory: ChatMessage[],
   section: MemorySection
 ) {
-logger.log('Searching memory', contextId, aiName, chatHistory);
+logger.log('Searching memory', contextId, aiName);
 const variables: CortexVariables = {
 chatHistory,
 contextId,
@@ -56,7 +56,7 @@ export async function manageMemory(contextId: string,
                                    aiName: string,
                                    chatHistory: ChatMessage[]
 ) {
-  logger.log('Managing memory', contextId, aiName, chatHistory);
+  logger.log('Managing memory', contextId, aiName);
   const variables: CortexVariables = {
     chatHistory,
     contextId,
@@ -72,7 +72,8 @@ export async function readMemory(contextId: string,
                                  aiName: string,
                                  section: MemorySection,
                                  priority: number = 0,
-                                 recentHours: number = 0
+                                 recentHours: number = 0,
+                                 numResults: number = 0
 ) {
 
   const variables: CortexVariables = {
@@ -80,7 +81,8 @@ export async function readMemory(contextId: string,
     contextId,
     aiName,
     priority,
-    recentHours
+    recentHours,
+    numResults
   }
 
   const res = await getCortexResponse(variables, READ_MEMORY);

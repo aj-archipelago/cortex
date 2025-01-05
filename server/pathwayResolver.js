@@ -226,7 +226,7 @@ class PathwayResolver {
             try {
                 // Load saved context and core memory if it exists
                 const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
-                    (getv && getv(contextId)) || {},
+                    (getv && await getv(this.savedContextId)) || {},
                     callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1}),
                     callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1 }),
                     callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryTopics', priority: 0, numResults: 10 }),

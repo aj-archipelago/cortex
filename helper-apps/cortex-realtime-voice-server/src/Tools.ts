@@ -13,12 +13,6 @@ import { searchMemory } from "./cortex/memory";
 import { MemorySection, type ChatMessage } from "./cortex/utils";
 import type {SocketServer} from "./SocketServer";
 
-type Call = {
-  call_id: string;
-  name: string;
-  arguments: string;
-}
-
 interface ScreenshotArgs {
   lastUserMessage: string;
   silent?: boolean;
@@ -42,7 +36,6 @@ interface ImageMessage {
 }
 
 export class Tools {
-  private callList: Array<Call> = [];
   private realtimeClient: RealtimeVoiceClient;
   private socket: Socket<ClientToServerEvents,
     ServerToClientEvents,
@@ -233,24 +226,8 @@ export class Tools {
     ];
   }
 
-  initCall(call_id: string, name: string, args: string) {
-    this.callList.push({call_id, name, arguments: args});
-  }
-
-  updateCall(call_id: string, args: string) {
-    const call = this.callList.find((c) => c.call_id === call_id);
-    if (!call) {
-      throw new Error(`Call with id ${call_id} not found`);
-    }
-    call.arguments = args;
-  }
-
-  async executeCall(call_id: string, args: string, contextId: string, aiName: string) {
-    const call = this.callList.find((c) => c.call_id === call_id);
-    logger.log('Executing call', call, 'with args', args);
-    if (!call) {
-      throw new Error(`Call with id ${call_id} not found`);
-    }
+  async executeCall(call_id: string, name: string, args: string, contextId: string, aiName: string) {
+    logger.log('Executing call', name, 'with args', args);
 
     let fillerIndex = 0;
     let timeoutId: NodeJS.Timer | undefined;
@@ -268,7 +245,7 @@ export class Tools {
     const mute = parsedArgs?.mute === true;
 
     const calculateFillerTimeout = (fillerIndex: number) => {
-      const baseTimeout = 6500;
+      const baseTimeout = 7500;
       const randomTimeout = Math.floor(Math.random() * Math.min((fillerIndex + 1) * 1000, 5000));
       return baseTimeout + randomTimeout;
     }
@@ -278,17 +255,17 @@ export class Tools {
         clearTimeout(timeoutId);
       }
       // Filler messages are disposable - skip if busy
-      await this.sendPrompt(`You are currently using the ${call.name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very brief.`, false, true);
+      await this.sendPrompt(`You are currently using the ${name} tool to help with the user's request and several seconds have passed since your last voice response. You should respond to the user via audio with a brief vocal utterance e.g. \"hmmm\" or \"let's see\" that will let them know you're still there. Make sure to sound natural and human and fit the tone of the conversation. Keep it very brief.`, false, true);
 
       fillerIndex++;
       // Set next timeout with random interval
       timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
     }
 
-    let initialPrompt = `You are currently using the ${call.name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very brief and make it fit the conversation naturally.`;
+    let initialPrompt = `You are currently using the ${name} tool to help with the user's request. If you haven't yet told the user via voice that you're doing something, do so now. Keep it very brief and make it fit the conversation naturally.`;
 
     // tool specific initializations
-    switch (call.name.toLowerCase()) {
+    switch (name.toLowerCase()) {
       case 'memorylookup':
         initialPrompt =`You are currently using the MemoryLookup tool to help yourself remember something. It will be a few seconds before you remember the information. Stall the user for a few seconds with natural banter while you use this tool. Don't talk directly about the tool - just say "let me think about that" or something else that fits the conversation.`;
         isSilent = false;
@@ -304,8 +281,7 @@ export class Tools {
 
     // Skip initial message if silent
     if (!isSilent) {
-      // Initial message is not disposable - keep trying if busy
-      await this.sendPrompt(initialPrompt, false, false);
+      await this.sendPrompt(initialPrompt, false, true);
     }
 
     // Set up idle updates if not silent and idle messages are enabled
@@ -313,7 +289,7 @@ export class Tools {
       timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
     }
 
-    let finishPrompt =`You have finished using the ${call.name} tool to help with the user's request. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. If you choose not to call another tool because you have everything you need, respond to the user via audio`;
+    let finishPrompt =`You have finished using the ${name} tool to help with the user's request. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. If you choose not to call another tool because you have everything you need, respond to the user via audio`;
 
     try {
       const cortexHistory = this.getCortexHistory(parsedArgs);
@@ -321,14 +297,14 @@ export class Tools {
       let response;
       const imageUrls = new Set<string>();
       // tool specific execution logic
-      switch (call.name.toLowerCase()) {
+      switch (name.toLowerCase()) {
         case 'search':
         case 'document':
           response = await search(
             contextId,
             aiName,
             cortexHistory,
-            call.name === 'Search' ? ['aje', 'aja', 'bing', 'wires', 'mydata'] : ['mydata'],
+            name === 'Search' ? ['aje', 'aja', 'bing', 'wires', 'mydata'] : ['mydata'],
             JSON.stringify({query: args})
           );
           finishPrompt += ' by reading the output of the tool to the user verbatim - make sure to read it in your signature voice and style'
@@ -474,7 +450,7 @@ export class Tools {
           break;
 
         default:
-          logger.log('Unknown function call', call);
+          logger.log('Unknown function call', name);
       }
       logger.log(response);
 
@@ -488,12 +464,12 @@ export class Tools {
       await this.realtimeClient.createConversationItem({
         id: createId(),
         type: 'function_call_output',
-        call_id: call.call_id,
+        call_id: call_id,
         output: response?.result || '',
       });
 
       if (isSilent) {
-        finishPrompt = `You have finished using the ${call.name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. You are operating in silent mode, so don't respond with any voice or text output until the user speaks again.`;
+        finishPrompt = `You have finished using the ${name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. You are operating in silent mode, so don't respond with any voice or text output until the user speaks again.`;
       }
 
       finishPrompt += '.';
@@ -502,13 +478,11 @@ export class Tools {
       }
 
       // Send image events after finish prompt if we collected any
-      if (call.name.toLowerCase() === 'image' && imageUrls.size > 0) {
+      if (name.toLowerCase() === 'image' && imageUrls.size > 0) {
         imageUrls.forEach(url => {
           this.socket.emit('imageCreated', url);
         });
       }
-
-      this.callList = this.callList.filter((c) => c.call_id !== call_id);
     } catch (error) {
       // Make sure to clear timer if there's an error
       if (timeoutId) {
