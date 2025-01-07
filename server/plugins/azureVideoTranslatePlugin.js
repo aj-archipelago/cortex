@@ -81,17 +81,6 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
                 throw new Error(this.jsonBuffer);
             }
 
-            if (isValidJSON(this.jsonBuffer)) {
-                const parsedData = JSON.parse(this.jsonBuffer);
-                if (parsedData.progress !== undefined) {
-                    publishRequestProgress({
-                        requestId: this.requestId,
-                        progress: parsedData.progress,
-                        info: this.jsonBuffer
-                    });
-                }
-            }
-
             onData(this.jsonBuffer);
             this.jsonBuffer = '';
             this.jsonDepth = 0;
@@ -118,11 +107,34 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
                 let finalJson = '';
                 this.handleStream(response.data,
                     (data) => {
-                        publishRequestProgress({
-                            requestId: this.requestId,
-                            info: data
-                        });
+                        let sent = false;
+                        if (isValidJSON(data)) {
+                            const parsedData = JSON.parse(data);
+                            if (parsedData.progress !== undefined) {
+                                let timeInfo = '';
+                                if (parsedData.estimated_time_remaining && parsedData.elapsed_time) {
+                                    const minutes = Math.ceil(parsedData.estimated_time_remaining / 60);
+                                    timeInfo = minutes <= 2 
+                                        ? `Should be done soon (${parsedData.elapsed_time} elapsed)`
+                                        : `Estimated ${minutes} minutes remaining`;
+                                }
+
+                                publishRequestProgress({
+                                    requestId: this.requestId,
+                                    progress: parsedData.progress,
+                                    info: timeInfo
+                                });
+                                sent = true;
+                            }
+                        }
+                        if (!sent) {
+                            publishRequestProgress({
+                                requestId: this.requestId,
+                                info: data
+                            });
+                        }
                         logger.debug('Data:', data);
+                        
                         // Extract JSON content if message contains targetLocales
                         const jsonMatch = data.match(/{[\s\S]*"targetLocales"[\s\S]*}/);
                         if (jsonMatch) {
