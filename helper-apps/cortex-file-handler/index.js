@@ -120,7 +120,7 @@ async function main(context, req) {
         return;
     }
 
-    const { uri, requestId, save, hash, checkHash, fetch, load, restore } = req.body?.params || req.query;
+    const { uri, requestId, save, hash, checkHash, clearHash, fetch, load, restore } = req.body?.params || req.query;
 
     const filepond = fetch || restore || load;
     if (req.method.toLowerCase() === `get` && filepond) {
@@ -163,6 +163,24 @@ async function main(context, req) {
         return;
     }
 
+    if(hash && clearHash){
+        try {
+            const hashValue = await getFileStoreMap(hash);
+            await removeFromFileStoreMap(hash);
+            context.res = {
+                status: 200,
+                body: hashValue ? `Hash ${hash} removed` : `Hash ${hash} not found`
+            };
+        } catch (error) {
+            context.res = {
+                status: 500,
+                body: `Error occurred during hash cleanup: ${error}`
+            };
+            console.log('Error occurred during hash cleanup:', error);
+        }
+        return
+    }
+
     if(hash && checkHash){ //check if hash exists
         context.log(`Checking hash: ${hash}`);
         const result = await getFileStoreMap(hash);
@@ -188,7 +206,7 @@ async function main(context, req) {
 
     if (req.method.toLowerCase() === `post`) {
         const { useGoogle } = req.body?.params || req.query;
-        const { url } = await uploadBlob(context, req, !useAzure, useGoogle);
+        const { url } = await uploadBlob(context, req, !useAzure, useGoogle, null, hash);
         context.log(`File url: ${url}`);
         if(hash && context?.res?.body){ //save hash after upload
             await setFileStoreMap(hash, context.res.body);
