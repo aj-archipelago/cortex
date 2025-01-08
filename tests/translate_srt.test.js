@@ -22,33 +22,63 @@ test.after.always('cleanup', async () => {
     }
 });
 
-async function testTranslateSrt(t, text, language='English') {
+async function testSubtitleTranslation(t, text, language = 'English', format = 'srt') {
     const response = await testServer.executeOperation({
-        query: 'query translate_subtitle($text: String!, $to:String) { translate_subtitle(text: $text, to:$to) { result } }',
+        query: 'query translate_subtitle($text: String!, $to: String, $format: String) { translate_subtitle(text: $text, to: $to, format: $format) { result } }',
         variables: {
             to: language,
-            text
-         },
+            text,
+            format
+        },
     });
 
     t.falsy(response.body?.singleResult?.errors);
 
     const result = response.body?.singleResult?.data?.translate_subtitle?.result;
-    t.true(result?.length > text.length*0.5);
+    t.true(result?.length > text.length * 0.5);
 
-    //check all timestamps are still there and not translated
-    const originalTimestamps = text.match(/\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/g);
-    const translatedTimestamps = result.match(/\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/g);
+    // Check format-specific header
+    if (format === 'vtt') {
+        t.true(result.startsWith('WEBVTT\n\n'), 'VTT output should start with WEBVTT header');
+    }
+
+    // Check timestamps based on format
+    const timestampPattern = format === 'srt' 
+        ? /\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/g
+        : /\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}/g;
+
+    const originalTimestamps = text.match(timestampPattern);
+    const translatedTimestamps = result.match(timestampPattern);
     
     t.deepEqual(originalTimestamps, translatedTimestamps, 'All timestamps should be present and unchanged');
 
+    // Check line count (accounting for WEBVTT header in VTT)
     const originalLineCount = text.split('\n').length;
     const translatedLineCount = result.split('\n').length;
     
     t.is(originalLineCount, translatedLineCount, 'Total number of lines should be the same');
+
+    // For VTT, verify any custom identifiers are preserved
+    if (format === 'vtt') {
+        const originalBlocks = text.split(/\n\s*\n/).filter(block => block.trim());
+        const translatedBlocks = result.split(/\n\s*\n/).filter(block => block.trim());
+        
+        // Skip WEBVTT header block
+        const startIndex = originalBlocks[0].trim() === 'WEBVTT' ? 1 : 0;
+        
+        for (let i = startIndex; i < originalBlocks.length; i++) {
+            const origLines = originalBlocks[i].split('\n');
+            const transLines = translatedBlocks[i].split('\n');
+            
+            // If first line isn't a timestamp, it's an identifier and should be preserved
+            if (!/^\d{2}:\d{2}/.test(origLines[0])) {
+                t.is(transLines[0], origLines[0], 'VTT identifiers should be preserved');
+            }
+        }
+    }
 }
 
-test('test translate_srt endpoint with simple srt', async t => {
+test('test subtitle translation with SRT format', async t => {
     const text = `1
 00:00:03,069 --> 00:00:04,771
 Who's that?
@@ -66,17 +96,39 @@ Who is Aseel a mom to?
 Aseel is mommy
 `;
 
-    await testTranslateSrt(t, text, 'Spanish');
+    await testSubtitleTranslation(t, text, 'Spanish', 'srt');
 });
 
-test('test translate_srt endpoint with long srt file', async t => {
+test('test subtitle translation with VTT format', async t => {
+    const text = `WEBVTT
+
+1
+00:00:00.000 --> 00:00:07.000
+It's here to change the game.
+
+intro
+00:00:07.000 --> 00:00:11.360
+With the power of AI transforming the future.
+
+question
+00:00:11.360 --> 00:00:14.160
+The possibilities endless.
+
+00:00:14.160 --> 00:00:17.240
+It's not just about the generative AI itself.
+`;
+
+    await testSubtitleTranslation(t, text, 'Spanish', 'vtt');
+});
+
+test('test subtitle translation with long SRT file', async t => {
     t.timeout(400000);
     const text = fs.readFileSync(path.join(__dirname, 'sublong.srt'), 'utf8');
-    await testTranslateSrt(t, text, 'English');
+    await testSubtitleTranslation(t, text, 'English', 'srt');
 });
 
-test('test translate_srt endpoint with horizontal srt file', async t => {
+test('test subtitle translation with horizontal SRT file', async t => {
     t.timeout(400000);
     const text = fs.readFileSync(path.join(__dirname, 'subhorizontal.srt'), 'utf8');
-    await testTranslateSrt(t, text, 'Turkish');
+    await testSubtitleTranslation(t, text, 'Turkish', 'srt');
 });
