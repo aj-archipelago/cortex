@@ -57,6 +57,7 @@ export default {
         title: ``,
         messages: [],
         voiceResponse: false,
+        codeRequestId: ``,
     },
     timeout: 600,
     tokenRatio: TOKEN_RATIO,
@@ -78,6 +79,11 @@ export default {
             args.chatHistory = args.chatHistory.slice(-20);
         }
 
+        const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0 });
+        if (memoryContext) {
+            args.chatHistory.splice(-1, 0, { role: 'assistant', content: memoryContext });
+        }
+
         const pathwayResolver = resolver;
         const { anthropicModel, openAIModel } = pathwayResolver.pathway;
 
@@ -91,8 +97,8 @@ export default {
         let ackResponse = null;
         if (args.voiceResponse) {
             ackResponse = await callPathway('sys_generator_ack', { ...args, stream: false }, pathwayResolver);
-            if (ackResponse) {
-                await say(pathwayResolver.requestId, ackResponse, 10);
+            if (ackResponse && ackResponse !== "none") {
+                await say(pathwayResolver.requestId, ackResponse, 100);
                 args.chatHistory.push({ role: 'assistant', content: ackResponse });
             }
         }
@@ -200,6 +206,11 @@ export default {
                         break;
                     case "clarify":
                         toolCallbackName = null;
+                        toolCallbackId = null;
+                        toolCallbackMessage = toolMessage;
+                        break;
+                    case "memory":
+                        toolCallbackName = 'sys_generator_memory';
                         toolCallbackId = null;
                         toolCallbackMessage = toolMessage;
                         break;

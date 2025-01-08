@@ -7,13 +7,13 @@ import { config } from "../../config.js";
 
 function isValidJSON(str) {
     try {
-      JSON.parse(str);
-      return true;
+        JSON.parse(str);
+        return true;
     } catch (e) {
-      return false;
+        return false;
     }
 }
-  
+
 class AzureVideoTranslatePlugin extends ModelPlugin {
     constructor(pathway, model) {
         super(pathway, model);
@@ -21,8 +21,6 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         this.eventSource = null;
         this.jsonBuffer = '';
         this.jsonDepth = 0;
-        this.currentStep = 0;
-        this.totalNumOfSteps = 30;
     }
 
     getRequestParameters(_, parameters, __) {
@@ -77,11 +75,12 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         this.jsonDepth += (data.match(/{/g) || []).length - (data.match(/}/g) || []).length;
 
         if (this.jsonDepth === 0 && this.jsonBuffer.trim()) {
-            console.log(this.jsonBuffer);
+            logger.debug(this.jsonBuffer);
             if (this.jsonBuffer.includes('Failed to run with exception')) {
                 this.cleanup();
                 throw new Error(this.jsonBuffer);
             }
+
             onData(this.jsonBuffer);
             this.jsonBuffer = '';
             this.jsonDepth = 0;
@@ -106,21 +105,46 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
 
             return new Promise((resolve, reject) => {
                 let finalJson = '';
-                this.handleStream(response.data, 
-                    (data) => { 
-                        this.currentStep++;
-                        publishRequestProgress({
-                            requestId: this.requestId,
-                            progress: this.currentStep / this.totalNumOfSteps,
-                            // data: this.jsonBuffer,
-                            info: data
-                        });
+                this.handleStream(response.data,
+                    (data) => {
+                        let sent = false;
                         if (isValidJSON(data)) {
-                            finalJson = data;
+                            const parsedData = JSON.parse(data);
+                            if (parsedData.progress !== undefined) {
+                                let timeInfo = '';
+                                if (parsedData.estimated_time_remaining && parsedData.elapsed_time) {
+                                    const minutes = Math.ceil(parsedData.estimated_time_remaining / 60);
+                                    timeInfo = minutes <= 2 
+                                        ? `Should be done soon (${parsedData.elapsed_time} elapsed)`
+                                        : `Estimated ${minutes} minutes remaining`;
+                                }
+
+                                publishRequestProgress({
+                                    requestId: this.requestId,
+                                    progress: parsedData.progress,
+                                    info: timeInfo
+                                });
+                                sent = true;
+                            }
                         }
+                        if (!sent) {
+                            publishRequestProgress({
+                                requestId: this.requestId,
+                                info: data
+                            });
+                        }
+                        logger.debug('Data:', data);
+                        
+                        // Extract JSON content if message contains targetLocales
+                        const jsonMatch = data.match(/{[\s\S]*"targetLocales"[\s\S]*}/);
+                        if (jsonMatch) {
+                            const extractedJson = jsonMatch[0];
+                            if (isValidJSON(extractedJson)) {
+                                finalJson = extractedJson;
+                            }
+                        } 
                     },
                     () => {
-                        // console.log('Full data:', fullData);
                         resolve(finalJson)
                     },
                     (error) => reject(error)

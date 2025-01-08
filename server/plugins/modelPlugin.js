@@ -36,11 +36,19 @@ class ModelPlugin {
         this.requestCount = 0;
     }
 
+    safeGetEncodedLength(data) {
+        if (data && data.length > 100000) {
+            return data.length * 3 / 16;
+        } else {
+            return encode(data).length;
+        }
+    }
+
     truncateMessagesToTargetLength(messages, targetTokenLength) {
         // Calculate the token length of each message
         const tokenLengths = messages.map((message) => ({
             message,
-            tokenLength: encode(this.messagesToChatML([message], false)).length,
+            tokenLength: this.safeGetEncodedLength(this.messagesToChatML([message], false)),
         }));
     
         // Calculate the total token length of all messages
@@ -89,7 +97,7 @@ class ModelPlugin {
 
                     tokenLengths[index] = {
                         message: truncatedMessage,
-                        tokenLength: encode(this.messagesToChatML([ truncatedMessage ], false)).length
+                        tokenLength: this.safeGetEncodedLength(this.messagesToChatML([ truncatedMessage ], false))
                     }
 
                     // calculate the length again to keep us honest
@@ -141,9 +149,9 @@ class ModelPlugin {
         const modelPromptMessagesML = this.messagesToChatML(modelPromptMessages);
 
         if (modelPromptMessagesML) {
-            return { modelPromptMessages, tokenLength: encode(modelPromptMessagesML).length, modelPrompt };
+            return { modelPromptMessages, tokenLength: this.safeGetEncodedLength(modelPromptMessagesML), modelPrompt };
         } else {
-            return { modelPromptText, tokenLength: encode(modelPromptText).length, modelPrompt };
+            return { modelPromptText, tokenLength: this.safeGetEncodedLength(modelPromptText), modelPrompt };
         }
     }
 
@@ -260,19 +268,32 @@ class ModelPlugin {
         return {length, units};
     }
 
+    shortenContent(content, maxWords = 40) {
+        if (!content || typeof content !== 'string') {
+            return content;
+        }
+        const words = content.split(" ");
+        if (words.length <= maxWords || logger.level === 'debug') {
+            return content;
+        }
+        return words.slice(0, maxWords / 2).join(" ") +
+            " ... " +
+            words.slice(-maxWords / 2).join(" ");
+    }
+
     logRequestData(data, responseData, prompt) {
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
     
         if (modelInput) {
             const { length, units } = this.getLength(modelInput);
             logger.info(`[request sent containing ${length} ${units}]`);
-            logger.verbose(`${modelInput}`);
+            logger.verbose(`${this.shortenContent(modelInput)}`);
         }
     
         const responseText = JSON.stringify(responseData);
         const { length, units } = this.getLength(responseText);
         logger.info(`[response received containing ${length} ${units}]`);
-        logger.verbose(`${responseText}`);
+        logger.verbose(`${this.shortenContent(responseText)}`);
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }

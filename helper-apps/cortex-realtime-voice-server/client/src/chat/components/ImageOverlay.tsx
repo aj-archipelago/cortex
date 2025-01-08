@@ -1,95 +1,166 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+const FADE_DURATION = 300; // milliseconds
+const DISPLAY_DURATION = 10000; // milliseconds (10 seconds)
 
 type ImageOverlayProps = {
   imageUrls: string[];
   onComplete?: () => void;
+  isAudioPlaying?: boolean;
 };
 
-export const ImageOverlay = ({ imageUrls, onComplete }: ImageOverlayProps) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
+export function ImageOverlay({ imageUrls, onComplete, isAudioPlaying = false }: ImageOverlayProps) {
+  const [currentIndex, setCurrentIndex] = useState(-1);
+  const [shownImages, setShownImages] = useState<Set<string>>(new Set());
   const [isVisible, setIsVisible] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+  const previousAudioPlaying = useRef(isAudioPlaying);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const displayStartTimeRef = useRef<number | null>(null);
   
-  // Track remaining time to handle pausing
-  const [remainingTime, setRemainingTime] = useState(20000);
-  
-  const startTimers = useCallback(() => {
-    if (isPaused) return;
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
 
-    // Schedule fade out
-    const fadeOutTimer = setTimeout(() => {
-      setIsVisible(false);
-    }, remainingTime); 
+  // Start display timer when image becomes visible
+  useEffect(() => {
+    if (isVisible && currentIndex >= 0) {
+      displayStartTimeRef.current = Date.now();
+    }
+  }, [isVisible, currentIndex]);
 
-    // Schedule next image or completion
-    const completionTimer = setTimeout(() => {
-      if (currentIndex < imageUrls.length - 1) {
-        setCurrentIndex(currentIndex + 1);
-        setRemainingTime(20000); // Reset timer for next image
+  // Handle image transitions when audio stops and minimum time has passed
+  useEffect(() => {
+    if (previousAudioPlaying.current && !isAudioPlaying && currentIndex >= 0) {
+      const timeElapsed = displayStartTimeRef.current ? Date.now() - displayStartTimeRef.current : 0;
+      const remainingTime = Math.max(0, DISPLAY_DURATION - timeElapsed);
+
+      clearTimer();
+      
+      if (remainingTime > 0) {
+        // If minimum display time hasn't elapsed, wait for the remaining time
+        timerRef.current = setTimeout(() => {
+          const currentUrl = imageUrls[currentIndex];
+          setIsVisible(false);
+          setTimeout(() => {
+            setShownImages(prev => new Set(Array.from(prev).concat([currentUrl])));
+            setCurrentIndex(-1);
+          }, FADE_DURATION);
+        }, remainingTime);
       } else {
+        // If minimum time has elapsed, start fade immediately
+        const currentUrl = imageUrls[currentIndex];
+        setIsVisible(false);
+        setTimeout(() => {
+          setShownImages(prev => new Set(Array.from(prev).concat([currentUrl])));
+          setCurrentIndex(-1);
+        }, FADE_DURATION);
+      }
+    }
+    previousAudioPlaying.current = isAudioPlaying;
+  }, [isAudioPlaying, currentIndex, imageUrls, clearTimer]);
+
+  // Start timer when new image is shown
+  useEffect(() => {
+    if (currentIndex >= 0 && !isAudioPlaying) {
+      clearTimer();
+      timerRef.current = setTimeout(() => {
+        const currentUrl = imageUrls[currentIndex];
+        setIsVisible(false);
+        setTimeout(() => {
+          setShownImages(prev => new Set(Array.from(prev).concat([currentUrl])));
+          setCurrentIndex(-1);
+        }, FADE_DURATION);
+      }, DISPLAY_DURATION);
+
+      return () => clearTimer();
+    }
+  }, [currentIndex, imageUrls, isAudioPlaying, clearTimer]);
+
+  // Handle image transitions
+  useEffect(() => {
+    if (currentIndex === -1) {
+      const nextIndex = imageUrls.findIndex(url => !shownImages.has(url));
+      if (nextIndex !== -1) {
+        setCurrentIndex(nextIndex);
+        setIsVisible(true);
+      } else if (shownImages.size > 0) {
         onComplete?.();
       }
-    }, remainingTime + 1000); // Add 1s for fade out
-
-    return { fadeOutTimer, completionTimer };
-  }, [currentIndex, imageUrls.length, onComplete, isPaused, remainingTime]);
-
-  useEffect(() => {
-    if (imageUrls.length === 0) return;
-
-    // Reset state when new images arrive
-    setCurrentIndex(0);
-    setRemainingTime(20000);
-    setIsVisible(true);
-    
-    const timers = startTimers();
-    
-    let interval: NodeJS.Timeout | null = null;
-    if (!isPaused) {
-      interval = setInterval(() => {
-        setRemainingTime(prev => Math.max(0, prev - 1000));
-      }, 1000);
     }
+  }, [imageUrls, shownImages, currentIndex, onComplete]);
 
-    return () => {
-      if (timers) {
-        clearTimeout(timers.fadeOutTimer);
-        clearTimeout(timers.completionTimer);
-      }
-      if (interval) {
-        clearInterval(interval);
-      }
-    };
-  }, [imageUrls, isPaused, startTimers]);
-
-  const handleMouseEnter = () => {
-    setIsPaused(true);
+  const handleImageSelect = (index: number) => {
+    clearTimer();
+    displayStartTimeRef.current = Date.now();
+    setCurrentIndex(index);
+    // Start with image invisible for manual selection too
+    setIsVisible(false);
+    setTimeout(() => setIsVisible(true), 50);
   };
 
-  const handleMouseLeave = () => {
-    setIsPaused(false);
-  };
-  
-  if (!imageUrls.length) return null;
-  
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => clearTimer();
+  }, [clearTimer]);
+
+  if (!imageUrls.length) {
+    return null;
+  }
+
   return (
     <div 
       className="absolute inset-0 flex items-center justify-center"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      onMouseEnter={() => {
+        setShowControls(true);
+      }}
+      onMouseLeave={() => {
+        setShowControls(false);
+      }}
     >
+      {currentIndex !== -1 && (
+        <img
+          src={imageUrls[currentIndex]}
+          alt="Generated content"
+          style={{ 
+            opacity: isVisible ? 1 : 0,
+            transition: 'opacity 500ms ease-in-out'
+          }}
+          className="max-w-full max-h-full object-contain"
+        />
+      )}
+      
+      {/* Image selection controls */}
       <div 
-        className={`absolute inset-0 bg-gray-900 transition-opacity duration-1000 ${
-          isVisible ? 'opacity-50' : 'opacity-0'
+        className={`absolute bottom-4 left-1/2 transform -translate-x-1/2 flex gap-2 p-2 bg-black/50 rounded-full transition-opacity duration-200 ${
+          showControls ? 'opacity-100' : 'opacity-0'
         }`}
-      />
-      <img
-        src={imageUrls[currentIndex]}
-        alt="AI Generated"
-        className={`relative z-10 w-full h-full object-contain transition-opacity duration-1000 ${
-          isVisible ? 'opacity-100' : 'opacity-0'
-        }`}
-      />
+      >
+        <button
+          onClick={() => {
+            clearTimer();
+            setCurrentIndex(-1);
+            setIsVisible(false);
+          }}
+          className={`w-3 h-3 rounded-full transition-all ${
+            currentIndex === -1 ? 'bg-white scale-110' : 'bg-white/50 hover:bg-white/75'
+          }`}
+          title="Hide all images"
+        />
+        {imageUrls.map((_, index) => (
+          <button
+            key={index}
+            onClick={() => handleImageSelect(index)}
+            className={`w-3 h-3 rounded-full transition-all ${
+              currentIndex === index ? 'bg-white scale-110' : 'bg-white/50 hover:bg-white/75'
+            }`}
+            title={`Show image ${index + 1}`}
+          />
+        ))}
+      </div>
     </div>
   );
-}; 
+} 

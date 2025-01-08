@@ -1,8 +1,8 @@
-import {type ChatMessage, type CortextVariables, type DataSource, getCortexResponse} from "./utils";
+import {type ChatMessage, type CortexVariables, type DataSource, getCortexResponse} from "./utils";
 
 const SEARCH_QUERY = `
 query Search($text: String, $contextId: String, $chatHistory: [MultiMessage], $aiName: String, $dataSources: [String]) {
-  sys_generator_results(text: $text, contextId: $contextId, chatHistory: $chatHistory, aiName: $aiName, dataSources: $dataSources) {
+  sys_entity_continue(text: $text, contextId: $contextId, chatHistory: $chatHistory, aiName: $aiName, dataSources: $dataSources, generatorPathway: "sys_generator_results", voiceResponse: true) {
     result
     tool
     errors
@@ -16,7 +16,7 @@ export async function search(contextId: string,
                              chatHistory: ChatMessage[],
                              dataSources: DataSource[],
                              text: string) {
-  const variables: CortextVariables = {
+  const variables: CortexVariables = {
     chatHistory,
     contextId,
     aiName,
@@ -26,5 +26,5 @@ export async function search(contextId: string,
 
   const res = await getCortexResponse(variables, SEARCH_QUERY);
 
-  return res.sys_generator_results;
+  return res.sys_entity_continue;
 }

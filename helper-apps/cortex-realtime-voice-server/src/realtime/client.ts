@@ -3,6 +3,7 @@ import type { WebSocket as WS } from 'ws';
 import type { MessageEvent as WS_MessageEvent } from 'ws';
 import { createId } from '@paralleldrive/cuid2';
 import { hasNativeWebSocket, trimDebugEvent } from './utils';
+import { logger } from '../utils/logger';
 import type {
   ConversationCreatedEvent,
   ConversationItemCreatedEvent,
@@ -91,12 +92,35 @@ interface RealtimeVoiceClientConfig {
   model?: string;
   autoReconnect?: boolean;
   debug?: boolean;
+  filterDeltas?: boolean;
 }
 
-export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
+// Create a type for the emit method
+type TypedEmitter = {
+  emit<K extends keyof RealtimeVoiceEvents>(
+    event: K,
+    ...args: RealtimeVoiceEvents[K]
+  ): boolean;
+  on<K extends keyof RealtimeVoiceEvents>(
+    event: K,
+    listener: (...args: RealtimeVoiceEvents[K]) => void
+  ): TypedEmitter;
+  once<K extends keyof RealtimeVoiceEvents>(
+    event: K,
+    listener: (...args: RealtimeVoiceEvents[K]) => void
+  ): TypedEmitter;
+  off<K extends keyof RealtimeVoiceEvents>(
+    event: K,
+    listener: (...args: RealtimeVoiceEvents[K]) => void
+  ): TypedEmitter;
+};
+
+// Change the class declaration to use intersection types
+export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
   private readonly apiKey?: string;
   private readonly autoReconnect: boolean;
   private readonly debug: boolean;
+  private readonly filterDeltas: boolean;
   private readonly url: string = '';
   private readonly isAzure: boolean = false;
   private readonly transcription: Transcription = new Transcription();
@@ -112,21 +136,29 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
     model = 'gpt-4o-realtime-preview-2024-12-17',
     autoReconnect = true,
     debug = false,
+    filterDeltas = false,
   }: RealtimeVoiceClientConfig) {
     super();
 
     this.isAzure = realtimeUrl.includes('azure.com');
+    if (this.isAzure) {
+      model = 'gpt-4o-realtime-preview-2024-10-01';
+    } else {
+      model = 'gpt-4o-realtime-preview-2024-12-17';
+    }
+
     this.url = `${realtimeUrl.replace('https://', 'wss://')}${realtimeUrl.includes('?') ? '&' : '?'}model=${model}`;
 
     this.apiKey = apiKey;
     this.autoReconnect = autoReconnect;
     this.debug = debug;
+    this.filterDeltas = filterDeltas;
 
     // Default voice based on provider
     const defaultVoice: Voice = 'alloy';
 
     this.sessionConfig = {
-      modalities: ['text', 'audio'],
+      modalities: ['audio', 'text'],
       instructions: DEFAULT_INSTRUCTIONS,
       voice: sessionConfig?.voice || defaultVoice,
       input_audio_format: 'pcm16',
@@ -138,7 +170,7 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
         type: 'server_vad',
         threshold: 0.5,
         prefix_padding_ms: 300,
-        silence_duration_ms: 500,
+        silence_duration_ms: 1500,
       },
       tools: [],
       tool_choice: 'auto',
@@ -254,7 +286,7 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
   }
 
   async disconnect(reconnect: boolean = false): Promise<boolean> {
-    console.log('Disconnect called:', this.isConnected, reconnect);
+    logger.log('Disconnect called:', this.isConnected, reconnect);
     this.isReconnecting = reconnect;
     if (this.isConnected) {
       this.isConnected = false;
@@ -289,7 +321,8 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
         ...sessionConfig,
       },
     });
-    // console.log('Sending update session message:', message);
+    // No need to log session update messages as they can be noisy
+    logger.log('Sending session update message:', message);
     this.ws?.send(message);
   }
 
@@ -442,6 +475,17 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
       return;
     }
 
+    // Filter out delta messages if filterDeltas is enabled
+    if (this.filterDeltas) {
+      const firstArg = args[0];
+      if (typeof firstArg === 'object' && firstArg?.type?.includes('.delta')) {
+        return;
+      }
+      if (typeof firstArg === 'string' && firstArg === 'Received message:' && args[1]?.type?.includes('.delta')) {
+        return;
+      }
+    }
+
     const date = new Date().toISOString();
     const logs = [`[Websocket/${date}]`].concat(args).map((arg) => {
       if (typeof arg === 'object' && arg !== null) {
@@ -450,6 +494,6 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> {
         return arg;
       }
     });
-    console.log(...logs);
+    logger.log(...logs);
   }
 }

@@ -1,4 +1,9 @@
-import {type ChatMessage, type CortextVariables, getCortexResponse} from "./utils";
+import {type ChatMessage, type CortexVariables, getCortexResponse} from "./utils";
+
+export type MultiMessage = {
+  role: string;
+  content: string | string[];
+}
 
 const VISION_QUERY = `
 query Vision($text: String, $contextId: String, $chatHistory: [MultiMessage], $aiName: String) {
@@ -13,17 +18,17 @@ query Vision($text: String, $contextId: String, $chatHistory: [MultiMessage], $a
 
 export async function vision(contextId: string,
                              aiName: string,
-                             chatHistory: ChatMessage[],
+                             chatHistory: (ChatMessage | MultiMessage)[],
                              text: string) {
 
-  const variables: CortextVariables = {
+  const variables: Omit<CortexVariables, 'chatHistory'> & { chatHistory: (ChatMessage | MultiMessage)[] } = {
     chatHistory,
     contextId,
     aiName,
     text
   }
 
-  const res = await getCortexResponse(variables, VISION_QUERY);
+  const res = await getCortexResponse(variables as CortexVariables, VISION_QUERY);
 
   return res.sys_generator_video_vision;
 }

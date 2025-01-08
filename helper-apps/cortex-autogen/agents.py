@@ -19,6 +19,8 @@ import threading
 import shutil
 
 human_input_queues = {}
+human_input_text_queues = {}
+request_stored_message_queues = {}
 def background_human_input_check(request_id):
     while True:
         human_input = check_for_human_input(request_id)
@@ -26,7 +28,19 @@ def background_human_input_check(request_id):
             human_input_queues[request_id].put(human_input)
             if human_input in ["TERMINATE", "PAUSE"]:
                 break
+            else:
+                if not human_input_text_queues.get(request_id):
+                    human_input_text_queues[request_id] = queue.Queue()
+                human_input_text_queues[request_id].put(human_input)
         time.sleep(1)
+
+
+def get_message_with_user_input(message, request_id):
+    human_input_text = ""
+    if human_input_text_queues.get(request_id):
+        while not human_input_text_queues[request_id].empty():
+            human_input_text += " " + human_input_text_queues[request_id].get()
+    return message + human_input_text
 
 def get_request_temp_dir(request_id):
     if not request_id:
@@ -100,6 +114,7 @@ def chat_with_agents(**kwargs):
     original_request_message = kwargs.pop("original_request_message", None)
     original_request_message_data = kwargs.pop("original_request_message_data", None)
 
+
     llm_config = kwargs.pop("llm_config", None)
     request_id = kwargs.pop("request_id", None)
     chat_publish_progress = kwargs.pop("chat_publish_progress", None)
@@ -137,11 +152,12 @@ def chat_with_agents(**kwargs):
         assistant.send = create_send_function(assistant)
         user_proxy.send = create_send_function(user_proxy)
 
+        message_with_possible_human_input = get_message_with_user_input(message, request_id)
+
         chat_result = user_proxy.initiate_chat(
             assistant, 
-            message=message, 
+            message=message_with_possible_human_input, 
         )
-
 
 
     code_msg = find_code_message(all_messages)
@@ -155,11 +171,19 @@ def chat_with_agents(**kwargs):
             index_message({
                 "requestId": request_id,
                 "content":corrector_result, #code_msg,
-                "task": original_request_message,
+                "task": get_message_with_user_input(original_request_message,request_id),
                 "contextId": original_request_message_data.get("contextId"),
             })
         except Exception as e:
             logging.error(f"Error extracting code corrector result: {e}")
+
+    try:
+        request_stored_message_queues[request_id].put(all_messages[-2]["message"] or all_messages[-2]["content"])
+        request_stored_message_queues[request_id].put(all_messages[-1]["message"] or all_messages[-1]["content"])
+    except Exception as e:
+        logging.error(f"Error storing messages in queue: {e}")
+    
+
 
     if return_type == "chat_history":
         return chat_result.chat_history
@@ -173,7 +197,6 @@ def chat_with_agents(**kwargs):
         return "\n".join([msg['content'] for msg in chat_result.chat_history])
 
     return chat_result 
-
 
 
 def logged_send(sender, original_send, message, recipient, request_reply=None, silent=True, request_id=None, chat_publish_progress=None, all_messages=None):
@@ -214,15 +237,19 @@ def logged_send(sender, original_send, message, recipient, request_reply=None, s
                         return logged_send(sender, original_send, new_input, recipient, request_reply, silent)
                 logging.info("Pause timeout, ending conversation")
                 raise Exception("Conversation ended due to pause timeout")
+
+            #if not terminate or pause, then it's text input from human
             logging.info(f"Human input to {recipient.name}: {human_input}")
-            return original_send(human_input, recipient, request_reply, silent)
+            #need to update original message with human input
+            new_input = message + human_input
+            return original_send(new_input, recipient, request_reply, silent)
 
     logging.info(f"Message from {sender.name} to {recipient.name}: {message}")
 
     return original_send(message, recipient, request_reply, silent)
 
 
-def process_message(original_request_message_data, original_request_message_data_obj):    
+def process_message(original_request_message_data, original_request_message_data_obj, first_run=True):    
     try:
         all_messages = []
         started_at = datetime.now()
@@ -230,9 +257,15 @@ def process_message(original_request_message_data, original_request_message_data
         original_request_message = original_request_message_data['message']
 
         human_input_queues[request_id] = queue.Queue()
-        thread = threading.Thread(target=background_human_input_check, args=(request_id,))
-        thread.daemon = True
-        thread.start()
+        human_input_text_queues[request_id] = queue.Queue()
+        if not request_stored_message_queues.get(request_id):
+            request_stored_message_queues[request_id] = queue.Queue()
+        request_stored_message_queues[request_id].put(original_request_message)
+
+        if first_run:
+            thread = threading.Thread(target=background_human_input_check, args=(request_id,))
+            thread.daemon = True
+            thread.start()
 
         final_msg = process_message_safe(original_request_message_data, original_request_message_data_obj, original_request_message,  all_messages, request_id, started_at)
 
@@ -251,6 +284,44 @@ def process_message(original_request_message_data, original_request_message_data
 
         publish_request_progress(finalData)
         store_in_mongo(finalData)
+
+        #wait for any human input before terminating
+        #if you receive human input start the conversation again
+        for i in range(31*6): # 30+1 minutes
+            if human_input_queues[request_id].empty():
+                time.sleep(1)
+            else:
+                human_input = human_input_queues[request_id].get()
+                if human_input:
+                    logging.info(f"Human input to assistant: {human_input}")
+                    #update request with human input
+                    new_message_data = original_request_message_data.copy()
+
+                    old_task = original_request_message_data.get("message")
+
+                    #get request_stored_message_queues
+                    old_messages = []
+                    if request_stored_message_queues.get(request_id):
+                        while not request_stored_message_queues[request_id].empty():
+                            old_messages.append(request_stored_message_queues[request_id].get())
+
+
+                    #convert to text, limit to max 2000 characters, keep most recent
+                    old_messages_text = "\n".join(old_messages)
+                    old_messages_text = old_messages_text[-2000:]
+
+
+                    new_message_data['message'] = f"NEW TASK: {human_input}\n\nPREV TASK: {old_task} STUFF DONE IN PREV TASK: {old_messages_text}\n\n{final_msg}\n\n"
+                    new_message_data['keywords'] = ''
+                    # new_message_data_obj = original_request_message_data_obj.copy()
+                    # new_message_data_obj['message'] = new_message_data['message']
+
+
+
+                    process_message(new_message_data, original_request_message_data_obj, first_run=False)
+                    return
+
+        logging.info(f"Task completed, task:\n{get_message_with_user_input(original_request_message,request_id)},\nresult: {final_msg}")
 
 
     except Exception as e:
@@ -291,7 +362,6 @@ def process_message(original_request_message_data, original_request_message_data
         except Exception as e:
             logging.error(f"Error cleaning up: {str(e)}")
             
-
 
 def process_message_safe(original_request_message_data, original_request_message_data_obj, original_request_message,  all_messages, request_id, started_at):
     config_list = config_list_from_json(env_or_file="OAI_CONFIG_LIST")
@@ -342,10 +412,10 @@ def process_message_safe(original_request_message_data, original_request_message
 
 
     preparer = AssistantAgent("preparer", llm_config=llm_config, system_message=prompts.get("PLANNER_SYSTEM_MESSAGE"))
-    prepared_plan = preparer.generate_reply(messages=[{"content": original_request_message, "role":"user"}])
+    prepared_plan = preparer.generate_reply(messages=[{"content": get_message_with_user_input(original_request_message,request_id), "role":"user"}])
 
     helper_decider = AssistantAgent("helper_decider", llm_config=llm_config, system_message=prompts.get("HELPER_DECIDER_SYSTEM_MESSAGE"))
-    helper_decider_result = helper_decider.generate_reply(messages=[{"content": original_request_message, "role":"user"}])
+    helper_decider_result = helper_decider.generate_reply(messages=[{"content": get_message_with_user_input(original_request_message,request_id), "role":"user"}])
 
     try:
         helper_decider_result = json.loads(helper_decider_result)
@@ -361,17 +431,17 @@ def process_message_safe(original_request_message_data, original_request_message
         context += f"\n#SECTION_OF_OLD_TASK_CODE_INFO_START:\nHere's code/info from old-tasks that might help:\n{search_index(code_keywords)}\n#SECTION_OF_OLD_TASK_CODE_INFO_END\n"
 
     if helper_decider_result.get("bing_search"):
-        bing_search_message = f"Search Bing for more information on the task: {original_request_message}, prepared draft plan to solve task: {prepared_plan}"
+        bing_search_message = f"Search Bing for more information on the task: {get_message_with_user_input(original_request_message,request_id)}, prepared draft plan to solve task: {prepared_plan}"
         result = chat(prompts.get("BING_SEARCH_PROMPT"), bing_search_message)
         context += f"\n\nBing search results: {result}"
 
     if helper_decider_result.get("cognitive_search"):
-        cognitive_search_message = f"Search cognitive index for more information on the task: {original_request_message}."
+        cognitive_search_message = f"Search cognitive index for more information on the task: {get_message_with_user_input(original_request_message,request_id)}."
         result = chat(prompts.get("COGNITIVE_SEARCH_PROMPT"), cognitive_search_message)
         context += f"\n\nCognitive search results: {result}"
 
 
-    context = process_helper_results(helper_decider_result, original_request_message, context, chat) 
+    context = process_helper_results(helper_decider_result, get_message_with_user_input(original_request_message,request_id), context, chat) 
 
     context_message = ""
     if context:
@@ -379,7 +449,7 @@ def process_message_safe(original_request_message_data, original_request_message
 
 
     check_message = f"""
-Task: \n{original_request_message}\n\n
+Task: \n{get_message_with_user_input(original_request_message,request_id)}\n\n
 Context to check if task can be considered completed: {context_message}\n\n
     """
 
@@ -389,7 +459,7 @@ Context to check if task can be considered completed: {context_message}\n\n
     chat_result = None
     if check_result != "DONE":
         message = f"""
-Your task is to complete the following: \n{original_request_message}\n\n"
+Your task is to complete the following: \n{get_message_with_user_input(original_request_message,request_id)}\n\n"
 Here is a draft plan to solve the task: \n{prepared_plan}\n\n 
 {context_message}
 You don't have to follow the plan, it's just a suggestion.
@@ -404,7 +474,7 @@ Do your best to complete the task, user expects you to continue original task re
         presenter_messages_context = context_message
     presenter_message = f"""
 Here is everything done in order to complete the task: {presenter_messages_context}\n\n 
-Original task was: {original_request_message}\n\n
+Original task was: {get_message_with_user_input(original_request_message,request_id)}\n\n
 Reply to it with task result, do not forget that user expects you continue original task request conversation:\n\n
 """
 
@@ -418,6 +488,6 @@ Reply to it with task result, do not forget that user expects you continue origi
         final_msg += f"\n\n[Download all files of this task]({zip_url})"
     
     
-    print(f"Task completed, task:\n{original_request_message},\nresult: {final_msg}")
-    logging.info(f"Task completed, task:\n{original_request_message},\nresult: {final_msg}")
+    print(f"Task completed, task:\n{get_message_with_user_input(original_request_message,request_id)},\nresult: {final_msg}")
+    logging.info(f"Task completed, task:\n{get_message_with_user_input(original_request_message,request_id)},\nresult: {final_msg}")
     return final_msg

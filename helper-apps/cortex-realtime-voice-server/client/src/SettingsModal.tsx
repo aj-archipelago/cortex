@@ -5,6 +5,9 @@ type SettingsModalProps = {
   aiName: string;
   userName: string;
   userId: string;
+  voice: Voice;
+  aiStyle: string;
+  language: string;
   isOpen: boolean;
   onClose: () => void;
   onSave: (settings: SettingsData) => void;
@@ -25,19 +28,19 @@ const openaiVoices: OpenAIVoice[] = ['alloy', 'echo', 'shimmer', 'ash', 'ballad'
 const azureVoices: AzureVoice[] = ['amuch', 'dan', 'elan', 'marilyn', 'meadow', 'breeze', 'cove', 'ember', 'jupiter', 'alloy', 'echo', 'shimmer'];
 
 // Check if we're using Azure based on the environment variable
-const isAzure = process.env.REACT_APP_VOICE_PROVIDER === 'azure';
+const isAzure = import.meta.env.VITE_VOICE_PROVIDER === 'azure';
 
 export const SettingsModal = (
-  {aiName, userName, userId, isOpen, onClose, onSave}: SettingsModalProps
+  {aiName, userName, userId, voice, aiStyle, language, isOpen, onClose, onSave}: SettingsModalProps
 ) => {
   const [formData, setFormData] = useState<SettingsData>({
     aiName,
     userName,
     userId,
-    language: 'en',
+    language,
     aiMemorySelfModify: false,
-    aiStyle: 'Anthropic',
-    voice: 'alloy'
+    aiStyle,
+    voice
   });
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {

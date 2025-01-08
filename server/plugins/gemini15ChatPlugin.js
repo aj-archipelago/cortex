@@ -179,24 +179,37 @@ class Gemini15ChatPlugin extends ModelPlugin {
                 const messageContent = message.parts.reduce((acc, part) => {
                     if (part.text) {
                         return acc + part.text;
+                    } else if (part.inlineData) {
+                        return acc + '* base64 data truncated for log *';
+                    } else if (part.fileData) {
+                        return acc + part.fileData.fileUri;
                     }
                     return acc;
                 } , '');
-                const words = messageContent.split(" ");
                 const { length, units } = this.getLength(messageContent);
-                const preview = words.length < 41 ? messageContent : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
+                const preview = this.shortenContent(messageContent);
     
                 logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
             });
         } else if (messages && messages.length === 1) {
-            logger.verbose(`${messages[0].parts[0].text}`);
+            const messageContent = messages[0].parts.reduce((acc, part) => {
+                if (part.text) {
+                    return acc + part.text;
+                } else if (part.inlineData) {
+                    return acc + '* base64 data truncated for log *';
+                } else if (part.fileData) {
+                    return acc + part.fileData.fileUri;
+                }
+                return acc;
+            } , '');
+            logger.verbose(`${this.shortenContent(messageContent)}`);
         }
 
         // check if responseData is an array or string
         if (typeof responseData === 'string') {
             const { length, units } = this.getLength(responseData);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${responseData}`);
+            logger.verbose(`${this.shortenContent(responseData)}`);
         } else if (Array.isArray(responseData)) {
             const { mergedResult, safetyRatings } = mergeResults(responseData);
             if (safetyRatings?.length) {
@@ -205,7 +218,7 @@ class Gemini15ChatPlugin extends ModelPlugin {
             }
             const { length, units } = this.getLength(mergedResult);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${mergedResult}`);
+            logger.verbose(`${this.shortenContent(mergedResult)}`);
         } else {
             logger.info(`[response received as an SSE stream]`);
         }

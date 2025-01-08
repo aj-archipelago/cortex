@@ -223,21 +223,42 @@ class PathwayResolver {
         this.savedContextId = contextId ? contextId : uuidv4();
         
         const loadMemory = async () => {
-            // Load initial values
-            this.savedContext = (getv && await getv(contextId)) || {};
-            this.memorySelf = (getv && await getv(`${contextId}-memorySelf`)) || "";
-            this.memoryDirectives = (getv && await getv(`${contextId}-memoryDirectives`)) || "";
-            this.memoryTopics = (getv && await getv(`${contextId}-memoryTopics`)) || "";
-            this.memoryUser = (getv && await getv(`${contextId}-memoryUser`)) || "";
+            try {
+                // Load saved context and core memory if it exists
+                const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
+                    (getv && await getv(this.savedContextId)) || {},
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1}),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryTopics', priority: 0, numResults: 10 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryContext', priority: 0 }),
+                ]).catch(error => {
+                    this.logError(`Failed to load memory: ${error.message}`);
+                    return [{},'','','','',''];
+                });
 
-            // Store initial state for comparison
-            this.initialState = {
-                savedContext: this.savedContext,
-                memorySelf: this.memorySelf,
-                memoryDirectives: this.memoryDirectives,
-                memoryTopics: this.memoryTopics,
-                memoryUser: this.memoryUser
-            };
+                this.savedContext = savedContext;
+                this.memorySelf = memorySelf || '';
+                this.memoryDirectives = memoryDirectives || '';
+                this.memoryTopics = memoryTopics || '';
+                this.memoryUser = memoryUser || '';
+                this.memoryContext = memoryContext || '';
+
+                // Store initial state for comparison
+                this.initialState = {
+                    savedContext: this.savedContext,
+                };
+            } catch (error) {
+                this.logError(`Error in loadMemory: ${error.message}`);
+                // Set default values in case of error
+                this.savedContext = {};
+                this.memorySelf = '';
+                this.memoryDirectives = '';
+                this.memoryTopics = '';
+                this.memoryUser = '';
+                this.memoryContext = '';
+                this.initialState = { savedContext: {} };
+            }
         };
 
         const saveChangedMemory = async () => {
@@ -245,26 +266,10 @@ class PathwayResolver {
             
             const currentState = {
                 savedContext: this.savedContext,
-                memorySelf: this.memorySelf,
-                memoryDirectives: this.memoryDirectives,
-                memoryTopics: this.memoryTopics,
-                memoryUser: this.memoryUser
             };
 
             if (currentState.savedContext !== this.initialState.savedContext) {
                 setv && await setv(this.savedContextId, this.savedContext);
-            }
-            if (currentState.memorySelf !== this.initialState.memorySelf) {
-                setv && await setv(`${this.savedContextId}-memorySelf`, this.memorySelf);
-            }
-            if (currentState.memoryDirectives !== this.initialState.memoryDirectives) {
-                setv && await setv(`${this.savedContextId}-memoryDirectives`, this.memoryDirectives);
-            }
-            if (currentState.memoryTopics !== this.initialState.memoryTopics) {
-                setv && await setv(`${this.savedContextId}-memoryTopics`, this.memoryTopics);
-            }
-            if (currentState.memoryUser !== this.initialState.memoryUser) {
-                setv && await setv(`${this.savedContextId}-memoryUser`, this.memoryUser);
             }
         };
 
@@ -344,6 +349,11 @@ class PathwayResolver {
 
     // Calculate the maximum token length for a chunk
     getChunkMaxTokenLength() {
+        // Skip expensive calculations if not using input chunking
+        if (!this.useInputChunking) {
+            return this.modelExecutor.plugin.getModelMaxTokenLength();
+        }
+
         // find the longest prompt
         const maxPromptTokenLength = Math.max(...this.prompts.map((promptData) => this.modelExecutor.plugin.getCompiledPrompt('', this.args, promptData).tokenLength));
         

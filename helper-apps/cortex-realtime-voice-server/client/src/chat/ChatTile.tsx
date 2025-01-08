@@ -31,10 +31,9 @@ interface MarkdownComponents extends Components {
 
 export type ChatMessage = {
   id: string;
+  isSelf: boolean;
   name: string;
   message: string;
-  isSelf: boolean;
-  isImage: boolean;
   timestamp: number;
 };
 
@@ -57,14 +56,19 @@ const MessageContent = ({ message }: { message: string }) => {
 
   const components: MarkdownComponents = {
     code({ inline, className, children }: CodeComponentProps) {
-      const match = /language-(\w+)/.exec(className || '');
-      const language = match ? match[1] : '';
+      const match = /language-(\w+)|^(\w+)/.exec(className || '');
+      const language = match ? match[1] || match[2] : '';
       
       if (!inline && language) {
         return (
-          <div className="rounded-lg overflow-hidden my-2 relative group">
-            <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-              <CopyButton text={String(children)} />
+          <div className="rounded-lg overflow-hidden my-1.5 relative group">
+            <div className="flex justify-between items-center px-2 py-1 bg-gray-800/50">
+              <div className="text-xs text-gray-400 select-none">
+                {language}
+              </div>
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                <CopyButton text={String(children)} />
+              </div>
             </div>
             <SyntaxHighlighter
               style={nightOwl}
@@ -72,6 +76,7 @@ const MessageContent = ({ message }: { message: string }) => {
               customStyle={{
                 margin: 0,
                 background: 'transparent',
+                fontSize: '0.75rem',
               }}
             >
               {String(children).replace(/\n$/, '')}
@@ -80,28 +85,17 @@ const MessageContent = ({ message }: { message: string }) => {
         );
       }
       
-      return inline ? (
-        <code className="bg-gray-800/50 px-1.5 py-0.5 rounded text-cyan-300">
-          {children}
+      return (
+        <code className="bg-gray-800/50 px-1 py-0.5 rounded text-cyan-300 text-xs inline-block">
+          {String(children)}
         </code>
-      ) : (
-        <SyntaxHighlighter
-          style={nightOwl}
-          language="text"
-          customStyle={{
-            margin: 0,
-            background: 'transparent',
-          }}
-        >
-          {String(children).replace(/\n$/, '')}
-        </SyntaxHighlighter>
       );
     },
     // Style links
     a: ({ node, children, ...props }) => (
       <a 
         {...props} 
-        className="text-cyan-400 hover:text-cyan-300 underline"
+        className="text-cyan-400 hover:text-cyan-300 underline text-sm"
         target="_blank" 
         rel="noopener noreferrer" 
       >
@@ -110,30 +104,30 @@ const MessageContent = ({ message }: { message: string }) => {
     ),
     // Style tables
     table: ({ node, ...props }) => (
-      <div className="overflow-x-auto my-4">
-        <table {...props} className="border-collapse table-auto w-full" />
+      <div className="overflow-x-auto my-2">
+        <table {...props} className="border-collapse table-auto w-full text-sm" />
       </div>
     ),
     th: ({ node, ...props }) => (
-      <th {...props} className="border border-gray-600 px-4 py-2 bg-gray-800" />
+      <th {...props} className="border border-gray-600 px-3 py-1.5 bg-gray-800 text-sm" />
     ),
     td: ({ node, ...props }) => (
-      <td {...props} className="border border-gray-600 px-4 py-2" />
+      <td {...props} className="border border-gray-600 px-3 py-1.5 text-sm" />
     ),
     // Add special styling for math blocks
     math: ({ value }) => (
-      <div className="py-2 overflow-x-auto">
+      <div className="py-1.5 overflow-x-auto text-sm">
         <span>{value}</span>
       </div>
     ),
     inlineMath: ({ value }) => (
-      <span className="px-1">{value}</span>
+      <span className="px-1 text-sm">{value}</span>
     ),
   };
 
   return (
     <ReactMarkdown
-      className="prose prose-invert max-w-none"
+      className="prose prose-invert prose-sm max-w-none text-sm [&>p]:text-sm [&>ul]:text-sm [&>ol]:text-sm"
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeRaw, rehypeKatex]}
       components={components}
@@ -169,13 +163,13 @@ export function ChatTile({ messages, onSend, isConnected = false }: ChatTileProp
         <div className="p-4 space-y-4">
           {sortedMessages.map((msg) => (
             <div key={msg.id} className="flex flex-col">
-              <div className={`w-full rounded-lg p-3 relative group ${
+              <div className={`w-full rounded-lg p-2.5 relative group ${
                 msg.isSelf 
                   ? 'bg-blue-500/30 border border-blue-500/20' 
                   : 'bg-gray-700/30 border border-gray-600/20'
               }`}>
                 <div className="flex justify-between items-start">
-                  <div className="text-xs text-gray-400 mb-1">{msg.name}</div>
+                  <div className="text-2xs text-gray-400 mb-1">{msg.name}</div>
                   <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                     <CopyButton text={msg.message} />
                   </div>
@@ -195,8 +189,8 @@ export function ChatTile({ messages, onSend, isConnected = false }: ChatTileProp
             type="text"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            className={`flex-grow bg-gray-800/50 border border-gray-700/50 rounded-lg px-4 py-2 
-                     text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50
+            className={`flex-grow bg-gray-800/50 border border-gray-700/50 rounded-lg px-3 py-1.5 
+                     text-sm text-gray-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50
                      ${!isConnected && 'opacity-50 cursor-not-allowed'}`}
             placeholder={isConnected ? "Type a message..." : "Connect to send messages..."}
             disabled={!isConnected}
@@ -204,11 +198,11 @@ export function ChatTile({ messages, onSend, isConnected = false }: ChatTileProp
           <button
             type="submit"
             disabled={!isConnected}
-            className={`p-2 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 
+            className={`p-1.5 rounded-lg bg-gradient-to-r from-blue-500 to-cyan-500 
                      ${isConnected ? 'hover:from-blue-600 hover:to-cyan-600' : 'opacity-50 cursor-not-allowed'}
                      shadow-lg shadow-cyan-500/20`}
           >
-            <SendIcon sx={{ fontSize: 20 }} />
+            <SendIcon sx={{ fontSize: 16 }} />
           </button>
         </form>
       </div>

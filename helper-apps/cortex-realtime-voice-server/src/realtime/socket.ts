@@ -13,6 +13,7 @@ export interface ServerToClientEvents {
   conversationUpdated: (item: RealtimeItem, delta: DeltaType) => void;
   conversationInterrupted: () => void;
   imageCreated: (imageUrl: string) => void;
+  requestScreenshot: () => void;
 }
 
 export interface ClientToServerEvents {
@@ -20,4 +21,7 @@ export interface ClientToServerEvents {
   appendAudio: (audio: string) => void;
   cancelResponse: () => void;
   conversationCompleted: () => void;
+  audioPlaybackComplete: (trackId: string) => void;
+  screenshotCaptured: (imageData: string) => void;
+  screenshotError: (error: string) => void;
 }

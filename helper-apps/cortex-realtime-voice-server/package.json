@@ -3,11 +3,12 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "dev": "bun --watch run index.ts",
+    "dev": "concurrently \"cd client && bun run dev\" \"bun --watch run index.ts\"",
+    "dev:server": "bun --watch run index.ts",
+    "dev:client": "cd client && bun run dev",
     "start": "bun run index.ts",
     "start:test": "NODE_ENV=test bun run index.ts",
-    "start:prod": "cd client; bun run build; cd ..; NODE_ENV=production bun run index.ts",
-    "postinstall": "cd client; bun install; cd .."
+    "start:prod": "NODE_ENV=production bun run index.ts"
   },
   "dependencies": {
     "@hono/node-server": "1.13.7",
@@ -18,7 +19,8 @@
   "devDependencies": {
     "@types/bun": "1.1.14",
     "@types/node": "22.10.1",
-    "bun-types": "^1.1.38"
+    "bun-types": "^1.1.38",
+    "concurrently": "^8.2.2"
   },
   "peerDependencies": {
     "typescript": "5.7.2"

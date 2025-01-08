@@ -191,7 +191,7 @@ async function deleteBlob(requestId) {
   return result;
 }
 
-async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, filePath=null) {
+async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, filePath=null, hash=null) {
   return new Promise((resolve, reject) => {
     try {
       let requestId = uuidv4();
@@ -201,7 +201,7 @@ async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, 
       if (filePath) {
         const file = fs.createReadStream(filePath);
         const filename = path.basename(filePath);
-        uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename, resolve)
+        uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename, resolve, hash);
       } else {
         // Otherwise, continue working with form-data
         const busboy = Busboy({ headers: req.headers });
@@ -215,7 +215,7 @@ async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, 
         });
 
         busboy.on("file", async (fieldname, file, filename) => {
-          uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename?.filename || filename, resolve)
+          uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename?.filename || filename, resolve, hash);
         });
 
         busboy.on("error", (error) => {
@@ -240,7 +240,7 @@ async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, 
   });
 }
 
-async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename, resolve) {
+async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename, resolve, hash=null) {
   // do not use Google if the file is not an image or video
   const ext = path.extname(filename).toLowerCase();
   const canUseGoogle = IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext);
@@ -306,16 +306,29 @@ async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file
     const { url } = body;
     const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
     const writeStream = gcsFile.createWriteStream();
-
+    
     const response = await axios({
       method: "get",
       url: url,
       responseType: "stream",
     });
-
-    // pipe the Axios response stream directly into the GCS Write Stream
+    
+    // // Get the total file size from the response headers
+    // const totalSize = Number(response.headers["content-length"]);
+    // let downloadedSize = 0;
+    
+    // // Listen to the 'data' event to track the progress
+    // response.data.on("data", (chunk) => {
+    //   downloadedSize += chunk.length;
+    
+    //   // Calculate and display the progress
+    //   const progress = (downloadedSize / totalSize) * 100;
+    //   console.log(`Progress gsc of ${encodedFilename}: ${progress.toFixed(2)}%`);
+    // });
+    
+    // Pipe the Axios response stream directly into the GCS Write Stream
     response.data.pipe(writeStream);
-
+    
     await new Promise((resolve, reject) => {
       writeStream.on("finish", resolve);
       writeStream.on("error", reject);
@@ -324,6 +337,12 @@ async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file
     body.gcs = `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
   }
   
+  if(!body.filename) {
+    body.filename = filename;
+  }
+  if(hash && !body.hash) {
+    body.hash = hash;
+  }
   resolve(body); // Resolve the promise
 }
 

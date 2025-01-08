@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 
 function getCortexApiKey() {
   if (process.env.NODE_ENV === 'production') {
@@ -27,10 +28,21 @@ function getHeaders() {
 
 export type ChatMessage = { role: string, content: string }
 export type DataSource = "mydata" | "aja" | "aje" | "wires" | "bing"
-export type MemorySection = "memorySelf" | "memoryUser" | "memoryTopics" | "memoryDirectives"
-export type CortextVariables = {
+
+export const MemorySection = {
+  memorySelf: "memorySelf",
+  memoryUser: "memoryUser",
+  memoryTopics: "memoryTopics",
+  memoryDirectives: "memoryDirectives",
+  memoryAll: "memoryAll"
+} as const;
+
+export type MemorySection = typeof MemorySection[keyof typeof MemorySection];
+
+export type CortexVariables = {
   contextId?: string,
   aiName?: string,
+  aiStyle?: string,
   chatHistory?: ChatMessage[],
   text?: string,
   useMemory?: boolean,
@@ -41,16 +53,30 @@ export type CortextVariables = {
   height?: number;
   size?: string;
   style?: string;
+  priority?: number;
+  recentHours?: number;
+  numResults?: number;
+}
+
+function truncateBody(body: any): string {
+  const str = JSON.stringify(body);
+  if (str.length <= 5000) return str;
+  
+  const halfLength = 2500;
+  return str.substring(0, halfLength) + '...' + str.substring(str.length - halfLength);
 }
 
 export async function getCortexResponse(
-  variables: CortextVariables,
+  variables: CortexVariables,
   query: string) {
   const headers = getHeaders();
   const body = {
     query,
     variables
   }
+  logger.log(`Cortex URL: ${getCortexUrl()}`);
+  // logger.log(`Cortex Body: ${truncateBody(body)}`);
+  // logger.log(`Cortex Headers: ${JSON.stringify(headers)}`);
   const res = await fetch(getCortexUrl(), {
     method: 'POST',
     headers,
@@ -58,11 +84,12 @@ export async function getCortexResponse(
   });
 
   if (!res.ok) {
-    console.log(res)
+    logger.error('Failed to fetch data:', res);
     throw new Error('Failed to fetch data')
   }
 
   const responseObject = await res.json();
-  // console.log('cortext response', responseObject);
+  // Debug logging can be enabled/disabled via logger's environment control
+  logger.debug('cortex response', responseObject);
   return responseObject.data;
 }
