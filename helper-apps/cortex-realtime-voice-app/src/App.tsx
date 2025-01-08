@@ -137,7 +137,6 @@ export default function App() {
               aiName={aiName}
               userName={userName}
               userId={userId}
-              isOpen={settingsOpen}
               onClose={onCloseSettings}
               onSave={onSaveSettings}
             />

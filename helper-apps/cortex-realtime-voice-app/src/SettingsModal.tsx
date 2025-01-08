@@ -8,7 +8,6 @@ type SettingsModalProps = {
   aiName: string;
   userName: string;
   userId: string;
-  isOpen: boolean;
   onClose: () => void;
   onSave: (settings: SettingsData) => void;
 }
@@ -42,7 +41,7 @@ const languages = {
 const isAzure = process.env.REACT_APP_VOICE_PROVIDER === 'azure';
 
 export const SettingsModal = (
-  {aiName, userName, userId, isOpen, onClose, onSave}: SettingsModalProps
+  {aiName, userName, userId, onClose, onSave}: SettingsModalProps
 ) => {
   const [newAiName, setAiName] = useState(aiName);
   const [newUserName, setUserName] = useState(userName);
