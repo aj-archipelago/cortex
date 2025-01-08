@@ -1,7 +1,7 @@
 import {ChatBubble} from './ChatBubble';
 import {ChatMessageInput} from './ChatMessageInput';
 import {useEffect, useRef} from 'react';
-import {useWindowDimensions, Image, View, ScrollView, Platform} from "react-native";
+import {useWindowDimensions, Image, View, ScrollView} from "react-native";
 import {useSafeAreaInsets} from "react-native-safe-area-context";
 
 export type ChatMessage = {
