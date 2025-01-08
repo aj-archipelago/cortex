@@ -5,11 +5,13 @@ import { encode } from '../../lib/encodeCache.js';
 import { getFirstNToken } from '../chunker.js';
 import logger, { obscureUrlParams } from '../../lib/logger.js';
 import { config } from '../../config.js';
+import axios from 'axios';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETURN_TOKENS = 256;
 const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
 const DEFAULT_MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB default
+const DEFAULT_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
 class ModelPlugin {
     constructor(pathway, model) {
@@ -22,6 +24,7 @@ class ModelPlugin {
         this.pathwayName = pathway.name;
         this.promptParameters = {};
         this.isMultiModal = false;
+        this.allowedMIMETypes = model.allowedMIMETypes || DEFAULT_ALLOWED_MIME_TYPES;
 
         // Make all of the parameters defined on the pathway itself available to the prompt
         for (const [k, v] of Object.entries(pathway)) {
@@ -34,6 +37,30 @@ class ModelPlugin {
         }
 
         this.requestCount = 0;
+    }
+
+    async validateImageUrl(url) {
+        if (url.startsWith('data:')) {
+            const [, mimeType = ""] = url.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/) || [];
+            return this.allowedMIMETypes.includes(mimeType);
+        }
+
+        try {
+            const headResponse = await axios.head(url, {
+                timeout: 30000,
+                maxRedirects: 5
+            });
+
+            const contentType = headResponse.headers['content-type'];
+            if (!contentType || !this.allowedMIMETypes.includes(contentType)) {
+                logger.warn(`Unsupported image type: ${contentType} - skipping image content.`);
+                return false;
+            }
+            return true;
+        } catch (e) {
+            logger.error(`Failed to validate image URL: ${url}. ${e}`);
+            return false;
+        }
     }
 
     safeGetEncodedLength(data) {
