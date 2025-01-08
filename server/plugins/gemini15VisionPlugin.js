@@ -40,21 +40,34 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                         } else if (type === 'text') {
                             return { text: text };
                         } else if (type === 'image_url') {
+                            if (!fileUrl) {
+                                return null;
+                            }
                             if (fileUrl.startsWith('gs://')) {
+                                // Validate GCS URL has at least a bucket name after gs://
+                                const gcsPath = fileUrl.slice(5); // Remove 'gs://'
+                                if (!gcsPath || gcsPath.length < 1) {
+                                    return null;
+                                }
                                 return {
                                     fileData: {
                                         mimeType: mime.lookup(fileUrl) || 'image/jpeg',
                                         fileUri: fileUrl
                                     }
                                 };
-                            } else {
+                            } else if (fileUrl.includes('base64,')) {
+                                const base64Data = fileUrl.split('base64,')[1];
+                                if (!base64Data) {
+                                    return null;
+                                }
                                 return {
                                     inlineData: {
-                                        mimeType: 'image/jpeg', // fixed for now as there's no MIME type in the request
-                                        data: fileUrl.split('base64,')[1]
+                                        mimeType: 'image/jpeg',
+                                        data: base64Data
                                     }
                                 };
                             }
+                            return null;
                         }
                     } catch (e) {
                         // this space intentionally left blank
