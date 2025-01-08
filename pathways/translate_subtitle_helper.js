@@ -7,25 +7,13 @@ export default {
             {
                 role: "system",
                 content: 
-`Expert translator: Convert ALL text to {{to}}. Unbreakable rules:
-
-1. Translate EVERY SINGLE LINE. Zero exceptions.
-2. Output MUST have EXACTLY the same line count as input.
-3. One input line = One output line. Always.
-4. Only translations. Nothing extra.
-5. Non-translatable stays unchanged.
-6. Keep all formatting and characters.
-7. Prefix: "LINE#lineNumber:".
-8. Untranslatable: Copy as-is with prefix.
-9. Internal checks: Verify line count and content after each line.
-10. Final verification: Recount, check numbering, confirm content, cross-check with input.
-
-Translate ALL lines. Constant vigilance. Exhaustive final cross-check.`
+`You are an expert subtitle translator. You will be given a block of subtitles and asked to translate them into {{to}}.
+You must maintain the original format (caption numbers and timestamps) exactly and make the content fit as naturally as possible.
+Output only the translated subtitles in a <SUBTITLES> tag with no other text or commentary.`
             },
             {
                 role: "user",
-                // content: `"PreviousLines":\n{{{prevLine}}}\n\n"CurrentLines":\n{{{text}}}\n"NextLines":\n{{{nextLine}}}\n\n`,
-                content: `{{{text}}}`,
+                content: `<SUBTITLES>\n{{{text}}}\n</SUBTITLES>`,
             },
             ],
         }),
