@@ -3,7 +3,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { logger } from "./logger";
 
 // Time to wait after last user message before allowing AI to speak
-const USER_SPEAKING_THRESHOLD_MS = 1500;
+const USER_SPEAKING_THRESHOLD_MS = 200;
 
 export interface SendPromptOptions {
   allowTools?: boolean;
@@ -36,11 +36,10 @@ export async function sendPrompt(
   const isUserActive = userSpeaking || recentlySpoke;
 
   // Don't send prompt if AI is responding, audio is playing, or user is speaking/recently spoke
-  if (aiResponding || audioPlaying || isUserActive) {
+  if (audioPlaying || isUserActive) {
     logger.log(`${disposable ? 'Skipping' : 'Queuing'} prompt while ${
       userSpeaking ? 'user is actively speaking' :
       recentlySpoke ? 'user recently finished speaking' :
-      aiResponding ? 'AI is responding' :
       'AI audio is playing'
     }`);
     if (!disposable) {
@@ -67,14 +66,6 @@ export async function sendPrompt(
     ]
   });
 
-  /*
-  await this.realtimeClient.createConversationItem({
-    id: createId(),
-    type: 'function_call_output',
-    call_id: call.call_id,
-    output: response?.result || '',
-  });
-  */
 
   client.createResponse({ tool_choice: allowTools ? 'auto' : 'none' });
   return { skipped: false };

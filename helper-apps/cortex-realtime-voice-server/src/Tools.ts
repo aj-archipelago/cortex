@@ -68,9 +68,8 @@ export class Tools {
           type: "object",
           properties: {
             lastUserMessage: {type: "string"},
-            silent: {type: "boolean", default: true}
           },
-          required: ["lastUserMessage", "silent"]
+          required: ["lastUserMessage"]
         },
       },
       {
@@ -81,9 +80,8 @@ export class Tools {
           type: "object",
           properties: {
             detailedInstructions: {type: "string"},
-            silent: {type: "boolean", default: false}
           },
-          required: ["detailedInstructions", "silent"]
+          required: ["detailedInstructions"]
         },
       },
       {
@@ -94,9 +92,8 @@ export class Tools {
           type: "object",
           properties: {
             detailedInstructions: {type: "string"},
-            silent: {type: "boolean", default: false}
           },
-          required: ["detailedInstructions", "silent"]
+          required: ["detailedInstructions"]
         },
       },
       {
@@ -107,7 +104,6 @@ export class Tools {
           type: "object",
           properties: {
             detailedInstructions: {type: "string"},
-            silent: {type: "boolean", default: false}
           },
           required: ["detailedInstructions"]
         },
@@ -120,7 +116,6 @@ export class Tools {
           type: "object",
           properties: {
             detailedInstructions: {type: "string"},
-            silent: {type: "boolean", default: false}
           },
           required: ["detailedInstructions"]
         },
@@ -133,11 +128,11 @@ export class Tools {
           type: "object",
           properties: {
             detailedInstructions: {type: "string"},
-            silent: {type: "boolean", default: false}
           },
-          required: ["detailedInstructions", "silent"]
+          required: ["detailedInstructions"]
         },
       },
+      /*
       {
         type: 'function',
         name: 'MuteAudio',
@@ -150,17 +145,17 @@ export class Tools {
           required: ["mute"]
         },
       },
+      */
       {
         type: 'function',
         name: 'Screenshot',
-        description: 'Use this tool to capture a screenshot of what the user is currently seeing in their browser window or on their computer screen. Any time the user asks you to take a look at something on their screen, use this tool. The tool will request a screenshot from the client and send the image data and the conversation history to your visual processing core for a detailed analysis and response.',
+        description: 'Use this tool to capture a screenshot of what the user is currently seeing in their browser window or on their computer screen. Any time the user asks you to take a look at something on their computer screen, use this tool. The tool will request a screenshot from the client and send the image data and the conversation history to your visual processing core for a detailed analysis and response.',
         parameters: {
           type: "object",
           properties: {
             lastUserMessage: {type: "string"},
-            silent: {type: "boolean", default: true}
           },
-          required: ["lastUserMessage", "silent"]
+          required: ["lastUserMessage"]
         },
       },
       // {
@@ -226,12 +221,12 @@ export class Tools {
     ];
   }
 
-  async executeCall(call_id: string, name: string, args: string, contextId: string, aiName: string) {
+  async executeCall(call_id: string, name: string, args: string, contextId: string, aiName: string, isInteractive: boolean = true) {
     logger.log('Executing call', name, 'with args', args);
 
     let fillerIndex = 0;
     let timeoutId: NodeJS.Timer | undefined;
-    let promptOnIdle = false;
+    let promptOnIdle = true;
     let promptOnCompletion = true;
 
     let parsedArgs;
@@ -241,16 +236,16 @@ export class Tools {
       // Ignore JSON parse errors
     }
 
-    let isSilent = parsedArgs?.silent === true;
-    const mute = parsedArgs?.mute === true;
+    let isSilent = !isInteractive;
 
     const calculateFillerTimeout = (fillerIndex: number) => {
-      const baseTimeout = 7500;
+      const baseTimeout = 3500;
       const randomTimeout = Math.floor(Math.random() * Math.min((fillerIndex + 1) * 1000, 5000));
       return baseTimeout + randomTimeout;
     }
 
     const sendFillerMessage = async () => {
+      logger.log('Tool execution: Sending filler message');
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
@@ -272,15 +267,11 @@ export class Tools {
         promptOnCompletion = true;
         promptOnIdle = false;
         break;
-      case 'muteaudio':
-        isSilent = true;
-        promptOnCompletion = false;
-        promptOnIdle = false;
-        break;
     }
 
     // Skip initial message if silent
     if (!isSilent) {
+      logger.log('Tool execution: Sending initial prompt - ', initialPrompt);
       await this.sendPrompt(initialPrompt, false, true);
     }
 
@@ -331,7 +322,7 @@ export class Tools {
           break;
 
         case 'image':
-          finishPrompt = 'You have finished using the Image tool to help with the user\'s request. Please respond to the user via audio';
+          finishPrompt = 'You have finished using the Image tool to help with the user\'s request. The image is being shown to the user right now. Please respond to the user via audio';
 
           response = await image(
             contextId,
@@ -386,10 +377,6 @@ export class Tools {
             JSON.stringify({query: args})
           );
           finishPrompt += ' by reading the output of the tool to the user verbatim'
-          break;
-
-        case 'muteaudio':
-          this.socketServer.setAudioMuted(this.socket, mute);
           break;
 
         case 'screenshot':
@@ -461,19 +448,16 @@ export class Tools {
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
       
-      await this.realtimeClient.createConversationItem({
+      this.realtimeClient.createConversationItem({
         id: createId(),
         type: 'function_call_output',
         call_id: call_id,
         output: response?.result || '',
       });
 
-      if (isSilent) {
-        finishPrompt = `You have finished using the ${name} tool. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. You are operating in silent mode, so don't respond with any voice or text output until the user speaks again.`;
-      }
-
       finishPrompt += '.';
-      if (promptOnCompletion) {
+      if (promptOnCompletion && !isSilent) {
+        logger.log('Tool execution: Sending finish prompt - ', finishPrompt);
         await this.sendPrompt(finishPrompt, true, false);
       }
 

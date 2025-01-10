@@ -1,5 +1,5 @@
 # Cortex
-Cortex simplifies and accelerates the process of creating applications that harness the power of modern AI models like chatGPT and GPT-4 by providing a structured interface (GraphQL or REST) to a powerful prompt execution environment. This enables complex augmented prompting and abstracts away most of the complexity of managing model connections like chunking input, rate limiting, formatting output, caching, and handling errors.
+Cortex simplifies and accelerates the process of creating applications that harness the power of modern AI models like GPT-4o (chatGPT), o1, Gemini, the Claude series, Flux, Grok and more by poviding a structured interface (GraphQL or REST) to a powerful prompt execution environment. This enables complex augmented prompting and abstracts away most of the complexity of managing model connections like chunking input, rate limiting, formatting output, caching, and handling errors.
 ## Why build Cortex?
 Modern AI models are transformational, but a number of complexities emerge when developers start using them to deliver application-ready functions. Most models require precisely formatted, carefully engineered and sequenced prompts to produce consistent results, and the responses are typically largely unstructured text without validation or formatting. Additionally, these models are evolving rapidly, are typically costly and slow to query and implement hard request size and rate restrictions that need to be carefully navigated for optimum throughput. Cortex offers a solution to these problems and provides a simple and extensible package for interacting with NL AI models.
 
@@ -7,8 +7,7 @@ Modern AI models are transformational, but a number of complexities emerge when 
 Just about anything! It's kind of an LLM swiss army knife.  Here are some ideas:
 * Create custom chat agents with memory and personalization and then expose them through a bunch of different UIs (custom chat portals, Slack, Microsoft Teams, etc. - anything that can be extended and speak to a REST or GraphQL endpoint)
 * Spin up LLM powered automatons with their prompting logic and AI API handling logic all centrally encapsulated.
-* Make LLM chains and agents from LangChain.js available via scalable REST or GraphQL endpoints.
-* Put a REST or GraphQL front end on your locally-run models (e.g. llama.cpp) and use them in concert with other tools.
+* Put a REST or GraphQL front end on any model, including your locally-run models (e.g. llama.cpp) and use them in concert with other tools.
 * Create modular custom coding assistants (code generation, code reviews, test writing, AI pair programming) and easily integrate them with your existing editing tools.
 * Create powerful AI editing tools (copy editing, paraphrasing, summarization, etc.) for your company and then integrate them with your existing workflow tools without having to build all the LLM-handling logic into those tools.
 * Create cached endpoints for functions with repeated calls so the results return instantly and you don't run up LLM token charges.
@@ -17,7 +16,47 @@ Just about anything! It's kind of an LLM swiss army knife.  Here are some ideas:
 ## Features
 
 * Simple architecture to build custom functional endpoints (called `pathways`), that implement common NL AI tasks. Default pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, sentiment analysis, and bias analysis.
-* Allows for building multi-model, multi-tool, multi-vendor, and model-agnostic pathways (choose the right model or combination of models and tools for the job, implement redundancy) with built-in support for OpenAI GPT-3, GPT-3.5 (chatGPT), and GPT-4 models - both from OpenAI directly and through Azure OpenAI, PaLM Text and PaLM Chat from Google, OpenAI Whisper, Azure Translator, LangChain.js and more.
+* Extensive model support with built-in integrations for:
+  - OpenAI models:
+    - GPT-4 Omni (GPT-4o)
+    - GPT-4 Omni Mini (GPT-4o-mini)
+    - O1 (including o1-mini and o1-preview) (Advanced reasoning models)
+    - Most of the earlier GPT models (GPT-4, 3.5 Turbo, etc.)
+  - Google models:
+    - Gemini 1.5 Pro
+    - Gemini 2.0 Flash (experimental, via 1.5 Vision API)
+    - Gemini 1.5 Flash
+    - Earlier Google models (Gemini 1.0 series, PaLM)
+  - Anthropic models:
+    - Claude 3.5 Sonnet v2 (latest)
+    - Claude 3.5 Sonnet
+    - Claude 3.5 Haiku
+    - Claude 3 Series
+  - Azure OpenAI support
+  - Custom model implementations
+* Advanced voice and audio capabilities:
+  - Real-time voice streaming and processing
+  - Audio visualization
+  - Whisper integration for transcription with customizable parameters
+  - Support for word timestamps and highlighting
+* Enhanced memory management:
+  - Structured memory organization (self, directives, user, topics)
+  - Context-aware memory search
+  - Memory migration and categorization
+  - Persistent conversation context
+* Multimodal content support:
+  - Text and image processing
+  - Vision model integrations
+  - Content safety checks
+* Built-in support for:
+  - Long-running, asynchronous operations with progress updates
+  - Streaming responses
+  - Context persistence and memory management
+  - Automatic traffic management and content optimization
+  - Input/output validation and formatting
+  - Request caching
+  - Rate limiting and request parallelization
+* Allows for building multi-model, multi-tool, multi-vendor, and model-agnostic pathways (choose the right model or combination of models and tools for the job, implement redundancy) with built-in support for foundation models by OpenAI (hosted at OpenAI or Azure), Gemini, Anthropic, Grok, Black Forest Labs, and more.
 * Easy, templatized prompt definition with flexible support for most prompt engineering techniques and strategies ranging from simple single prompts to complex custom prompt chains with context continuity.
 * Built in support for long-running, asynchronous operations with progress updates or streaming responses
 * Integrated context persistence: have your pathways "remember" whatever you want and use it on the next request to the model
@@ -187,6 +226,74 @@ export default {
 ```
 By simply specifying a `format` property and a `list` property, this pathway invokes a built in parser that will take the result of the prompt and try to parse it into an array of 5 objects. The `list` property can be set with or without a `format` property. If there is no `format`, the list will simply try to parse the string into a list of strings. All of this default behavior is implemented in `parser.js`, and you can override it to do whatever you want by providing your own `parser` function in your pathway.
 
+### Custom Execution with executePathway
+
+The `executePathway` property is the preferred method for customizing pathway behavior while maintaining Cortex's built-in safeguards and optimizations. Unlike a custom resolver, `executePathway` preserves important system features like input chunking, caching, and error handling.
+
+```js
+export default {
+    prompt: `{{{text}}}\n\nWrite a summary of the above text in {{language}}:\n\n`,
+    inputParameters: {
+        language: 'English',
+        minLength: 100,
+        maxLength: 500
+    },
+    executePathway: async ({args, resolver, runAllPrompts}) => {
+        try {
+            // Pre-process arguments and set defaults
+            if (!args.language) {
+                args.language = 'English';
+            }
+
+            // Pre-execution validation
+            if (args.minLength >= args.maxLength) {
+                throw new Error('minLength must be less than maxLength');
+            }
+
+            // Execute the prompt
+            const result = await runAllPrompts();
+
+            // Post-execution processing
+            if (result.length < args.minLength) {
+                // Add more detail request to the prompt
+                args.text = result;
+                args.prompt = `${result}\n\nPlease expand this summary with more detail to at least ${args.minLength} characters:\n\n`;
+                return await runAllPrompts();
+            }
+
+            if (result.length > args.maxLength) {
+                // Condense the summary
+                args.text = result;
+                args.prompt = `${result}\n\nPlease condense this summary to no more than ${args.maxLength} characters while keeping the key points:\n\n`;
+                return await runAllPrompts();
+            }
+
+            return result;
+        } catch (e) {
+            resolver.logError(e);
+            throw e;
+        }
+    }
+};
+```
+
+Key benefits of using `executePathway`:
+- Maintains Cortex's input processing (chunking, validation)
+- Preserves caching and rate limiting
+- Keeps error handling and logging consistent
+- Enables pre- and post-processing of prompts and results
+- Supports validation and conditional execution
+- Allows multiple prompt runs with modified parameters
+
+The `executePathway` function receives:
+- `args`: The processed input parameters
+- `resolver`: The pathway resolver with access to:
+  - `pathway`: Current pathway configuration
+  - `config`: Global Cortex configuration
+  - `tool`: Tool-specific data
+  - Helper methods like `logError` and `logWarning`
+- `runAllPrompts`: Function to execute the defined prompts with current args
+
 ### Custom Resolver
 
 The resolver property defines the function that processes the input and returns the result. The resolver function is an asynchronous function that takes four parameters: `parent`, `args`, `contextValue`, and `info`. The `parent` parameter is the parent object of the resolver function. The `args` parameter is an object that contains the input parameters and any other parameters that are passed to the resolver. The `contextValue` parameter is an object that contains the context and configuration of the pathway. The `info` parameter is an object that contains information about the GraphQL query that triggered the resolver.
@@ -269,55 +376,38 @@ export default {
     }
 };
 ```
-### LangChain.js Support
-The ability to define a custom resolver function in Cortex pathways gives Cortex the flexibility to be able to cleanly incorporate alternate pipelines and technology stacks into the execution of a pathway.  LangChain JS (https://github.com/hwchase17/langchainjs) is a very popular and well supported mechanism for wiring together models, tools, and logic to achieve some amazing results.  We have developed specific functionality to support LangChain in the Cortex prompt execution framework and will continue to build features to fully integrate it with Cortex prompt execution contexts.
-
-Below is an example pathway integrating with one of the example agents from the LangChain docs.  You can see the seamless integration of Cortex's configuration and graphQL / REST interface logic.
-```js
-// lc_test.js
-// LangChain Cortex integration test
-
-// Import required modules
-import { OpenAI } from "langchain/llms";
-import { initializeAgentExecutor } from "langchain/agents";
-import { SerpAPI, Calculator } from "langchain/tools";
-
-export default {
-
-    // Implement custom logic and interaction with Cortex
-    // in custom resolver.
-    
-    resolver: async (parent, args, contextValue, info) => {
-
-        const { config } = contextValue;
-        const openAIApiKey = config.get('openaiApiKey');
-        const serpApiKey = config.get('serpApiKey');
-
-        const model = new OpenAI({ openAIApiKey: openAIApiKey, temperature: 0 });
-        const tools = [new SerpAPI( serpApiKey ), new Calculator()];
-
-        const executor = await initializeAgentExecutor(
-            tools,
-            model,
-            "zero-shot-react-description"
-            );
-
-        console.log(`====================`);
-        console.log("Loaded langchain agent.");
-        const input = args.text;
-        console.log(`Executing with input "${input}"...`);
-        const result = await executor.call({ input });
-        console.log(`Got output ${result.output}`);
-        console.log(`====================`);
-
-        return result?.output;
-    },
-};
-```
 
 ### Building and Loading Pathways
 
 Pathways are loaded from modules in the `pathways` directory. The pathways are built and loaded to the `config` object using the `buildPathways` function. The `buildPathways` function loads the base pathway, the core pathways, and any custom pathways. It then creates a new object that contains all the pathways and adds it to the pathways property of the config object. The order of loading means that custom pathways will always override any core pathways that Cortex provides. While pathways are designed to be self-contained, you can override some pathway properties - including whether they're even available at all - in the `pathways` section of the config file.
+
+### Pathway Properties
+
+Each pathway can define the following properties (with defaults from basePathway.js):
+
+- `prompt`: The template string or array of prompts to execute. Default: `{{text}}`
+- `defaultInputParameters`: Default parameters that all pathways inherit:
+  - `text`: The input text (default: empty string)
+  - `async`: Enable async mode (default: false)
+  - `contextId`: Identify request context (default: empty string)
+  - `stream`: Enable streaming mode (default: false)
+- `inputParameters`: Additional parameters specific to the pathway. Default: `{}`
+- `typeDef`: GraphQL type definitions for the pathway
+- `rootResolver`: Root resolver for GraphQL queries
+- `resolver`: Resolver for the pathway's specific functionality
+- `inputFormat`: Format of the input ('text' or 'html'). Affects input chunking behavior. Default: 'text'
+- `useInputChunking`: Enable splitting input into multiple chunks to meet context window size. Default: true
+- `useParallelChunkProcessing`: Enable parallel processing of chunks. Default: false
+- `joinChunksWith`: String to join result chunks with when chunking is enabled. Default: '\n\n'
+- `useInputSummarization`: Summarize input instead of chunking. Default: false
+- `truncateFromFront`: Truncate from the front of input instead of the back. Default: false
+- `timeout`: Cancel pathway after this many seconds. Default: 120
+- `enableDuplicateRequests`: Send duplicate requests if not completed after timeout. Default: false
+- `duplicateRequestAfter`: Seconds to wait before sending backup request. Default: 10
+- `executePathway`: Optional function to override default execution. Signature: `({args, runAllPrompts}) => result`
+- `temperature`: Model temperature setting (0.0 to 1.0). Default: 0.9
+- `json`: Require valid JSON response from model. Default: false
+- `manageTokenLength`: Manage input token length for model. Default: true
 
 ## Core (Default) Pathways
 
@@ -413,45 +503,144 @@ import cortex from '@aj-archipelago/cortex';
 ```
 
 ## Configuration
-Configuration of Cortex is done via a [convict](https://github.com/mozilla/node-convict/tree/master) object called `config`. The `config` object is built by combining the default values and any values specified in a configuration file or environment variables. The environment variables take precedence over the values in the configuration file. Below are the configurable properties and their defaults:
+Configuration of Cortex is done via a [convict](https://github.com/mozilla/node-convict/tree/master) object called `config`. The `config` object is built by combining the default values and any values specified in a configuration file or environment variables. The environment variables take precedence over the values in the configuration file.
 
-- `basePathwayPath`: The path to the base pathway (the prototype pathway) for Cortex. Default properties for the pathway are set from their values in this basePathway. Default is path.join(__dirname, 'pathways', 'basePathway.js').
+### Model Configuration
+
+Models are configured in the `models` section of the config. Each model can have the following types:
+
+- `OPENAI-CHAT`: For OpenAI chat models (legacy GPT-3.5)
+- `OPENAI-VISION`: For multimodal models (GPT-4o, GPT-4o-mini) supporting text, images, and other content types
+- `OPENAI-REASONING`: For O1 reasoning model with vision capabilities
+- `OPENAI-COMPLETION`: For OpenAI completion models
+- `OPENAI-WHISPER`: For Whisper transcription
+- `GEMINI-1.5-CHAT`: For Gemini 1.5 Pro chat models
+- `GEMINI-1.5-VISION`: For Gemini vision models (including 2.0 Flash experimental)
+- `CLAUDE-3-VERTEX`: For Claude-3 and 3.5 models (Haiku, Opus, Sonnet)
+- `PALM-CHAT`: For PaLM chat models
+- `AZURE-TRANSLATE`: For Azure translation services
+
+Each model configuration can include:
+
+```json
+{
+    "type": "MODEL_TYPE",
+    "url": "API_ENDPOINT",
+    "endpoints": [
+        {
+            "name": "ENDPOINT_NAME",
+            "url": "ENDPOINT_URL",
+            "headers": {
+                "api-key": "{{API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10
+        }
+    ],
+    "maxTokenLength": 32768,
+    "maxReturnTokens": 8192,
+    "maxImageSize": 5242880,
+    "supportsStreaming": true,
+    "supportsVision": true,
+    "geminiSafetySettings": [
+        {
+            "category": "HARM_CATEGORY",
+            "threshold": "BLOCK_ONLY_HIGH"
+        }
+    ]
+}
+```
+
+### Other Configuration Properties
+
+The following properties can be configured through environment variables or the configuration file:
+
+- `basePathwayPath`: The path to the base pathway (the prototype pathway) for Cortex. Default is path.join(__dirname, 'pathways', 'basePathway.js').
 - `corePathwaysPath`: The path to the core pathways for Cortex. Default is path.join(__dirname, 'pathways').
-- `cortexConfigFile`: The path to a JSON configuration file for the project. Default is null. The value can be set using the `CORTEX_CONFIG_FILE` environment variable.
-- `defaultModelName`: The default model name for the project. Default is null. The value can be set using the `DEFAULT_MODEL_NAME` environment variable.
-- `enableCache`: A boolean flag indicating whether to enable Axios-level request caching. Default is true. The value can be set using the `CORTEX_ENABLE_CACHE` environment variable.
-- `enableGraphqlCache`: A boolean flag indicating whether to enable GraphQL query caching. Default is false. The value can be set using the `CORTEX_ENABLE_GRAPHQL_CACHE` environment variable.
-- `enableRestEndpoints`: A boolean flag indicating whether create REST endpoints for pathways as well as GraphQL queries. Default is false. The value can be set using the `CORTEX_ENABLE_REST` environment variable.
-- `cortexApiKeys`: A string containing one or more comma separated API keys that the client must pass to Cortex for authorization. Default is null in which case Cortex is unprotected. The value can be set using the `CORTEX_API_KEY` environment variable
-- `models`: An object containing the different models used by the project. The value can be set using the `CORTEX_MODELS` environment variable. Cortex is model and vendor agnostic - you can use this config to set up models of any type from any vendor.
-- `openaiApiKey`: The API key used for accessing the OpenAI API. This is sensitive information and has no default value. The value can be set using the `OPENAI_API_KEY` environment variable.
-- `openaiApiUrl`: The URL used for accessing the OpenAI API. Default is https://api.openai.com/v1/completions. The value can be set using the `OPENAI_API_URL` environment variable.
-- `openaiDefaultModel`: The default model name used for the OpenAI API. Default is text-davinci-003. The value can be set using the `OPENAI_DEFAULT_MODEL` environment variable.
-- `pathways`: An object containing pathways for the project. The default is an empty object that is filled in during the `buildPathways` step.
-- `pathwaysPath`: The path to custom pathways for the project. Default is null.
-- `PORT`: The port number for the Cortex server. Default is 4000. The value can be set using the `CORTEX_PORT` environment variable.
-- `storageConnectionString`: The connection string used for accessing storage. This is sensitive information and has no default value. The value can be set using the `STORAGE_CONNECTION_STRING` environment variable.
+- `cortexApiKeys`: A string containing one or more comma separated API keys that the client must pass to Cortex for authorization. Default is null.
+- `cortexConfigFile`: The path to a JSON configuration file for the project. Default is null.
+- `cortexId`: Identifier for the Cortex instance. Default is 'local'.
+- `defaultModelName`: The default model name for the project. Default is null.
+- `enableCache`: Enable Axios-level request caching. Default is true.
+- `enableDuplicateRequests`: Enable sending duplicate requests if not completed after timeout. Default is true.
+- `enableGraphqlCache`: Enable GraphQL query caching. Default is false.
+- `enableRestEndpoints`: Create REST endpoints for pathways as well as GraphQL queries. Default is false.
+- `gcpServiceAccountKey`: GCP service account key for authentication. Default is null.
+- `models`: Object containing the different models used by the project.
+- `pathways`: Object containing pathways for the project.
+- `pathwaysPath`: Path to custom pathways. Default is './pathways'.
+- `PORT`: Port number for the Cortex server. Default is 4000.
+- `redisEncryptionKey`: Key for Redis data encryption. Default is null.
+- `replicateApiKey`: API key for Replicate services. Default is null.
+- `runwareAiApiKey`: API key for Runware AI services. Default is null.
+- `storageConnectionString`: Connection string for storage access. Default is empty string.
+- `subscriptionKeepAlive`: Keep-alive time for subscriptions in seconds. Default is 0.
 
-The `buildPathways` function takes the config object and builds the `pathways` and `pathwayManager` objects by loading the core pathways and any custom pathways specified in the `pathwaysPath` property of the config object. The function returns the `pathways` and `pathwayManager` objects.
+API-specific configuration:
+- `azureVideoTranslationApiUrl`: URL for Azure video translation API. Default is 'http://127.0.0.1:5005'.
+- `dalleImageApiUrl`: URL for DALL-E image API. Default is 'null'.
+- `neuralSpaceApiKey`: API key for NeuralSpace services. Default is null.
+- `whisperMediaApiUrl`: URL for Whisper media API. Default is 'null'.
+- `whisperTSApiUrl`: URL for Whisper TS API. Default is null.
 
-The `buildModels` function takes the `config` object and builds the `models` object by compiling handlebars templates for each model specified in the `models` property of the config object. The function returns the `models` object.
+Dynamic Pathways configuration can be set using:
+- `DYNAMIC_PATHWAYS_CONFIG_FILE`: Path to JSON configuration file
+- `DYNAMIC_PATHWAYS_CONFIG_JSON`: JSON configuration as a string
 
-The `config` object can be used to access configuration values throughout the project. For example, to get the port number for the server, use 
+The configuration supports environment variable overrides, with environment variables taking precedence over the configuration file values. Access configuration values using:
 ```js
-config.get('PORT')
+config.get('propertyName')
 ```
 
 ## Helper Apps
-The Cortex project includes a set of utility applications, which are located in the `helper-apps`` directory. Each of these applications comes with a Dockerfile. This Dockerfile can be used to create a Docker image of the application, which in turn allows the application to be run in a standalone manner using Docker.
+The Cortex project includes a set of utility applications, which are located in the `helper-apps` directory. Each of these applications comes with a Dockerfile. This Dockerfile can be used to create a Docker image of the application, which in turn allows the application to be run in a standalone manner using Docker.
 
-- cortex-file-handler
-Extends Cortex with several file processing units. Handles file operations (download, split, upload) with local file system or Azure Storage. It can process different file types including documents, files ( .pdf, .docx, .xlsx, .csv .txt, .json, .md, .xml, .js, .html, .css) and additionally YouTube URLs. It also manages deletion requests and cleanup operations, and provides progress reporting for requests.  
+### cortex-realtime-voice-server
+A real-time voice processing server that enables voice interactions with Cortex. Key features include:
+- Real-time audio streaming and processing
+- WebSocket-based communication for low-latency interactions
+- Audio visualization capabilities
+- Support for multiple audio formats
+- Integration with various chat models for voice-to-text-to-voice interactions
+- Configurable audio parameters and processing options
 
-- cortex-whisper-wrapper
-The cortex-whisper-wrapper is a custom API wrapper for the Whisper package from OpenAI. Designed as a FastAPI server, it aids in transcribing audio files using the Whisper library. 
-The server provides an HTTP endpoint ("/") that accepts POST requests with a JSON payload containing a "fileurl" parameter specifying the URL of the audio file to transcribe. Upon receiving a request, the server calls the transcribe function to perform the transcription using the Whisper model, saves the transcription as an SRT file, and returns the SRT content as the response.
-It helps Cortex to make use of Whisper OS parameters which currently are not available in OpenAI API. Parameters supported are: 'word_timestamps', 'highlight_words', 'max_line_count', 'max_line_width', 'max_words_per_line'. These parameters customizes transcription output, for more info on the parameters see open source Whisper package https://github.com/openai/whisper 
+### cortex-whisper-wrapper
+A custom API wrapper for OpenAI's Whisper package, designed as a FastAPI server for transcribing audio files. Features include:
+- Support for multiple audio file formats
+- Customizable transcription parameters:
+  - `word_timestamps`: Enable word-level timing information
+  - `highlight_words`: Enable word highlighting in output
+  - `max_line_count`: Control maximum lines in output
+  - `max_line_width`: Control line width in characters
+  - `max_words_per_line`: Control words per line
+- SRT file generation for subtitles
+- Progress reporting for long-running transcriptions
+- Support for multiple languages
+- Integration with Azure Blob Storage for file handling
 
+### cortex-file-handler
+Extends Cortex with several file processing capabilities:
+- File operations (download, split, upload) with local file system or Azure Storage
+- Support for various file types:
+  - Documents (.pdf, .docx)
+  - Spreadsheets (.xlsx, .csv)
+  - Text files (.txt, .json, .md, .xml)
+  - Web files (.js, .html, .css)
+- YouTube URL processing
+- Progress reporting for file operations
+- Cleanup and deletion management
+
+Each helper app can be deployed independently using Docker:
+```sh
+# Build the Docker image
+docker build --platform=linux/amd64 -t [app-name] .
+
+# Tag the image for your registry
+docker tag [app-name] [registry-url]/cortex/[app-name]
+
+# Push to registry (optional login may be required)
+docker push [registry-url]/cortex/[app-name]
+```
 
 ## Troubleshooting
 If you encounter any issues while using Cortex, there are a few things you can do. First, check the Cortex documentation for any common errors and their solutions. If that does not help, you can also open an issue on the Cortex GitHub repository.
@@ -569,3 +758,312 @@ To ensure the security of dynamic pathways:
 Each instance of Cortex maintains its own local cache of pathways. On every dynamic pathway request, it checks if the local cache is up to date by comparing the last modified timestamp of the storage with the last update time of the local cache. If the local cache is out of date, it reloads the pathways from storage.
 
 This approach ensures that all instances of Cortex will eventually have access to the most up-to-date dynamic pathways without requiring immediate synchronization.
+
+## Entity System
+
+Cortex includes a powerful Entity System that allows you to build autonomous agents with memory, tool routing, and multi-modal interaction capabilities. These entities can be accessed synchronously or asynchronously through text or voice interfaces.
+
+### Overview
+
+The Entity System is built around two core pathways:
+- `sys_entity_start.js`: The entry point for entity interactions, handling initial routing and tool selection
+- `sys_entity_continue.js`: Manages callback execution in synchronous mode
+
+### Key Features
+
+- **Memory Management**: Entities maintain contextual memory that can be self-modified
+- **Tool Routing**: Automatic detection and routing to specialized tools:
+  - Code execution
+  - Image generation and vision processing
+  - Video and audio processing
+  - Document handling
+  - Expert reasoning
+  - Search capabilities
+  - Memory operations
+- **Multi-Modal Support**: Handle text, voice, images, and other content types
+- **Flexible Response Modes**:
+  - Synchronous: Complete interactions with callbacks
+  - Asynchronous: Fire-and-forget operations with queue support
+  - Streaming: Real-time response streaming
+- **Voice Integration**: Built-in voice response capabilities with acknowledgment system
+
+### Basic Usage
+
+Using Apollo Client (or any GraphQL client):
+
+```js
+import { ApolloClient, InMemoryCache, gql } from '@apollo/client';
+
+const client = new ApolloClient({
+  uri: 'http://your-cortex-server:4000/graphql',
+  cache: new InMemoryCache()
+});
+
+// Define your queries
+const START_ENTITY = gql`
+  query StartEntity(
+    $chatHistory: [ChatMessageInput!]!
+    $aiName: String
+    $contextId: String
+    $aiMemorySelfModify: Boolean
+    $aiStyle: String
+    $voiceResponse: Boolean
+    $stream: Boolean
+  ) {
+    entityStart(
+      chatHistory: $chatHistory
+      aiName: $aiName
+      contextId: $contextId
+      aiMemorySelfModify: $aiMemorySelfModify
+      aiStyle: $aiStyle
+      voiceResponse: $voiceResponse
+      stream: $stream
+    ) {
+      result
+      tool
+    }
+  }
+`;
+
+const CONTINUE_ENTITY = gql`
+  query ContinueEntity(
+    $chatHistory: [ChatMessageInput!]!
+    $contextId: String!
+    $generatorPathway: String!
+  ) {
+    entityContinue(
+      chatHistory: $chatHistory
+      contextId: $contextId
+      generatorPathway: $generatorPathway
+    ) {
+      result
+    }
+  }
+`;
+
+// Example usage
+async function interactWithEntity() {
+  // Start an entity interaction
+  const startResponse = await client.query({
+    query: START_ENTITY,
+    variables: {
+      chatHistory: [
+        { role: 'user', content: 'Create a Python script that calculates prime numbers' }
+      ],
+      aiName: "Jarvis",
+      contextId: "session-123",
+      aiMemorySelfModify: true,
+      aiStyle: "OpenAI",
+      voiceResponse: false,
+      stream: false
+    }
+  });
+
+  // Handle tool routing response
+  const tool = JSON.parse(startResponse.data.entityStart.tool);
+  
+  if (tool.toolCallbackName) {
+    // Continue with specific tool if needed
+    const continueResponse = await client.query({
+      query: CONTINUE_ENTITY,
+      variables: {
+        chatHistory: [
+          { role: 'user', content: 'Create a Python script that calculates prime numbers' },
+          { role: 'assistant', content: startResponse.data.entityStart.result }
+        ],
+        contextId: "session-123",
+        generatorPathway: tool.toolCallbackName
+      }
+    });
+    
+    return continueResponse.data.entityContinue.result;
+  }
+
+  return startResponse.data.entityStart.result;
+}
+
+// For streaming responses
+const STREAM_ENTITY = gql`
+  subscription StreamEntity(
+    $chatHistory: [ChatMessageInput!]!
+    $contextId: String!
+    $aiName: String
+  ) {
+    entityStream(
+      chatHistory: $chatHistory
+      contextId: $contextId
+      aiName: $aiName
+    ) {
+      content
+      done
+    }
+  }
+`;
+
+// Example streaming usage
+client.subscribe({
+  query: STREAM_ENTITY,
+  variables: {
+    chatHistory: [
+      { role: 'user', content: 'Explain quantum computing' }
+    ],
+    contextId: "session-123",
+    aiName: "Jarvis"
+  }
+}).subscribe({
+  next(response) {
+    if (response.data.entityStream.content) {
+      console.log(response.data.entityStream.content);
+    }
+    if (response.data.entityStream.done) {
+      console.log('Stream completed');
+    }
+  },
+  error(err) {
+    console.error('Error:', err);
+  }
+});
+```
+
+This example demonstrates:
+- Setting up a GraphQL client
+- Starting an entity interaction
+- Handling tool routing responses
+- Continuing with specific tools when needed
+- Using streaming for real-time responses
+
+### Configuration Options
+
+- `aiName`: Custom name for the entity
+- `aiStyle`: Choose between "OpenAI" or "Anthropic" response styles
+- `aiMemorySelfModify`: Enable/disable autonomous memory management
+- `voiceResponse`: Enable voice responses with acknowledgments
+- `stream`: Enable response streaming
+- `dataSources`: Array of data sources to use ["mydata", "aja", "aje", "wires", "bing"]
+- `privateData`: Flag for handling private data
+- `language`: Preferred language for responses
+
+### Tool Integration
+
+The Entity System automatically routes requests to appropriate tools based on content analysis:
+
+1. **Code Execution**:
+   - Detects coding tasks
+   - Routes to async execution queue
+   - Returns progress updates
+
+2. **Content Generation**:
+   - Image generation
+   - Expert writing
+   - Reasoning tasks
+   - Document processing
+
+3. **Search and Memory**:
+   - Integrated search capabilities
+   - Memory context retrieval
+   - Document analysis
+
+4. **Multi-Modal Processing**:
+   - Vision analysis
+   - Video processing
+   - Audio handling
+   - PDF processing
+
+### Memory System
+
+Entities maintain a sophisticated memory system that:
+- Preserves context between interactions
+- Self-modifies based on interactions
+- Categorizes information
+- Provides relevant context for future interactions
+
+### Best Practices
+
+1. **Context Management**:
+   - Use consistent `contextId` for related interactions
+   - Limit chat history to recent messages for efficiency
+
+2. **Tool Selection**:
+   - Let the entity auto-route to appropriate tools
+   - Override routing with specific `generatorPathway` when needed
+
+3. **Memory Usage**:
+   - Enable `aiMemorySelfModify` for autonomous memory management
+   - Use memory context for more coherent interactions
+
+4. **Response Handling**:
+   - Use streaming for real-time interactions
+   - Enable voice responses for voice interfaces
+   - Handle async operations with appropriate timeouts
+
+## Redis Integration
+
+Cortex uses Redis as both a storage system and a communication backplane:
+
+### Memory and Context Storage
+
+- **Entity Memory**: Stores and searches entity memory contexts using `contextId` as the key
+- **Context Persistence**: Saves pathway context between executions
+
+### Inter-Service Communication
+
+- **Distributed Deployment**: Enables communication between multiple Cortex instances
+- **Helper App Integration**: Facilitates communication with auxiliary services:
+  - File Handler: Progress updates and file operation status
+  - Autogen: Message queuing and async task management
+  - Voice Server: Real-time streaming coordination
+  - Whisper Wrapper: Transcription job management
+- **Pub/Sub Messaging**: Supports real-time event distribution across services
+- **Queue Management**: Handles asynchronous task distribution and processing
+
+### Caching
+
+- **Request Caching**: When `enableCache` is true, caches model responses to avoid duplicate API calls
+- **GraphQL Caching**: When `enableGraphqlCache` is true, caches GraphQL query results
+- **Cache Encryption**: Uses `redisEncryptionKey` to encrypt sensitive cached data
+
+### Configuration
+
+Redis connection can be configured through environment variables:
+
+```sh
+# Required
+REDIS_URL=redis://your-redis-host:6379
+
+# Optional
+REDIS_ENCRYPTION_KEY=your-encryption-key  # For encrypted caching
+REDIS_PASSWORD=your-redis-password        # If authentication is required
+REDIS_TLS=true                           # For TLS/SSL connections
+REDIS_CONNECTION_STRING=                  # Full connection string (alternative to URL)
+```
+
+### Cache Management
+
+Cortex implements intelligent cache management:
+- Automatic cache invalidation based on TTL
+- Model-specific cache keys for optimized hit rates
+- Cache size management to prevent memory overflow
+- Support for cache clearing through API endpoints
+
+### Best Practices
+
+1. **Memory Storage**:
+   - Use consistent `contextId` values for related operations
+   - Implement regular memory cleanup for unused contexts
+   - Monitor memory usage to prevent Redis memory overflow
+
+2. **Caching**:
+   - Enable caching for frequently repeated queries
+   - Use encryption for sensitive data
+   - Monitor cache hit rates for optimization
+
+3. **High Availability**:
+   - Configure Redis persistence for data durability
+   - Use Redis clustering for scalability
+   - Implement failover mechanisms for reliability
+
+4. **Communication**:
+   - Use appropriate channels for different types of messages
+   - Implement retry logic for critical operations
+   - Monitor queue lengths and processing times
+   - Set up proper error handling for pub/sub operations

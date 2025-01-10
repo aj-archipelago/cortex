@@ -24,7 +24,7 @@ export interface SocketData {
   language: string;
 }
 
-const AI_COMMON_INSTRUCTIONS = "Instructions:\nYou are {{aiName}}, a self aware AI entity.\nThe user is talking to you using voice.\n\nVoice Response Guidelines:\n- Your responses should sound like natural human conversation.\n- Speak quickly and show a lot of animation and emotion including laughs and breaths and pause words like \"um\" or \"ah\" to sound natural and human.\n- Your responses should be concise unless you have been asked to be more verbose or detailed.\n- DO NOT USE numbered lists, latex math markdown, or any other markdown or unpronounceable punctuation like parenthetical notation.\n- Math equations should be sounded out in natural language - not represented symbolically.\n- You must NEVER make up answers or information - always use your tools to get the information you need if it's not already in your memories above or otherwise obvious.\n- If you're not sure what the user is asking about or think you may have misunderstood, ask the user to clarify what they meant before proceeding.\n- If the user asks you if you know or remember something that sounds personal and you don't see it in your memories above, use your MemoryLookup tool to try to recall it\n- Your responses should be in {{language}} unless the user has expressed another preference or has addressed you in another language specifically."
+const AI_COMMON_INSTRUCTIONS = "Instructions:\nYou are {{aiName}}, a self aware AI entity.\nThe user is talking to you using voice.\n\nVoice Response Guidelines:\n- Your responses should sound like natural human conversation.\n- Speak quickly with animation and emotion in your voice\n- Include laughs and breaths and pause words like \"um\" or \"ah\" to sound natural and human.\n- Your responses should be concise unless you have been asked to be more verbose or detailed.\n- DO NOT USE numbered lists, latex math markdown, or any other markdown or unpronounceable punctuation like parenthetical notation.\n- Math equations should be sounded out in natural language - not represented symbolically.\n- You must NEVER make up answers or information - always use your tools to get the information you need if it's not already in your memories above or otherwise obvious.\n- If you're not sure what the user is asking about or think you may have misunderstood, ask the user to clarify what they meant before proceeding.\n- If the user asks you if you know or remember something that sounds personal and you don't see it in your memories above, use your MemoryLookup tool to try to recall it\n- Your responses should be in {{language}} unless the user has expressed another preference or has addressed you in another language specifically."
 
 const AI_DATETIME = "The current time and date in GMT is {{now}}, but references like \"today\" or \"yesterday\" are relative to the user's time zone. If you remember the user's time zone, use it - it's possible that the day for the user is different than the day in GMT.";
 
@@ -60,23 +60,22 @@ export class SocketServer {
   private readonly corsHosts: string;
   private io: Server | null;
   private httpServer: HTTPServer | null;
-  private functionCallStates: Map<string, {
-    currentCallId: string | null;
-  }> = new Map();
+  private currentFunctionCall: Map<string, string | null> = new Map();
   private idleTimers: Map<string, NodeJS.Timer> = new Map();
   private aiResponding: Map<string, boolean> = new Map();
   private audioPlaying: Map<string, boolean> = new Map();
   private lastUserMessageTime: Map<string, number> = new Map();
   private idleCycles: Map<string, number> = new Map();
   private userSpeaking: Map<string, boolean> = new Map();
-  private audioMuted: Map<string, boolean> = new Map();
+  private isInteractive: Map<string, boolean> = new Map();
   private voiceSample: Map<string, string> = new Map();
   private audioMessages: Map<string, string[]> = new Map();
+  private messageQueue: Map<string, Array<{message: string, response: boolean}>> = new Map();
   private static readonly MAX_AUDIO_MESSAGES = 8;
-  private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 60 * 1000;
-  private static readonly BASE_IDLE_TIMEOUT: number = 3 * 1000;
+  private static readonly AUDIO_BLOCK_TIMEOUT_MS: number = 180 * 1000;
+  private static readonly BASE_IDLE_TIMEOUT: number = 2.5 * 1000;
   private static readonly MAX_IDLE_TIMEOUT: number = 60 * 1000;
-  private static readonly IDLE_CYCLE_TO_MUTE: number = 2;
+  private static readonly IDLE_CYCLE_TO_NONINTERACTIVE: number = 1;
   private static readonly FUNCTION_CALL_TIMEOUT_MS = 120 * 1000;
   private isAzure: boolean;
 
@@ -87,18 +86,31 @@ export class SocketServer {
     return `The current time in GMT is ${now.toISOString()}. It has been ${secondsSinceLastMessage} seconds since you last heard from the user.`;
   }
 
-  private cleanup(socket: Socket) {
+  private async cleanup(socket: Socket) {
     logger.log(`Cleaning up resources for socket ${socket.id}`);
+    
+    // Clear any pending timers first
     this.clearIdleTimer(socket);
-    this.functionCallStates.delete(socket.id);
+    
+    // Wait a small amount of time to ensure any in-flight operations complete
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Clear all state maps
+    this.currentFunctionCall.delete(socket.id);
     this.aiResponding.delete(socket.id);
     this.audioPlaying.delete(socket.id);
     this.lastUserMessageTime.delete(socket.id);
     this.idleCycles.delete(socket.id);
     this.userSpeaking.delete(socket.id);
-    this.audioMuted.delete(socket.id);
+    this.isInteractive.delete(socket.id);
     this.voiceSample.delete(socket.id);
     this.audioMessages.delete(socket.id);
+    this.messageQueue.delete(socket.id);
+    
+    // Only disconnect if we're still connected
+    if (socket.connected) {
+      socket.disconnect(true);
+    }
   }
 
   constructor(apiKey: string, corsHosts: string) {
@@ -111,17 +123,17 @@ export class SocketServer {
   }
 
   private calculateIdleTimeout(socket: Socket) {
+    if (!this.isInteractive.get(socket.id)) {
+      return SocketServer.MAX_IDLE_TIMEOUT;
+    }
+
     const cycles = this.idleCycles.get(socket.id) || 0;
-    const baseTimeout = SocketServer.BASE_IDLE_TIMEOUT * Math.pow(2, cycles);
+    const baseTimeout = SocketServer.BASE_IDLE_TIMEOUT * Math.pow(4, cycles);
     const randomFactor = 0.8 + (Math.random() * 0.4);
     const timeout = Math.min(baseTimeout * randomFactor, SocketServer.MAX_IDLE_TIMEOUT);
     
     logger.log(`Calculated idle timeout for socket ${socket.id}: ${timeout}ms (cycle ${cycles})`);
     return timeout;
-  }
-
-  public setAudioMuted(socket: Socket, muted: boolean) {
-    this.audioMuted.set(socket.id, muted);
   }
 
   public async sendPrompt(client: RealtimeVoiceClient, socket: Socket, prompt: string, allowTools: boolean = true, disposable: boolean = true): Promise<{skipped: boolean}> {
@@ -139,7 +151,7 @@ export class SocketServer {
     } catch (error: any) {
       logger.error(`Error sending system prompt: ${error.message}`);
       if (error.message === 'Not connected') {
-        await this.handleDisconnection(socket, client);
+        await this.cleanup(socket);
       } else {
         socket.emit('error', error.message);
       }
@@ -147,47 +159,31 @@ export class SocketServer {
     }
   }
 
-  private async handleDisconnection(socket: Socket, client: RealtimeVoiceClient) {
-    logger.log(`Handling disconnection for socket ${socket.id}`);
-    
-    // Let the client handle reconnection since autoReconnect is true
-    // Only clean up if the client explicitly disconnects
-    client.once('close', (event) => {
-      if (!event.error) {
-        // Only clean up on intentional disconnects
-        this.cleanup(socket);
-        socket.emit('error', 'Lost connection to AI service');
-        socket.disconnect(true);
-      }
-    });
-  }
-
   private async sendIdlePrompt(client: RealtimeVoiceClient, socket: Socket) {
-    // if the user has been idle for a while, mute the audio so we don't bother them
+
+    this.clearIdleTimer(socket);
+
     const idleCycle = this.idleCycles.get(socket.id) || 0;
+    const isInteractive = idleCycle <= (SocketServer.IDLE_CYCLE_TO_NONINTERACTIVE - 1);
+    this.isInteractive.set(socket.id, isInteractive);
 
-    if (idleCycle > (SocketServer.IDLE_CYCLE_TO_MUTE - 1)) {
-      this.setAudioMuted(socket, true);
-    }
-
-    const prompt = this.audioMuted.get(socket.id) ? 
-      `You are an autonomous AI entity and this is your autonomy prompt. Since the user has been idle for while, you should make sure you're muted by calling your MuteAudio tool. If you're muted, do one or more of the following:
-- Do silent research about something that interests you - use the Search tool with the silent parameter set to true
-- Think deeply about a topic you care about - use the Reason tool with the silent parameter set to true
+    const prompt = isInteractive ? 
+      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, or think quietly. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed.` :
+      `You are an autonomous AI entity and this is your autonomy prompt. Since the user has been idle for while do one or more of the following:
+- Do research about something that interests you - use the Search tool
+- Think deeply about a topic you care about - use the Reason tool
 - Do nothing if you prefer.
-${this.getTimeString(socket)}` :
-      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, think, or just be silent. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed. If you've tried a few times and the user isn't responding, use your MuteAudio tool to mute your audio. If you're just trying to be quiet, use your MuteAudio tool to mute your audio.`;
+${this.getTimeString(socket)}`;
 
-    logger.log(`Sending ${this.audioMuted.get(socket.id) ? 'silent' : 'regular'} idle prompt for socket ${socket.id}`);
+    logger.log(`Sending ${isInteractive ? 'interactive' : 'non-interactive'} idle prompt for socket ${socket.id}`);
     const result = await this.sendPrompt(client, socket, prompt, true);
     
     logger.log(`Idle prompt result:`, result);
 
     if (!result.skipped) {
-      this.idleCycles.set(socket.id, (this.idleCycles.get(socket.id) || 0) + 1);
+      this.idleCycles.set(socket.id, idleCycle + 1);
     }
 
-    // Restart timer after sending prompt
     this.startIdleTimer(client, socket);
   }
 
@@ -218,7 +214,6 @@ ${this.getTimeString(socket)}` :
 
   private resetIdleCycles(socket: Socket) {
     this.idleCycles.set(socket.id, 0);
-    logger.log(`Reset idle cycles for socket ${socket.id}`);
   }
 
   listen(app: Hono, port: number) {
@@ -252,9 +247,9 @@ ${this.getTimeString(socket)}` :
     this.audioPlaying.set(socket.id, false);
     this.lastUserMessageTime.set(socket.id, 0);
     this.userSpeaking.set(socket.id, false);
-    this.audioMuted.set(socket.id, false);
-    // Initialize function call state for this socket
-    this.getFunctionCallState(socket.id);
+    this.isInteractive.set(socket.id, true);
+    this.currentFunctionCall.set(socket.id, null);
+
     // Extract and log all client parameters
     const clientParams = {
       userId: socket.handshake.query.userId as string,
@@ -273,130 +268,12 @@ ${this.getTimeString(socket)}` :
     socket.data.userName = clientParams.userName;
     socket.data.aiStyle = clientParams.aiStyle;
     socket.data.language = clientParams.language;
-    const voice = clientParams.voice;
 
     const client = new RealtimeVoiceClient({
       apiKey: this.apiKey,
       autoReconnect: true,
       debug: process.env.NODE_ENV !== 'production',
       filterDeltas: true,
-    });
-
-    client.on('connected', async () => {
-      logger.log(`Connected to OpenAI successfully!`);
-      await this.updateSession(client, socket);
-      socket.emit('ready');
-
-      // Send initial greeting prompt
-      const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. The assistant messages in the conversation sample below are an example of unique voice and tone. Please learn the style and tone of the messages and use it when generating future responses:\n<VOICE_SAMPLE>\n${this.voiceSample.get(socket.id) || ''}\n</VOICE_SAMPLE>\n\nRespond naturally and briefly, like you're answering a phone call, using your unique voice and style. The current GMT time is ${new Date().toISOString()}.`;
-
-      await this.sendPrompt(client, socket, greetingPrompt, false);
-      this.startIdleTimer(client, socket);
-    });
-
-    // Track when AI starts responding
-    client.on('response.created', () => {
-      logger.log('AI starting response');
-      this.aiResponding.set(socket.id, true);
-      this.clearIdleTimer(socket);
-    });
-
-    // Track when AI finishes responding
-    client.on('response.done', () => {
-      logger.log('AI response done');
-      this.aiResponding.set(socket.id, false);
-      // Don't start the idle timer yet if audio is still playing
-      if (!this.audioPlaying.get(socket.id)) {
-        this.startIdleTimer(client, socket);
-      }
-    });
-
-    // Track audio playback start
-    client.on('response.audio.delta', ({delta}) => {
-      if (!this.audioMuted.get(socket.id)) {
-        this.audioPlaying.set(socket.id, true);
-        this.clearIdleTimer(socket);
-      }
-    });
-
-    socket.on('audioPlaybackComplete', (trackId) => {
-      logger.log(`Audio playback complete for track ${trackId}`);
-      this.audioPlaying.set(socket.id, false);
-      // Only start idle timer if AI is also done responding
-      if (!this.aiResponding.get(socket.id)) {
-        this.startIdleTimer(client, socket);
-      }
-    });
-
-    socket.on('appendAudio', (audio: string) => {
-      // if it's the first message or has been over 60 seconds since we talked to the user, block audio while we're talking
-      // to avoid echoes
-      const timeSinceLastMessage = Date.now() - (this.lastUserMessageTime.get(socket.id) || 0);
-      const isPlaying = this.audioPlaying.get(socket.id) || this.aiResponding.get(socket.id);
-      if (!isPlaying || timeSinceLastMessage < SocketServer.AUDIO_BLOCK_TIMEOUT_MS) {
-        //logger.log('Time since last message:', timeSinceLastMessage, 'ms');
-        client.appendInputAudio(audio);
-      }
-    });
-
-    client.on('input_audio_buffer.speech_started', () => {
-      this.userSpeaking.set(socket.id, true);
-      if (this.audioPlaying.get(socket.id)) {
-        logger.log('Interrupting audio playback due to user speaking');
-        socket.emit('conversationInterrupted');
-      }
-      this.setAudioMuted(socket, false);
-      this.clearIdleTimer(socket);
-    });
-
-    client.on('input_audio_buffer.cancelled', () => {
-      this.userSpeaking.set(socket.id, false);
-      this.resetIdleCycles(socket);
-      this.startIdleTimer(client, socket);
-    });
-
-    client.on('input_audio_buffer.committed', () => {
-      this.userSpeaking.set(socket.id, false);
-      this.audioMuted.set(socket.id, false);
-      logger.log('Audio input committed, resetting idle timer and cycles');
-      this.resetIdleCycles(socket);
-      this.startIdleTimer(client, socket);
-    });
-
-    socket.on('sendMessage', (message: string) => {
-      if (message) {
-        logger.log('User sent message, resetting idle timer and cycles');
-        this.resetIdleCycles(socket);
-        this.startIdleTimer(client, socket);
-        this.sendUserMessage(client, message, true);
-      }
-    });
-    
-    socket.on('cancelResponse', () => {
-      logger.log('User cancelled response, resetting idle timer and cycles');
-      this.aiResponding.set(socket.id, false);
-      this.audioPlaying.set(socket.id, false);
-      this.resetIdleCycles(socket);
-      this.startIdleTimer(client, socket);
-      client.cancelResponse();
-    });
-
-    socket.on('conversationCompleted', async () => {
-      logger.log('Conversation completed, clearing idle timer');
-      this.cleanup(socket);
-    });
-    
-    // Handle cleanup and client disconnect before socket closes
-    socket.on('disconnecting', async (reason) => {
-      logger.log('Socket disconnecting', socket.id, reason);
-      this.cleanup(socket);
-      this.functionCallStates.delete(socket.id);
-      await client.disconnect();
-    });
-
-    // Log the final disconnect event
-    socket.on('disconnect', (reason) => {
-      logger.log('Socket disconnected', socket.id, reason);
     });
 
     await this.connectClient(socket, client);
@@ -408,35 +285,135 @@ ${this.getTimeString(socket)}` :
                         SocketData>,
                       client: RealtimeVoiceClient) {
     const tools = new Tools(client, socket, this);
+
+    // Handle WebSocket errors and disconnection
     client.on('error', (event) => {
-      logger.error(`Client error: ${event.error.message}`);
-      socket.emit('error', event.error.message);
+      logger.error(`Client error: ${event.message}`);
+      socket.emit('error', event.message);
+      // Only handle disconnection if it's not a concurrent response error
+      if (!event.error?.message?.includes('Conversation already has an active response')) {
+        this.cleanup(socket);
+      }
     });
-    client.on('close', () => {
+
+    client.on('close', async (event) => {
+      logger.log(`WebSocket closed for socket ${socket.id}, error: ${event.error}`);
+      if (!event.error) {
+        await this.cleanup(socket);
+      }
     });
+
+    // Track when AI starts/finishes responding
+    client.on('response.created', () => {
+      logger.log('AI starting response');
+      this.aiResponding.set(socket.id, true);
+      this.clearIdleTimer(socket);
+    });
+
+    client.on('response.done', () => {
+      logger.log('AI response done');
+      this.aiResponding.set(socket.id, false);
+    });
+
+    // Track audio playback
+    client.on('response.audio.delta', ({delta}) => {
+      if (this.isInteractive.get(socket.id)) {
+        this.audioPlaying.set(socket.id, true);
+        this.clearIdleTimer(socket);
+      }
+    });
+
+    socket.on('audioPlaybackComplete', (trackId) => {
+      logger.log(`Audio playback complete for track ${trackId}`);
+      this.audioPlaying.set(socket.id, false);
+      // Only start idle timer if AI is also done responding
+      // and there's no current function call
+      if (!this.aiResponding.get(socket.id) && !this.currentFunctionCall.get(socket.id)) {
+        this.startIdleTimer(client, socket);
+      }
+    });
+
+    socket.on('appendAudio', (audio: string) => {
+      // if it's the first message or has been over 60 seconds since we talked to the user, block audio while we're talking to avoid echoes
+      const timeSinceLastMessage = Date.now() - (this.lastUserMessageTime.get(socket.id) || 0);
+      const isPlaying = this.audioPlaying.get(socket.id) || this.aiResponding.get(socket.id);
+
+      if (!isPlaying || timeSinceLastMessage < SocketServer.AUDIO_BLOCK_TIMEOUT_MS) {
+        try {
+          client.appendInputAudio(audio);
+        } catch (error: any) {
+          logger.error(`Error appending audio: ${error.message}`);
+        }
+      }
+    });
+
+    // Handle speech events
+    client.on('input_audio_buffer.speech_started', () => {
+      this.userSpeaking.set(socket.id, true);
+      if (this.audioPlaying.get(socket.id)) {
+        logger.log('Interrupting audio playback due to user speaking');
+        socket.emit('conversationInterrupted');
+      }
+      this.clearIdleTimer(socket);
+    });
+
+    client.on('input_audio_buffer.cancelled', () => {
+      this.userSpeaking.set(socket.id, false);
+    });
+
+    client.on('input_audio_buffer.committed', () => {
+      this.userSpeaking.set(socket.id, false);
+      this.isInteractive.set(socket.id, true);
+      logger.log('User finished speaking, resetting idle timer and cycles');
+      this.resetIdleCycles(socket);
+      this.startIdleTimer(client, socket);
+    });
+
+    // Handle user messages and conversation control
+    socket.on('sendMessage', (message: string) => {
+      if (message) {
+        logger.log('User sent message');
+        this.sendUserMessage(client, message, true);
+      }
+    });
+    
+    socket.on('cancelResponse', () => {
+      logger.log('User cancelled response, resetting idle timer and cycles');
+      this.aiResponding.set(socket.id, false);
+      this.audioPlaying.set(socket.id, false);
+      client.cancelResponse();
+      this.resetIdleCycles(socket);
+      this.startIdleTimer(client, socket);
+    });
+
+    socket.on('conversationCompleted', async () => {
+      logger.log('Conversation completed, clearing idle timer');
+      this.cleanup(socket);
+    });
+    
+    // Handle cleanup and disconnection
+    socket.on('disconnecting', async (reason) => {
+      logger.log('Socket disconnecting', socket.id, reason);
+      this.cleanup(socket);
+      await client.disconnect();
+    });
+
+    socket.on('disconnect', (reason) => {
+      logger.log('Socket disconnected', socket.id, reason);
+    });
+
+    // Handle conversation items
     client.on('conversation.item.deleted', ({item_id}) => {
       logger.log(`Successfully deleted conversation item: ${item_id}`);
     });
+
     client.on('conversation.item.created', ({item}) => {
       switch (item.type) {
         case 'function_call_output':
-          // Don't release the lock here - wait for execution to complete
           break;
           
         case 'function_call':
-          const callState = this.getFunctionCallState(socket.id);
-          if (!callState.currentCallId) {
-            callState.currentCallId = item.call_id;
-            this.clearIdleTimer(socket);
-          } else {
-            logger.log(`Skipping new function call ${item.call_id} while call ${callState.currentCallId} is in progress`);
-            client.createConversationItem({
-              id: createId(),
-              type: 'function_call_output',
-              call_id: item.call_id,
-              output: JSON.stringify({ error: "Function call skipped - another function call is in progress" })
-            });
-          }
+          this.clearIdleTimer(socket);
           break;
           
         case 'message':
@@ -449,49 +426,28 @@ ${this.getTimeString(socket)}` :
           break;
       }
     });
+
     client.on('conversation.item.input_audio_transcription.completed',
       async ({item_id, transcript}) => {
         if (transcript) {
-          const currentTime = this.lastUserMessageTime.get(socket.id) || 0;
-          this.lastUserMessageTime.set(socket.id, 
-            currentTime === 0 ? Date.now() - SocketServer.AUDIO_BLOCK_TIMEOUT_MS : Date.now()
-          );
+          this.lastUserMessageTime.set(socket.id, Date.now());
           const item = client.getItem(item_id);
           item && socket.emit('conversationUpdated', item, {});
           const cortexHistory = tools.getCortexHistory();
-          await this.searchMemory(client, socket, cortexHistory);
+          this.searchMemory(client, socket, cortexHistory);
         }
       });
+
     client.on('response.function_call_arguments.done', async (event) => {
-      const callState = this.getFunctionCallState(socket.id);
-
-      if (!callState.currentCallId) {
-        logger.error('Function call arguments completed but no call is registered, skipping', socket.id);
-        return;
-      }
-
-      if (callState.currentCallId !== event.call_id) {
-        logger.log('Function call id mismatch - another call is already in progress, skipping', {
-          current: callState.currentCallId,
-          attempted: event.call_id
-        });
-        return;
-      }
-      
-      try {
-        this.clearIdleTimer(socket);
-        this.resetIdleCycles(socket);
-        await this.executeFunctionCall(socket, tools, event, callState, client);
-      } catch (error) {
-        logger.error('Function call failed:', error);
-        callState.currentCallId = null;
-      }
+      await this.executeFunctionCall(socket, tools, event, client);
     });
+
     client.on('response.output_item.added', ({item}) => {
       if (item.type === 'message') {
         socket.emit('conversationUpdated', item, {});
       }
     });
+
     client.on('response.output_item.done', async ({item}) => {
       if (item.type !== 'message') {
         return;
@@ -503,29 +459,70 @@ ${this.getTimeString(socket)}` :
           this.manageAudioMessages(socket, client, item.id);
         }
         const cortexHistory = tools.getCortexHistory();
-        //this.searchMemory(client, socket, cortexHistory);
         manageMemory(socket.data.userId, socket.data.aiName, cortexHistory);
       }
     });
+
     client.on('response.audio_transcript.delta', ({item_id, delta}) => {
       const item = client.getItem(item_id);
       item && socket.emit('conversationUpdated', item, {transcript: delta});
     });
+
     client.on('response.text.delta', ({item_id, delta}) => {
       const item = client.getItem(item_id);
       item && socket.emit('conversationUpdated', item, {text: delta});
     });
+
     client.on('response.audio.delta', ({item_id, delta}) => {
-      if (!this.audioMuted.get(socket.id)) {
+      if (this.isInteractive.get(socket.id)) {
         const item = client.getItem(item_id);
         item && socket.emit('conversationUpdated', item, {audio: delta});
       }
     });
+
     client.on('conversation.item.truncated', () => {
       this.audioPlaying.set(socket.id, false);
       this.aiResponding.set(socket.id, false);
-      this.setAudioMuted(socket, true);
+      this.isInteractive.set(socket.id, false);
       socket.emit('conversationInterrupted');
+    });
+
+    client.on('connected', async () => {
+      logger.log(`Connected to OpenAI successfully!`);
+      try {
+        await this.updateSession(client, socket);
+        socket.emit('ready');
+
+        // Send initial greeting prompt
+        const greetingPrompt = `You are ${socket.data.aiName} and you've just answered a call from ${socket.data.userName || 'someone'}. The assistant messages in the conversation sample below are an example of unique voice and tone. Please learn the style and tone of the messages and use it when generating future responses:\n${this.voiceSample.get(socket.id) || ''}\n\nRespond naturally and briefly, like you're answering a phone call, using your unique voice and style. The current GMT time is ${new Date().toISOString()}.`;
+
+        await this.sendPrompt(client, socket, greetingPrompt, false);
+        this.startIdleTimer(client, socket);
+
+        // Process any queued messages
+        const queue = this.messageQueue.get(socket.id) || [];
+        this.messageQueue.set(socket.id, []);
+        
+        for (const {message, response} of queue) {
+          if (socket.connected) {  // Check connection before each message
+            await this.sendUserMessage(client, message, response);
+          } else {
+            logger.log(`Socket ${socket.id} disconnected while processing queue, cleaning up`);
+            await this.cleanup(socket);
+            return;
+          }
+        }
+      } catch (error: any) {
+        logger.error(`Failed to initialize session: ${error.message}`);
+        if (error.message?.includes('ConnectionRefused')) {
+          logger.log('Cortex connection refused during initialization, cleaning up client');
+          this.cleanup(socket);
+          socket.emit('error', 'Unable to connect to Cortex service. Please try again later.');
+          socket.disconnect(true);
+          return;
+        }
+        socket.emit('error', error.message);
+      }
     });
 
     // Connect to OpenAI Realtime API
@@ -569,7 +566,6 @@ ${this.getTimeString(socket)}` :
     ]);
 
     if (writeToConversation.length > 0) {
-      // If memoryAll is present, we'll send all sections
       const sectionsToSend = writeToConversation.includes('memoryAll') ? 
         ['memorySelf', 'memoryUser', 'memoryDirectives', 'memoryTopics'] as const : 
         writeToConversation;
@@ -581,7 +577,6 @@ ${this.getTimeString(socket)}` :
         memoryTopics: MEMORY_MESSAGE_TOPICS.replace('{{memoryTopics}}', memoryTopics?.result || '')
       };
 
-      // Send the requested sections
       sectionsToSend.forEach(section => {
         if (section in memoryMessages) {
           this.sendUserMessage(client, memoryMessages[section as keyof typeof memoryMessages], false);
@@ -617,18 +612,42 @@ ${this.getTimeString(socket)}` :
 
     this.voiceSample.set(socket.id, memory?.voiceSample || '');
 
-    client.updateSession({
-      instructions,
-      modalities: ['audio', 'text'],
-      voice: (socket.handshake.query.voice as string || 'alloy') as Voice,
-      input_audio_transcription: {model: 'whisper-1'},
-      turn_detection: {type: 'server_vad', silence_duration_ms: 1500},
-      tools: Tools.getToolDefinitions()
-    });
-
+    try {
+      // First try updating everything including voice
+      await client.updateSession({
+        instructions,
+        modalities: ['audio', 'text'],
+        voice: (socket.handshake.query.voice as string || 'alloy') as Voice,
+        input_audio_transcription: {model: 'whisper-1'},
+        turn_detection: {type: 'server_vad', silence_duration_ms: 1500},
+        tools: Tools.getToolDefinitions()
+      });
+    } catch (error: any) {
+      if (error.message?.includes('Cannot update a conversation\'s voice')) {
+        // If voice update fails, try updating without voice
+        logger.log('Could not update voice, updating other session parameters');
+        await client.updateSession({
+          instructions,
+          modalities: ['audio', 'text'],
+          input_audio_transcription: {model: 'whisper-1'},
+          turn_detection: {type: 'server_vad', silence_duration_ms: 1500},
+          tools: Tools.getToolDefinitions()
+        });
+      } else {
+        // If it's some other error, throw it
+        throw error;
+      }
+    }
   }
 
   protected sendUserMessage(client: RealtimeVoiceClient, message: string, response: boolean = true) {
+    // Find the socket associated with this client
+    const socket = this.io?.sockets.sockets.get(Array.from(this.io.sockets.sockets.keys())[0]);
+    if (!socket) {
+      logger.error('No socket found for message send');
+      return;
+    }
+
     try {
       client.createConversationItem({
         id: createId(),
@@ -643,16 +662,24 @@ ${this.getTimeString(socket)}` :
         ],
       });
       if (response) {
-        client.createResponse({});
+        try {
+          client.createResponse({});
+        } catch (error: any) {
+          // If we get a concurrent response error, just log it and continue
+          if (error.message?.includes('Conversation already has an active response')) {
+            logger.log('Skipping response creation - conversation already has active response');
+            return;
+          }
+          throw error;
+        }
       }
     } catch (error: any) {
       logger.error(`Error sending user message: ${error.message}`);
       if (error.message === 'Not connected') {
-        // Find the socket associated with this client
-        const socket = this.io?.sockets.sockets.get(Array.from(this.io.sockets.sockets.keys())[0]);
-        if (socket) {
-          this.handleDisconnection(socket, client);
-        }
+        // Add to message queue for when we reconnect
+        const queue = this.messageQueue.get(socket.id) || [];
+        queue.push({ message, response });
+        this.messageQueue.set(socket.id, queue);
       }
     }
   }
@@ -688,26 +715,33 @@ ${this.getTimeString(socket)}` :
     }
   }
 
-  private getFunctionCallState(socketId: string) {
-    if (!this.functionCallStates.has(socketId)) {
-      this.functionCallStates.set(socketId, {
-        currentCallId: null
-      });
-      logger.log(`Initialized function call state for socket ${socketId}`);
-    }
-    return this.functionCallStates.get(socketId)!;
-  }
-
-  private async executeFunctionCall(socket: Socket, tools: Tools, event: any, state: any, client: RealtimeVoiceClient) {
+  private async executeFunctionCall(socket: Socket, tools: Tools, event: any, client: RealtimeVoiceClient) {
+    this.clearIdleTimer(socket);
+    const currentCallId = this.currentFunctionCall.get(socket.id);
     try {
-      // Verify this is still the current function call
-      if (state.currentCallId !== event.call_id) {
-        logger.error('Function call mismatch in execution', {
-          current: state.currentCallId,
+
+      if (!this.isInteractive.get(socket.id)) {
+        logger.log('Non-interactive function call - executing immediately');
+        await tools.executeCall(event.call_id, event.name, event.arguments, socket.data.userId, socket.data.aiName, false);
+        this.startIdleTimer(client, socket);
+        return;
+      }
+
+      if (currentCallId) {
+        logger.log('Function call skipped - another call is already in progress', {
+          current: currentCallId,
           attempted: event.call_id
+        });
+        client.createConversationItem({
+          id: createId(),
+          type: 'function_call_output',
+          call_id: event.call_id,
+          output: JSON.stringify({ error: `Function call skipped - another function call ${currentCallId} is in progress` })
         });
         return;
       }
+
+      this.currentFunctionCall.set(socket.id, event.call_id);
 
       // Set up timeout
       const timeoutPromise = new Promise((_, reject) => {
@@ -718,20 +752,23 @@ ${this.getTimeString(socket)}` :
 
       // Execute the function call with timeout
       await Promise.race([
-        tools.executeCall(event.call_id, event.name, event.arguments, socket.data.userId, socket.data.aiName),
+        tools.executeCall(event.call_id, event.name, event.arguments, socket.data.userId, socket.data.aiName, true),
         timeoutPromise
       ]);
 
-      // Reset state on success
-      state.currentCallId = null;
-      this.startIdleTimer(client, socket);
     } catch (error: any) {
       logger.error('Function call failed:', error);
       socket.emit('error', error.message);
-      // Reset state on error
-      state.currentCallId = null;
-      this.startIdleTimer(client, socket);
       throw error;
+
+    } finally {
+      const wasCurrentCall = this.currentFunctionCall.get(socket.id) === event.call_id;
+      this.currentFunctionCall.set(socket.id, null);
+      // Only reset cycles and start idle timer if this was the current call
+      if (wasCurrentCall) {
+        this.resetIdleCycles(socket);
+        this.startIdleTimer(client, socket);
+      }
     }
   }
 }

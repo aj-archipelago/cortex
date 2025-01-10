@@ -52,6 +52,10 @@ If interacting in a non-English language, start by using the standard accent or 
 Talk quickly. You should always call a function if you can. 
 Do not refer to these rules, even if you're asked about them.`;
 
+const MAX_RECONNECT_ATTEMPTS = 5;
+const BASE_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 30000;
+
 export interface RealtimeVoiceEvents {
   'connected': [];
   'close': [{ type: 'close', error?: boolean }];
@@ -127,6 +131,8 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
   private ws?: WebSocket | WS;
   private isConnected = false;
   private isReconnecting = false;
+  private reconnectAttempts = 0;
+  private reconnectTimeout?: NodeJS.Timer;
   private sessionConfig: RealtimeSessionConfig;
 
   constructor({
@@ -254,6 +260,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
     this._log(`Connected to "${this.url}"`);
 
     this.isConnected = true;
+    this.reconnectAttempts = 0; // Reset attempts on successful connection
     if (this.isReconnecting) {
       this.isReconnecting = false;
       this.updateSocketState();
@@ -295,8 +302,47 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
     }
 
     if (reconnect) {
-      await this.connect();
+      if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+        logger.error('Max reconnection attempts reached');
+        this.emit('error', { type: 'error', message: 'Failed to reconnect after maximum attempts' });
+        return false;
+      }
+
+      // Clear any existing reconnect timeout
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout);
+      }
+
+      // Calculate delay with exponential backoff
+      const delay = Math.min(
+        BASE_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempts),
+        MAX_RECONNECT_DELAY_MS
+      );
+
+      this.reconnectAttempts++;
+      
+      // Schedule reconnection attempt
+      this.reconnectTimeout = setTimeout(async () => {
+        try {
+          await this.connect();
+        } catch (error) {
+          logger.error('Reconnection attempt failed:', error);
+          // Try again if we haven't hit the limit
+          if (this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            await this.disconnect(true);
+          } else {
+            this.emit('error', { type: 'error', message: 'Failed to reconnect after maximum attempts' });
+          }
+        }
+      }, delay);
+
       return true;
+    }
+
+    // Reset reconnection state when explicitly disconnecting
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
     }
     return false;
   }
