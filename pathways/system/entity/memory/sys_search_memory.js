@@ -38,7 +38,6 @@ export default {
 
         let sectionMemory;
         let result = "";
-        const lastMessage = args.chatHistory[args.chatHistory.length - 2];
         if (args.section === "memoryAll") {
             // Search all sections in parallel
             const sections = ["memorySelf", "memoryUser", "memoryDirectives", "memoryTopics"];
@@ -51,7 +50,7 @@ export default {
             result = sections.map((section, i) => 
                 `=== ${section} ===\n${memories[i]}`
             ).join('\n\n');
-            result = `${result}\n\nThe last time you spoke to the user was ${new Date().toISOString()} and you said: ${JSON.stringify(lastMessage)}`;
+            result = `${result}\n\nThe last time you spoke to the user was ${new Date().toISOString()}.`;
 
         } else {
             sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section}); 
