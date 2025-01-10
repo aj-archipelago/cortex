@@ -82,16 +82,35 @@ export default function Chat({
     logger.log('Stopping conversation');
     const wavRecorder = wavRecorderRef.current;
     const wavStreamPlayer = wavStreamPlayerRef.current;
+    const socket = socketRef.current;
 
-    if (wavRecorder.getStatus() === "recording") {
-      await wavRecorder.end();
-      await wavStreamPlayer.interrupt();
-      await SoundEffects.playDisconnect();
-      socketRef.current.emit('conversationCompleted');
-      socketRef.current.removeAllListeners();
-      socketRef.current.disconnect();
+    try {
+      // First stop recording and audio playback
+      if (wavRecorder.getStatus() === "recording") {
+        await wavRecorder.end();
+      }
+      if (wavStreamPlayer) {
+        await wavStreamPlayer.interrupt();
+      }
 
-      // Clean up audio nodes
+      // Clean up socket connection first
+      if (socket) {
+        // Only emit if we're still connected
+        if (socket.connected) {
+          socket.emit('conversationCompleted');
+          // Wait a bit to ensure the message is sent
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        socket.removeAllListeners();
+        socket.disconnect();
+        // Create a new socket instance to ensure clean state
+        socketRef.current = io(`/?userId=${userId}&userName=${userName}&aiName=${aiName}&voice=${voice}&aiStyle=${aiStyle}&language=${language}`, {
+          autoConnect: false,
+          reconnection: false
+        });
+      }
+
+      // Then clean up audio nodes
       if (sourceNodeRef.current) {
         sourceNodeRef.current.disconnect();
         sourceNodeRef.current = null;
@@ -109,15 +128,36 @@ export default function Chat({
       wavRecorderRef.current = new WavRecorder({sampleRate: 24000});
       wavStreamPlayerRef.current = new WavStreamPlayer({sampleRate: 24000});
 
+      // Play disconnect sound last
+      await SoundEffects.playDisconnect();
+
+      // Reset state
       setIsRecording(false);
-      setIsMuted(false);  // Reset mute state
-      setImageUrls([]); // Clear images on disconnect
+      setIsMuted(false);
+      setImageUrls([]);
+      setIsAudioPlaying(false);
+    } catch (error) {
+      logger.error('Error stopping conversation:', error);
+      // Even if there's an error, try to reset critical state
+      setIsRecording(false);
+      setIsAudioPlaying(false);
     }
-  }, []);
+  }, [userId, userName, aiName, voice, aiStyle, language]);
 
   const startConversation = useCallback(() => {
     logger.log('Starting conversation');
     
+    // Clean up any existing socket connection first
+    if (socketRef.current?.connected) {
+      socketRef.current.disconnect();
+    }
+    
+    // Create a new socket instance
+    socketRef.current = io(`/?userId=${userId}&userName=${userName}&aiName=${aiName}&voice=${voice}&aiStyle=${aiStyle}&language=${language}`, {
+      autoConnect: false,
+      timeout: 10000 // 10 second connection timeout
+    });
+
     const socket = socketRef.current;
 
     // Remove ALL existing listeners before adding new ones

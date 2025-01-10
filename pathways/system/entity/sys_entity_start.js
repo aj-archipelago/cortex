@@ -79,24 +79,23 @@ export default {
             args.chatHistory = args.chatHistory.slice(-20);
         }
 
-        const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0 });
-        if (memoryContext) {
-            args.chatHistory.splice(-1, 0, { role: 'assistant', content: memoryContext });
-        }
-
         const pathwayResolver = resolver;
         const { anthropicModel, openAIModel } = pathwayResolver.pathway;
-
         const styleModel = args.aiStyle === "Anthropic" ? anthropicModel : openAIModel;
 
         // if the model has been overridden, make sure to use it
         if (pathwayResolver.modelName) {
             args.model = pathwayResolver.modelName;
         }
+
+        const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
+        if (memoryContext) {
+            args.chatHistory.splice(-1, 0, { role: 'assistant', content: memoryContext });
+        }
         
         let ackResponse = null;
         if (args.voiceResponse) {
-            ackResponse = await callPathway('sys_generator_ack', { ...args, stream: false }, pathwayResolver);
+            ackResponse = await callPathway('sys_generator_ack', { ...args, stream: false });
             if (ackResponse && ackResponse !== "none") {
                 await say(pathwayResolver.requestId, ackResponse, 100);
                 args.chatHistory.push({ role: 'assistant', content: ackResponse });
