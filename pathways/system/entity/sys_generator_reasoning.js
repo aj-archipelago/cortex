@@ -15,7 +15,7 @@ export default {
         aiName: "Jarvis",
         language: "English",
     },
-    model: 'oai-o1-mini',
+    model: 'oai-o1',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,

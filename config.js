@@ -171,6 +171,21 @@ var config = convict({
                 "maxReturnTokens": 4096,
                 "supportsStreaming": true
             },
+            "oai-o1": {
+                "type": "OPENAI-REASONING",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "o1"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 200000,
+                "maxReturnTokens": 100000,
+                "supportsStreaming": false
+            },
             "oai-o1-mini": {
                 "type": "OPENAI-REASONING",
                 "url": "https://api.openai.com/v1/chat/completions",
