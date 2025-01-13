@@ -22,6 +22,7 @@ export interface ClientToServerEvents {
   cancelResponse: () => void;
   conversationCompleted: () => void;
   audioPlaybackComplete: (trackId: string) => void;
-  screenshotCaptured: (imageData: string) => void;
   screenshotError: (error: string) => void;
+  screenshotChunk: (chunk: string, index: number) => void;
+  screenshotComplete: (totalChunks: number) => void;
 }

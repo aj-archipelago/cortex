@@ -3,6 +3,10 @@ import { Socket } from 'socket.io-client';
 import { ClientToServerEvents, ServerToClientEvents } from '../../../../src/realtime/socket';
 import { logger } from '../../utils/logger';
 
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB limit
+const MAX_DIMENSION = 3840; // Max width/height
+const COMPRESSION_QUALITY = 0.9; // Image quality (0.0 to 1.0)
+
 type ScreenshotCaptureProps = {
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
 };
@@ -57,21 +61,49 @@ export const ScreenshotCapture = ({ socket }: ScreenshotCaptureProps) => {
       };
     });
     
-    // Create canvas and draw video frame
+    // Create canvas and calculate dimensions
+    let width = video.videoWidth;
+    let height = video.videoHeight;
+    
+    // Scale down if dimensions exceed maximum
+    if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+      const aspectRatio = width / height;
+      if (width > height) {
+        width = MAX_DIMENSION;
+        height = Math.round(width / aspectRatio);
+      } else {
+        height = MAX_DIMENSION;
+        width = Math.round(height * aspectRatio);
+      }
+    }
+    
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d');
     
     if (!ctx) {
       throw new Error('Could not get canvas context');
     }
     
-    // Draw the video frame
-    ctx.drawImage(video, 0, 0);
+    // Draw the video frame with scaling if needed
+    ctx.drawImage(video, 0, 0, width, height);
     
-    // Convert to base64
-    const imageData = canvas.toDataURL('image/png');
+    // Try different compression levels if needed
+    let imageData = canvas.toDataURL('image/jpeg', COMPRESSION_QUALITY);
+    let attempts = 3;
+    let currentQuality = COMPRESSION_QUALITY;
+    
+    while (imageData.length > MAX_IMAGE_SIZE && attempts > 0) {
+      currentQuality *= 0.8; // Reduce quality by 20% each attempt
+      imageData = canvas.toDataURL('image/jpeg', currentQuality);
+      attempts--;
+      logger.log(`Compressing image, attempt ${3 - attempts}, size: ${Math.round(imageData.length / 1024)}KB`);
+    }
+    
+    if (imageData.length > MAX_IMAGE_SIZE) {
+      throw new Error('Screenshot too large even after compression');
+    }
     
     // Clean up
     video.remove();
@@ -88,8 +120,24 @@ export const ScreenshotCapture = ({ socket }: ScreenshotCaptureProps) => {
       // Capture frame from stream
       const imageData = await captureFrame(stream);
       
-      logger.log('Sending screenshot data to server...');
-      socket.emit('screenshotCaptured', imageData);
+      logger.log(`Screenshot captured (size: ${Math.round(imageData.length / 1024)}KB)...`);
+      
+      // Split into ~500KB chunks
+      const CHUNK_SIZE = 500 * 1024;
+      const chunks: string[] = [];
+      
+      for (let i = 0; i < imageData.length; i += CHUNK_SIZE) {
+        chunks.push(imageData.slice(i, i + CHUNK_SIZE));
+      }
+      
+      // Send chunks
+      chunks.forEach((chunk, index) => {
+        logger.log(`Sending chunk ${index + 1}/${chunks.length}`);
+        socket.emit('screenshotChunk', chunk, index);
+      });
+      
+      // Signal completion
+      socket.emit('screenshotComplete', chunks.length);
       
     } catch (error) {
       logger.error('Error handling screenshot request:', error);

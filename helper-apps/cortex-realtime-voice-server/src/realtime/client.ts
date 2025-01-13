@@ -130,7 +130,6 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
   private readonly transcription: Transcription = new Transcription();
   private ws?: WebSocket | WS;
   private isConnected = false;
-  private isReconnecting = false;
   private reconnectAttempts = 0;
   private reconnectTimeout?: NodeJS.Timer;
   private sessionConfig: RealtimeSessionConfig;
@@ -258,15 +257,15 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
 
   onOpen() {
     this._log(`Connected to "${this.url}"`);
-
     this.isConnected = true;
-    this.reconnectAttempts = 0; // Reset attempts on successful connection
-    if (this.isReconnecting) {
-      this.isReconnecting = false;
+    
+    // If reconnectAttempts > 0, this is a reconnection
+    if (this.reconnectAttempts > 0) {
       this.updateSocketState();
     } else {
       this.emit('connected');
     }
+    this.reconnectAttempts = 0; // Reset attempts on successful connection
   }
 
   onMessage(event: MessageEvent<any> | WS_MessageEvent) {
@@ -278,23 +277,20 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
 
   async onError() {
     this._log(`Error, disconnected from "${this.url}"`);
-
     if (!await this.disconnect(this.autoReconnect)) {
       this.emit('close', { type: 'close', error: true });
     }
   }
 
   async onCloseWithReconnect() {
-    this._log(`Disconnected from "${this.url}", reconnect: ${this.autoReconnect}, isReconnecting: ${this.isReconnecting}`);
-
-    if (!await this.disconnect(this.autoReconnect && this.isReconnecting)) {
+    this._log(`Disconnected from "${this.url}", reconnect: ${this.autoReconnect}`);
+    if (!await this.disconnect(this.autoReconnect)) {
       this.emit('close', { type: 'close', error: false });
     }
   }
 
   async disconnect(reconnect: boolean = false): Promise<boolean> {
     logger.log('Disconnect called:', this.isConnected, reconnect);
-    this.isReconnecting = reconnect;
     if (this.isConnected) {
       this.isConnected = false;
       this.ws?.close();
@@ -541,5 +537,9 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
       }
     });
     logger.log(...logs);
+  }
+
+  public canReconnect(): boolean {
+    return this.autoReconnect && this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS;
   }
 }
