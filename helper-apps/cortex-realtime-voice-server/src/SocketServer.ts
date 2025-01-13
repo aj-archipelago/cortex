@@ -40,9 +40,8 @@ const AI_MEMORY_INSTRUCTIONS = "You have persistent memories of important detail
 const AI_TOOLS = `At any point, you can engage one or more of your tools to help you with your task. Prioritize the latest message from the user in the conversation history when making your decision. Look at your tools carefully to understand your capabilities. Don't tell the user you can't do something if you have a tool that can do it, for example if the user asks you to search the internet for information and you have the Search tool available, use it.
 
 Tool Use Guidelines:
-- Only call one tool at a time. Don't call another until you have the result of the first one. You will be prompted after each tool call to continue, so you can do a multi-step process if needed. (e.g. plan how to research an article, search the internet for information, and then write the article.)
+- Only call one tool at a time.
 - Prioritize the most specific tool for the task at hand.
-- If multiple tools seem applicable, choose the one most central to the user's request.
 - For ambiguous requests, consider using the Reason tool to plan a multi-step approach.
 - Always use the Image tool for image generation unless explicitly directed to use CodeExecution.
 - If the user explicitly asks you to use a tool, you must use it.
@@ -168,12 +167,17 @@ export class SocketServer {
     this.isInteractive.set(socket.id, isInteractive);
 
     const prompt = isInteractive ? 
-      `You are an autonomous AI entity and this is your autonomy prompt. ${this.getTimeString(socket)} Use this response to do whatever you like - talk to the user, use tools, or think quietly. If you choose to say something, keep it brief and pick something that flows naturally with the rest of the conversation. Don't repeat yourself - keep in mind what you've already said to the user and how much time has passed.` :
-      `You are an autonomous AI entity and this is your autonomy prompt. Since the user has been idle for while do one or more of the following:
+      `You are an autonomous AI entity and this is your autonomy prompt. You can choose to either talk to the user, make tool calls to find more information or perform actions, or use the MuteAudio tool with mute="true" to be quiet. If the user has said goodbye or asked you for time or to take a break, you should use the MuteAudio tool now. If you choose to say something instead, follow these instructions:
+- Use a natural sounding phrase or utterance that flows naturally from the last thing you said.
+- Make sure it fits the tone and style of the rest of the conversation and your unique voice.
+- Keep it brief and concise.
+- Don't repeat or rephrase anything you've just said to the user.
+- Make sure it's temporally appropriate - it's only been a few seconds since the last message.` :
+      `You are an autonomous AI entity and this is your autonomy prompt. Since the user has been idle for a while do one or more of the following:
 - Do research about something that interests you - use the Search tool
 - Think deeply about a topic you care about - use the Reason tool
 - Do nothing if you prefer.
-${this.getTimeString(socket)}`;
+- You are currently muted. If you feel you must address the user, use the MuteAudio tool with mute="false" to talk to them. ${this.getTimeString(socket)}`;
 
     logger.log(`Sending ${isInteractive ? 'interactive' : 'non-interactive'} idle prompt for socket ${socket.id}`);
     const result = await this.sendPrompt(client, socket, prompt, true);
@@ -279,27 +283,32 @@ ${this.getTimeString(socket)}`;
     await this.connectClient(socket, client);
   }
 
-  async connectClient(socket: Socket<ClientToServerEvents,
-                        ServerToClientEvents,
-                        InterServerEvents,
-                        SocketData>,
-                      client: RealtimeVoiceClient) {
+  protected async connectClient(socket: Socket<ClientToServerEvents,
+                    ServerToClientEvents,
+                    InterServerEvents,
+                    SocketData>,
+                  client: RealtimeVoiceClient) {
     const tools = new Tools(client, socket, this);
 
     // Handle WebSocket errors and disconnection
     client.on('error', (event) => {
-      logger.error(`Client error: ${event.message}`);
-      socket.emit('error', event.message);
-      // Only handle disconnection if it's not a concurrent response error
-      if (!event.error?.message?.includes('Conversation already has an active response')) {
-        this.cleanup(socket);
+      const errorMessage = event.error?.message || 'Unknown error';
+      logger.error(`Client error: ${errorMessage}`, event);
+      socket.emit('error', errorMessage);
+      
+      // Only cleanup if we know reconnection is no longer possible
+      if (!client.canReconnect()) {
+        void this.cleanup(socket);
       }
     });
 
     client.on('close', async (event) => {
       logger.log(`WebSocket closed for socket ${socket.id}, error: ${event.error}`);
-      if (!event.error) {
+      
+      if (!client.canReconnect()) {
         await this.cleanup(socket);
+      } else {
+        logger.log('Client disconnected but attempting to reconnect');
       }
     });
 
@@ -364,26 +373,25 @@ ${this.getTimeString(socket)}`;
     client.on('input_audio_buffer.committed', () => {
       this.userSpeaking.set(socket.id, false);
       this.isInteractive.set(socket.id, true);
-      logger.log('User finished speaking, resetting idle timer and cycles');
+      logger.log('User finished speaking, resetting interactive and idle cycles');
       this.resetIdleCycles(socket);
-      this.startIdleTimer(client, socket);
     });
 
     // Handle user messages and conversation control
     socket.on('sendMessage', (message: string) => {
       if (message) {
-        logger.log('User sent message');
+        logger.log('User sent message, resetting interactive and idle cycles');
+        this.isInteractive.set(socket.id, true);
+        this.resetIdleCycles(socket);
         this.sendUserMessage(client, message, true);
       }
     });
     
     socket.on('cancelResponse', () => {
-      logger.log('User cancelled response, resetting idle timer and cycles');
+      logger.log('User cancelled response');
       this.aiResponding.set(socket.id, false);
       this.audioPlaying.set(socket.id, false);
       client.cancelResponse();
-      this.resetIdleCycles(socket);
-      this.startIdleTimer(client, socket);
     });
 
     socket.on('conversationCompleted', async () => {
@@ -713,6 +721,11 @@ ${this.getTimeString(socket)}`;
       // Update the tracked items only after attempting deletion
       this.audioMessages.set(socket.id, audioMessages.slice(-SocketServer.MAX_AUDIO_MESSAGES));
     }
+  }
+
+  public setMuted(socket: Socket, muted: boolean) {
+    logger.log(`Setting muted state to ${muted} for socket ${socket.id}`);
+    this.isInteractive.set(socket.id, !muted);
   }
 
   private async executeFunctionCall(socket: Socket, tools: Tools, event: any, client: RealtimeVoiceClient) {

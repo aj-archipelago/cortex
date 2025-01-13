@@ -132,11 +132,10 @@ export class Tools {
           required: ["detailedInstructions"]
         },
       },
-      /*
       {
         type: 'function',
         name: 'MuteAudio',
-        description: 'Use this tool to enable or disable audio output (your voice) to the user. If you want to be quiet or the user has asked you to be quiet, use this tool with the argument mute="true". If you are muted and want to talk, use this tool with the argument mute="false".',
+        description: 'Use this tool to enable or disable audio output (your voice) to the user. If you want to be quiet or the user has asked you to be quiet, use this tool with the argument mute="true". If you are muted and absolutely need to talk, use this tool with the argument mute="false".',
         parameters: {
           type: "object",
           properties: {
@@ -145,7 +144,6 @@ export class Tools {
           required: ["mute"]
         },
       },
-      */
       {
         type: 'function',
         name: 'Screenshot',
@@ -267,6 +265,11 @@ export class Tools {
         promptOnCompletion = true;
         promptOnIdle = false;
         break;
+      case 'muteaudio':
+        isSilent = true;
+        promptOnCompletion = false;
+        promptOnIdle = false;
+        break;
     }
 
     // Skip initial message if silent
@@ -298,7 +301,7 @@ export class Tools {
             name === 'Search' ? ['aje', 'aja', 'bing', 'wires', 'mydata'] : ['mydata'],
             JSON.stringify({query: args})
           );
-          finishPrompt += ' by reading the output of the tool to the user verbatim - make sure to read it in your signature voice and style'
+          finishPrompt += ' by reading the output of the tool to the user verbatim - make sure to read it in your signature voice and style and ensure the emotion in your voice is appropriate for the content'
           break;
 
         case 'memorylookup':
@@ -308,6 +311,15 @@ export class Tools {
             cortexHistory,
             MemorySection.memoryAll
           );
+          break;
+
+        case 'muteaudio':
+          const parsedMuteArgs = JSON.parse(args);
+          this.socketServer.setMuted(this.socket, parsedMuteArgs.mute);
+          response = { result: `Audio ${parsedMuteArgs.mute ? 'muted' : 'unmuted'} successfully` };
+          if (!parsedMuteArgs.mute) {
+            finishPrompt = 'You have used the MuteAudio tool to unmute yourself and address the user. You may now respond to the user via audio. The user may have been idle for some time. So you might want to start with "you there?" or something similarly fitting.';
+          }
           break;
 
         case 'write':
@@ -322,7 +334,7 @@ export class Tools {
           break;
 
         case 'image':
-          finishPrompt = 'You have finished using the Image tool to help with the user\'s request. The image is being shown to the user right now. Please respond to the user via audio';
+          finishPrompt = 'You have finished using the Image tool to help with the user\'s request. The image is being shown to the user right now. Please respond to the user via audio. Don\'t include the image URL in your response as it\'s already being shown to the user in your interface';
 
           response = await image(
             contextId,
@@ -384,9 +396,38 @@ export class Tools {
           
           // Create a Promise that will resolve when we get the screenshot
           const screenshotPromise = new Promise((resolve, reject) => {
-            // Set up one-time listeners for the screenshot events
-            this.socket.once('screenshotCaptured', async (imageData: string) => {
+            let imageChunks: string[] = [];
+            let timeoutId: NodeJS.Timer;
+
+            const resetTimeout = () => {
+              if (timeoutId) clearTimeout(timeoutId);
+              timeoutId = setTimeout(() => {
+                cleanup();
+                reject(new Error('Screenshot capture timed out'));
+              }, 30000); // 30 second timeout
+            };
+
+            const cleanup = () => {
+              this.socket.off('screenshotError', handleError);
+              this.socket.off('screenshotChunk', handleChunk);
+              this.socket.off('screenshotComplete', handleComplete);
+              if (timeoutId) clearTimeout(timeoutId);
+            };
+
+            const handleChunk = (chunk: string, index: number) => {
+              resetTimeout();
+              imageChunks[index] = chunk;
+              logger.log(`Received screenshot chunk ${index}`);
+            };
+
+            const handleComplete = async (totalChunks: number) => {
               try {
+                resetTimeout();
+                if (imageChunks.length !== totalChunks) {
+                  throw new Error(`Missing chunks: expected ${totalChunks}, got ${imageChunks.length}`);
+                }
+                const completeImage = imageChunks.join('');
+                
                 // Add the screenshot to the cortex history as a user message with image
                 const imageMessage: MultiMessage = {
                   role: 'user',
@@ -398,7 +439,7 @@ export class Tools {
                     JSON.stringify({
                       type: 'image_url',
                       image_url: {
-                        url: imageData
+                        url: completeImage
                       }
                     })
                   ]
@@ -416,16 +457,27 @@ export class Tools {
                   JSON.stringify({query: parsedScreenshotArgs.lastUserMessage})
                 );
                 
+                cleanup();
                 resolve(visionResponse);
               } catch (error) {
+                cleanup();
                 reject(error);
               }
-            });
-            
-            this.socket.once('screenshotError', (error: string) => {
+            };
+
+            const handleError = (error: string) => {
+              cleanup();
               reject(new Error(error));
-            });
-            
+            };
+
+            // Set up event listeners
+            this.socket.on('screenshotError', handleError);
+            this.socket.on('screenshotChunk', handleChunk);
+            this.socket.on('screenshotComplete', handleComplete);
+
+            // Start timeout
+            resetTimeout();
+
             // Request the screenshot
             logger.log('Requesting screenshot');
             this.socket.emit('requestScreenshot');
@@ -433,7 +485,6 @@ export class Tools {
           
           // Wait for the screenshot and analysis
           response = await screenshotPromise;
-          finishPrompt += ' by reading the output of the tool to the user verbatim - make sure to read it in your signature voice and style'
           break;
 
         default:
