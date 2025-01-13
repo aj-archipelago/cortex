@@ -49,8 +49,17 @@ class OpenAIReasoningPlugin extends OpenAIChatPlugin {
         requestParameters.max_completion_tokens = maxTokens ? Math.min(maxTokens, modelMaxReturnTokens) : modelMaxReturnTokens;
         requestParameters.temperature = 1;
 
-        if (this.promptParameters.json) {
-            //requestParameters.response_format = { type: "json_object", }
+        if (this.promptParameters.reasoningEffort) {
+            const effort = this.promptParameters.reasoningEffort.toLowerCase();
+            if (['high', 'medium', 'low'].includes(effort)) {
+                requestParameters.reasoning_effort = effort;
+            } else {
+                requestParameters.reasoning_effort = 'low';
+            }
+        }
+        
+        if (this.promptParameters.responseFormat) {
+            requestParameters.response_format = this.promptParameters.responseFormat;
         }
 
         return requestParameters;
