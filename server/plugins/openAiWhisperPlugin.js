@@ -64,7 +64,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         }
 
         const processTS = async (uri) => {
-            const cortexRequest = new CortexRequest({ pathwayResolver });
 
             const tsparams = { fileurl:uri };
             const { language } = parameters;
@@ -81,8 +80,14 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
             }
 
+            const cortexRequest = new CortexRequest({ pathwayResolver });
             cortexRequest.url = WHISPER_TS_API_URL;
             cortexRequest.data = tsparams;
+            const whisperInitCallback = (requestInstance) => {
+                requestInstance.url = WHISPER_TS_API_URL;
+                requestInstance.data = tsparams;
+            };
+            cortexRequest.initCallback = whisperInitCallback;
 
             const MAX_RETRIES = 3;
             let attempt = 0;
@@ -92,7 +97,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 try {
                     res = await this.executeRequest(cortexRequest);
                     if(res.statusCode && res.statusCode >= 400){
-                        throw new Error(res.message || 'An error occurred.');
+                        throw new Error(res?.message || 'An error occurred.');
                     }
                     break;
                 }
@@ -102,7 +107,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
             }
 
-            if (res.statusCode && res.statusCode >= 400) {
+            if (res?.statusCode && res?.statusCode >= 400) {
                 throw new Error(res.message || 'An error occurred.');
             }
 
