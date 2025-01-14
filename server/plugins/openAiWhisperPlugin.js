@@ -96,7 +96,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 sendProgress(true, true);
                 try {
                     res = await this.executeRequest(cortexRequest);
-                    if(res.statusCode && res.statusCode >= 400){
+                    if(res?.statusCode && res?.statusCode >= 400){
                         throw new Error(res?.message || 'An error occurred.');
                     }
                     break;
