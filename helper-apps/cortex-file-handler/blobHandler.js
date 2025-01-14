@@ -87,7 +87,7 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
 const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 
 
-async function gcsUrlExists(url, defaultReturn = true) {
+async function gcsUrlExists(url, defaultReturn = false) {
     try {
         if(!url) {
             return defaultReturn; // Cannot check return
@@ -241,21 +241,21 @@ async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, 
 }
 
 async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename, resolve, hash=null) {
-  // do not use Google if the file is not an image or video
+  // Validate if we can use Google based on file type
   const ext = path.extname(filename).toLowerCase();
   const canUseGoogle = IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext);
-  if (!canUseGoogle) {
-    useGoogle = false;
-  }
-
-  // check if useGoogle is set but no gcs and warn
-  if (useGoogle && useGoogle !== "false" && !gcs) {
-    context.log.warn("Google Cloud Storage is not initialized reverting google upload ");
-    useGoogle = false;
+  
+  // Enforce Google requirement if specified and supported
+  if (useGoogle && useGoogle !== "false") {
+    if (!canUseGoogle) {
+      throw new Error(`File type ${ext} not supported for Google Cloud Storage`);
+    }
+    if (!gcs) {
+      throw new Error('Google Cloud Storage is not initialized');
+    }
   }
 
   const encodedFilename = encodeURIComponent(`${requestId || uuidv4()}_${filename}`);
-
 
   if (saveToLocal) {
     // create the target folder if it doesn't exist
@@ -303,38 +303,33 @@ async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file
   };
 
   if (useGoogle && useGoogle !== "false") {
-    const { url } = body;
-    const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
-    const writeStream = gcsFile.createWriteStream();
-    
-    const response = await axios({
-      method: "get",
-      url: url,
-      responseType: "stream",
-    });
-    
-    // // Get the total file size from the response headers
-    // const totalSize = Number(response.headers["content-length"]);
-    // let downloadedSize = 0;
-    
-    // // Listen to the 'data' event to track the progress
-    // response.data.on("data", (chunk) => {
-    //   downloadedSize += chunk.length;
-    
-    //   // Calculate and display the progress
-    //   const progress = (downloadedSize / totalSize) * 100;
-    //   console.log(`Progress gsc of ${encodedFilename}: ${progress.toFixed(2)}%`);
-    // });
-    
-    // Pipe the Axios response stream directly into the GCS Write Stream
-    response.data.pipe(writeStream);
-    
-    await new Promise((resolve, reject) => {
-      writeStream.on("finish", resolve);
-      writeStream.on("error", reject);
-    });
+    try {
+      const { url } = body;
+      const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
+      const writeStream = gcsFile.createWriteStream();
+      
+      const response = await axios({
+        method: "get",
+        url: url,
+        responseType: "stream",
+      });
+      
+      // Upload to GCS
+      response.data.pipe(writeStream);
+      
+      await new Promise((resolve, reject) => {
+        writeStream.on("finish", resolve);
+        writeStream.on("error", reject);
+      });
 
-    body.gcs = `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
+      body.gcs = `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
+    } catch (error) {
+      // Clean up Azure/local upload if GCS fails
+      if (body.url) {
+        await cleanup([body.url]);
+      }
+      throw new Error(`Failed to upload to Google Cloud Storage: ${error.message}`);
+    }
   }
   
   if(!body.filename) {
@@ -343,7 +338,13 @@ async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file
   if(hash && !body.hash) {
     body.hash = hash;
   }
-  resolve(body); // Resolve the promise
+
+  // Validate required fields before resolving
+  if (useGoogle && useGoogle !== "false" && !body.gcs) {
+    throw new Error('Missing GCS URL in response');
+  }
+
+  resolve(body);
 }
 
 // Function to delete files that haven't been used in more than a month
@@ -432,4 +433,35 @@ async function cleanupGCS(urls=null) {
   return cleanedURLs;
 }
 
-export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists };
+// New helper function to ensure GCS upload for existing files
+async function ensureGCSUpload(existingFile, filename) {
+  if (!existingFile.gcs) {
+    const ext = path.extname(filename).toLowerCase();
+    const canUseGoogle = IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext);
+    
+    if (canUseGoogle && gcs) {
+      // Upload existing file to GCS
+      const encodedFilename = path.basename(existingFile.url.split('?')[0]);
+      const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
+      const writeStream = gcsFile.createWriteStream();
+      
+      const response = await axios({
+        method: "get",
+        url: existingFile.url,
+        responseType: "stream",
+      });
+      
+      response.data.pipe(writeStream);
+      
+      await new Promise((resolve, reject) => {
+        writeStream.on("finish", resolve);
+        writeStream.on("error", reject);
+      });
+
+      existingFile.gcs = `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
+    }
+  }
+  return existingFile;
+}
+
+export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload };

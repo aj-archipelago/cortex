@@ -1,4 +1,4 @@
-import pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist';
 import fs from 'fs/promises';
 import mammoth from 'mammoth';
 import XLSX from 'xlsx';

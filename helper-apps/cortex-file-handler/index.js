@@ -1,5 +1,5 @@
 import { downloadFile, processYoutubeUrl, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists } from './blobHandler.js';
+import { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload } from './blobHandler.js';
 import { cleanupRedisFileStoreMap, getFileStoreMap, publishRequestProgress, removeFromFileStoreMap, setFileStoreMap } from './redis.js';
 import { deleteTempPath, ensureEncoded, isValidYoutubeUrl } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
@@ -86,14 +86,15 @@ async function urlExists(url) {
   const httpModule = url.startsWith('https') ? https : http;
   
   return new Promise((resolve) => {
-    httpModule
-      .get(url, function (response) {
-        // Check if the response status is OK
-        resolve(response.statusCode === 200);
-      })
-      .on('error', function () {
-        resolve(false);
-      });
+    const request = httpModule.request(url, { method: 'HEAD' }, function(response) {
+      resolve(response.statusCode === 200);
+    });
+    
+    request.on('error', function() {
+      resolve(false);
+    });
+    
+    request.end();
   });
 }
 
@@ -126,11 +127,11 @@ async function main(context, req) {
     if (req.method.toLowerCase() === `get` && filepond) {
         context.log(`Remote file: ${filepond}`);
         // Check if file already exists (using hash as the key)
-        const exists = await getFileStoreMap(filepond);
+        let exists = await getFileStoreMap(filepond);
         if(exists){
             context.res = {
                 status: 200,
-                body: exists // existing file URL
+                body: exists
             };
             return;
         }
@@ -182,19 +183,24 @@ async function main(context, req) {
     }
 
     if(hash && checkHash){ //check if hash exists
-        context.log(`Checking hash: ${hash}`);
-        const result = await getFileStoreMap(hash);
+        let result = await getFileStoreMap(hash);
 
         if(result){
+            context.log(`File exists in map: ${hash}`);
             const exists = await urlExists(result?.url);
-            const gcsExists = await gcsUrlExists(result?.gcs);
 
-            if(!exists || !gcsExists){
+            if(!exists){
+                context.log(`File is not in storage. Removing from map: ${hash}`);
                 await removeFromFileStoreMap(hash);
                 return;
             }
 
-            context.log(`Hash exists: ${hash}`);
+            const gcsExists = await gcsUrlExists(result?.gcs);
+            if(!gcsExists){
+                context.log(`GCS file may be missing. Correcting if needed: ${hash}`);
+                result = await ensureGCSUpload(result, result.filename);
+            }
+
             //update redis timestamp with current time
             await setFileStoreMap(hash, result);
         }
@@ -208,7 +214,8 @@ async function main(context, req) {
         const { useGoogle } = req.body?.params || req.query;
         const { url } = await uploadBlob(context, req, !useAzure, useGoogle, null, hash);
         context.log(`File url: ${url}`);
-        if(hash && context?.res?.body){ //save hash after upload
+        if(hash && context?.res?.body){ 
+            //save hash after upload
             await setFileStoreMap(hash, context.res.body);
         }
         return
