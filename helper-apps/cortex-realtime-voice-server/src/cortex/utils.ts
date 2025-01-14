@@ -75,21 +75,35 @@ export async function getCortexResponse(
     variables
   }
   logger.log(`Cortex URL: ${getCortexUrl()}`);
-  // logger.log(`Cortex Body: ${truncateBody(body)}`);
-  // logger.log(`Cortex Headers: ${JSON.stringify(headers)}`);
-  const res = await fetch(getCortexUrl(), {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  try {
+    const res = await fetch(getCortexUrl(), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
 
-  if (!res.ok) {
-    logger.error('Failed to fetch data:', res);
-    throw new Error('Failed to fetch data')
+    if (!res.ok) {
+      logger.error('Failed to fetch data:', res);
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        throw new Error('ConnectionRefused: Unable to connect to Cortex service');
+      }
+      throw new Error(`Failed to fetch data: ${res.status}`);
+    }
+
+    const responseObject = await res.json();
+    // Debug logging can be enabled/disabled via logger's environment control
+    logger.debug('cortex response', responseObject);
+    if (!responseObject.data) {
+      throw new Error('Invalid response from Cortex service');
+    }
+    return responseObject.data;
+  } catch (error: any) {
+    logger.error(`Cortex request failed: ${error.message}`);
+    // For connection issues, throw the error to be handled by the caller
+    if (error.message?.includes('ConnectionRefused') || error.message?.includes('Unable to connect')) {
+      throw new Error('ConnectionRefused: Unable to connect to Cortex service');
+    }
+    // For other errors, throw a generic error
+    throw new Error(`Cortex request failed: ${error.message}`);
   }
-
-  const responseObject = await res.json();
-  // Debug logging can be enabled/disabled via logger's environment control
-  logger.debug('cortex response', responseObject);
-  return responseObject.data;
 }

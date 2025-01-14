@@ -2,9 +2,7 @@ import OpenAIVisionPlugin from "./openAiVisionPlugin.js";
 import logger from "../../lib/logger.js";
 import axios from 'axios';
 
-const allowedMIMETypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-
-async function convertContentItem(item, maxImageSize) {
+async function convertContentItem(item, maxImageSize, plugin) {
   let imageUrl = "";
 
   try {
@@ -26,6 +24,12 @@ async function convertContentItem(item, maxImageSize) {
             }
 
             try {
+              // First validate the image URL
+              if (!await plugin.validateImageUrl(imageUrl)) {
+                return null;
+              }
+
+              // Then fetch and convert to base64 if needed
               const urlData = imageUrl.startsWith("data:") ? imageUrl : await fetchImageAsDataURL(imageUrl);
               if (!urlData) { return null; }
               
@@ -69,25 +73,14 @@ async function convertContentItem(item, maxImageSize) {
 // Fetch image and convert to base 64 data URL
 async function fetchImageAsDataURL(imageUrl) {
   try {
-    // First check headers
-    const headResponse = await axios.head(imageUrl, {
-      timeout: 30000, // 30 second timeout
-      maxRedirects: 5
-    });
-
-    const contentType = headResponse.headers['content-type'];
-    if (!contentType || !allowedMIMETypes.includes(contentType)) {
-      logger.warn(`Unsupported image type: ${contentType} - skipping image content.`);
-      return null;
-    }
-
-    // Then get the actual image data
+    // Get the actual image data
     const dataResponse = await axios.get(imageUrl, {
       timeout: 30000,
       responseType: 'arraybuffer',
       maxRedirects: 5
     });
 
+    const contentType = dataResponse.headers['content-type'];
     const base64Image = Buffer.from(dataResponse.data).toString('base64');
     return `data:${contentType};base64,${base64Image}`;
   }
@@ -161,7 +154,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     const claude3Messages = await Promise.all(
       finalMessages.map(async (message) => {
         const contentArray = Array.isArray(message.content) ? message.content : [message.content];
-        const claude3Content = await Promise.all(contentArray.map(item => convertContentItem(item, this.getModelMaxImageSize())));
+        const claude3Content = await Promise.all(contentArray.map(item => convertContentItem(item, this.getModelMaxImageSize(), this)));
         return {
           role: message.role,
           content: claude3Content.filter(Boolean),

@@ -50,7 +50,7 @@ export default {
             result = sections.map((section, i) => 
                 `=== ${section} ===\n${memories[i]}`
             ).join('\n\n');
-            result = `${result}\n\nThe last time you spoke to the user was ${new Date().toISOString()}`;
+            result = `${result}\n\nThe last time you spoke to the user was ${new Date().toISOString()}.`;
 
         } else {
             sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section}); 

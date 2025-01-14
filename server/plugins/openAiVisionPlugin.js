@@ -17,14 +17,14 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         this.isMultiModal = true;
     }
     
-    tryParseMessages(messages) {
-        return messages.map(message => {
+    async tryParseMessages(messages) {
+        return await Promise.all(messages.map(async message => {
             try {
                 if (message.role === "tool") {
                     return message;
                 }
                 if (Array.isArray(message.content)) {
-                    message.content = message.content.map(item => {
+                    message.content = await Promise.all(message.content.map(async item => {
                         const parsedItem = safeJsonParse(item);
 
                         if (typeof parsedItem === 'string') {
@@ -32,17 +32,21 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                         }
 
                         if (typeof parsedItem === 'object' && parsedItem !== null && parsedItem.type === 'image_url') {
-                            return {type: parsedItem.type, image_url: {url: parsedItem.url || parsedItem.image_url.url}};
+                            const url = parsedItem.url || parsedItem.image_url?.url;
+                            if (url && await this.validateImageUrl(url)) {
+                                return {type: parsedItem.type, image_url: {url}};
+                            }
+                            return { type: 'text', text: 'Image skipped: unsupported format' };
                         }
                         
                         return parsedItem;
-                    });
+                    }));
                 }
             } catch (e) {
                 return message;
             }
             return message;
-        });
+        }));
     }
 
     // Override the logging function to display the messages and responses
@@ -100,10 +104,10 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
     }
 
 
-    getRequestParameters(text, parameters, prompt) {
+    async getRequestParameters(text, parameters, prompt) {
         const requestParameters = super.getRequestParameters(text, parameters, prompt);
 
-        this.tryParseMessages(requestParameters.messages);
+        requestParameters.messages = await this.tryParseMessages(requestParameters.messages);
 
         const modelMaxReturnTokens = this.getModelMaxReturnTokens();
         const maxTokensPrompt = this.promptParameters.max_tokens;
@@ -118,6 +122,20 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         }
 
         return requestParameters;
+    }
+
+    async execute(text, parameters, prompt, cortexRequest) {
+        const requestParameters = await this.getRequestParameters(text, parameters, prompt);
+        const { stream } = parameters;
+
+        cortexRequest.data = {
+            ...(cortexRequest.data || {}),
+            ...requestParameters,
+        };
+        cortexRequest.params = {}; // query params
+        cortexRequest.stream = stream;
+
+        return this.executeRequest(cortexRequest);
     }
 
 }

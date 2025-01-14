@@ -31,7 +31,7 @@ test('OpenAI to Claude conversion data url', async (t) => {
         ]}
     ];
 
-    const parsedOpenAI = openai.tryParseMessages(openaiMessages);
+    const parsedOpenAI = await openai.tryParseMessages(openaiMessages);
     const { system, modifiedMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
 
     t.is(modifiedMessages.length, 1);
@@ -55,7 +55,7 @@ test('OpenAI to Claude conversion image url', async (t) => {
         ]}
     ];
 
-    const parsedOpenAI = openai.tryParseMessages(openaiMessages);
+    const parsedOpenAI = await openai.tryParseMessages(openaiMessages);
     const { system, modifiedMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
 
     t.is(modifiedMessages.length, 1);
@@ -68,8 +68,8 @@ test('OpenAI to Claude conversion image url', async (t) => {
 });
 
 // Test OpenAI to Gemini conversion
-test('OpenAI to Gemini conversion', t => {
-    const { openai, gemini, gemini15 } = createPlugins();
+test('OpenAI to Gemini conversion', async (t) => {
+    const { gemini, gemini15 } = createPlugins();
     
     const openaiMessages = [
         { role: 'system', content: 'You are a helpful assistant.' },
@@ -79,9 +79,8 @@ test('OpenAI to Gemini conversion', t => {
         ]}
     ];
 
-    const parsedOpenAI = openai.tryParseMessages(openaiMessages);
-    const { modifiedMessages, system } = gemini.convertMessagesToGemini(parsedOpenAI);
-    const { modifiedMessages: modifiedMessages15, system: system15 } = gemini15.convertMessagesToGemini(parsedOpenAI);
+    const { modifiedMessages, system } = gemini.convertMessagesToGemini(openaiMessages);
+    const { modifiedMessages: modifiedMessages15, system: system15 } = gemini15.convertMessagesToGemini(openaiMessages);
 
     // Gemini
     t.is(modifiedMessages.length, 1);
@@ -188,11 +187,12 @@ test('Unsupported mime type conversion', async (t) => {
         ]}
     ];
 
-    const parsedOpenAI = openai.tryParseMessages(pdfMessage);
+    const parsedOpenAI = await openai.tryParseMessages(pdfMessage);
     const { system, modifiedMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
 
-    t.is(modifiedMessages[0].content.length, 1);
+    t.is(modifiedMessages[0].content.length, 2);
     t.is(modifiedMessages[0].content[0].text, 'Can you analyze this PDF?');
+    t.is(modifiedMessages[0].content[1].text, 'Image skipped: unsupported format');
 });
 
 // Test pathological cases
@@ -215,7 +215,7 @@ test('Pathological cases', async (t) => {
         { role: 'user', content: 'Another question' },
     ];
 
-    const parsedOpenAI = openai.tryParseMessages(pathologicalMessages);
+    const parsedOpenAI = await openai.tryParseMessages(pathologicalMessages);
     
     // Test Claude conversion
     const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
@@ -273,7 +273,7 @@ test('Empty message array', async (t) => {
     
     const emptyMessages = [];
 
-    const parsedOpenAI = openai.tryParseMessages(emptyMessages);
+    const parsedOpenAI = await openai.tryParseMessages(emptyMessages);
     
     // Test Claude conversion
     const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
@@ -302,7 +302,7 @@ test('Only system messages', async (t) => {
         { role: 'system', content: 'You are helpful and friendly.' },
     ];
 
-    const parsedOpenAI = openai.tryParseMessages(onlySystemMessages);
+    const parsedOpenAI = await openai.tryParseMessages(onlySystemMessages);
     
     // Test Claude conversion
     const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
@@ -323,4 +323,80 @@ test('Only system messages', async (t) => {
     t.is(geminiSystem15.parts[0].text, 'You are an AI assistant.');
     t.is(geminiSystem15.parts[1].text, 'You are helpful and friendly.');
     t.is(geminiMessages15.length, 0);
+});
+
+// Test different image URL types for Gemini 1.5
+test('Gemini 1.5 image URL type handling', t => {
+    const { gemini15 } = createPlugins();
+    
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'Process these images:' },
+            // GCS URL - should be converted to fileData
+            { type: 'image_url', image_url: { url: 'gs://my-bucket/image1.jpg' } },
+            // Base64 URL - should be converted to inlineData
+            { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/4AAQSkZJRg...' } },
+            // Regular HTTP URL - should be dropped (return null)
+            { type: 'image_url', image_url: { url: 'https://example.com/image.jpg' } },
+            // Azure blob URL - should be dropped (return null)
+            { type: 'image_url', image_url: { url: 'https://myaccount.blob.core.windows.net/container/image.jpg' } }
+        ]}
+    ];
+
+    const { modifiedMessages } = gemini15.convertMessagesToGemini(messages);
+
+    t.is(modifiedMessages.length, 1);
+    t.is(modifiedMessages[0].parts.length, 3); // text + gcs + base64 (2 urls dropped)
+    
+    // Check text part
+    t.is(modifiedMessages[0].parts[0].text, 'Process these images:');
+    
+    // Check GCS URL handling
+    t.true('fileData' in modifiedMessages[0].parts[1]);
+    t.is(modifiedMessages[0].parts[1].fileData.fileUri, 'gs://my-bucket/image1.jpg');
+    t.is(modifiedMessages[0].parts[1].fileData.mimeType, 'image/jpeg');
+    
+    // Check base64 URL handling
+    t.true('inlineData' in modifiedMessages[0].parts[2]);
+    t.is(modifiedMessages[0].parts[2].inlineData.mimeType, 'image/jpeg');
+    t.is(modifiedMessages[0].parts[2].inlineData.data, '/9j/4AAQSkZJRg...');
+});
+
+// Test edge cases for image URLs in Gemini 1.5
+test('Gemini 1.5 image URL edge cases', t => {
+    const { gemini15 } = createPlugins();
+    
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'Process these edge cases:' },
+            // Empty URL
+            { type: 'image_url', image_url: { url: '' } },
+            // Malformed base64
+            { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' } },
+            // Malformed GCS URL
+            { type: 'image_url', image_url: { url: 'gs://' } },
+            // Missing URL property
+            { type: 'image_url', image_url: {} },
+            // Null URL
+            { type: 'image_url', image_url: { url: null } }
+        ]}
+    ];
+
+    const { modifiedMessages } = gemini15.convertMessagesToGemini(messages);
+
+    // Verify basic message structure
+    t.is(modifiedMessages.length, 1);
+    t.true(Array.isArray(modifiedMessages[0].parts));
+    
+    // Check each part to ensure no invalid images were converted
+    modifiedMessages[0].parts.forEach(part => {
+        if (part.text) {
+            t.is(part.text, 'Process these edge cases:', 'Only expected text content should be present');
+        } else {
+            t.fail('Found non-text part that should have been filtered out: ' + JSON.stringify(part));
+        }
+    });
+    
+    // Verify we only have one part (the text)
+    t.is(modifiedMessages[0].parts.length, 1, 'Should only have the text part');
 });
