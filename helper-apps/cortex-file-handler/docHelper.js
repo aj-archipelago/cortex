@@ -97,8 +97,10 @@ export async function documentToText(filePath) {
         case 'txt':
             return txtToText(filePath);
         case 'docx':
+        case 'doc':
             return docxToText(filePath);
         case 'xlsx':
+        case 'xls':
             return xlsxToText(filePath);
         case 'csv':
             return csvToText(filePath);

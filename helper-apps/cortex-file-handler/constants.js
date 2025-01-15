@@ -7,7 +7,9 @@ export const DOC_EXTENSIONS = [
     ".js",
     ".html",
     ".css",
+    ".doc",
     ".docx",
+    ".xls",
     ".xlsx"
 ];
 
@@ -53,6 +55,12 @@ export const ACCEPTED_MIME_TYPES = {
     'text/css': ['.css'],
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+    'application/msword': ['.doc'],
+    'application/vnd.ms-excel': ['.xls'],
+    'application/vnd.ms-word.document.macroEnabled.12': ['.docm'],
+    'application/vnd.ms-excel.sheet.macroEnabled.12': ['.xlsm'],
+    'application/vnd.ms-word.template.macroEnabled.12': ['.dotm'],
+    'application/vnd.ms-excel.template.macroEnabled.12': ['.xltm'],
     
     // Image types
     'image/jpeg': ['.jpg', '.jpeg'],

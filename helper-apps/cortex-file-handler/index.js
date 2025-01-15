@@ -315,17 +315,23 @@ async function CortexFileHandler(context, req) {
     }
 
     try {
-        if (DOC_EXTENSIONS.some(ext => uri.toLowerCase().endsWith(ext))) {
-            const extension = path.extname(uri).toLowerCase();
-            const file = path.join(os.tmpdir(), `${uuidv4()}${extension}`);
-            await downloadFile(uri, file)
-            const text = await documentToText(file);
+        // Parse URL and get pathname without query parameters for extension check
+        const urlObj = new URL(uri);
+        const pathWithoutQuery = urlObj.pathname;
+        
+        if (DOC_EXTENSIONS.some(ext => pathWithoutQuery.toLowerCase().endsWith(ext))) {
+            const extension = path.extname(pathWithoutQuery).toLowerCase();
+            const tempDir = path.join(os.tmpdir(), `${uuidv4()}`);
+            fs.mkdirSync(tempDir);
+            const downloadedFile = path.join(tempDir, `${uuidv4()}${extension}`);
+            await downloadFile(uri, downloadedFile);
+            const text = await documentToText(downloadedFile);
             let tmpPath;
 
             try {
                 if (save) {
                     const fileName = `${uuidv4()}.txt`; // generate unique file name
-                    const filePath = path.join(os.tmpdir(), fileName);
+                    const filePath = path.join(tempDir, fileName);
                     tmpPath = filePath;
                     fs.writeFileSync(filePath, text); // write text to file
             
@@ -342,10 +348,10 @@ async function CortexFileHandler(context, req) {
                 try {
                     // delete temporary files
                     tmpPath && fs.unlinkSync(tmpPath);
-                    file && fs.unlinkSync(file);
-                    console.log(`Cleaned temp files ${tmpPath}, ${file}`);
+                    downloadedFile && fs.unlinkSync(downloadedFile);
+                    console.log(`Cleaned temp files ${tmpPath}, ${downloadedFile}`);
                 } catch(err) {
-                    console.log(`Error cleaning temp files ${tmpPath}, ${file}:`, err);
+                    console.log(`Error cleaning temp files ${tmpPath}, ${downloadedFile}:`, err);
                 }
                 
                 try {
@@ -403,8 +409,6 @@ async function CortexFileHandler(context, req) {
             body: error.message || error
         };
         return;
-    } finally {
-        // reserved for cleanup
     }
 
     console.log('result:', result.map(item =>
@@ -414,7 +418,6 @@ async function CortexFileHandler(context, req) {
     context.res = {
         body: result
     };
-
 }
 
 export default CortexFileHandler;
