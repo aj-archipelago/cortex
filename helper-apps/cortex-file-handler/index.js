@@ -1,28 +1,23 @@
-import { downloadFile, processYoutubeUrl, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload } from './blobHandler.js';
+import { downloadFile, splitMediaFile } from './fileChunker.js';
+import { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs} from './blobHandler.js';
 import { cleanupRedisFileStoreMap, getFileStoreMap, publishRequestProgress, removeFromFileStoreMap, setFileStoreMap } from './redis.js';
-import { deleteTempPath, ensureEncoded, isValidYoutubeUrl } from './helper.js';
+import { ensureEncoded, ensureFileExtension } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
 import { documentToText, easyChunker } from './docHelper.js';
+import { DOC_EXTENSIONS, isAcceptedMimeType } from './constants.js';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import http from 'http';
 import https from 'https';
-import axios from "axios";
-import { pipeline } from "stream";
-import { promisify } from "util";
-const pipelineUtility = promisify(pipeline); // To pipe streams using async/await
-
-const DOC_EXTENSIONS =  [".txt", ".json", ".csv", ".md", ".xml", ".js", ".html", ".css", '.pdf', '.docx', '.xlsx', '.csv'];
 
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
-console.log(useAzure ? 'Using Azure Storage' : 'Using local file system');
 
+console.log(`Storage configuration - ${useAzure ? 'Azure' : 'Local'} Storage${gcs ? ' and Google Cloud Storage' : ''}`);
 
 let isCleanupRunning = false;
-async function cleanupInactive() {
+async function cleanupInactive(context) {
     try {
         if (isCleanupRunning) { return; } //no need to cleanup every call
         isCleanupRunning = true;
@@ -52,7 +47,7 @@ async function cleanupInactive() {
         
         try {
             if (cleanedAzure && cleanedAzure.length > 0) {
-                await cleanup(cleanedAzure);
+                await cleanup(context, cleanedAzure);
             }
         } catch (error) {
             console.log('Error occurred during azure cleanup:', error);
@@ -83,26 +78,59 @@ async function cleanupInactive() {
 
 async function urlExists(url) {
   if(!url) return false;
-  const httpModule = url.startsWith('https') ? https : http;
   
-  return new Promise((resolve) => {
-    const request = httpModule.request(url, { method: 'HEAD' }, function(response) {
-      resolve(response.statusCode === 200);
-    });
+  try {
+    // Basic URL validation
+    const urlObj = new URL(url);
+    if (!['http:', 'https:'].includes(urlObj.protocol)) {
+      throw new Error('Invalid protocol - only HTTP and HTTPS are supported');
+    }
+
+    const httpModule = urlObj.protocol === 'https:' ? https : http;
     
-    request.on('error', function() {
-      resolve(false);
+    return new Promise((resolve) => {
+      const request = httpModule.request(url, { method: 'HEAD' }, function(response) {
+        if (response.statusCode >= 200 && response.statusCode < 400) {
+          const contentType = response.headers['content-type'];
+          const cleanContentType = contentType ? contentType.split(';')[0].trim() : '';
+          // Check if the content type is one we accept
+          if (cleanContentType && isAcceptedMimeType(cleanContentType)) {
+            resolve({ valid: true, contentType: cleanContentType });
+          } else {
+            console.log(`Unsupported content type: ${contentType}`);
+            resolve({ valid: false });
+          }
+        } else {
+          resolve({ valid: false });
+        }
+      });
+      
+      request.on('error', function(err) {
+        console.error('URL validation error:', err.message);
+        resolve({ valid: false });
+      });
+      
+      request.end();
     });
-    
-    request.end();
-  });
+  } catch (error) {
+    console.error('URL validation error:', error.message);
+    return { valid: false };
+  }
 }
 
-  
-async function main(context, req) {
-    context.log('Starting req processing..');
+async function CortexFileHandler(context, req) {
+    const { uri, requestId, save, hash, checkHash, clearHash, fetch, load, restore } = req.body?.params || req.query;
+    const operation = save ? 'save' : 
+                     checkHash ? 'checkHash' : 
+                     clearHash ? 'clearHash' : 
+                     fetch || load || restore ? 'remoteFile' : 
+                     req.method.toLowerCase() === 'delete' ? 'delete' :
+                     uri ? (DOC_EXTENSIONS.some(ext => uri.toLowerCase().endsWith(ext)) ? 'document_processing' : 'media_chunking') : 
+                     'upload';
+    
+    context.log(`Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ''}${uri ? `uri: ${uri}, ` : ''}${hash ? `hash: ${hash}, ` : ''}operation: ${operation}`);
 
-    cleanupInactive(); //trigger & no need to wait for it
+    cleanupInactive(context); //trigger & no need to wait for it
 
     // Clean up blob when request delete which means processing marked completed
     if (req.method.toLowerCase() === `delete`) {
@@ -121,46 +149,82 @@ async function main(context, req) {
         return;
     }
 
-    const { uri, requestId, save, hash, checkHash, clearHash, fetch, load, restore } = req.body?.params || req.query;
+    const remoteUrl = fetch || restore || load;
+    if (req.method.toLowerCase() === `get` && remoteUrl) {
+        context.log(`Remote file: ${remoteUrl}`);
+        let filename;  // Declare filename outside try block
+        try {
+            // Validate URL format and accessibility
+            const urlCheck = await urlExists(remoteUrl);
+            if (!urlCheck.valid) {
+                context.res = {
+                    status: 400,
+                    body: 'Invalid or inaccessible URL'
+                };
+                return;
+            }
 
-    const filepond = fetch || restore || load;
-    if (req.method.toLowerCase() === `get` && filepond) {
-        context.log(`Remote file: ${filepond}`);
-        // Check if file already exists (using hash as the key)
-        let exists = await getFileStoreMap(filepond);
-        if(exists){
+            // Check if file already exists (using hash as the key)
+            let exists = await getFileStoreMap(remoteUrl);
+            if(exists){
+                context.res = {
+                    status: 200,
+                    body: exists
+                };
+                //update redis timestamp with current time
+                await setFileStoreMap(remoteUrl, exists);
+                return;
+            }
+
+            // Download the file first
+            const urlObj = new URL(remoteUrl);
+            let originalFileName = path.basename(urlObj.pathname);
+            if (!originalFileName || originalFileName === '') {
+                originalFileName = urlObj.hostname;
+            }
+            
+            // Ensure the filename has the correct extension based on content type
+            originalFileName = ensureFileExtension(originalFileName, urlCheck.contentType);
+
+            const maxLength = 200; // Set the maximum length for the filename
+            let truncatedFileName = originalFileName;
+            if (originalFileName.length > maxLength) {
+                const extension = path.extname(originalFileName);
+                const basename = path.basename(originalFileName, extension);
+                truncatedFileName = basename.substring(0, maxLength - extension.length) + extension;
+            }
+
+            // Use the original-truncated file name when saving the downloaded file
+            filename = path.join(os.tmpdir(), truncatedFileName);
+            await downloadFile(remoteUrl, filename);
+            
+            // Now upload the downloaded file
+            const res = await uploadBlob(context, null, !useAzure, filename, remoteUrl);
+
+            //Update Redis (using hash as the key)
+            await setFileStoreMap(remoteUrl, res);
+
+            // Return the file URL
             context.res = {
                 status: 200,
-                body: exists
+                body: res,
             };
-            return;
+        } catch (error) {
+            context.log("Error processing remote file request:", error);
+            context.res = {
+                status: 500,
+                body: `Error processing file: ${error.message}`
+            };
+        } finally {
+            // Cleanup temp file if it exists
+            try {
+                if (filename && fs.existsSync(filename)) {
+                    fs.unlinkSync(filename);
+                }
+            } catch (err) {
+                context.log("Error cleaning up temp file:", err);
+            }
         }
-
-        // Check if it's a youtube url
-        let youtubeDownloadedFile = null; 
-        if(isValidYoutubeUrl(filepond)){
-            youtubeDownloadedFile = await processYoutubeUrl(filepond, true);
-        }
-        const filename = path.join(os.tmpdir(), path.basename(youtubeDownloadedFile || filepond));
-        // Download the remote file to a local/temporary location keep name & ext
-        if(!youtubeDownloadedFile){
-            const response = await axios.get(filepond, { responseType: "stream" });
-            await pipelineUtility(response.data, fs.createWriteStream(filename));
-        }
-
-        
-        const res = await uploadBlob(context, null, !useAzure, true, filename); 
-        context.log(`File uploaded: ${JSON.stringify(res)}`);
-
-        //Update Redis (using hash as the key)
-        await setFileStoreMap(filepond, res);
-
-        // Return the file URL
-        context.res = {
-            status: 200,
-            body: res,
-        };
-
         return;
     }
 
@@ -183,39 +247,46 @@ async function main(context, req) {
     }
 
     if(hash && checkHash){ //check if hash exists
-        let result = await getFileStoreMap(hash);
+        let hashResult = await getFileStoreMap(hash);
 
-        if(result){
+        if(hashResult){
             context.log(`File exists in map: ${hash}`);
-            const exists = await urlExists(result?.url);
+            const exists = await urlExists(hashResult?.url);
 
-            if(!exists){
+            if(!exists.valid){
                 context.log(`File is not in storage. Removing from map: ${hash}`);
                 await removeFromFileStoreMap(hash);
                 return;
             }
 
-            const gcsExists = await gcsUrlExists(result?.gcs);
-            if(!gcsExists){
-                context.log(`GCS file may be missing. Correcting if needed: ${hash}`);
-                result = await ensureGCSUpload(result, result.filename);
+            if (gcs) {
+                const gcsExists = await gcsUrlExists(hashResult?.gcs);
+                if(!gcsExists){
+                    hashResult = await ensureGCSUpload(context, hashResult);
+                }
             }
 
             //update redis timestamp with current time
-            await setFileStoreMap(hash, result);
+            await setFileStoreMap(hash, hashResult);
+
+            context.res = {
+                status: 200,
+                body: hashResult
+            };
+
+            return;
         }
+
         context.res = {
-            body: result
+            status: 404,
+            body: `Hash ${hash} not found`
         };
         return;
     }
 
     if (req.method.toLowerCase() === `post`) {
-        const { useGoogle } = req.body?.params || req.query;
-        const { url } = await uploadBlob(context, req, !useAzure, useGoogle, null, hash);
-        context.log(`File url: ${url}`);
+        await uploadBlob(context, req, !useAzure, null, hash);
         if(hash && context?.res?.body){ 
-            //save hash after upload
             await setFileStoreMap(hash, context.res.body);
         }
         return
@@ -234,8 +305,6 @@ async function main(context, req) {
     let numberOfChunks;
 
     let file = ensureEncoded(uri); // encode url to handle special characters
-    let folder;
-    const isYoutubeUrl = isValidYoutubeUrl(uri);
 
     const result = [];
 
@@ -245,17 +314,15 @@ async function main(context, req) {
         await publishRequestProgress({ requestId, progress, completedCount, totalCount, numberOfChunks, data });
     }
 
-    const isDocument = DOC_EXTENSIONS.some(ext => uri.toLowerCase().endsWith(ext));
-
     try {
-        if (isDocument) {
+        if (DOC_EXTENSIONS.some(ext => uri.toLowerCase().endsWith(ext))) {
             const extension = path.extname(uri).toLowerCase();
             const file = path.join(os.tmpdir(), `${uuidv4()}${extension}`);
             await downloadFile(uri, file)
             const text = await documentToText(file);
             let tmpPath;
 
-            try{
+            try {
                 if (save) {
                     const fileName = `${uuidv4()}.txt`; // generate unique file name
                     const filePath = path.join(os.tmpdir(), fileName);
@@ -269,19 +336,19 @@ async function main(context, req) {
                 } else {
                     result.push(...easyChunker(text));
                 }
-            }catch(err){
+            } catch(err) {
                 console.log(`Error saving file ${uri} with request id ${requestId}:`, err);
-            }finally{
-                try{
+            } finally {
+                try {
                     // delete temporary files
                     tmpPath && fs.unlinkSync(tmpPath);
                     file && fs.unlinkSync(file);
                     console.log(`Cleaned temp files ${tmpPath}, ${file}`);
-                }catch(err){
+                } catch(err) {
                     console.log(`Error cleaning temp files ${tmpPath}, ${file}:`, err);
                 }
                 
-                try{
+                try {
                     //delete uploaded prev nontext file
                     //check cleanup for whisper temp uploaded files url
                     const regex = /whispertempfiles\/([a-z0-9-]+)/;
@@ -291,57 +358,53 @@ async function main(context, req) {
                         useAzure ? await deleteBlob(extractedValue) : await deleteFolder(extractedValue);
                         console.log(`Cleaned temp file ${uri} with request id ${extractedValue}`);
                     }
-                }catch(err){
+                } catch(err) {
                     console.log(`Error cleaning temp file ${uri}:`, err);
                 }
             }
-        }else{
-
-            if (isYoutubeUrl) {
-                // totalCount += 1; // extra 1 step for youtube download
-                const processAsVideo = req.body?.params?.processAsVideo || req.query?.processAsVideo;
-                file = await processYoutubeUrl(file, processAsVideo);
-            }
-
+        } else {
             const { chunkPromises, chunkOffsets, uniqueOutputPath } = await splitMediaFile(file);
-            folder = uniqueOutputPath;
 
             numberOfChunks = chunkPromises.length; // for progress reporting
             totalCount += chunkPromises.length * 4; // 4 steps for each chunk (download and upload)
-            // isYoutubeUrl && sendProgress(); // send progress for youtube download after total count is calculated
 
             // sequential download of chunks
             const chunks = [];
             for (const chunkPromise of chunkPromises) {
-                chunks.push(await chunkPromise);
-                sendProgress();
+                const chunkPath = await chunkPromise;
+                chunks.push(chunkPath);
+                await sendProgress();
             }
 
             // sequential processing of chunks
             for (let index = 0; index < chunks.length; index++) {
-                const chunk = chunks[index];
-                const blobName = useAzure ? await saveFileToBlob(chunk, requestId) : await moveFileToPublicFolder(chunk, requestId);
+                const chunkPath = chunks[index];
+                const blobName = useAzure ? await saveFileToBlob(chunkPath, requestId) : await moveFileToPublicFolder(chunkPath, requestId);
                 const chunkOffset = chunkOffsets[index];
-                result.push({ uri:blobName, offset:chunkOffset });
-                context.log(`Saved chunk as: ${blobName}`);
-                sendProgress();
+                result.push({ uri: blobName, offset: chunkOffset });
+                console.log(`Saved chunk as: ${blobName}`);
+                await sendProgress();
             }
 
-            // parallel processing, dropped 
-            // result = await Promise.all(mediaSplit.chunks.map(processChunk));
+            // Cleanup the temp directory
+            try {
+                if (uniqueOutputPath && fs.existsSync(uniqueOutputPath)) {
+                    fs.rmSync(uniqueOutputPath, { recursive: true });
+                    console.log(`Cleaned temp directory: ${uniqueOutputPath}`);
+                }
+            } catch (err) {
+                console.log(`Error cleaning temp directory ${uniqueOutputPath}:`, err);
+            }
         }
     } catch (error) {
         console.error("An error occurred:", error);
-        context.res.status(500);
-        context.res.body = error.message || error;
+        context.res = {
+            status: 500,
+            body: error.message || error
+        };
         return;
     } finally {
-        try {
-            (isYoutubeUrl) && (await deleteTempPath(file));
-            folder && (await deleteTempPath(folder));
-        } catch (error) {
-            console.error("An error occurred while deleting:", error);
-        }
+        // reserved for cleanup
     }
 
     console.log('result:', result.map(item =>
@@ -354,5 +417,4 @@ async function main(context, req) {
 
 }
 
-
-export default main;
+export default CortexFileHandler;

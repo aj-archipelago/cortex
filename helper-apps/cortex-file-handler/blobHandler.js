@@ -13,38 +13,6 @@ import axios from "axios";
 import { publicFolder, port, ipAddress } from "./start.js";
 import mime from "mime-types";
 
-const IMAGE_EXTENSIONS = [
-  ".jpg",
-  ".jpeg",
-  ".png",
-  ".gif",
-  ".bmp",
-  ".webp",
-  ".tiff",
-  ".svg",
-  ".pdf"
-];
-
-const VIDEO_EXTENSIONS = [
-  ".mp4",
-  ".webm",
-  ".ogg",
-  ".mov",
-  ".avi",
-  ".flv",
-  ".wmv",
-  ".mkv",
-];
-
-const AUDIO_EXTENSIONS = [
-  ".mp3",
-  ".wav",
-  ".ogg",
-  ".flac",
-  ".aac",
-  ".aiff",
-];
-
 function isBase64(str) {
   try {
     return btoa(atob(str)) == str;
@@ -66,7 +34,7 @@ const { project_id: GCP_PROJECT_ID } = GCP_SERVICE_ACCOUNT;
 let gcs;
 if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
   console.warn(
-    "Google Cloud Project ID or Service Account details are missing"
+    "No Google Cloud Storage credentials provided - GCS will not be used"
   );
 } else {
   try {
@@ -78,7 +46,7 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
     // Rest of your Google Cloud operations using gcs object
   } catch (error) {
     console.error(
-      "Provided Google Cloud Service Account details are invalid: ",
+      "Google Cloud Storage credentials are invalid - GCS will not be used: ",
       error
     );
   }
@@ -86,15 +54,10 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
 
 const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 
-
 async function gcsUrlExists(url, defaultReturn = false) {
     try {
-        if(!url) {
+        if(!url || !gcs) {
             return defaultReturn; // Cannot check return
-        }
-        if (!gcs) {
-            console.warn('GCS environment variables are not set. Unable to check if URL exists in GCS.');
-            return defaultReturn; // Cannot check return 
         }
 
         const urlParts = url.replace('gs://', '').split('/');
@@ -191,8 +154,8 @@ async function deleteBlob(requestId) {
   return result;
 }
 
-async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, filePath=null, hash=null) {
-  return new Promise((resolve, reject) => {
+async function uploadBlob(context, req, saveToLocal = false, filePath=null, hash=null) {
+  return new Promise(async (resolve, reject) => {
     try {
       let requestId = uuidv4();
       let body = {};
@@ -201,7 +164,16 @@ async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, 
       if (filePath) {
         const file = fs.createReadStream(filePath);
         const filename = path.basename(filePath);
-        uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename, resolve, hash);
+        try {
+          const result = await uploadFile(context, requestId, body, saveToLocal, file, filename, resolve, hash);
+          resolve(result);
+        } catch (error) {
+          context.res = {
+            status: 500,
+            body: "Error processing file upload."
+          };
+          reject(error);
+        }
       } else {
         // Otherwise, continue working with form-data
         const busboy = Busboy({ headers: req.headers });
@@ -209,179 +181,202 @@ async function uploadBlob(context, req, saveToLocal = false, useGoogle = false, 
         busboy.on("field", (fieldname, value) => {
           if (fieldname === "requestId") {
             requestId = value;
-          } else if (fieldname === "useGoogle") {
-            useGoogle = value;
           }
         });
 
         busboy.on("file", async (fieldname, file, filename) => {
-          uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename?.filename || filename, resolve, hash);
+          uploadFile(context, requestId, body, saveToLocal, file, filename?.filename || filename, resolve, hash).catch(error => {
+            context.res = {
+              status: 500,
+              body: "Error processing file upload."
+            };
+            reject(error);
+          });
         });
 
         busboy.on("error", (error) => {
-          context.log.error("Error processing file upload:", error);
+          context.log("Error processing file upload:", error);
           context.res = {
             status: 500,
-            body: "Error processing file upload.",
+            body: "Error processing file upload."
           };
-          reject(error); // Reject the promise
+          reject(error);
         });
 
         req.pipe(busboy);
       }
     } catch (error) {
-      context.log.error("Error processing file upload:", error);
+      context.log("Error processing file upload:", error);
       context.res = {
         status: 500,
-        body: "Error processing file upload.",
+        body: "Error processing file upload."
       };
-      reject(error); // Reject the promise
+      reject(error);
     }
   });
 }
 
-async function uploadFile(context, requestId, body, saveToLocal, useGoogle, file, filename, resolve, hash=null) {
-  // Validate if we can use Google based on file type
-  const ext = path.extname(filename).toLowerCase();
-  const canUseGoogle = IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext);
+// Helper function to handle local file storage
+async function saveToLocalStorage(context, requestId, encodedFilename, file) {
+  const localPath = join(publicFolder, requestId);
+  fs.mkdirSync(localPath, { recursive: true });
+  const destinationPath = `${localPath}/${encodedFilename}`;
+  context.log(`Saving to local storage... ${destinationPath}`);
+  await pipeline(file, fs.createWriteStream(destinationPath));
+  return `http://${ipAddress}:${port}/files/${requestId}/${encodedFilename}`;
+}
+
+// Helper function to handle Azure blob storage
+async function saveToAzureStorage(context, encodedFilename, file) {
+  const { containerClient } = await getBlobClient();
+  const contentType = mime.lookup(encodedFilename);
+  const options = contentType ? { blobHTTPHeaders: { blobContentType: contentType } } : {};
   
-  // Enforce Google requirement if specified and supported
-  if (useGoogle && useGoogle !== "false") {
-    if (!canUseGoogle) {
-      throw new Error(`File type ${ext} not supported for Google Cloud Storage`);
-    }
-    if (!gcs) {
-      throw new Error('Google Cloud Storage is not initialized');
-    }
+  const blockBlobClient = containerClient.getBlockBlobClient(encodedFilename);
+  const passThroughStream = new PassThrough();
+  file.pipe(passThroughStream);
+  
+  context.log(`Uploading to Azure... ${encodedFilename}`);
+  await blockBlobClient.uploadStream(passThroughStream, undefined, undefined, options);
+  const sasToken = generateSASToken(containerClient, encodedFilename);
+  return `${blockBlobClient.url}?${sasToken}`;
+}
+
+// Helper function to upload a file to Google Cloud Storage
+async function uploadToGCS(context, sourceUrl, encodedFilename) {
+  const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
+  const writeStream = gcsFile.createWriteStream();
+  
+  const response = await axios({
+    method: "get",
+    url: sourceUrl,
+    responseType: "stream",
+  });
+  
+  context.log(`Uploading to GCS... ${encodedFilename}`);
+  response.data.pipe(writeStream);
+  
+  await new Promise((resolve, reject) => {
+    writeStream.on("finish", resolve);
+    writeStream.on("error", reject);
+  });
+
+  return `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
+}
+
+// Helper function to handle Google Cloud Storage
+async function saveToGoogleStorage(context, encodedFilename, azureUrl) {
+  if (!gcs) {
+    throw new Error('Google Cloud Storage is not initialized');
   }
 
-  const encodedFilename = encodeURIComponent(`${requestId || uuidv4()}_${filename}`);
+  return uploadToGCS(context, azureUrl, encodedFilename);
+}
 
-  if (saveToLocal) {
-    // create the target folder if it doesn't exist
-    const localPath = join(publicFolder, requestId);
-    fs.mkdirSync(localPath, { recursive: true });
+async function uploadFile(context, requestId, body, saveToLocal, file, filename, resolve, hash = null) {
+  try {
+    const encodedFilename = encodeURIComponent(`${requestId || uuidv4()}_${filename}`);
+    
+    // Set up storage promises
+    const storagePromises = [];
+    const primaryPromise = saveToLocal 
+      ? saveToLocalStorage(context, requestId, encodedFilename, file)
+      : saveToAzureStorage(context, encodedFilename, file);
+    
+    storagePromises.push(primaryPromise.then(url => ({ url, type: 'primary' })));
 
-    const destinationPath = `${localPath}/${encodedFilename}`;
-
-    await pipeline(file, fs.createWriteStream(destinationPath));
-
-    const message = `File '${encodedFilename}' saved to folder successfully.`;
-    context.log(message);
-
-    const url = `http://${ipAddress}:${port}/files/${requestId}/${encodedFilename}`;
-
-    body = { message, url };
-
-    resolve(body); // Resolve the promise
-  } else {
-    const { containerClient } = await getBlobClient();
-
-    const contentType = mime.lookup(encodedFilename);  // content type based on file extension
-    const options = {};
-    if (contentType) {
-      options.blobHTTPHeaders = { blobContentType: contentType };
+    // Add GCS promise if configured
+    if (gcs) {
+      // We need to wait for the primary URL to upload to GCS
+      storagePromises.push(
+        primaryPromise.then(url => 
+          saveToGoogleStorage(context, encodedFilename, url)
+            .then(gcsUrl => ({ gcs: gcsUrl, type: 'gcs' }))
+        )
+      );
     }
 
-    const blockBlobClient = containerClient.getBlockBlobClient(encodedFilename);
+    // Wait for all storage operations to complete
+    const results = await Promise.all(storagePromises);
+    
+    // Combine results
+    body = {
+      message: `File '${encodedFilename}' ${saveToLocal ? 'saved to folder' : 'uploaded'} successfully.`,
+      filename,
+      ...results.reduce((acc, result) => {
+        if (result.type === 'primary') acc.url = result.url;
+        if (result.type === 'gcs') acc.gcs = result.gcs;
+        return acc;
+      }, {})
+    };
 
-    const passThroughStream = new PassThrough();
-    file.pipe(passThroughStream);
+    if (hash) {
+      body.hash = hash;
+    }
 
-    await blockBlobClient.uploadStream(passThroughStream, undefined, undefined, options);
+    // Set response
+    context.res = {
+      status: 200,
+      body,
+    };
 
-    const message = `File '${encodedFilename}' uploaded successfully.`;
-    context.log(message);
-    const sasToken = generateSASToken(containerClient, encodedFilename);
-    const url = `${blockBlobClient.url}?${sasToken}`;
-    body = { message, url };
-  }
-
-  context.res = {
-    status: 200,
-    body,
-  };
-
-  if (useGoogle && useGoogle !== "false") {
-    try {
-      const { url } = body;
-      const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
-      const writeStream = gcsFile.createWriteStream();
-      
-      const response = await axios({
-        method: "get",
-        url: url,
-        responseType: "stream",
-      });
-      
-      // Upload to GCS
-      response.data.pipe(writeStream);
-      
-      await new Promise((resolve, reject) => {
-        writeStream.on("finish", resolve);
-        writeStream.on("error", reject);
-      });
-
-      body.gcs = `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
-    } catch (error) {
-      // Clean up Azure/local upload if GCS fails
-      if (body.url) {
-        await cleanup([body.url]);
+    resolve(body);
+  } catch (error) {
+    context.log("Error in uploadFile:", error);
+    // If we have a URL but GCS failed, clean it up
+    if (body.url) {
+      try {
+        await cleanup(context, [body.url]);
+      } catch (cleanupError) {
+        context.log("Error during cleanup after failure:", cleanupError);
       }
-      throw new Error(`Failed to upload to Google Cloud Storage: ${error.message}`);
     }
+    throw error;
   }
-  
-  if(!body.filename) {
-    body.filename = filename;
-  }
-  if(hash && !body.hash) {
-    body.hash = hash;
-  }
-
-  // Validate required fields before resolving
-  if (useGoogle && useGoogle !== "false" && !body.gcs) {
-    throw new Error('Missing GCS URL in response');
-  }
-
-  resolve(body);
 }
 
 // Function to delete files that haven't been used in more than a month
-async function cleanup(urls=null) {
+async function cleanup(context, urls=null) {
   const { containerClient } = await getBlobClient();
+  const cleanedURLs = [];
 
   if(!urls) {
     const xMonthAgo = new Date();
     xMonthAgo.setMonth(xMonthAgo.getMonth() - 1);
 
     const blobs = containerClient.listBlobsFlat();
-    const cleanedURLs = [];
     
     for await (const blob of blobs) {
       const lastModified = blob.properties.lastModified;
       if (lastModified < xMonthAgo) {
-        const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
-        await blockBlobClient.delete();
-        console.log(`Cleaned blob: ${blob.name}`);
-        cleanedURLs.push(blob.name);
+        try {
+          const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
+          await blockBlobClient.delete();
+          context.log(`Cleaned blob: ${blob.name}`);
+          cleanedURLs.push(blob.name);
+        } catch (error) {
+          if (error.statusCode !== 404) { // Ignore "not found" errors
+            context.log(`Error cleaning blob ${blob.name}:`, error);
+          }
+        }
       }
     }
-    
-    return cleanedURLs;
-  }else{
-    // Delete the blobs with the specified URLs 
-    const cleanedURLs = [];
+  } else {
     for(const url of urls) {
-      // Remove the base url to get the blob name
-      const blobName = url.replace(containerClient.url, '');
-      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-      await blockBlobClient.delete();
-      console.log(`Cleaned blob: ${blobName}`);
-      cleanedURLs.push(blobName);
+      try {
+        const blobName = url.replace(containerClient.url, '');
+        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+        await blockBlobClient.delete();
+        context.log(`Cleaned blob: ${blobName}`);
+        cleanedURLs.push(blobName);
+      } catch (error) {
+        if (error.statusCode !== 404) { // Ignore "not found" errors
+          context.log(`Error cleaning blob ${url}:`, error);
+        }
+      }
     }
-    return cleanedURLs;
   }
+  return cleanedURLs;
 }
 
 async function cleanupGCS(urls=null) {
@@ -433,35 +428,14 @@ async function cleanupGCS(urls=null) {
   return cleanedURLs;
 }
 
-// New helper function to ensure GCS upload for existing files
-async function ensureGCSUpload(existingFile, filename) {
-  if (!existingFile.gcs) {
-    const ext = path.extname(filename).toLowerCase();
-    const canUseGoogle = IMAGE_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext) || AUDIO_EXTENSIONS.includes(ext);
-    
-    if (canUseGoogle && gcs) {
-      // Upload existing file to GCS
-      const encodedFilename = path.basename(existingFile.url.split('?')[0]);
-      const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
-      const writeStream = gcsFile.createWriteStream();
-      
-      const response = await axios({
-        method: "get",
-        url: existingFile.url,
-        responseType: "stream",
-      });
-      
-      response.data.pipe(writeStream);
-      
-      await new Promise((resolve, reject) => {
-        writeStream.on("finish", resolve);
-        writeStream.on("error", reject);
-      });
-
-      existingFile.gcs = `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
-    }
+// Helper function to ensure GCS upload for existing files
+async function ensureGCSUpload(context, existingFile) {
+  if (!existingFile.gcs && gcs) {
+    context.log(`GCS file was missing - uploading.`);
+    const encodedFilename = path.basename(existingFile.url.split('?')[0]);
+    existingFile.gcs = await uploadToGCS(context, existingFile.url, encodedFilename);
   }
   return existingFile;
 }
 
-export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload };
+export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs };

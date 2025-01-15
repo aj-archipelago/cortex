@@ -6,7 +6,6 @@ import os from 'os';
 import { promisify } from 'util';
 import axios from 'axios';
 import { ensureEncoded } from './helper.js';
-import ytdl from '@distube/ytdl-core';
 
 
 const ffmpegProbe = promisify(ffmpeg.ffprobe);
@@ -125,51 +124,6 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 500) {
     }
 }
 
-const ytdlDownload = async (url, filename, video = false) => {
-    return new Promise((resolve, reject) => {
-        const videoOptions = video 
-            ? { filter: 'audioandvideo' }  // audio and video
-            : { quality: 'highestaudio' }; // audio only
-
-        const encodedUrl = encodeURI(url);
-        const videoStream = ytdl(encodedUrl, videoOptions);
-        let lastLoggedTime = Date.now();
-
-        videoStream.on('error', (error) => {
-            reject(error);
-        });
-
-        videoStream.on('progress', (chunkLength, downloaded, total) => {
-            const currentTime = Date.now();
-            if (currentTime - lastLoggedTime >= 2000) { // Log every 2 seconds
-                const percent = downloaded / total;
-                console.log(`${(percent * 100).toFixed(2)}% downloaded ${url}`);
-                lastLoggedTime = currentTime;
-            }
-        });
-
-        videoStream.pipe(fs.createWriteStream(filename))
-            .on('finish', () => {
-                resolve();
-            })
-            .on('error', (error) => {
-                reject(error);
-            });
-    });
-};
-
-async function processYoutubeUrl(url, video=false) {
-    try {
-        const outputFormat = video ? '.mp4' : '.mp3';
-        const outputFileName = path.join(os.tmpdir(), `${uuidv4()}${outputFormat}`);
-        await ytdlDownload(url, outputFileName, video);
-        return outputFileName;
-    } catch (e) {
-        console.log(e);
-        throw new Error(`Error processing YouTube video, YouTube downloader might be outdated or blocked. ${e.message}`);    
-    }
-}
-
 export {
-    splitMediaFile, processYoutubeUrl, downloadFile
+    splitMediaFile, downloadFile
 };

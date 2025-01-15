@@ -30,8 +30,8 @@ async function deleteFolder(requestId) {
 }
 
 async function cleanupLocal(urls=null) {
+  const cleanedUrls = [];
   if(!urls){
-    const cleanedUrls = []; // initialize array for holding cleaned file URLs
     try {
       // Read the directory
       const items = await fs.readdir(publicFolder);

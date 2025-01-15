@@ -1,7 +1,7 @@
 {
-  "name": "@aj-archipelago/mediafilechunker",
-  "version": "1.0.0",
-  "description": "",
+  "name": "@aj-archipelago/cortex-file-handler",
+  "version": "1.0.15",
+  "description": "File handling service for Cortex - handles file uploads, media chunking, and document processing",
   "type": "module",
   "scripts": {
     "start": "node start.js",
