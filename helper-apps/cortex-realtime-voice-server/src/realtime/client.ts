@@ -120,7 +120,7 @@ type TypedEmitter = {
 };
 
 // Change the class declaration to use intersection types
-export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
+export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> implements TypedEmitter {
   private readonly apiKey?: string;
   private readonly autoReconnect: boolean;
   private readonly debug: boolean;
@@ -258,7 +258,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
   onOpen() {
     this._log(`Connected to "${this.url}"`);
     this.isConnected = true;
-    
+
     // If reconnectAttempts > 0, this is a reconnection
     if (this.reconnectAttempts > 0) {
       this.updateSocketState();
@@ -300,7 +300,11 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
     if (reconnect) {
       if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         logger.error('Max reconnection attempts reached');
-        this.emit('error', { type: 'error', message: 'Failed to reconnect after maximum attempts' });
+        this.emit('error', {
+          type: 'error',
+          event_id: "reconnect",
+          error: {message: 'Max reconnection attempts reached'}
+        });
         return false;
       }
 
@@ -316,7 +320,7 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
       );
 
       this.reconnectAttempts++;
-      
+
       // Schedule reconnection attempt
       this.reconnectTimeout = setTimeout(async () => {
         try {
@@ -327,7 +331,11 @@ export class RealtimeVoiceClient extends EventEmitter implements TypedEmitter {
           if (this.reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             await this.disconnect(true);
           } else {
-            this.emit('error', { type: 'error', message: 'Failed to reconnect after maximum attempts' });
+            this.emit('error', {
+              type: 'error',
+              event_id: "reconnect",
+              error: {message: 'Failed to reconnect after maximum attempts'}
+            });
           }
         }
       }, delay);

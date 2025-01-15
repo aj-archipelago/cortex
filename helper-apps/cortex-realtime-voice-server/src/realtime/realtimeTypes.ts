@@ -111,11 +111,11 @@ type RealtimeContentPart = {
 export type RealtimeErrorEvent = RealtimeEvent & {
   type: 'error',
   error: {
-    type: string,
-    code: string,
     message: string,
-    param: null,
-    event_id: string
+    type?: string,
+    code?: string,
+    param?: null,
+    event_id?: string
   }
 }
 
