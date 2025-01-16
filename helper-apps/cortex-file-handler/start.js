@@ -18,17 +18,29 @@ app.use('/files', express.static(publicFolder));
 // New primary endpoint
 app.all('/api/CortexFileHandler', async (req, res) => {
     const context = { req, res, log: console.log }
-    await CortexFileHandler(context, req);
-    context.log(context.res);
-    res.status(context.res.status || 200).send(context.res.body);
+    try {
+        await CortexFileHandler(context, req);
+        context.log(context.res);
+        res.status(context.res.status || 200).send(context.res.body);
+    } catch (error) {
+        const status = error.status || 500;
+        const message = error.message || 'Internal server error';
+        res.status(status).send(message);
+    }
 });
 
 // Legacy endpoint for compatibility
 app.all('/api/MediaFileChunker', async (req, res) => {
     const context = { req, res, log: console.log }
-    await CortexFileHandler(context, req);
-    context.log(context.res);
-    res.status(context.res.status || 200).send(context.res.body);
+    try {
+        await CortexFileHandler(context, req);
+        context.log(context.res);
+        res.status(context.res.status || 200).send(context.res.body);
+    } catch (error) {
+        const status = error.status || 500;
+        const message = error.message || 'Internal server error';
+        res.status(status).send(message);
+    }
 });
 
 app.listen(port, () => {

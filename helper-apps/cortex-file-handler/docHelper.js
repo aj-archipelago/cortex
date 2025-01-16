@@ -95,6 +95,7 @@ export async function documentToText(filePath) {
         case 'pdf':
             return pdfToText(filePath);
         case 'txt':
+        case 'html':
             return txtToText(filePath);
         case 'docx':
         case 'doc':

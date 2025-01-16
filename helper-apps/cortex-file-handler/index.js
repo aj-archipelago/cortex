@@ -1,5 +1,5 @@
 import { downloadFile, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs} from './blobHandler.js';
+import { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs} from './blobHandler.js';
 import { cleanupRedisFileStoreMap, getFileStoreMap, publishRequestProgress, removeFromFileStoreMap, setFileStoreMap } from './redis.js';
 import { ensureEncoded, ensureFileExtension } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
@@ -124,7 +124,7 @@ async function CortexFileHandler(context, req) {
                      checkHash ? 'checkHash' : 
                      clearHash ? 'clearHash' : 
                      fetch || load || restore ? 'remoteFile' : 
-                     req.method.toLowerCase() === 'delete' ? 'delete' :
+                     req.method.toLowerCase() === 'delete' || req.query.operation === 'delete' ? 'delete' :
                      uri ? (DOC_EXTENSIONS.some(ext => uri.toLowerCase().endsWith(ext)) ? 'document_processing' : 'media_chunking') : 
                      'upload';
     
@@ -133,18 +133,28 @@ async function CortexFileHandler(context, req) {
     cleanupInactive(context); //trigger & no need to wait for it
 
     // Clean up blob when request delete which means processing marked completed
-    if (req.method.toLowerCase() === `delete`) {
-        const { requestId } = req.query;
-        if (!requestId) {
+    if (operation === 'delete') {
+        const deleteRequestId = req.query.requestId || requestId;
+        if (!deleteRequestId) {
             context.res = {
                 status: 400,
                 body: "Please pass a requestId on the query string"
             };
             return;
         }
-        const result = useAzure ? await deleteBlob(requestId) : await deleteFolder(requestId);
+        
+        // Delete from Azure/Local storage
+        const azureResult = useAzure ? await deleteBlob(deleteRequestId) : await deleteFolder(deleteRequestId);
+        const gcsResult = [];
+        if (gcs) {
+            for (const blobName of azureResult) {
+                gcsResult.push(...await deleteGCS(blobName));
+            }
+        }
+        
         context.res = {
-            body: result
+            status: 200,
+            body: { body: [...azureResult, ...gcsResult] }
         };
         return;
     }
@@ -231,11 +241,18 @@ async function CortexFileHandler(context, req) {
     if(hash && clearHash){
         try {
             const hashValue = await getFileStoreMap(hash);
-            await removeFromFileStoreMap(hash);
-            context.res = {
-                status: 200,
-                body: hashValue ? `Hash ${hash} removed` : `Hash ${hash} not found`
-            };
+            if (hashValue) {
+                await removeFromFileStoreMap(hash);
+                context.res = {
+                    status: 200,
+                    body: `Hash ${hash} removed`
+                };
+            } else {
+                context.res = {
+                    status: 404,
+                    body: `Hash ${hash} not found`
+                };
+            }
         } catch (error) {
             context.res = {
                 status: 500,
@@ -243,7 +260,7 @@ async function CortexFileHandler(context, req) {
             };
             console.log('Error occurred during hash cleanup:', error);
         }
-        return
+        return;
     }
 
     if(hash && checkHash){ //check if hash exists
@@ -256,6 +273,10 @@ async function CortexFileHandler(context, req) {
             if(!exists.valid){
                 context.log(`File is not in storage. Removing from map: ${hash}`);
                 await removeFromFileStoreMap(hash);
+                context.res = {
+                    status: 404,
+                    body: `Hash ${hash} not found`
+                };
                 return;
             }
 
@@ -273,7 +294,6 @@ async function CortexFileHandler(context, req) {
                 status: 200,
                 body: hashResult
             };
-
             return;
         }
 

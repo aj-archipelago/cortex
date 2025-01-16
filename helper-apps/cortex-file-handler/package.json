@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node start.js",
     "dev": "node -r dotenv/config start.js",
-    "test": "echo \"No tests yet...\""
+    "test": "DOTENV_CONFIG_PATH=.env.test NODE_ENV=test node -r dotenv/config node_modules/ava/entrypoints/cli.mjs",
+    "test:azure": "DOTENV_CONFIG_PATH=.env.test.azure NODE_ENV=test ./scripts/test-azure.sh",
+    "test:watch": "DOTENV_CONFIG_PATH=.env.test NODE_ENV=test node -r dotenv/config node_modules/ava/entrypoints/cli.mjs --watch",
+    "test:gcs": "DOTENV_CONFIG_PATH=.env.test.gcs NODE_ENV=test ./scripts/test-gcs.sh"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.13.0",
@@ -24,5 +27,22 @@
     "public-ip": "^6.0.1",
     "uuid": "^9.0.0",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "ava": "^5.3.1",
+    "dotenv": "^16.3.1",
+    "nock": "^13.3.0"
+  },
+  "ava": {
+    "files": [
+      "tests/**/*",
+      "!tests/test-files/**/*",
+      "!tests/test-docs/**/*",
+      "!tests/mocks/**/*"
+    ],
+    "timeout": "1m",
+    "nodeArguments": [
+      "--experimental-modules"
+    ]
   }
 }

@@ -138,17 +138,21 @@ const generateSASToken = (containerClient, blobName, expiryTimeSeconds =
 async function deleteBlob(requestId) {
   if (!requestId) throw new Error("Missing requestId parameter");
   const { containerClient } = await getBlobClient();
-  // List the blobs in the container with the specified prefix
-  const blobs = containerClient.listBlobsFlat({ prefix: `${requestId}/` });
+  // List all blobs in the container
+  const blobs = containerClient.listBlobsFlat();
 
   const result = [];
   // Iterate through the blobs
   for await (const blob of blobs) {
-    // Delete the matching blob
-    const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
-    await blockBlobClient.delete();
-    console.log(`Cleaned blob: ${blob.name}`);
-    result.push(blob.name);
+    // Check if the blob name starts with requestId_ (flat structure)
+    // or is inside a folder named requestId/ (folder structure)
+    if (blob.name.startsWith(`${requestId}_`) || blob.name.startsWith(`${requestId}/`)) {
+      // Delete the matching blob
+      const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
+      await blockBlobClient.delete();
+      console.log(`Cleaned blob: ${blob.name}`);
+      result.push(blob.name);
+    }
   }
 
   return result;
@@ -168,15 +172,15 @@ async function uploadBlob(context, req, saveToLocal = false, filePath=null, hash
           const result = await uploadFile(context, requestId, body, saveToLocal, file, filename, resolve, hash);
           resolve(result);
         } catch (error) {
-          context.res = {
-            status: 500,
-            body: "Error processing file upload."
-          };
-          reject(error);
+          const err = new Error("Error processing file upload.");
+          err.status = 500;
+          throw err;
         }
       } else {
         // Otherwise, continue working with form-data
         const busboy = Busboy({ headers: req.headers });
+        let hasFile = false;
+        let errorOccurred = false;
       
         busboy.on("field", (fieldname, value) => {
           if (fieldname === "requestId") {
@@ -185,33 +189,70 @@ async function uploadBlob(context, req, saveToLocal = false, filePath=null, hash
         });
 
         busboy.on("file", async (fieldname, file, filename) => {
+          if (errorOccurred) return;
+          hasFile = true;
           uploadFile(context, requestId, body, saveToLocal, file, filename?.filename || filename, resolve, hash).catch(error => {
-            context.res = {
-              status: 500,
-              body: "Error processing file upload."
-            };
-            reject(error);
+            if (errorOccurred) return;
+            errorOccurred = true;
+            const err = new Error("Error processing file upload.");
+            err.status = 500;
+            reject(err);
           });
         });
 
         busboy.on("error", (error) => {
-          context.log("Error processing file upload:", error);
-          context.res = {
-            status: 500,
-            body: "Error processing file upload."
-          };
-          reject(error);
+          if (errorOccurred) return;
+          errorOccurred = true;
+          const err = new Error("No file provided in request");
+          err.status = 400;
+          reject(err);
         });
 
-        req.pipe(busboy);
+        busboy.on("finish", () => {
+          if (errorOccurred) return;
+          if (!hasFile) {
+            errorOccurred = true;
+            const err = new Error("No file provided in request");
+            err.status = 400;
+            reject(err);
+          }
+        });
+
+        // Handle errors from piping the request
+        req.on('error', (error) => {
+          if (errorOccurred) return;
+          errorOccurred = true;
+          // Only log unexpected errors
+          if (error.message !== "No file provided in request") {
+            context.log("Error in request stream:", error);
+          }
+          const err = new Error("No file provided in request");
+          err.status = 400;
+          reject(err);
+        });
+
+        try {
+          req.pipe(busboy);
+        } catch (error) {
+          if (errorOccurred) return;
+          errorOccurred = true;
+          // Only log unexpected errors
+          if (error.message !== "No file provided in request") {
+            context.log("Error piping request to busboy:", error);
+          }
+          const err = new Error("No file provided in request");
+          err.status = 400;
+          reject(err);
+        }
       }
     } catch (error) {
-      context.log("Error processing file upload:", error);
-      context.res = {
-        status: 500,
-        body: "Error processing file upload."
-      };
-      reject(error);
+      // Only log unexpected errors
+      if (error.message !== "No file provided in request") {
+        context.log("Error processing file upload:", error);
+      }
+      const err = new Error(error.message || "Error processing file upload.");
+      err.status = error.status || 500;
+      reject(err);
     }
   });
 }
@@ -275,6 +316,16 @@ async function saveToGoogleStorage(context, encodedFilename, azureUrl) {
 
 async function uploadFile(context, requestId, body, saveToLocal, file, filename, resolve, hash = null) {
   try {
+    // Check if file is provided
+    if (!file) {
+      context.res = {
+        status: 400,
+        body: 'No file provided in request'
+      };
+      resolve(context.res);
+      return;
+    }
+
     const encodedFilename = encodeURIComponent(`${requestId || uuidv4()}_${filename}`);
     
     // Set up storage promises
@@ -300,7 +351,7 @@ async function uploadFile(context, requestId, body, saveToLocal, file, filename,
     const results = await Promise.all(storagePromises);
     
     // Combine results
-    body = {
+    const result = {
       message: `File '${encodedFilename}' ${saveToLocal ? 'saved to folder' : 'uploaded'} successfully.`,
       filename,
       ...results.reduce((acc, result) => {
@@ -311,16 +362,16 @@ async function uploadFile(context, requestId, body, saveToLocal, file, filename,
     };
 
     if (hash) {
-      body.hash = hash;
+      result.hash = hash;
     }
 
     // Set response
     context.res = {
       status: 200,
-      body,
+      body: result,
     };
 
-    resolve(body);
+    resolve(result);
   } catch (error) {
     context.log("Error in uploadFile:", error);
     // If we have a URL but GCS failed, clean it up
@@ -428,6 +479,39 @@ async function cleanupGCS(urls=null) {
   return cleanedURLs;
 }
 
+async function deleteGCS(blobName) {
+  if (!blobName) throw new Error("Missing blobName parameter");
+  if (!gcs) throw new Error("Google Cloud Storage is not initialized");
+
+  try {
+    if (process.env.STORAGE_EMULATOR_HOST) {
+      // For fake GCS server, use HTTP API directly
+      const response = await axios.delete(
+        `http://localhost:4443/storage/v1/b/${GCS_BUCKETNAME}/o/${encodeURIComponent(blobName)}`,
+        { validateStatus: status => status === 200 || status === 404 }
+      );
+      if (response.status === 200) {
+        console.log(`Cleaned GCS file: ${blobName}`);
+        return [blobName];
+      }
+      return [];
+    } else {
+      // For real GCS, use the SDK
+      const bucket = gcs.bucket(GCS_BUCKETNAME);
+      const file = bucket.file(blobName);
+      await file.delete();
+      console.log(`Cleaned GCS file: ${blobName}`);
+      return [blobName];
+    }
+  } catch (error) {
+    if (error.code !== 404) {
+      console.error(`Error in deleteGCS: ${error}`);
+      throw error;
+    }
+    return [];
+  }
+}
+
 // Helper function to ensure GCS upload for existing files
 async function ensureGCSUpload(context, existingFile) {
   if (!existingFile.gcs && gcs) {
@@ -438,4 +522,4 @@ async function ensureGCSUpload(context, existingFile) {
   return existingFile;
 }
 
-export { saveFileToBlob, deleteBlob, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs };
+export { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs };

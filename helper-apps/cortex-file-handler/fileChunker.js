@@ -19,15 +19,10 @@ async function processChunk(inputPath, outputFileName, start, duration) {
             .format('mp3')
             .audioCodec('libmp3lame')
             .audioBitrate(128)
-            .on('start', (cmd) => {
-                console.log(`Started FFmpeg with command: ${cmd}`);
-            })
             .on('error', (err) => {
-                console.error(`Error occurred while processing chunk:`, err);
                 reject(err);
             })
             .on('end', () => {
-                console.log(`Finished processing chunk`);
                 resolve(outputFileName);
             })
             .save(outputFileName);
@@ -50,23 +45,14 @@ async function downloadFile(url, outputPath) {
             response = await axios.get(url, { responseType: 'stream' });
         }
 
-        // Make an HTTP request for the file
-
-        // Create a writable file stream to save the file
         const fileStream = fs.createWriteStream(outputPath);
-
-        // Pipe the response data into the file stream
         response.data.pipe(fileStream);
 
-        // Wait for the file stream to finish writing
         await new Promise((resolve, reject) => {
             fileStream.on('finish', resolve);
             fileStream.on('error', reject);
         });
-
-        console.log(`Downloaded file saved to: ${outputPath}`);
     } catch (error) {
-        console.error(`Error downloading file from ${url}:`, error);
         throw error;
     }
 }
@@ -118,9 +104,7 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 500) {
 
         return { chunkPromises, chunkOffsets, uniqueOutputPath }; 
     } catch (err) {
-        const msg = `Error processing media file, check if the file is a valid media file or is accessible`;
-        console.error(msg, err);
-        throw new Error(msg);
+        throw new Error(`Error processing media file, check if the file is a valid media file or is accessible`);
     }
 }
 
