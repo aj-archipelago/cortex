@@ -6,6 +6,9 @@ import os from 'os';
 import { promisify } from 'util';
 import axios from 'axios';
 import { ensureEncoded } from './helper.js';
+import http from 'http';
+import https from 'https';
+import { pipeline } from 'stream/promises';
 
 const ffmpegProbe = promisify(ffmpeg.ffprobe);
 
@@ -49,10 +52,7 @@ async function processChunk(inputPath, outputFileName, start, duration) {
             .duration(duration)
             .format('mp3')
             .audioCodec('libmp3lame')
-            .audioBitrate(128);
-
-        // Set up streaming pipeline
-        command.stream()
+            .audioBitrate(128)
             .on('start', () => {
                 console.log(`Processing chunk: ${start}s -> ${start + duration}s`);
             })
@@ -70,8 +70,10 @@ async function processChunk(inputPath, outputFileName, start, duration) {
             .on('end', () => {
                 console.log(`Chunk complete: ${outputFileName}`);
                 resolve(outputFileName);
-            })
-            .pipe(fs.createWriteStream(outputFileName));
+            });
+
+        // Use pipe() to handle streaming
+        command.pipe(fs.createWriteStream(outputFileName), { end: true });
     });
 }
 
@@ -85,18 +87,32 @@ async function downloadFile(url, outputPath) {
     try {
         let response;
         try {
-            response = await axios.get(decodeURIComponent(url), { responseType: 'stream' });
+            response = await axios.get(decodeURIComponent(url), { 
+                responseType: 'stream',
+                // Add timeout and maxContentLength
+                timeout: 30000,
+                maxContentLength: Infinity,
+                // Enable streaming download
+                decompress: true,
+                // Use a smaller chunk size for better memory usage
+                httpAgent: new http.Agent({ keepAlive: true }),
+                httpsAgent: new https.Agent({ keepAlive: true })
+            });
         } catch (error) {
-            response = await axios.get(url, { responseType: 'stream' });
+            response = await axios.get(url, { 
+                responseType: 'stream',
+                timeout: 30000,
+                maxContentLength: Infinity,
+                decompress: true,
+                httpAgent: new http.Agent({ keepAlive: true }),
+                httpsAgent: new https.Agent({ keepAlive: true })
+            });
         }
 
-        const fileStream = fs.createWriteStream(outputPath);
-        response.data.pipe(fileStream);
-
-        await new Promise((resolve, reject) => {
-            fileStream.on('finish', resolve);
-            fileStream.on('error', reject);
-        });
+        const writer = fs.createWriteStream(outputPath);
+        
+        // Use pipeline for better error handling and memory management
+        await pipeline(response.data, writer);
 
         if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
             throw new Error('Download failed or file is empty');
@@ -118,7 +134,6 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 500, requestId
         uniqueOutputPath = generateUniqueFolderName();
         fs.mkdirSync(uniqueOutputPath, { recursive: true });
         
-        // Track temp directory for cleanup
         tempDirectories.set(uniqueOutputPath, {
             createdAt: Date.now(),
             requestId
@@ -135,14 +150,16 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 500, requestId
             inputPath = tempPath;
         }
 
-        // Convert to absolute path and verify existence
         inputPath = path.resolve(inputPath);
         if (!fs.existsSync(inputPath)) {
             throw new Error(`Input file not found: ${inputPath}`);
         }
 
-        // Create read stream for input file
-        inputStream = fs.createReadStream(inputPath, { highWaterMark: 1024 * 1024 }); // 1MB chunks
+        // Use a larger chunk size for better throughput while still managing memory
+        inputStream = fs.createReadStream(inputPath, { 
+            highWaterMark: 4 * 1024 * 1024, // 4MB chunks
+            autoClose: true
+        });
 
         console.log('Probing file:', inputPath);
         const metadata = await ffmpegProbe(inputPath);
@@ -154,30 +171,44 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 500, requestId
         const numChunks = Math.ceil((duration - 1) / chunkDurationInSeconds);
         console.log(`Processing ${numChunks} chunks of ${chunkDurationInSeconds} seconds each`);
 
-        const chunkPromises = [];
-        const chunkOffsets = [];
+        const chunkResults = new Array(numChunks); // Pre-allocate array to maintain order
+        const chunkOffsets = new Array(numChunks); // Pre-allocate offsets array
 
-        // Process chunks sequentially with streaming
-        for (let i = 0; i < numChunks; i++) {
-            const outputFileName = path.join(uniqueOutputPath, `chunk-${i + 1}-${path.parse(inputPath).name}.mp3`);
-            const offset = i * chunkDurationInSeconds;
-            
-            try {
-                const result = await processChunk(inputPath, outputFileName, offset, chunkDurationInSeconds);
-                chunkPromises.push(result);
-                chunkOffsets.push(offset);
-                console.log(`Completed chunk ${i + 1}/${numChunks}`);
-            } catch (error) {
-                console.error(`Failed to process chunk ${i + 1}:`, error);
-                // Continue with next chunk
+        // Process chunks in parallel with a concurrency limit
+        const CONCURRENT_CHUNKS = 3; // Process 3 chunks at a time
+        for (let i = 0; i < numChunks; i += CONCURRENT_CHUNKS) {
+            const chunkBatch = [];
+            for (let j = 0; j < CONCURRENT_CHUNKS && i + j < numChunks; j++) {
+                const chunkIndex = i + j;
+                const outputFileName = path.join(uniqueOutputPath, `chunk-${chunkIndex + 1}-${path.parse(inputPath).name}.mp3`);
+                const offset = chunkIndex * chunkDurationInSeconds;
+                
+                chunkBatch.push(processChunk(inputPath, outputFileName, offset, chunkDurationInSeconds)
+                    .then(result => {
+                        chunkResults[chunkIndex] = result; // Store in correct position
+                        chunkOffsets[chunkIndex] = offset; // Store offset in correct position
+                        console.log(`Completed chunk ${chunkIndex + 1}/${numChunks}`);
+                        return result;
+                    })
+                    .catch(error => {
+                        console.error(`Failed to process chunk ${chunkIndex + 1}:`, error);
+                        return null;
+                    }));
             }
+            
+            // Wait for the current batch to complete before starting the next
+            await Promise.all(chunkBatch);
         }
 
-        if (chunkPromises.length === 0) {
+        // Filter out any failed chunks
+        const validChunks = chunkResults.filter(Boolean);
+        const validOffsets = chunkOffsets.filter((_, index) => chunkResults[index]);
+
+        if (validChunks.length === 0) {
             throw new Error('No chunks were successfully processed');
         }
 
-        return { chunkPromises, chunkOffsets, uniqueOutputPath };
+        return { chunkPromises: validChunks, chunkOffsets: validOffsets, uniqueOutputPath };
     } catch (err) {
         if (uniqueOutputPath && fs.existsSync(uniqueOutputPath)) {
             try {
@@ -190,7 +221,6 @@ async function splitMediaFile(inputPath, chunkDurationInSeconds = 500, requestId
         console.error('Error in splitMediaFile:', err);
         throw new Error(`Error processing media file: ${err.message}`);
     } finally {
-        // Clean up resources
         if (inputStream) {
             try {
                 inputStream.destroy();

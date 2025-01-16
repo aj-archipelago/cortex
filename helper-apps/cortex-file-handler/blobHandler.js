@@ -274,49 +274,35 @@ async function saveToAzureStorage(context, encodedFilename, file) {
   const options = contentType ? { blobHTTPHeaders: { blobContentType: contentType } } : {};
   
   const blockBlobClient = containerClient.getBlockBlobClient(encodedFilename);
-  const passThroughStream = new PassThrough();
-  file.pipe(passThroughStream);
   
   context.log(`Uploading to Azure... ${encodedFilename}`);
-  await blockBlobClient.uploadStream(passThroughStream, undefined, undefined, options);
+  await blockBlobClient.uploadStream(file, undefined, undefined, options);
   const sasToken = generateSASToken(containerClient, encodedFilename);
   return `${blockBlobClient.url}?${sasToken}`;
 }
 
 // Helper function to upload a file to Google Cloud Storage
-async function uploadToGCS(context, sourceUrl, encodedFilename) {
+async function uploadToGCS(context, file, encodedFilename) {
   const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
   const writeStream = gcsFile.createWriteStream();
   
-  const response = await axios({
-    method: "get",
-    url: sourceUrl,
-    responseType: "stream",
-  });
-  
   context.log(`Uploading to GCS... ${encodedFilename}`);
-  response.data.pipe(writeStream);
   
-  await new Promise((resolve, reject) => {
-    writeStream.on("finish", resolve);
-    writeStream.on("error", reject);
-  });
-
+  await pipeline(file, writeStream);
   return `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
 }
 
 // Helper function to handle Google Cloud Storage
-async function saveToGoogleStorage(context, encodedFilename, azureUrl) {
+async function saveToGoogleStorage(context, encodedFilename, file) {
   if (!gcs) {
     throw new Error('Google Cloud Storage is not initialized');
   }
 
-  return uploadToGCS(context, azureUrl, encodedFilename);
+  return uploadToGCS(context, file, encodedFilename);
 }
 
 async function uploadFile(context, requestId, body, saveToLocal, file, filename, resolve, hash = null) {
   try {
-    // Check if file is provided
     if (!file) {
       context.res = {
         status: 400,
@@ -328,22 +314,31 @@ async function uploadFile(context, requestId, body, saveToLocal, file, filename,
 
     const encodedFilename = encodeURIComponent(`${requestId || uuidv4()}_${filename}`);
     
+    // Create duplicate readable streams for parallel uploads
+    const streams = [];
+    if (gcs) {
+      streams.push(new PassThrough());
+    }
+    streams.push(new PassThrough());
+
+    // Pipe the input file to all streams
+    streams.forEach(stream => {
+      file.pipe(stream);
+    });
+
     // Set up storage promises
     const storagePromises = [];
     const primaryPromise = saveToLocal 
-      ? saveToLocalStorage(context, requestId, encodedFilename, file)
-      : saveToAzureStorage(context, encodedFilename, file);
+      ? saveToLocalStorage(context, requestId, encodedFilename, streams[streams.length - 1])
+      : saveToAzureStorage(context, encodedFilename, streams[streams.length - 1]);
     
     storagePromises.push(primaryPromise.then(url => ({ url, type: 'primary' })));
 
-    // Add GCS promise if configured
+    // Add GCS promise if configured - now uses its own stream
     if (gcs) {
-      // We need to wait for the primary URL to upload to GCS
       storagePromises.push(
-        primaryPromise.then(url => 
-          saveToGoogleStorage(context, encodedFilename, url)
-            .then(gcsUrl => ({ gcs: gcsUrl, type: 'gcs' }))
-        )
+        saveToGoogleStorage(context, encodedFilename, streams[0])
+          .then(gcsUrl => ({ gcs: gcsUrl, type: 'gcs' }))
       );
     }
 
@@ -365,7 +360,6 @@ async function uploadFile(context, requestId, body, saveToLocal, file, filename,
       result.hash = hash;
     }
 
-    // Set response
     context.res = {
       status: 200,
       body: result,
@@ -374,7 +368,6 @@ async function uploadFile(context, requestId, body, saveToLocal, file, filename,
     resolve(result);
   } catch (error) {
     context.log("Error in uploadFile:", error);
-    // If we have a URL but GCS failed, clean it up
     if (body.url) {
       try {
         await cleanup(context, [body.url]);
