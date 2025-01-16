@@ -179,6 +179,7 @@ export default {
                     case "video":
                     case "audio":
                     case "pdf":
+                    case "text":
                         if (visionContentPresent) {
                             toolCallbackName = 'sys_generator_video_vision';
                             toolCallbackMessage = toolMessage;

@@ -34,7 +34,7 @@ export default {
 
             const newArgs = {
                 ...args,
-                chatHistory: args.chatHistory.slice(-6)
+                chatHistory: args.chatHistory.slice(-20)
             };
 
             if (generatorPathway === 'sys_generator_document') {
