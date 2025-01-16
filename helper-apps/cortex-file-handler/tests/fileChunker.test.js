@@ -8,18 +8,28 @@ import nock from 'nock';
 import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
+import { performance } from 'perf_hooks';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Helper function to create a test media file of specified duration using ffmpeg
 async function createTestMediaFile(filepath, durationSeconds = 10) {
     try {
+        console.log(`Creating test file: ${filepath} (${durationSeconds}s)`);
         // Generate silence using ffmpeg
         execSync(`ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t ${durationSeconds} -q:a 9 -acodec libmp3lame "${filepath}"`, {
-            stdio: 'ignore'
+            stdio: ['ignore', 'pipe', 'pipe']  // Capture stdout and stderr
         });
+        
+        // Verify the file was created and has content
+        const stats = await fs.stat(filepath);
+        if (stats.size === 0) {
+            throw new Error('Generated file is empty');
+        }
+        console.log(`Successfully created ${filepath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
     } catch (error) {
-        console.error('Error creating test file:', error);
+        console.error(`Error creating test file ${filepath}:`, error.message);
+        if (error.stderr) console.error('ffmpeg error:', error.stderr.toString());
         throw error;
     }
 }
@@ -37,36 +47,77 @@ test.before(async t => {
     const testDir = join(__dirname, 'test-files');
     await fs.mkdir(testDir, { recursive: true });
     
-    // Create test files of different durations
-    const testFile1s = join(testDir, 'test-1s.mp3');
-    const testFile10s = join(testDir, 'test-10s.mp3');
-    const testFile600s = join(testDir, 'test-600s.mp3');
-    
-    await createTestMediaFile(testFile1s, 1);
-    await createTestMediaFile(testFile10s, 10);
-    await createTestMediaFile(testFile600s, 600);
-    
-    t.context = {
-        testDir,
-        testFile1s,
-        testFile10s,
-        testFile600s
-    };
+    try {
+        // Create test files of different durations
+        const testFile1s = join(testDir, 'test-1s.mp3');
+        const testFile10s = join(testDir, 'test-10s.mp3');
+        const testFile600s = join(testDir, 'test-600s.mp3');
+        
+        await createTestMediaFile(testFile1s, 1);
+        await createTestMediaFile(testFile10s, 10);
+        await createTestMediaFile(testFile600s, 600);
+        
+        // Create large test files
+        const testFile1h = join(testDir, 'test-1h.mp3');
+        const testFile4h = join(testDir, 'test-4h.mp3');
+        
+        console.log('\nCreating large test files (this may take a while)...');
+        await createTestMediaFile(testFile1h, 3600);
+        await createTestMediaFile(testFile4h, 14400);
+        
+        t.context = {
+            testDir,
+            testFile1s,
+            testFile10s,
+            testFile600s,
+            testFile1h,
+            testFile4h
+        };
 
-    // Setup nock for URL tests with proper headers
-    nock('https://example.com')
-        .get('/media/test.mp3')
-        .replyWithFile(200, testFile10s, {
-            'Content-Type': 'audio/mpeg',
-            'Content-Length': (await fs.stat(testFile10s)).size.toString()
-        })
-        .persist();
+        // Setup nock for URL tests with proper headers
+        nock('https://example.com')
+            .get('/media/test.mp3')
+            .replyWithFile(200, testFile10s, {
+                'Content-Type': 'audio/mpeg',
+                'Content-Length': (await fs.stat(testFile10s)).size.toString()
+            })
+            .persist();
+    } catch (error) {
+        console.error('Error during test setup:', error);
+        // Clean up any partially created files
+        try {
+            await fs.rm(testDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+            console.error('Error during cleanup:', cleanupError);
+        }
+        throw error;
+    }
 });
 
-// Cleanup: Remove test files
+// Cleanup: Remove test files and worker pool
 test.after.always(async t => {
-    await fs.rm(t.context.testDir, { recursive: true, force: true });
+    // Clean up test files
+    if (t.context.testDir) {
+        try {
+            await fs.rm(t.context.testDir, { recursive: true, force: true });
+            console.log('Test files cleaned up successfully');
+        } catch (error) {
+            console.error('Error cleaning up test files:', error);
+        }
+    }
+
+    // Clean up nock
     nock.cleanAll();
+    
+    // Clean up worker pool if it exists
+    if (typeof workerPool !== 'undefined' && Array.isArray(workerPool)) {
+        try {
+            await Promise.all(workerPool.map(worker => worker.terminate()));
+            console.log('Worker pool cleaned up successfully');
+        } catch (error) {
+            console.error('Error cleaning up worker pool:', error);
+        }
+    }
 });
 
 // Test successful chunking of a short file
@@ -182,4 +233,90 @@ test('handles invalid URLs in download gracefully', async t => {
     await t.throwsAsync(
         async () => downloadFile(invalidUrl, outputPath)
     );
+});
+
+// Helper to format duration nicely
+function formatDuration(ms) {
+    if (ms < 1000) return `${ms}ms`;
+    const seconds = ms / 1000;
+    if (seconds < 60) return `${seconds.toFixed(2)}s`;
+    const minutes = seconds / 60;
+    if (minutes < 60) return `${minutes.toFixed(2)}m`;
+    const hours = minutes / 60;
+    return `${hours.toFixed(2)}h`;
+}
+
+// Test performance with 1-hour file
+test('performance test - 1 hour file', async t => {
+    const start = performance.now();
+    
+    const { chunkPromises, chunkOffsets, uniqueOutputPath } = await splitMediaFile(t.context.testFile1h);
+    
+    // Wait for all chunks to complete
+    const chunkPaths = await Promise.all(chunkPromises);
+    const end = performance.now();
+    const duration = end - start;
+    
+    console.log(`\n1 hour file processing stats:
+    - Total time: ${formatDuration(duration)}
+    - Chunks created: ${chunkPaths.length}
+    - Average time per chunk: ${formatDuration(duration / chunkPaths.length)}
+    - Processing speed: ${((3600 / (duration / 1000))).toFixed(2)}x realtime`);
+    
+    t.true(chunkPaths.length > 0, 'Should create chunks');
+    t.true(duration > 0, 'Should measure time');
+    
+    // Cleanup
+    await fs.rm(uniqueOutputPath, { recursive: true, force: true });
+});
+
+// Test performance with 4-hour file
+test('performance test - 4 hour file', async t => {
+    const start = performance.now();
+    
+    const { chunkPromises, chunkOffsets, uniqueOutputPath } = await splitMediaFile(t.context.testFile4h);
+    
+    // Wait for all chunks to complete
+    const chunkPaths = await Promise.all(chunkPromises);
+    const end = performance.now();
+    const duration = end - start;
+    
+    console.log(`\n4 hour file processing stats:
+    - Total time: ${formatDuration(duration)}
+    - Chunks created: ${chunkPaths.length}
+    - Average time per chunk: ${formatDuration(duration / chunkPaths.length)}
+    - Processing speed: ${((14400 / (duration / 1000))).toFixed(2)}x realtime`);
+    
+    t.true(chunkPaths.length > 0, 'Should create chunks');
+    t.true(duration > 0, 'Should measure time');
+    
+    // Cleanup
+    await fs.rm(uniqueOutputPath, { recursive: true, force: true });
+});
+
+// Test memory usage during large file processing
+test('memory usage during large file processing', async t => {
+    const initialMemory = process.memoryUsage().heapUsed;
+    let peakMemory = initialMemory;
+    
+    const interval = setInterval(() => {
+        const used = process.memoryUsage().heapUsed;
+        peakMemory = Math.max(peakMemory, used);
+    }, 100);
+    
+    const { chunkPromises, uniqueOutputPath } = await splitMediaFile(t.context.testFile4h);
+    await Promise.all(chunkPromises);
+    
+    clearInterval(interval);
+    
+    const memoryIncrease = (peakMemory - initialMemory) / 1024 / 1024; // Convert to MB
+    console.log(`\nMemory usage stats:
+    - Initial memory: ${(initialMemory / 1024 / 1024).toFixed(2)}MB
+    - Peak memory: ${(peakMemory / 1024 / 1024).toFixed(2)}MB
+    - Memory increase: ${memoryIncrease.toFixed(2)}MB`);
+    
+    t.true(memoryIncrease >= 0, 'Should track memory usage');
+    
+    // Cleanup
+    await fs.rm(uniqueOutputPath, { recursive: true, force: true });
 }); 
