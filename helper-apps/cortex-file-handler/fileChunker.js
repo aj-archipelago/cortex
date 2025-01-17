@@ -18,8 +18,7 @@ const tempDirectories = new Map(); // dir -> { createdAt, requestId }
 
 // Temp directory cleanup
 async function cleanupTempDirectories() {
-    const tempDir = os.tmpdir();
-    
+   
     for (const [dir, info] of tempDirectories) {
         try {
             // Cleanup directories older than 1 hour

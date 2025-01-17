@@ -1,5 +1,7 @@
+/* eslint-disable no-unused-vars */
 import test from 'ava';
 import axios from 'axios';
+// eslint-disable-next-line import/no-extraneous-dependencies
 import FormData from 'form-data';
 import { port, publicFolder, ipAddress } from '../start.js';
 import { v4 as uuidv4 } from 'uuid';

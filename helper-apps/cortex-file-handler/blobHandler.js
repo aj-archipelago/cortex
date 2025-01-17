@@ -11,6 +11,7 @@ import { join } from "path";
 import { Storage } from "@google-cloud/storage";
 import axios from "axios";
 import { publicFolder, port, ipAddress } from "./start.js";
+// eslint-disable-next-line import/no-extraneous-dependencies
 import mime from "mime-types";
 
 function isBase64(str) {
@@ -65,6 +66,19 @@ async function gcsUrlExists(url, defaultReturn = false) {
         const bucketName = urlParts[0];
         const fileName = urlParts.slice(1).join('/');
 
+        if (process.env.STORAGE_EMULATOR_HOST) {
+            try {
+                const response = await axios.get(
+                    `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${bucketName}/o/${encodeURIComponent(fileName)}`,
+                    { validateStatus: status => status === 200 || status === 404 }
+                );
+                return response.status === 200;
+            } catch (error) {
+                console.error('Error checking emulator file:', error);
+                return false;
+            }
+        }
+
         const bucket = gcs.bucket(bucketName);
         const file = bucket.file(fileName);
 
@@ -77,7 +91,7 @@ async function gcsUrlExists(url, defaultReturn = false) {
     }
 }
 
-const getBlobClient = async () => {
+export const getBlobClient = async () => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   const containerName = AZURE_STORAGE_CONTAINER_NAME;
   if (!connectionString || !containerName) {
@@ -159,102 +173,104 @@ async function deleteBlob(requestId) {
   return result;
 }
 
-async function uploadBlob(context, req, saveToLocal = false, filePath=null, hash=null) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      let requestId = uuidv4();
-      let body = {};
+function uploadBlob(context, req, saveToLocal = false, filePath=null, hash=null) {
+  return new Promise((resolve, reject) => {
+    (async () => {
+      try {
+        let requestId = uuidv4();
+        let body = {};
 
-      // If filePath is given, we are dealing with local file and not form-data
-      if (filePath) {
-        const file = fs.createReadStream(filePath);
-        const filename = path.basename(filePath);
-        try {
-          const result = await uploadFile(context, requestId, body, saveToLocal, file, filename, resolve, hash);
-          resolve(result);
-        } catch (error) {
-          const err = new Error("Error processing file upload.");
-          err.status = 500;
-          throw err;
-        }
-      } else {
-        // Otherwise, continue working with form-data
-        const busboy = Busboy({ headers: req.headers });
-        let hasFile = false;
-        let errorOccurred = false;
-      
-        busboy.on("field", (fieldname, value) => {
-          if (fieldname === "requestId") {
-            requestId = value;
-          }
-        });
-
-        busboy.on("file", async (fieldname, file, filename) => {
-          if (errorOccurred) return;
-          hasFile = true;
-          uploadFile(context, requestId, body, saveToLocal, file, filename?.filename || filename, resolve, hash).catch(error => {
-            if (errorOccurred) return;
-            errorOccurred = true;
+        // If filePath is given, we are dealing with local file and not form-data
+        if (filePath) {
+          const file = fs.createReadStream(filePath);
+          const filename = path.basename(filePath);
+          try {
+            const result = await uploadFile(context, requestId, body, saveToLocal, file, filename, resolve, hash);
+            resolve(result);
+          } catch (error) {
             const err = new Error("Error processing file upload.");
             err.status = 500;
-            reject(err);
+            throw err;
+          }
+        } else {
+          // Otherwise, continue working with form-data
+          const busboy = Busboy({ headers: req.headers });
+          let hasFile = false;
+          let errorOccurred = false;
+        
+          busboy.on("field", (fieldname, value) => {
+            if (fieldname === "requestId") {
+              requestId = value;
+            }
           });
-        });
 
-        busboy.on("error", (error) => {
-          if (errorOccurred) return;
-          errorOccurred = true;
-          const err = new Error("No file provided in request");
-          err.status = 400;
-          reject(err);
-        });
+          busboy.on("file", async (fieldname, file, filename) => {
+            if (errorOccurred) return;
+            hasFile = true;
+            uploadFile(context, requestId, body, saveToLocal, file, filename?.filename || filename, resolve, hash).catch(_error => {
+              if (errorOccurred) return;
+              errorOccurred = true;
+              const err = new Error("Error processing file upload.");
+              err.status = 500;
+              reject(err);
+            });
+          });
 
-        busboy.on("finish", () => {
-          if (errorOccurred) return;
-          if (!hasFile) {
+          busboy.on("error", (_error) => {
+            if (errorOccurred) return;
             errorOccurred = true;
             const err = new Error("No file provided in request");
             err.status = 400;
             reject(err);
-          }
-        });
+          });
 
-        // Handle errors from piping the request
-        req.on('error', (error) => {
-          if (errorOccurred) return;
-          errorOccurred = true;
-          // Only log unexpected errors
-          if (error.message !== "No file provided in request") {
-            context.log("Error in request stream:", error);
-          }
-          const err = new Error("No file provided in request");
-          err.status = 400;
-          reject(err);
-        });
+          busboy.on("finish", () => {
+            if (errorOccurred) return;
+            if (!hasFile) {
+              errorOccurred = true;
+              const err = new Error("No file provided in request");
+              err.status = 400;
+              reject(err);
+            }
+          });
 
-        try {
-          req.pipe(busboy);
-        } catch (error) {
-          if (errorOccurred) return;
-          errorOccurred = true;
-          // Only log unexpected errors
-          if (error.message !== "No file provided in request") {
-            context.log("Error piping request to busboy:", error);
+          // Handle errors from piping the request
+          req.on('error', (error) => {
+            if (errorOccurred) return;
+            errorOccurred = true;
+            // Only log unexpected errors
+            if (error.message !== "No file provided in request") {
+              context.log("Error in request stream:", error);
+            }
+            const err = new Error("No file provided in request");
+            err.status = 400;
+            reject(err);
+          });
+
+          try {
+            req.pipe(busboy);
+          } catch (error) {
+            if (errorOccurred) return;
+            errorOccurred = true;
+            // Only log unexpected errors
+            if (error.message !== "No file provided in request") {
+              context.log("Error piping request to busboy:", error);
+            }
+            const err = new Error("No file provided in request");
+            err.status = 400;
+            reject(err);
           }
-          const err = new Error("No file provided in request");
-          err.status = 400;
-          reject(err);
         }
+      } catch (error) {
+        // Only log unexpected errors
+        if (error.message !== "No file provided in request") {
+          context.log("Error processing file upload:", error);
+        }
+        const err = new Error(error.message || "Error processing file upload.");
+        err.status = error.status || 500;
+        reject(err);
       }
-    } catch (error) {
-      // Only log unexpected errors
-      if (error.message !== "No file provided in request") {
-        context.log("Error processing file upload:", error);
-      }
-      const err = new Error(error.message || "Error processing file upload.");
-      err.status = error.status || 500;
-      reject(err);
-    }
+    })();
   });
 }
 
@@ -511,7 +527,16 @@ async function ensureGCSUpload(context, existingFile) {
   if (!existingFile.gcs && gcs) {
     context.log(`GCS file was missing - uploading.`);
     const encodedFilename = path.basename(existingFile.url.split('?')[0]);
-    existingFile.gcs = await uploadToGCS(context, existingFile.url, encodedFilename);
+    
+    // Download the file from Azure/local storage
+    const response = await axios({
+      method: 'get',
+      url: existingFile.url,
+      responseType: 'stream'
+    });
+    
+    // Upload the file stream to GCS
+    existingFile.gcs = await uploadToGCS(context, response.data, encodedFilename);
   }
   return existingFile;
 }

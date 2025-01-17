@@ -1,20 +1,19 @@
 import { downloadFile, splitMediaFile } from './fileChunker.js';
 import { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs, AZURE_STORAGE_CONTAINER_NAME } from './blobHandler.js';
 import { cleanupRedisFileStoreMap, getFileStoreMap, publishRequestProgress, removeFromFileStoreMap, setFileStoreMap } from './redis.js';
-import { ensureEncoded, ensureFileExtension } from './helper.js';
+import { ensureEncoded, ensureFileExtension, urlExists } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
 import { documentToText, easyChunker } from './docHelper.js';
-import { DOC_EXTENSIONS, isAcceptedMimeType } from './constants.js';
+import { DOC_EXTENSIONS } from './constants.js';
 import path from 'path';
 import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
-import http from 'http';
-import https from 'https';
 
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
+const useGCS = process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 || process.env.GCP_SERVICE_ACCOUNT_KEY ? true : false;
 
-console.log(`Storage configuration - ${useAzure ? 'Azure' : 'Local'} Storage${gcs ? ' and Google Cloud Storage' : ''}`);
+console.log(`Storage configuration - ${useAzure ? 'Azure' : 'Local'} Storage${useGCS ? ' and Google Cloud Storage' : ''}`);
 
 let isCleanupRunning = false;
 async function cleanupInactive(context) {
@@ -74,48 +73,6 @@ async function cleanupInactive(context) {
     } finally{
         isCleanupRunning = false;
     }
-}
-
-async function urlExists(url) {
-  if(!url) return false;
-  
-  try {
-    // Basic URL validation
-    const urlObj = new URL(url);
-    if (!['http:', 'https:'].includes(urlObj.protocol)) {
-      throw new Error('Invalid protocol - only HTTP and HTTPS are supported');
-    }
-
-    const httpModule = urlObj.protocol === 'https:' ? https : http;
-    
-    return new Promise((resolve) => {
-      const request = httpModule.request(url, { method: 'HEAD' }, function(response) {
-        if (response.statusCode >= 200 && response.statusCode < 400) {
-          const contentType = response.headers['content-type'];
-          const cleanContentType = contentType ? contentType.split(';')[0].trim() : '';
-          // Check if the content type is one we accept
-          if (cleanContentType && isAcceptedMimeType(cleanContentType)) {
-            resolve({ valid: true, contentType: cleanContentType });
-          } else {
-            console.log(`Unsupported content type: ${contentType}`);
-            resolve({ valid: false });
-          }
-        } else {
-          resolve({ valid: false });
-        }
-      });
-      
-      request.on('error', function(err) {
-        console.error('URL validation error:', err.message);
-        resolve({ valid: false });
-      });
-      
-      request.end();
-    });
-  } catch (error) {
-    console.error('URL validation error:', error.message);
-    return { valid: false };
-  }
 }
 
 async function CortexFileHandler(context, req) {
@@ -268,23 +225,53 @@ async function CortexFileHandler(context, req) {
 
         if(hashResult){
             context.log(`File exists in map: ${hash}`);
-            const exists = await urlExists(hashResult?.url);
+            
+            // Check primary storage (Azure/Local) first
+            const primaryExists = await urlExists(hashResult?.url);
+            const gcsExists = gcs ? await gcsUrlExists(hashResult?.gcs) : false;
 
-            if(!exists.valid){
-                context.log(`File is not in storage. Removing from map: ${hash}`);
+            // If neither storage has the file, remove from map and return not found
+            if (!primaryExists.valid && !gcsExists) {
+                context.log(`File not found in any storage. Removing from map: ${hash}`);
                 await removeFromFileStoreMap(hash);
                 context.res = {
                     status: 404,
-                    body: `Hash ${hash} not found`
+                    body: `Hash ${hash} not found in storage`
                 };
                 return;
             }
 
-            if (gcs) {
-                const gcsExists = await gcsUrlExists(hashResult?.gcs);
-                if(!gcsExists){
-                    hashResult = await ensureGCSUpload(context, hashResult);
+            // If primary is missing but GCS exists, restore from GCS
+            if (!primaryExists.valid && gcsExists) {
+                context.log(`Primary storage file missing, restoring from GCS: ${hash}`);
+                try {
+                    const res = await CortexFileHandler(context, {
+                        method: 'GET',
+                        body: { params: { fetch: hashResult.gcs } }
+                    });
+                    if (res?.body?.url) {
+                        hashResult.url = res.body.url;
+                    }
+                } catch (error) {
+                    console.error('Error restoring from GCS:', error);
                 }
+            }
+            // If GCS is missing but primary exists, restore to GCS
+            else if (primaryExists.valid && gcs && !gcsExists) {
+                context.log(`GCS file missing, restoring from primary: ${hash}`);
+                hashResult = await ensureGCSUpload(context, hashResult);
+            }
+
+            // Final check to ensure we have at least one valid storage location
+            const finalPrimaryCheck = await urlExists(hashResult?.url);
+            if (!finalPrimaryCheck.valid && !await gcsUrlExists(hashResult?.gcs)) {
+                context.log(`Failed to restore file. Removing from map: ${hash}`);
+                await removeFromFileStoreMap(hash);
+                context.res = {
+                    status: 404,
+                    body: `Hash ${hash} not found and restoration failed`
+                };
+                return;
             }
 
             //update redis timestamp with current time
