@@ -52,7 +52,8 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
   }
 }
 
-const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
+export const AZURE_STORAGE_CONTAINER_NAME = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 
 async function gcsUrlExists(url, defaultReturn = false) {
     try {
@@ -78,7 +79,7 @@ async function gcsUrlExists(url, defaultReturn = false) {
 
 const getBlobClient = async () => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME;
+  const containerName = AZURE_STORAGE_CONTAINER_NAME;
   if (!connectionString || !containerName) {
     throw new Error(
       "Missing Azure Storage connection string or container name environment variable"

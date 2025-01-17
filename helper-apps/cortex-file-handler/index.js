@@ -1,5 +1,5 @@
 import { downloadFile, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs} from './blobHandler.js';
+import { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs, AZURE_STORAGE_CONTAINER_NAME } from './blobHandler.js';
 import { cleanupRedisFileStoreMap, getFileStoreMap, publishRequestProgress, removeFromFileStoreMap, setFileStoreMap } from './redis.js';
 import { ensureEncoded, ensureFileExtension } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
@@ -376,8 +376,8 @@ async function CortexFileHandler(context, req) {
                 
                 try {
                     //delete uploaded prev nontext file
-                    //check cleanup for whisper temp uploaded files url
-                    const regex = /whispertempfiles\/([a-z0-9-]+)/;
+                    //check cleanup for uploaded files url
+                    const regex = new RegExp(`${AZURE_STORAGE_CONTAINER_NAME}/([a-z0-9-]+)`);
                     const match = uri.match(regex);
                     if (match && match[1]) {
                         const extractedValue = match[1];
