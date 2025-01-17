@@ -25,13 +25,31 @@ async function moveFileToPublicFolder(chunkPath, requestId) {
 async function deleteFolder(requestId) {
     if (!requestId) throw new Error('Missing requestId parameter');
     const targetFolder = join(publicFolder, requestId);
-    await fs.rm(targetFolder, { recursive: true });
-    console.log(`Cleaned folder: ${targetFolder}`);
+    try {
+        // Check if folder exists first
+        const stats = await fs.stat(targetFolder);
+        if (stats.isDirectory()) {
+            // Get list of files before deleting
+            const files = await fs.readdir(targetFolder);
+            const deletedFiles = files.map(file => join(requestId, file));
+            // Delete the folder
+            await fs.rm(targetFolder, { recursive: true });
+            console.log(`Cleaned folder: ${targetFolder}`);
+            return deletedFiles;
+        }
+        return [];
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            // Folder doesn't exist, return empty array
+            return [];
+        }
+        throw error;
+    }
 }
 
 async function cleanupLocal(urls=null) {
+  const cleanedUrls = [];
   if(!urls){
-    const cleanedUrls = []; // initialize array for holding cleaned file URLs
     try {
       // Read the directory
       const items = await fs.readdir(publicFolder);

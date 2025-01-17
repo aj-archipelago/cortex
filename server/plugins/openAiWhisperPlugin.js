@@ -226,15 +226,6 @@ try {
 
                 await markCompletedForCleanUp(requestId);
 
-                //check cleanup for whisper temp uploaded files url
-                const regex = /whispertempfiles\/([a-z0-9-]+)/;
-                const match = file.match(regex);
-                if (match && match[1]) {
-                    const extractedValue = match[1];
-                    await markCompletedForCleanUp(extractedValue);
-                    logger.info(`Cleaned temp whisper file ${file} with request id ${extractedValue}`);
-                }
-
             } catch (error) {
                 logger.error(`An error occurred while deleting: ${error}`);
             }

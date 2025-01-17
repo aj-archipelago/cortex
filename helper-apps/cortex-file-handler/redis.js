@@ -96,34 +96,25 @@ const removeFromFileStoreMap = async (key) => {
 const cleanupRedisFileStoreMap = async (nDays=1) => {
     let cleaned = [];
     try {
-        // Get all key-value pairs from "FileStoreMap"
-        const fileStoreMap = await getAllFileStoreMap();
+        const map = await getAllFileStoreMap();
+        const nDaysAgo = new Date(Date.now() - nDays * 24 * 60 * 60 * 1000);
 
-        if(!fileStoreMap){
-            console.log("FileStoreMap is empty");
-            return;
-        }
-        
-        // Iterate over each key-value pair in the fileStoreMap
-        for (const [key, value] of Object.entries(fileStoreMap)) {
-            //check timestamp of each value compare to nDays and remove if older
-            const timestamp = new Date(value.timestamp);
-            const now = new Date();
-            const diffTime = Math.abs(now - timestamp);
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            if (diffDays > nDays) {
+        for(const key in map){
+            const value = map[key];
+            const timestamp = value?.timestamp ? new Date(value.timestamp) : null;
+            if(!timestamp || timestamp.getTime() < nDaysAgo.getTime()){
                 // Remove the key from the "FileStoreMap" hash map
                 await removeFromFileStoreMap(key);
                 console.log(`Removed key ${key} from FileStoreMap`);
                 cleaned.push(Object.assign({hash:key}, value));
             }
-
         }
     } catch (error) {
         console.error(`Error cleaning FileStoreMap: ${error}`);
-    }finally{
-        return cleaned;
+    } finally {
+        // Cleanup code if needed
     }
+    return cleaned;
 };
 
 
