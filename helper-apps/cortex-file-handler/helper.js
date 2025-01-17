@@ -1,6 +1,8 @@
 import fs from 'fs';
-import { ACCEPTED_MIME_TYPES } from './constants.js';
+import { ACCEPTED_MIME_TYPES, isAcceptedMimeType } from './constants.js';
 import path from 'path';
+import http from 'http';
+import https from 'https';
 
 export async function deleteTempPath(path) {
     try {
@@ -63,5 +65,47 @@ export function ensureEncoded(url) {
     } catch (error) {
         console.error('Error encoding URL:', error);
         return url;
+    }
+}
+
+export async function urlExists(url) {
+    if(!url) return false;
+    
+    try {
+        // Basic URL validation
+        const urlObj = new URL(url);
+        if (!['http:', 'https:'].includes(urlObj.protocol)) {
+            throw new Error('Invalid protocol - only HTTP and HTTPS are supported');
+        }
+
+        const httpModule = urlObj.protocol === 'https:' ? https : http;
+        
+        return new Promise((resolve) => {
+            const request = httpModule.request(url, { method: 'HEAD' }, function(response) {
+                if (response.statusCode >= 200 && response.statusCode < 400) {
+                    const contentType = response.headers['content-type'];
+                    const cleanContentType = contentType ? contentType.split(';')[0].trim() : '';
+                    // Check if the content type is one we accept
+                    if (cleanContentType && isAcceptedMimeType(cleanContentType)) {
+                        resolve({ valid: true, contentType: cleanContentType });
+                    } else {
+                        console.log(`Unsupported content type: ${contentType}`);
+                        resolve({ valid: false });
+                    }
+                } else {
+                    resolve({ valid: false });
+                }
+            });
+            
+            request.on('error', function(err) {
+                console.error('URL validation error:', err.message);
+                resolve({ valid: false });
+            });
+            
+            request.end();
+        });
+    } catch (error) {
+        console.error('URL validation error:', error.message);
+        return { valid: false };
     }
 }

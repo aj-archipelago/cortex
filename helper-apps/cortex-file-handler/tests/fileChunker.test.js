@@ -5,7 +5,6 @@ import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import { splitMediaFile, downloadFile } from '../fileChunker.js';
 import nock from 'nock';
-import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
 import { performance } from 'perf_hooks';
@@ -94,7 +93,7 @@ test.before(async t => {
     }
 });
 
-// Cleanup: Remove test files and worker pool
+// Cleanup: Remove test files
 test.after.always(async t => {
     // Clean up test files
     if (t.context.testDir) {
@@ -108,16 +107,6 @@ test.after.always(async t => {
 
     // Clean up nock
     nock.cleanAll();
-    
-    // Clean up worker pool if it exists
-    if (typeof workerPool !== 'undefined' && Array.isArray(workerPool)) {
-        try {
-            await Promise.all(workerPool.map(worker => worker.terminate()));
-            console.log('Worker pool cleaned up successfully');
-        } catch (error) {
-            console.error('Error cleaning up worker pool:', error);
-        }
-    }
 });
 
 // Test successful chunking of a short file
@@ -250,7 +239,7 @@ function formatDuration(ms) {
 test('performance test - 1 hour file', async t => {
     const start = performance.now();
     
-    const { chunkPromises, chunkOffsets, uniqueOutputPath } = await splitMediaFile(t.context.testFile1h);
+    const { chunkPromises, uniqueOutputPath } = await splitMediaFile(t.context.testFile1h);
     
     // Wait for all chunks to complete
     const chunkPaths = await Promise.all(chunkPromises);
@@ -274,7 +263,7 @@ test('performance test - 1 hour file', async t => {
 test('performance test - 4 hour file', async t => {
     const start = performance.now();
     
-    const { chunkPromises, chunkOffsets, uniqueOutputPath } = await splitMediaFile(t.context.testFile4h);
+    const { chunkPromises, uniqueOutputPath } = await splitMediaFile(t.context.testFile4h);
     
     // Wait for all chunks to complete
     const chunkPaths = await Promise.all(chunkPromises);
