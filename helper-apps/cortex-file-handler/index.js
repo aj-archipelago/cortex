@@ -259,7 +259,8 @@ async function CortexFileHandler(context, req) {
             // If GCS is missing but primary exists, restore to GCS
             else if (primaryExists.valid && gcs && !gcsExists) {
                 context.log(`GCS file missing, restoring from primary: ${hash}`);
-                hashResult = await ensureGCSUpload(context, hashResult);
+                const { gcs: _, ...fileInfo } = hashResult; // eslint-disable-line no-unused-vars
+                hashResult = await ensureGCSUpload(context, fileInfo);
             }
 
             // Final check to ensure we have at least one valid storage location
