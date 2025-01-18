@@ -68,6 +68,7 @@ export const ACCEPTED_MIME_TYPES = {
     'image/webp': ['.webp'],
     'image/heic': ['.heic'],
     'image/heif': ['.heif'],
+    'application/octet-stream': ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'],
     'application/pdf': ['.pdf'],
     
     // Audio types
