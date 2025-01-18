@@ -1,6 +1,7 @@
 // replicateApiPlugin.js
 import ModelPlugin from "./modelPlugin.js";
 import logger from "../../lib/logger.js";
+import axios from "axios";
 
 class ReplicateApiPlugin extends ModelPlugin {
   constructor(pathway, model) {
@@ -106,10 +107,61 @@ class ReplicateApiPlugin extends ModelPlugin {
     cortexRequest.data = requestParameters;
     cortexRequest.params = requestParameters.params;
 
-    return this.executeRequest(cortexRequest);
+    // Make initial request to start prediction
+    const stringifiedResponse = await this.executeRequest(cortexRequest);
+    const parsedResponse = JSON.parse(stringifiedResponse);
+
+    // If we got a completed response, return it
+    if (parsedResponse?.status === "succeeded") {
+      return stringifiedResponse;
+    }
+    
+    logger.info("Replicate API returned a non-completed response.");
+
+    if (!parsedResponse?.id) {
+      throw new Error("No prediction ID returned from Replicate API");
+    }
+
+    // Get the prediction ID and polling URL
+    const predictionId = parsedResponse.id;
+    const pollUrl = parsedResponse.urls?.get;
+
+    if (!pollUrl) {
+      throw new Error("No polling URL returned from Replicate API");
+    }
+
+    // Poll for results
+    const maxAttempts = 60; // 5 minutes with 5 second intervals
+    const pollInterval = 5000;
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const pollResponse = await axios.get(pollUrl, {
+          headers: cortexRequest.headers
+        });
+
+        logger.info("Polling Replicate API - attempt " + attempt);
+        const status = pollResponse.data?.status;
+        
+        if (status === "succeeded") {
+          logger.info("Replicate API returned a completed response after polling");
+          return JSON.stringify(pollResponse.data);
+        } else if (status === "failed" || status === "canceled") {
+          throw new Error(`Prediction ${status}: ${pollResponse.data?.error || "Unknown error"}`);
+        }
+
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      } catch (error) {
+        logger.error(`Error polling prediction ${predictionId}: ${error.message}`);
+        throw error;
+      }
+    }
+
+    throw new Error(`Prediction ${predictionId} timed out after ${maxAttempts * pollInterval / 1000} seconds`);
   }
 
-  // Parse the response from the Replicate API
+  // Stringify the response from the Replicate API
   parseResponse(data) {
     if (data.data) {
       return JSON.stringify(data.data);
