@@ -1,26 +1,223 @@
 // AzureVideoTranslatePlugin.js
 import ModelPlugin from "./modelPlugin.js";
 import logger from "../../lib/logger.js";
-import axios from "axios";
 import { publishRequestProgress } from "../../lib/redisSubscription.js";
-import { config } from "../../config.js";
+import crypto from 'crypto';
+import axios from 'axios';
+import {config} from "../../config.js";
 
-function isValidJSON(str) {
-    try {
-        JSON.parse(str);
-        return true;
-    } catch (e) {
-        return false;
-    }
-}
+// turn off any caching because we're polling the operation status
+axios.defaults.cache = false;
 
 class AzureVideoTranslatePlugin extends ModelPlugin {
+    static lastProcessingRate = null; // bytes per second
+    
     constructor(pathway, model) {
         super(pathway, model);
-        this.apiUrl = config.get("azureVideoTranslationApiUrl");
-        this.eventSource = null;
-        this.jsonBuffer = '';
-        this.jsonDepth = 0;
+        this.subscriptionKey = config.get("azureVideoTranslationApiKey");
+        this.apiVersion = "2024-05-20-preview";
+        this.baseUrl = "";
+        this.startTime = null;
+        this.videoContentLength = null;
+    }
+
+    async verifyVideoAccess(videoUrl) {
+        try {
+            const response = await axios.head(videoUrl);
+            
+            const contentType = response.headers['content-type'];
+            const contentLength = parseInt(response.headers['content-length'], 10);
+
+            if (contentType && !contentType.includes('video/mp4')) {
+                logger.warn(`Warning: Video might not be in MP4 format. Content-Type: ${contentType}`);
+            }
+
+            const TYPICAL_BITRATE = 2.5 * 1024 * 1024; // 2.5 Mbps
+            const durationSeconds = Math.round((contentLength * 8) / TYPICAL_BITRATE);
+            
+            return {
+                isAccessible: true,
+                contentLength,
+                durationSeconds: durationSeconds || 60
+            };
+        } catch (error) {
+            throw new Error(`Failed to access video: ${error.message}`);
+        }
+    }
+
+    async createTranslation(params) {
+        const { videoUrl, sourceLanguage, targetLanguage, voiceKind, translationId } = params;
+        
+        const translation = {
+            id: translationId,
+            displayName: `${translationId}.mp4`,
+            description: `Translate video from ${sourceLanguage} to ${targetLanguage}`,
+            input: {
+                sourceLocale: sourceLanguage,
+                targetLocale: targetLanguage,
+                voiceKind: voiceKind,
+                videoFileUrl: videoUrl
+            }
+        };
+
+        const url = `${this.baseUrl}/translations/${translationId}?api-version=${this.apiVersion}`;
+        logger.debug(`Creating translation: ${url}`);
+
+        try {
+            const response = await axios.put(url, translation, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Ocp-Apim-Subscription-Key': this.subscriptionKey,
+                }
+            });
+
+            const operationUrl = response.headers['operation-location'];
+            return { translation: response.data, operationUrl };
+        } catch (error) {
+            const errorText = error.response?.data || error.message;
+            throw new Error(`Failed to create translation: ${error.message}\nDetails: ${errorText}`);
+        }
+    }
+
+    async getTranslationStatus(translationId) {
+        const url = `${this.baseUrl}/translations/${translationId}?api-version=${this.apiVersion}`;
+        try {
+            const response = await axios.get(url, {
+                headers: {
+                    'Ocp-Apim-Subscription-Key': this.subscriptionKey,
+                }
+            });
+            return response.data;
+        } catch (error) {
+            throw new Error(`Failed to get translation status: ${error.message}`);
+        }
+    }
+
+    async getIterationStatus(translationId, iterationId) {
+        const url = `${this.baseUrl}/translations/${translationId}/iterations/${iterationId}?api-version=${this.apiVersion}`;
+        
+        try {
+            const response = await axios.get(url, {
+                headers: {
+                    'Ocp-Apim-Subscription-Key': this.subscriptionKey,
+                }
+            });
+            return response.data;
+        } catch (error) {
+            const errorText = error.response?.data || error.message;
+            throw new Error(`Failed to get iteration status: ${error.message}\nDetails: ${errorText}`);
+        }
+    }
+
+    async pollOperation(operationUrl) {
+        try {
+            const response = await axios.get(operationUrl, {
+                headers: {
+                    'Ocp-Apim-Subscription-Key': this.subscriptionKey,
+                }
+            });
+            return response.data;
+        } catch (error) {
+            const errorText = error.response?.data || error.message;
+            throw new Error(`Failed to poll operation: ${error.message}\nDetails: ${errorText}`);
+        }
+    }
+
+    async monitorOperation(operationUrlOrConfig, entityType = 'operation') {
+
+        let estimatedTotalTime = 0;
+        if (AzureVideoTranslatePlugin.lastProcessingRate && this.videoContentLength) {
+            estimatedTotalTime = this.videoContentLength / AzureVideoTranslatePlugin.lastProcessingRate;
+        } else {
+            // First run: estimate based on 1x calculated video duration
+            estimatedTotalTime = (this.videoContentLength * 8) / (2.5 * 1024 * 1024);
+        }
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            let status;
+            if (typeof operationUrlOrConfig === 'string') {
+                const operation = await this.pollOperation(operationUrlOrConfig);
+                status = operation;
+            } else {
+                const { translationId, iterationId } = operationUrlOrConfig;
+                const iteration = await this.getIterationStatus(translationId, iterationId);
+                status = iteration;
+            }
+
+            logger.debug(`${entityType} status: ${JSON.stringify(status, null, 2)}`);
+
+            let progress = 0;
+            let estimatedProgress = 0;
+            let progressMessage = '';
+            switch (entityType) {
+                case 'translation':
+                    progressMessage = 'Getting ready to translate video...';
+                    break;
+                case 'iteration':
+                    if (status.status === 'NotStarted') {
+                        progressMessage = 'Waiting for translation to start...';
+                    } else if (status.status === 'Running') {
+                        progressMessage = 'Translating video...';
+                        if (this.startTime) {
+                            // Calculate progress based on elapsed time
+                            const elapsedSeconds = (Date.now() - this.startTime) / 1000;
+                            estimatedProgress = Math.min(0.95, elapsedSeconds / estimatedTotalTime);
+                            const remainingSeconds = Math.max(0, estimatedTotalTime - elapsedSeconds);
+                            if (remainingSeconds > 0) {
+                                if (remainingSeconds < 60) {
+                                    const roundedSeconds = Math.ceil(remainingSeconds);
+                                    progressMessage = `Translating video... ${roundedSeconds} second${roundedSeconds !== 1 ? 's' : ''} remaining`;
+                                } else {
+                                    const remainingMinutes = Math.ceil(remainingSeconds / 60);
+                                    progressMessage = `Translating video... ${remainingMinutes} minute${remainingMinutes !== 1 ? 's' : ''} remaining`;
+                                }
+                            }
+                            progress = status.percentComplete ? status.percentComplete / 100 : estimatedProgress;
+                        } else {
+                            this.startTime = Date.now();
+                            estimatedProgress = 0;
+                        }
+                    } else if (status.status === 'Succeeded') {
+                        progressMessage = 'Video translation complete.';
+                    } else if (status.status === 'Failed') {
+                        progressMessage = 'Video translation failed.';
+                    }
+                    break;
+            }
+
+            // Publish progress updates
+            publishRequestProgress({
+                requestId: this.requestId,
+                progress,
+                info: progressMessage
+            });
+
+            if (status.status === 'Succeeded') {
+                return status;
+            } else if (status.status === 'Failed') {
+                throw new Error(`${entityType} failed: ${status.error?.message || 'Unknown error'}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+    }
+
+    async getTranslationOutput(translationId, iterationId) {
+        const iteration = await this.getIterationStatus(translationId, iterationId);
+        const translation = await this.getTranslationStatus(translationId);
+        if (iteration.result) {
+            const targetLocale = translation.input.targetLocale;
+            return {
+                outputVideoSubtitleWebVttFileUrl: iteration.result.sourceLocaleSubtitleWebvttFileUrl,
+                targetLocales: {
+                    [targetLocale]: {
+                        outputVideoFileUrl: iteration.result.translatedVideoFileUrl,
+                        outputVideoSubtitleWebVttFileUrl: iteration.result.targetLocaleSubtitleWebvttFileUrl
+                    }
+                }
+            };
+        }
+        return null;
     }
 
     getRequestParameters(_, parameters, __) {
@@ -37,150 +234,88 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         );
     }
 
-    handleStream(stream, onData, onEnd, onError) {
-        const timeout = setTimeout(() => {
-            onError(new Error('Stream timeout'));
-        }, 300000); // timeout
-
-        stream.on('data', (chunk) => {
-            clearTimeout(timeout);
-            const lines = chunk.toString().split('\n\n');
-            lines.forEach(line => {
-                if (line.startsWith('data: ')) {
-                    const eventData = line.slice(6);
-                    try {
-                        this.handleEvent({ data: eventData }, onData);
-                    } catch (error) {
-                        onError(error);
-                    }
-                }
-            });
-        });
-        stream.on('end', () => {
-            clearTimeout(timeout);
-            this.cleanup();
-            onEnd();
-        });
-        stream.on('error', (error) => {
-            clearTimeout(timeout);
-            console.error('Stream error:', error);
-            this.cleanup();
-            onError(error);
-        });
-    }
-
-    handleEvent(event, onData) {
-        const data = event.data;
-        this.jsonBuffer += data;
-        this.jsonDepth += (data.match(/{/g) || []).length - (data.match(/}/g) || []).length;
-
-        if (this.jsonDepth === 0 && this.jsonBuffer.trim()) {
-            logger.debug(this.jsonBuffer);
-            if (this.jsonBuffer.includes('Failed to run with exception')) {
-                this.cleanup();
-                throw new Error(this.jsonBuffer);
-            }
-
-            onData(this.jsonBuffer);
-            this.jsonBuffer = '';
-            this.jsonDepth = 0;
-        }
-    }
-
     async execute(text, parameters, prompt, cortexRequest) {
-        if (!this.apiUrl) {
-            throw new Error("API URL is not set");
+        if (!this.subscriptionKey) {
+            throw new Error("Azure Video Translation subscription key is not set");
         }
+
         this.requestId = cortexRequest.requestId;
+        this.baseUrl = cortexRequest.url;
+        
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
+        
         try {
-            const response = await axios.post(this.apiUrl, requestParameters, {
-                responseType: 'stream',
-                headers: {
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache',
-                    'Expires': '0',
-                }
+            const translationId = `cortex-translation-${this.requestId}`;
+            const videoUrl = requestParameters.sourcevideooraudiofilepath;
+            const sourceLanguage = requestParameters.sourcelocale;
+            const targetLanguage = requestParameters.targetlocale;
+            const voiceKind = requestParameters.voicekind || 'PlatformVoice';
+            const embedSubtitles = requestParameters.withoutsubtitleintranslatedvideofile === "false" ? true : false;
+            const speakerCount = parseInt(requestParameters.speakercount) || 0;
+
+            // Verify video access and get duration
+            const videoInfo = await this.verifyVideoAccess(videoUrl);
+            this.videoContentLength = videoInfo.contentLength;
+            logger.debug(`Video info: ${JSON.stringify(videoInfo, null, 2)}`);
+
+            // Create translation
+            const { operationUrl } = await this.createTranslation({
+                videoUrl, sourceLanguage, targetLanguage, voiceKind, translationId
             });
 
-            return new Promise((resolve, reject) => {
-                let finalJson = '';
-                this.handleStream(response.data,
-                    (data) => {
-                        let sent = false;
-                        if (isValidJSON(data)) {
-                            const parsedData = JSON.parse(data);
-                            if (parsedData.progress !== undefined) {
-                                let timeInfo = '';
-                                if (parsedData.estimated_time_remaining && parsedData.elapsed_time) {
-                                    const minutes = Math.ceil(parsedData.estimated_time_remaining / 60);
-                                    timeInfo = minutes <= 2 
-                                        ? `Should be done soon (${parsedData.elapsed_time} elapsed)`
-                                        : `Estimated ${minutes} minutes remaining`;
-                                }
+            logger.debug(`Starting translation monitoring with operation URL: ${operationUrl}`);
+            // Monitor translation creation
+            const operationStatus = await this.monitorOperation(operationUrl, 'translation');
+            logger.debug(`Translation operation completed with status: ${JSON.stringify(operationStatus, null, 2)}`);
+            
+            const updatedTranslation = await this.getTranslationStatus(translationId);
+            logger.debug(`Translation status after operation: ${JSON.stringify(updatedTranslation, null, 2)}`);
 
-                                publishRequestProgress({
-                                    requestId: this.requestId,
-                                    progress: parsedData.progress,
-                                    info: timeInfo
-                                });
-                                sent = true;
-                            }
-                        }
-                        if (!sent) {
-                            publishRequestProgress({
-                                requestId: this.requestId,
-                                info: data
-                            });
-                        }
-                        logger.debug('Data:', data);
-                        
-                        // Extract JSON content if message contains targetLocales
-                        const jsonMatch = data.match(/{[\s\S]*"targetLocales"[\s\S]*}/);
-                        if (jsonMatch) {
-                            const extractedJson = jsonMatch[0];
-                            if (isValidJSON(extractedJson)) {
-                                finalJson = extractedJson;
-                            }
-                        } 
-                    },
-                    () => {
-                        resolve(finalJson)
-                    },
-                    (error) => reject(error)
-                );
-            }).finally(() => this.cleanup());
+            // Create iteration
+            const iteration = {
+                id: crypto.randomUUID(),
+                displayName: translationId,
+                input: {
+                    subtitleMaxCharCountPerSegment: 42,
+                    exportSubtitleInVideo: embedSubtitles,
+                    ...(speakerCount > 0 && { speakerCount })
+                }
+            };
 
+            logger.debug(`Creating iteration: ${JSON.stringify(iteration, null, 2)}`);
+            const iterationUrl = `${this.baseUrl}/translations/${translationId}/iterations/${iteration.id}?api-version=${this.apiVersion}`;
+            try {
+                const iterationResponse = await axios.put(iterationUrl, iteration, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Ocp-Apim-Subscription-Key': this.subscriptionKey,
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                });
+
+                const iterationOperationUrl = iterationResponse.headers['operation-location'];
+                await this.monitorOperation(iterationOperationUrl, 'iteration');
+
+                // Update processing rate for future estimates
+                const totalSeconds = (Date.now() - this.startTime) / 1000;
+                AzureVideoTranslatePlugin.lastProcessingRate = this.videoContentLength / totalSeconds;
+                logger.debug(`Updated processing rate: ${AzureVideoTranslatePlugin.lastProcessingRate} bytes/second`);
+
+                const output = await this.getTranslationOutput(translationId, iteration.id);
+                return JSON.stringify(output);
+            } catch (error) {
+                const errorText = error.response?.data || error.message;
+                throw new Error(`Failed to create iteration: ${error.message}\nDetails: ${errorText}`);
+            }
         } catch (error) {
-            this.cleanup();
-            return error;
-        }
-    }
-
-    parseResponse(data) {
-        const response = typeof data === 'object' ? JSON.stringify(data) : data;
-        publishRequestProgress({
-            requestId: this.requestId,
-            progress: 1,
-            data: response,
-        });
-        return response;
-    }
-
-    logRequestData(data, responseData, prompt) {
-        logger.verbose(`Request: ${JSON.stringify(data)}`);
-        logger.verbose(`Response: ${this.parseResponse(responseData)}`);
-        if (prompt?.debugInfo) {
-            prompt.debugInfo += `\nRequest: ${JSON.stringify(data)}`;
-            prompt.debugInfo += `\nResponse: ${this.parseResponse(responseData)}`;
+            logger.error(`Error in video translation: ${error.message}`);
+            throw error;
         }
     }
 
     cleanup() {
-        if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
-        }
+        // No cleanup needed for direct API implementation
     }
 }
 

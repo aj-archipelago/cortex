@@ -271,18 +271,19 @@ var config = convict({
             },
             "azure-video-translate": {
                 "type": "AZURE-VIDEO-TRANSLATE",
+                "url": "https://eastus.api.cognitive.microsoft.com/videotranslation",
                 "headers": {
                     "Content-Type": "application/json"
                 },
-                "supportsStreaming": true,
             }
         },
         env: 'CORTEX_MODELS'
     },
-    azureVideoTranslationApiUrl: {
+    azureVideoTranslationApiKey: {
         format: String,
-        default: 'http://127.0.0.1:5005',
-        env: 'AZURE_VIDEO_TRANSLATION_API_URL'
+        default: null,
+        env: 'AZURE_VIDEO_TRANSLATION_API_KEY',
+        sensitive: true
     },
     openaiApiKey: {
         format: String,
