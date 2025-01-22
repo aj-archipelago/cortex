@@ -58,6 +58,7 @@ export default {
         messages: [],
         voiceResponse: false,
         codeRequestId: ``,
+        skipCallbackMessage: false
     },
     timeout: 600,
     tokenRatio: TOKEN_RATIO,
@@ -223,11 +224,16 @@ export default {
             }
 
             if (toolCallbackMessage) {
-                if (args.stream) {
-                    if (!ackResponse) {
+                if (args.stream || args.skipCallbackMessage) {
+                    if (!ackResponse && !args.skipCallbackMessage) {
                         await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
                     }
                     pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
+
+                    if(args.skipCallbackMessage){
+                        return await callPathway('sys_entity_continue', { ...args, stream: false, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
+                    }
+
                     await callPathway('sys_entity_continue', { ...args, stream: true, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
                     return "";
                 } else {
