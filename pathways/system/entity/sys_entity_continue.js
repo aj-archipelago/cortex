@@ -1,6 +1,6 @@
 import { callPathway } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
-import entityConstants from './shared/sys_entity_constants.js';
+import { config } from '../../../config.js';
 
 export default {
     prompt: [],
@@ -25,13 +25,12 @@ export default {
         voiceResponse: false,
     },
     timeout: 300,
-    entityConstants,
     executePathway: async ({args, resolver}) => {
         const pathwayResolver = resolver;
 
         args = {
             ...args,
-            ...pathwayResolver.pathway.entityConstants
+            ...config.get('entityConstants')
         };
 
         // if the model has been overridden, make sure to use it

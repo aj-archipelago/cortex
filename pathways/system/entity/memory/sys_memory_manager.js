@@ -1,6 +1,6 @@
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import logger from '../../../../lib/logger.js';
-import entityConstants from '../shared/sys_entity_constants.js';
+import { config } from '../../../../config.js';
 
 const AI_MEMORY_DEFAULTS = `  {
     "memoryUser": "",
@@ -19,11 +19,10 @@ export default {
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 300,
-    entityConstants,
     executePathway: async ({args, resolver}) => {
         try {
 
-            args = { ...args, ...resolver.pathway.entityConstants };
+            args = { ...args, ...config.get('entityConstants') };
 
             // Check if memory is empty or all sections are empty, and set to defaults if so
             const memory = await callPathway('sys_read_memory', { ...args });

@@ -1,5 +1,6 @@
 import { Prompt } from '../../../server/prompt.js';
-import entityConstants from './shared/sys_entity_constants.js';
+import { config } from '../../../config.js';
+
 export default {
     prompt:
         [
@@ -17,12 +18,11 @@ export default {
     },
     useInputChunking: false,
     enableDuplicateRequests: false,
-    entityConstants,
-    executePathway: async ({args, runAllPrompts, resolver}) => {
+    executePathway: async ({args, runAllPrompts}) => {
 
         args = {
             ...args,
-            ...resolver.pathway.entityConstants
+            ...config.get('entityConstants')
         };
 
         const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;

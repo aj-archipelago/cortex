@@ -4,7 +4,7 @@ import { callPathway, say } from '../../../lib/pathwayTools.js';
 import logger from  '../../../lib/logger.js';
 import { chatArgsHasImageUrl } from  '../../../lib/util.js';
 import { QueueServiceClient } from '@azure/storage-queue';
-import entityConstants from './shared/sys_entity_constants.js';
+import { config } from '../../../config.js';
 
 const TOKEN_RATIO = 0.75;
 
@@ -59,7 +59,6 @@ export default {
     },
     timeout: 600,
     tokenRatio: TOKEN_RATIO,
-    entityConstants,
 
     executePathway: async ({args, resolver}) => {
         let title = null;
@@ -69,7 +68,7 @@ export default {
 
         args = {
             ...args,
-            ...pathwayResolver.pathway.entityConstants
+            ...config.get('entityConstants')
         };
 
         // Limit the chat history to 20 messages to speed up processing

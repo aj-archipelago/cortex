@@ -1,7 +1,7 @@
 import { Prompt } from '../../../../server/prompt.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import { encode } from '../../../../lib/encodeCache.js';
-import entityConstants from '../shared/sys_entity_constants.js';
+import { config } from '../../../../config.js';
 
 const modifyText = (text, modifications) => {
     let modifiedText = text || '';
@@ -151,9 +151,8 @@ export default {
     enableDuplicateRequests: false,
     json: true,
     timeout: 300,
-    entityConstants,
-    executePathway: async ({args, runAllPrompts, resolver}) => {
-        args = { ...args, ...resolver.pathway.entityConstants };
+    executePathway: async ({args, runAllPrompts}) => {
+        args = { ...args, ...config.get('entityConstants') };
 
         if (!args.section) {
             return "Memory not updated - no section specified";
