@@ -9,7 +9,7 @@ import axios from 'axios';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETURN_TOKENS = 256;
-const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
+const DEFAULT_PROMPT_TOKEN_RATIO = 1.0;
 const DEFAULT_MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB default
 const DEFAULT_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
