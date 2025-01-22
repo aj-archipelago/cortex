@@ -151,7 +151,9 @@ export default {
     enableDuplicateRequests: false,
     json: true,
     timeout: 300,
-    executePathway: async ({args, runAllPrompts}) => {
+    entityConstants,
+    executePathway: async ({args, runAllPrompts, resolver}) => {
+        args = { ...args, ...resolver.pathway.entityConstants };
 
         if (!args.section) {
             return "Memory not updated - no section specified";
@@ -178,7 +180,7 @@ export default {
 
         let sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section}); 
 
-        const result = await runAllPrompts({...args, sectionPrompt, sectionMemory, ...entityConstants});
+        const result = await runAllPrompts({...args, sectionPrompt, sectionMemory, ...resolver.pathway.entityConstants});
 
         try {
             const { modifications} = JSON.parse(result);

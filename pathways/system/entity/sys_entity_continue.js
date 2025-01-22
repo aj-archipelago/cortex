@@ -6,8 +6,6 @@ export default {
     prompt: [],
     useInputChunking: false,
     enableDuplicateRequests: false,
-    anthropicModel: 'claude-35-sonnet-vertex',
-    openAIModel: 'oai-gpt4o',
     inputParameters: {
         privateData: false,
         useMemory: true,    
@@ -27,13 +25,19 @@ export default {
         voiceResponse: false,
     },
     timeout: 300,
-    ...entityConstants,
+    entityConstants,
     executePathway: async ({args, resolver}) => {
         const pathwayResolver = resolver;
-        const { anthropicModel, openAIModel } = pathwayResolver.pathway;
-        const styleModel = args.aiStyle === "Anthropic" ? anthropicModel : openAIModel;
 
-        args = { ...args, styleModel, ...entityConstants };
+        args = {
+            ...args,
+            ...pathwayResolver.pathway.entityConstants
+        };
+
+        // if the model has been overridden, make sure to use it
+        if (pathwayResolver.modelName) {
+            args.model = pathwayResolver.modelName;
+        }
 
         try {
             // Get the generator pathway name from args or use default

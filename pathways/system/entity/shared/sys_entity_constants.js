@@ -16,6 +16,9 @@ const AI_DATETIME = "The current time and date in GMT is {{now}}, but references
 
 const AI_EXPERTISE = "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. You have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, examine images, take screenshots, generate images, solve hard math and logic problems, write code, and execute code in a sandboxed environment.";
 
+const AI_STYLE_OPENAI = "oai-gpt4o";
+const AI_STYLE_ANTHROPIC = "claude-35-sonnet-vertex";
+
 export default {
     AI_MEMORY,
     AI_DIRECTIVES,
@@ -25,6 +28,8 @@ export default {
     AI_CONVERSATION_HISTORY,
     AI_DATETIME,
     AI_EXPERTISE,
-    AI_MEMORY_INSTRUCTIONS
+    AI_MEMORY_INSTRUCTIONS,
+    AI_STYLE_OPENAI,
+    AI_STYLE_ANTHROPIC
 };
 

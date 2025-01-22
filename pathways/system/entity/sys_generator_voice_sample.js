@@ -17,19 +17,18 @@ export default {
     },
     useInputChunking: false,
     enableDuplicateRequests: false,
+    entityConstants,
     executePathway: async ({args, runAllPrompts, resolver}) => {
 
         args = {
             ...args,
-            ...entityConstants
+            ...resolver.pathway.entityConstants
         };
 
-        const pathwayResolver = resolver;
-        const { anthropicModel, openAIModel } = pathwayResolver.pathway;
+        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
+        args.model = aiStyle === "Anthropic" ? AI_STYLE_ANTHROPIC : AI_STYLE_OPENAI;
 
-        const styleModel = args.aiStyle === "Anthropic" ? anthropicModel : openAIModel;
-
-        const result = await runAllPrompts({ ...args, model: styleModel, stream: false });
+        const result = await runAllPrompts({ ...args, stream: false });
 
         return result;
     }

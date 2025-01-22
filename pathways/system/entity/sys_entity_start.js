@@ -38,8 +38,6 @@ export default {
     useInputChunking: false,
     enableDuplicateRequests: false,
     model: 'oai-gpt4o',
-    anthropicModel: 'claude-35-sonnet-vertex',
-    openAIModel: 'oai-gpt4o',
     useSingleTokenStream: false,
     inputParameters: {
         privateData: false,    
@@ -61,15 +59,17 @@ export default {
     },
     timeout: 600,
     tokenRatio: TOKEN_RATIO,
-    ...entityConstants,
+    entityConstants,
 
     executePathway: async ({args, resolver}) => {
         let title = null;
         let codeRequestId = null;
 
+        const pathwayResolver = resolver;
+
         args = {
             ...args,
-            ...entityConstants
+            ...pathwayResolver.pathway.entityConstants
         };
 
         // Limit the chat history to 20 messages to speed up processing
@@ -78,10 +78,6 @@ export default {
         } else {
             args.chatHistory = args.chatHistory.slice(-20);
         }
-
-        const pathwayResolver = resolver;
-        const { anthropicModel, openAIModel } = pathwayResolver.pathway;
-        const styleModel = args.aiStyle === "Anthropic" ? anthropicModel : openAIModel;
 
         // if the model has been overridden, make sure to use it
         if (pathwayResolver.modelName) {
@@ -104,7 +100,7 @@ export default {
 
         const fetchChatResponse = async (args, pathwayResolver) => {
             const [chatResponse, chatTitleResponse] = await Promise.all([
-                callPathway('sys_generator_quick', {...args, model: styleModel }, pathwayResolver),
+                callPathway('sys_generator_quick', {...args}, pathwayResolver),
                 callPathway('chat_title', { ...args, stream: false}),
             ]);
 
@@ -228,7 +224,7 @@ export default {
                         await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
                     }
                     pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
-                    await callPathway('sys_entity_continue', { ...args, stream: true, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
+                    await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver);
                     return "";
                 } else {
                     pathwayResolver.tool = JSON.stringify({ 
