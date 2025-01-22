@@ -6,6 +6,8 @@ export default {
     prompt: [],
     useInputChunking: false,
     enableDuplicateRequests: false,
+    anthropicModel: 'claude-35-sonnet-vertex',
+    openAIModel: 'oai-gpt4o',
     inputParameters: {
         privateData: false,
         useMemory: true,    
@@ -20,13 +22,18 @@ export default {
         chatId: ``,
         dataSources: [""],
         model: 'oai-gpt4o',
+        aiStyle: "OpenAI",
         generatorPathway: 'sys_generator_results',
         voiceResponse: false,
     },
     timeout: 300,
     ...entityConstants,
     executePathway: async ({args, resolver}) => {
-        args = { ...args, ...entityConstants };
+        const pathwayResolver = resolver;
+        const { anthropicModel, openAIModel } = pathwayResolver.pathway;
+        const styleModel = args.aiStyle === "Anthropic" ? anthropicModel : openAIModel;
+
+        args = { ...args, styleModel, ...entityConstants };
 
         try {
             // Get the generator pathway name from args or use default
