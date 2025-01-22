@@ -47,26 +47,60 @@ export default {
                 ...args,
                 chatHistory: args.chatHistory.slice(-2)
             });
+            
+            let memoryOperations;
             try {
-                const parsedMemoryRequired = JSON.parse(memoryRequired);
-                if (!parsedMemoryRequired || !parsedMemoryRequired.memoryRequired) {
+                memoryOperations = JSON.parse(memoryRequired);
+                if (!Array.isArray(memoryOperations) || memoryOperations.length === 0 || 
+                    memoryOperations[0].memoryOperation === "none") {
                     return "";
                 }
+
+                // Group memory operations by section
+                const operationsBySection = {
+                    memorySelf: [],
+                    memoryUser: [],
+                    memoryTopics: [],
+                    memoryDirectives: []
+                };
+
+                memoryOperations.forEach(op => {
+                    if (op.memorySection in operationsBySection) {
+                        operationsBySection[op.memorySection].push(op);
+                    }
+                });
+
+                // Execute all memory updates in parallel
+                const memoryPromises = {
+                    self: callPathway('sys_memory_update', { 
+                        ...args, 
+                        section: "memorySelf",
+                        operations: JSON.stringify(operationsBySection.memorySelf) 
+                    }),
+                    user: callPathway('sys_memory_update', { 
+                        ...args, 
+                        section: "memoryUser",
+                        operations: JSON.stringify(operationsBySection.memoryUser) 
+                    }),
+                    topics: callPathway('sys_memory_update', { 
+                        ...args, 
+                        section: "memoryTopics",
+                        operations: JSON.stringify(operationsBySection.memoryTopics) 
+                    }),
+                    directives: callPathway('sys_memory_update', { 
+                        ...args, 
+                        section: "memoryDirectives",
+                        operations: JSON.stringify(operationsBySection.memoryDirectives) 
+                    }),
+                };
+
+                await Promise.all(Object.values(memoryPromises));
+                return "";
+
             } catch (e) {
                 logger.warn('sys_memory_required returned invalid JSON:', memoryRequired);
                 return "";
             }
-
-            // Execute all memory updates in parallel
-            const memoryPromises = {
-                self: callPathway('sys_memory_update', { ...args, section: "memorySelf" }),
-                user: callPathway('sys_memory_update', { ...args, section: "memoryUser" }),
-                topics: callPathway('sys_memory_update', { ...args, section: "memoryTopics" }),
-                directives: callPathway('sys_memory_update', { ...args, section: "memoryDirectives" }),
-            };
-
-            await Promise.all(Object.values(memoryPromises));
-            return "";
 
         } catch (e) {
             logger.error('Error in memory manager:', e);
