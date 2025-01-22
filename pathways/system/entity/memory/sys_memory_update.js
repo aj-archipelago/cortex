@@ -180,7 +180,7 @@ export default {
 
         let sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section}); 
 
-        const result = await runAllPrompts({...args, sectionPrompt, sectionMemory, ...resolver.pathway.entityConstants});
+        const result = await runAllPrompts({...args, sectionPrompt, sectionMemory});
 
         try {
             const { modifications} = JSON.parse(result);
