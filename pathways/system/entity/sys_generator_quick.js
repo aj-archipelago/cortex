@@ -14,8 +14,7 @@ export default {
 
         let pathwayResolver = resolver;
         
-        const { aiStyle } = args;
-        const { AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = pathwayResolver.pathway;
+        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
         args.model = aiStyle === "Anthropic" ? AI_STYLE_ANTHROPIC : AI_STYLE_OPENAI;
  
         const promptMessages = [
