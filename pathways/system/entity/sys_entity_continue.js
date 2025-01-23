@@ -28,6 +28,7 @@ export default {
     executePathway: async ({args, resolver}) => {
         const pathwayResolver = resolver;
 
+        // add the entity constants to the args
         args = {
             ...args,
             ...config.get('entityConstants')

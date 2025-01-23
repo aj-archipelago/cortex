@@ -66,10 +66,15 @@ export default {
 
         const pathwayResolver = resolver;
 
+        // add the entity constants to the args
         args = {
             ...args,
             ...config.get('entityConstants')
         };
+                
+        // set the style model if applicable
+        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
+        const styleModel = aiStyle === "Anthropic" ? AI_STYLE_ANTHROPIC : AI_STYLE_OPENAI;
 
         // Limit the chat history to 20 messages to speed up processing
         if (args.messages && args.messages.length > 0) {
@@ -99,7 +104,7 @@ export default {
 
         const fetchChatResponse = async (args, pathwayResolver) => {
             const [chatResponse, chatTitleResponse] = await Promise.all([
-                callPathway('sys_generator_quick', {...args}, pathwayResolver),
+                callPathway('sys_generator_quick', {...args, model: styleModel}, pathwayResolver),
                 callPathway('chat_title', { ...args, stream: false}),
             ]);
 
