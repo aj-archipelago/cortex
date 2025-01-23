@@ -11,6 +11,8 @@ axios.defaults.cache = false;
 
 class AzureVideoTranslatePlugin extends ModelPlugin {
     static lastProcessingRate = null; // bytes per second
+    static processingRates = []; // Array to store historical processing rates
+    static maxHistorySize = 10; // Maximum number of rates to store
     
     constructor(pathway, model) {
         super(pathway, model);
@@ -299,8 +301,9 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
 
                 // Update processing rate for future estimates
                 const totalSeconds = (Date.now() - this.startTime) / 1000;
-                AzureVideoTranslatePlugin.lastProcessingRate = this.videoContentLength / totalSeconds;
-                logger.debug(`Updated processing rate: ${AzureVideoTranslatePlugin.lastProcessingRate} bytes/second`);
+                const newRate = this.videoContentLength / totalSeconds;
+                AzureVideoTranslatePlugin.updateProcessingRate(newRate);
+                logger.debug(`Updated processing rate: ${AzureVideoTranslatePlugin.lastProcessingRate} bytes/second (from ${newRate} bytes/second)`);
 
                 const output = await this.getTranslationOutput(translationId, iteration.id);
                 return JSON.stringify(output);
@@ -314,8 +317,23 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         }
     }
 
-    cleanup() {
-        // No cleanup needed for direct API implementation
+    static updateProcessingRate(newRate) {
+        // Add new rate to history
+        AzureVideoTranslatePlugin.processingRates.push(newRate);
+        
+        // Keep only the last maxHistorySize entries
+        if (AzureVideoTranslatePlugin.processingRates.length > AzureVideoTranslatePlugin.maxHistorySize) {
+            AzureVideoTranslatePlugin.processingRates.shift();
+        }
+        
+        // Calculate weighted average - more recent measurements have higher weight
+        const sum = AzureVideoTranslatePlugin.processingRates.reduce((acc, rate, index) => {
+            const weight = index + 1; // Weight increases with recency
+            return acc + (rate * weight);
+        }, 0);
+        
+        const weightSum = AzureVideoTranslatePlugin.processingRates.reduce((acc, _, index) => acc + (index + 1), 0);
+        AzureVideoTranslatePlugin.lastProcessingRate = sum / weightSum;
     }
 }
 
