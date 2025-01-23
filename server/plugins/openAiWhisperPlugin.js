@@ -64,7 +64,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         }
 
         const processTS = async (uri) => {
-            const cortexRequest = new CortexRequest({ pathwayResolver });
 
             const tsparams = { fileurl:uri };
             const { language } = parameters;
@@ -81,8 +80,14 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
             }
 
+            const cortexRequest = new CortexRequest({ pathwayResolver });
             cortexRequest.url = WHISPER_TS_API_URL;
             cortexRequest.data = tsparams;
+            const whisperInitCallback = (requestInstance) => {
+                requestInstance.url = WHISPER_TS_API_URL;
+                requestInstance.data = tsparams;
+            };
+            cortexRequest.initCallback = whisperInitCallback;
 
             const MAX_RETRIES = 3;
             let attempt = 0;
@@ -91,8 +96,8 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 sendProgress(true, true);
                 try {
                     res = await this.executeRequest(cortexRequest);
-                    if(res.statusCode && res.statusCode >= 400){
-                        throw new Error(res.message || 'An error occurred.');
+                    if(res?.statusCode && res?.statusCode >= 400){
+                        throw new Error(res?.message || 'An error occurred.');
                     }
                     break;
                 }
@@ -102,7 +107,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 }
             }
 
-            if (res.statusCode && res.statusCode >= 400) {
+            if (res?.statusCode && res?.statusCode >= 400) {
                 throw new Error(res.message || 'An error occurred.');
             }
 
@@ -220,15 +225,6 @@ try {
                 }
 
                 await markCompletedForCleanUp(requestId);
-
-                //check cleanup for whisper temp uploaded files url
-                const regex = /whispertempfiles\/([a-z0-9-]+)/;
-                const match = file.match(regex);
-                if (match && match[1]) {
-                    const extractedValue = match[1];
-                    await markCompletedForCleanUp(extractedValue);
-                    logger.info(`Cleaned temp whisper file ${file} with request id ${extractedValue}`);
-                }
 
             } catch (error) {
                 logger.error(`An error occurred while deleting: ${error}`);

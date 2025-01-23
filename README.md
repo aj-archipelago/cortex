@@ -131,6 +131,16 @@ Cortex pathway prompt enhancements include:
 ### Pathway Development
 To add a new pathway to Cortex, you create a new JavaScript file and define the prompts, properties, and functions that implement the desired functionality. Cortex provides defaults for almost everything, so in the simplest case a pathway can really just consist of a string prompt like the spelling example above. You can then save this file in the `pathways` directory in your Cortex project and it will be picked up and made available as a GraphQL query.
 
+### Specifying a Model
+When determining which model to use for a pathway, Cortex follows this order of precedence:
+
+1. `pathway.model` - The model specified directly in the pathway definition
+2. `args.model` - The model passed in the request arguments
+3. `pathway.inputParameters.model` - The model specified in the pathway's input parameters
+4. `config.get('defaultModelName')` - The default model specified in the configuration
+
+The first valid model found in this order will be used. If none of these models are found in the configured endpoints, Cortex will log a warning and use the default model defined in the configuration.
+
 ### Prompt
 When you define a new pathway, you need to at least specify a prompt that will be passed to the model for processing. In the simplest case, a prompt is really just a string, but the prompt is polymorphic - it can be a string or an object that contains information for the model API that you wish to call. Prompts can also be an array of strings or an array of objects for sequential operations. In this way Cortex aims to support the most simple to advanced prompting scenarios.
 
@@ -577,7 +587,7 @@ The following properties can be configured through environment variables or the 
 - `subscriptionKeepAlive`: Keep-alive time for subscriptions in seconds. Default is 0.
 
 API-specific configuration:
-- `azureVideoTranslationApiUrl`: URL for Azure video translation API. Default is 'http://127.0.0.1:5005'.
+- `azureVideoTranslationApiKey`: API key for Azure video translation API. Default is null.
 - `dalleImageApiUrl`: URL for DALL-E image API. Default is 'null'.
 - `neuralSpaceApiKey`: API key for NeuralSpace services. Default is null.
 - `whisperMediaApiUrl`: URL for Whisper media API. Default is 'null'.

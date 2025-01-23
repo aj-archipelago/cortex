@@ -1,4 +1,4 @@
-import pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist';
 import fs from 'fs/promises';
 import mammoth from 'mammoth';
 import XLSX from 'xlsx';
@@ -95,10 +95,13 @@ export async function documentToText(filePath) {
         case 'pdf':
             return pdfToText(filePath);
         case 'txt':
+        case 'html':
             return txtToText(filePath);
         case 'docx':
+        case 'doc':
             return docxToText(filePath);
         case 'xlsx':
+        case 'xls':
             return xlsxToText(filePath);
         case 'csv':
             return csvToText(filePath);
