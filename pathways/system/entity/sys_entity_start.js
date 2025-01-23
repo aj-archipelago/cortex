@@ -4,7 +4,7 @@ import { callPathway, say } from '../../../lib/pathwayTools.js';
 import logger from  '../../../lib/logger.js';
 import { chatArgsHasImageUrl } from  '../../../lib/util.js';
 import { QueueServiceClient } from '@azure/storage-queue';
-import entityConstants from './shared/sys_entity_constants.js';
+import { config } from '../../../config.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
@@ -36,8 +36,6 @@ export default {
     useInputChunking: false,
     enableDuplicateRequests: false,
     model: 'oai-gpt4o',
-    anthropicModel: 'claude-35-sonnet-vertex',
-    openAIModel: 'oai-gpt4o',
     useSingleTokenStream: false,
     inputParameters: {
         privateData: false,    
@@ -59,16 +57,22 @@ export default {
         skipCallbackMessage: false
     },
     timeout: 600,
-    ...entityConstants,
-
+  
     executePathway: async ({args, resolver}) => {
         let title = null;
         let codeRequestId = null;
 
+        const pathwayResolver = resolver;
+
+        // add the entity constants to the args
         args = {
             ...args,
-            ...entityConstants
+            ...config.get('entityConstants')
         };
+                
+        // set the style model if applicable
+        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
+        const styleModel = aiStyle === "Anthropic" ? AI_STYLE_ANTHROPIC : AI_STYLE_OPENAI;
 
         // Limit the chat history to 20 messages to speed up processing
         if (args.messages && args.messages.length > 0) {
@@ -76,10 +80,6 @@ export default {
         } else {
             args.chatHistory = args.chatHistory.slice(-20);
         }
-
-        const pathwayResolver = resolver;
-        const { anthropicModel, openAIModel } = pathwayResolver.pathway;
-        const styleModel = args.aiStyle === "Anthropic" ? anthropicModel : openAIModel;
 
         // if the model has been overridden, make sure to use it
         if (pathwayResolver.modelName) {
@@ -102,7 +102,7 @@ export default {
 
         const fetchChatResponse = async (args, pathwayResolver) => {
             const [chatResponse, chatTitleResponse] = await Promise.all([
-                callPathway('sys_generator_quick', {...args, model: styleModel }, pathwayResolver),
+                callPathway('sys_generator_quick', {...args, model: styleModel}, pathwayResolver),
                 callPathway('chat_title', { ...args, stream: false}),
             ]);
 
@@ -231,8 +231,7 @@ export default {
                         await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
                     }
                     pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
-
-                    await callPathway('sys_entity_continue', { ...args, stream: true, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
+                    await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver);
                     return "";
                 }
                 

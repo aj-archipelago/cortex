@@ -7,7 +7,6 @@ export default {
         contextId: ``,
         aiName: "Jarvis",
         language: "English",
-        model: "oai-gpt4o",
     },
     useInputChunking: false,
     enableDuplicateRequests: false,

@@ -1,6 +1,6 @@
 import { callPathway } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
-import entityConstants from './shared/sys_entity_constants.js';
+import { config } from '../../../config.js';
 
 export default {
     prompt: [],
@@ -20,13 +20,24 @@ export default {
         chatId: ``,
         dataSources: [""],
         model: 'oai-gpt4o',
+        aiStyle: "OpenAI",
         generatorPathway: 'sys_generator_results',
         voiceResponse: false,
     },
     timeout: 300,
-    ...entityConstants,
     executePathway: async ({args, resolver}) => {
-        args = { ...args, ...entityConstants };
+        const pathwayResolver = resolver;
+
+        // add the entity constants to the args
+        args = {
+            ...args,
+            ...config.get('entityConstants')
+        };
+
+        // if the model has been overridden, make sure to use it
+        if (pathwayResolver.modelName) {
+            args.model = pathwayResolver.modelName;
+        }
 
         try {
             // Get the generator pathway name from args or use default

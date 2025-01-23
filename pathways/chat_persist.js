@@ -18,6 +18,5 @@ export default {
         contextId: ``,
     },
     model: 'oai-gpt4o',
-    //model: 'oai-gpturbo',
     useInputChunking: false,
 }

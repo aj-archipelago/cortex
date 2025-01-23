@@ -1,6 +1,6 @@
 export default {
     prompt: `{{text}}`,
-    model: `azure-whisper`,
+    model: `oai-whisper`,
     inputParameters: {
         file: ``,
         language: ``,
