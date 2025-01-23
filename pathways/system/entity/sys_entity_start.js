@@ -56,6 +56,7 @@ export default {
         messages: [],
         voiceResponse: false,
         codeRequestId: ``,
+        skipCallbackMessage: false
     },
     timeout: 600,
     ...entityConstants,
@@ -220,25 +221,31 @@ export default {
             }
 
             if (toolCallbackMessage) {
+                if (args.skipCallbackMessage) {
+                    pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
+                    return await callPathway('sys_entity_continue', { ...args, stream: false, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
+                }
+
                 if (args.stream) {
                     if (!ackResponse) {
                         await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
                     }
                     pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
+
                     await callPathway('sys_entity_continue', { ...args, stream: true, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
                     return "";
-                } else {
-                    pathwayResolver.tool = JSON.stringify({ 
-                        hideFromModel: toolCallbackName ? true : false, 
-                        toolCallbackName, 
-                        title,
-                        search: toolCallbackName === 'sys_generator_results' ? true : false,
-                        coding: toolCallbackName === 'coding' ? true : false,
-                        codeRequestId,
-                        toolCallbackId
-                    });
-                    return toolCallbackMessage || "One moment please.";
                 }
+                
+                pathwayResolver.tool = JSON.stringify({ 
+                    hideFromModel: toolCallbackName ? true : false, 
+                    toolCallbackName, 
+                    title,
+                    search: toolCallbackName === 'sys_generator_results' ? true : false,
+                    coding: toolCallbackName === 'coding' ? true : false,
+                    codeRequestId,
+                    toolCallbackId
+                });
+                return toolCallbackMessage || "One moment please.";
             }
 
             const chatResponse = await (fetchChatResponsePromise || fetchChatResponse({ ...args, ackResponse }, pathwayResolver));
