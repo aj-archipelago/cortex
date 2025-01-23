@@ -6,8 +6,6 @@ import { chatArgsHasImageUrl } from  '../../../lib/util.js';
 import { QueueServiceClient } from '@azure/storage-queue';
 import entityConstants from './shared/sys_entity_constants.js';
 
-const TOKEN_RATIO = 0.75;
-
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
 
@@ -60,7 +58,6 @@ export default {
         codeRequestId: ``,
     },
     timeout: 600,
-    tokenRatio: TOKEN_RATIO,
     ...entityConstants,
 
     executePathway: async ({args, resolver}) => {
