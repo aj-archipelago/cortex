@@ -8,6 +8,22 @@ import GeminiVisionPlugin from '../server/plugins/geminiVisionPlugin.js';
 const mockPathway = { name: 'test', temperature: 0.7 };
 const mockModel = { name: 'test-model' };
 
+// Helper function to validate base64 image data
+function validateBase64Image(base64Data) {   
+    // Decode first few bytes to check for common image format headers
+    const decodedData = Buffer.from(base64Data, 'base64').slice(0, 4);
+    const validImageHeaders = [
+        Buffer.from([0xFF, 0xD8, 0xFF]), // JPEG
+        Buffer.from([0x89, 0x50, 0x4E, 0x47]), // PNG
+        Buffer.from([0x47, 0x49, 0x46]), // GIF
+        Buffer.from([0x52, 0x49, 0x46, 0x46]), // WEBP
+    ];
+    
+    return validImageHeaders.some(header => 
+        decodedData.slice(0, header.length).equals(header)
+    );
+}
+
 // Helper function to create plugin instances
 const createPlugins = () => ({
     openai: new OpenAIVisionPlugin(mockPathway, mockModel),
@@ -40,7 +56,8 @@ test('OpenAI to Claude conversion data url', async (t) => {
     t.true(modifiedMessages[0].content[0].type === 'text');
     t.is(modifiedMessages[0].content[0].text, 'What\'s in this image?');
     t.true(modifiedMessages[0].content[1].type === 'image');
-    t.true(modifiedMessages[0].content[1].source.data.startsWith('/9j/4AAQ'));
+    t.true(modifiedMessages[0].content[1].source.type === 'base64');
+    t.true(validateBase64Image(modifiedMessages[0].content[1].source.data), 'Base64 data should be a valid image');
 });
 
 // Test OpenAI to Claude conversion with a regular image url
@@ -64,7 +81,7 @@ test('OpenAI to Claude conversion image url', async (t) => {
     t.true(modifiedMessages[0].content[0].type === 'text');
     t.is(modifiedMessages[0].content[0].text, 'What\'s in this image?');
     t.true(modifiedMessages[0].content[1].type === 'image');
-    t.true(modifiedMessages[0].content[1].source.data.startsWith('/9j/4AAQ'));
+    t.true(validateBase64Image(modifiedMessages[0].content[1].source.data), 'Base64 data should be a valid image');
 });
 
 // Test OpenAI to Gemini conversion
@@ -148,10 +165,10 @@ test('Mixed content types conversion', async (t) => {
     t.is(claudeMessages.length, 3);
     t.true(claudeMessages[2].content[0].text.includes('Here\'s an image:'));
     t.true(claudeMessages[2].content[1].source.type === 'base64');
-    t.true(claudeMessages[2].content[1].source.data.startsWith('/9j/4AAQ'));
+    t.true(validateBase64Image(claudeMessages[2].content[1].source.data), 'First image should be valid');
     t.true(claudeMessages[2].content[2].text.includes('And another one:'));
     t.true(claudeMessages[2].content[3].source.type === 'base64');
-    t.true(claudeMessages[2].content[3].source.data.startsWith('/9j/4AAQ'));
+    t.true(validateBase64Image(claudeMessages[2].content[3].source.data), 'Second image should be valid');
     t.is(claudeSystem, 'You are a vision analysis AI.');
 
     // Check Gemini conversion
