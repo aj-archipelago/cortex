@@ -5,8 +5,6 @@ import { Prompt } from '../../../server/prompt.js';
 import logger from '../../../lib/logger.js';
 import { getUniqueId } from '../../../lib/util.js';
 
-const TOKEN_RATIO = 1.0;
-
 export default {
     prompt: [],
     useInputChunking: false,
