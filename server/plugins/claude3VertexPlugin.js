@@ -33,15 +33,16 @@ async function convertContentItem(item, maxImageSize, plugin) {
               const urlData = imageUrl.startsWith("data:") ? imageUrl : await fetchImageAsDataURL(imageUrl);
               if (!urlData) { return null; }
               
-              // Check base64 size
-              const base64Size = (urlData.length * 3) / 4;
+              const base64Image = urlData.split(",")[1];
+              // Calculate actual decoded size of base64 data
+              const base64Size = Buffer.from(base64Image, 'base64').length;
+              
               if (base64Size > maxImageSize) {
                 logger.warn(`Image size ${base64Size} bytes exceeds maximum allowed size ${maxImageSize} - skipping image content.`);
                 return null;
               }
               
               const [, mimeType = "image/jpeg"] = urlData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/) || [];
-              const base64Image = urlData.split(",")[1];
 
               return {
                 type: "image",
@@ -114,6 +115,8 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     const messagesCopy = JSON.parse(JSON.stringify(messages));
   
     let system = "";
+    let imageCount = 0;
+    const maxImages = 20; // Claude allows up to 20 images per request
   
     // Extract system messages
     const systemMessages = messagesCopy.filter(message => message.role === "system");
@@ -154,7 +157,20 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     const claude3Messages = await Promise.all(
       finalMessages.map(async (message) => {
         const contentArray = Array.isArray(message.content) ? message.content : [message.content];
-        const claude3Content = await Promise.all(contentArray.map(item => convertContentItem(item, this.getModelMaxImageSize(), this)));
+        const claude3Content = await Promise.all(contentArray.map(async item => {
+          const convertedItem = await convertContentItem(item, this.getModelMaxImageSize(), this);
+          
+          // Track image count
+          if (convertedItem?.type === 'image') {
+            imageCount++;
+            if (imageCount > maxImages) {
+              logger.warn(`Maximum number of images (${maxImages}) exceeded - skipping additional images.`);
+              return null;
+            }
+          }
+          
+          return convertedItem;
+        }));
         return {
           role: message.role,
           content: claude3Content.filter(Boolean),

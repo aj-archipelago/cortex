@@ -28,7 +28,6 @@ export default {
         model: 'oai-gpt4o',
     },
     timeout: 300,
-    tokenRatio: TOKEN_RATIO,
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
 

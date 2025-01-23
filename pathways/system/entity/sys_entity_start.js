@@ -6,8 +6,6 @@ import { chatArgsHasImageUrl } from  '../../../lib/util.js';
 import { QueueServiceClient } from '@azure/storage-queue';
 import { config } from '../../../config.js';
 
-const TOKEN_RATIO = 0.75;
-
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
 
@@ -56,10 +54,10 @@ export default {
         messages: [],
         voiceResponse: false,
         codeRequestId: ``,
+        skipCallbackMessage: false
     },
     timeout: 600,
-    tokenRatio: TOKEN_RATIO,
-
+  
     executePathway: async ({args, resolver}) => {
         let title = null;
         let codeRequestId = null;
@@ -223,6 +221,11 @@ export default {
             }
 
             if (toolCallbackMessage) {
+                if (args.skipCallbackMessage) {
+                    pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
+                    return await callPathway('sys_entity_continue', { ...args, stream: false, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
+                }
+
                 if (args.stream) {
                     if (!ackResponse) {
                         await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
@@ -230,18 +233,18 @@ export default {
                     pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
                     await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver);
                     return "";
-                } else {
-                    pathwayResolver.tool = JSON.stringify({ 
-                        hideFromModel: toolCallbackName ? true : false, 
-                        toolCallbackName, 
-                        title,
-                        search: toolCallbackName === 'sys_generator_results' ? true : false,
-                        coding: toolCallbackName === 'coding' ? true : false,
-                        codeRequestId,
-                        toolCallbackId
-                    });
-                    return toolCallbackMessage || "One moment please.";
                 }
+                
+                pathwayResolver.tool = JSON.stringify({ 
+                    hideFromModel: toolCallbackName ? true : false, 
+                    toolCallbackName, 
+                    title,
+                    search: toolCallbackName === 'sys_generator_results' ? true : false,
+                    coding: toolCallbackName === 'coding' ? true : false,
+                    codeRequestId,
+                    toolCallbackId
+                });
+                return toolCallbackMessage || "One moment please.";
             }
 
             const chatResponse = await (fetchChatResponsePromise || fetchChatResponse({ ...args, ackResponse }, pathwayResolver));
