@@ -72,13 +72,11 @@
     "@faker-js/faker": "^8.4.1",
     "ava": "^5.2.0",
     "dotenv": "^16.0.3",
-    "eslint": "^8.38.0",
-    "eslint-plugin-import": "^2.27.5",
     "got": "^13.0.0",
     "sinon": "^17.0.1"
   },
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   },
   "ava": {
     "files": [
