@@ -667,7 +667,7 @@ Detailed documentation on Cortex's API can be found in the /graphql endpoint of 
 ## Roadmap
 Cortex is a constantly evolving project, and the following features are coming soon:
 
-* Prompt execution context preservation between calls (to enable interactive, multi-call integrations with LangChain and other technologies)
+* Prompt execution context preservation between calls (to enable interactive, multi-call integrations with other technologies)
 * Model-specific cache key optimizations to increase hit rate and reduce cache size
 * Structured analytics and reporting on AI API call frequency, cost, cache hit rate, etc.
 
