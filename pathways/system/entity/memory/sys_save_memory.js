@@ -22,7 +22,7 @@ export default {
             return aiMemory;
         }
 
-        const validSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser'];
+        const validSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser', 'memoryVersion'];
 
         // Handle single section save
         if (section !== 'memoryAll') {

@@ -1,56 +1,83 @@
 import { Prompt } from '../../../../server/prompt.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { encode } from '../../../../lib/encodeCache.js';
 import { config } from '../../../../config.js';
+import { normalizeMemoryFormat, enforceTokenLimit } from './shared/sys_memory_helpers.js';
 
-const modifyText = (text, modifications) => {
+export const modifyText = (text, modifications) => {
     let modifiedText = text || '';
   
     modifications.forEach(mod => {
-        if (mod.type === 'delete' && !mod.pattern) {
-            console.warn('Delete modification missing pattern');
+        // Skip invalid modifications
+        if (!mod.type) {
+            console.warn('Modification missing type');
+            return;
+        }
+        if ((mod.type === 'delete' || mod.type === 'change') && !mod.pattern) {
+            console.warn(`${mod.type} modification missing pattern`);
+            return;
+        }
+        if ((mod.type === 'add' || mod.type === 'change') && !mod.newtext) {
+            console.warn(`${mod.type} modification missing newtext`);
             return;
         }
 
-        let regex;
-        if (mod.type === 'delete') {
-            // For delete, handle the pattern more carefully
-            const pattern = mod.pattern
-                .replace(/\\\[/g, '\\[')
-                .replace(/\\\]/g, '\\]')
-                .replace(/\\\(/g, '\\(')
-                .replace(/\\\)/g, '\\)')
-                .replace(/\\\{/g, '\\{')
-                .replace(/\\\}/g, '\\}')
-                .replace(/\\\*/g, '\\*')
-                .replace(/\\\+/g, '\\+')
-                .replace(/\\\?/g, '\\?')
-                .replace(/\\\./g, '\\.')
-                .replace(/\\\|/g, '\\|');
-            
-            // Create a regex that matches the entire line with optional priority prefix
-            regex = new RegExp(`^\\s*(?:\\[P[1-5]\\]\\s*)?${pattern}\\s*$`, 'gm');
-        } else {
-            regex = new RegExp(`^\\s*(?:\\[P[1-5]\\]\\s*)?${mod.pattern || ''}`, 'ms');
-        }
-  
+        // Create timestamp in GMT
+        const timestamp = new Date().toISOString();
+        
         switch (mod.type) {
             case 'add':
-                if (mod.newtext) {
-                    const text = mod.newtext.trim();
-                    if (!text.match(/^\[P[1-5]\]/)) {
-                        modifiedText = modifiedText + (modifiedText ? '\n' : '') + 
-                            `[P${mod.priority !== undefined ? mod.priority : '3'}] ${text}`;
-                    } else {
-                        modifiedText = modifiedText + (modifiedText ? '\n' : '') + text;
+                const priority = mod.priority || '3';
+                modifiedText = modifiedText + (modifiedText ? '\n' : '') + 
+                    `${priority}|${timestamp}|${mod.newtext}`;
+                break;
+            case 'change':
+                // Split into lines
+                const lines = modifiedText.split('\n');
+                modifiedText = lines.map(line => {
+                    const parts = line.split('|');
+                    const priority = parts[0];
+                    const content = parts.slice(2).join('|');
+                    
+                    if (content) {
+                        try {
+                            const trimmedContent = content.trim();
+                            const regex = new RegExp(mod.pattern, 'i');
+                            
+                            // Try exact match first
+                            if (regex.test(trimmedContent)) {
+                                const newPriority = mod.priority || priority || '3';
+                                // Try to extract capture groups if they exist
+                                const match = trimmedContent.match(regex);
+                                let newContent = mod.newtext;
+                                if (match && match.length > 1) {
+                                    // Replace $1, $2, etc with capture group values
+                                    newContent = mod.newtext.replace(/\$(\d+)/g, (_, n) => match[n] || '');
+                                }
+                                return `${newPriority}|${timestamp}|${newContent}`;
+                            }
+                        } catch (e) {
+                            console.warn(`Invalid regex pattern: ${mod.pattern}`);
+                        }
                     }
-                }
+                    return line;
+                }).join('\n');
                 break;
             case 'delete':
                 // Split into lines, filter out matching lines, and rejoin
                 modifiedText = modifiedText
                     .split('\n')
-                    .filter(line => !line.match(regex))
+                    .filter(line => {
+                        const parts = line.split('|');
+                        const content = parts.slice(2).join('|');
+                        if (!content) return true;
+                        try {
+                            const regex = new RegExp(mod.pattern, 'i');
+                            return !regex.test(content.trim());
+                        } catch (e) {
+                            console.warn(`Invalid regex pattern: ${mod.pattern}`);
+                            return true;
+                        }
+                    })
                     .filter(line => line.trim())
                     .join('\n');
                 break;
@@ -62,67 +89,6 @@ const modifyText = (text, modifications) => {
     return modifiedText;
 };
 
-export { modifyText };
-
-export const enforceTokenLimit = (text, maxTokens = 1000, isTopicsSection = false) => {
-    if (!text) return text;
-    
-    const lines = text.split('\n')
-        .map(line => line.trim())
-        .filter(line => line);
-
-    if (isTopicsSection) {
-        const uniqueLines = [...new Set(lines)];
-        
-        let tokens = encode(uniqueLines.join('\n')).length;
-        let safetyCounter = 0;
-        const maxIterations = uniqueLines.length;
-        
-        while (tokens > maxTokens && uniqueLines.length > 0 && safetyCounter < maxIterations) {
-            uniqueLines.shift();
-            tokens = encode(uniqueLines.join('\n')).length;
-            safetyCounter++;
-        }
-        
-        return uniqueLines.join('\n');
-    }
-
-    const seen = new Set();
-    const prioritizedLines = lines
-        .map(line => {
-            const match = line.match(/^\[P([1-5])\]/);
-            const priority = match ? parseInt(match[1]) : 3;
-            const contentOnly = line.replace(/^\[(?:P)?[1-5]\](?:\s*\[(?:P)?[1-5]\])*/g, '').trim();
-            
-            return {
-                priority,
-                line: match ? line : `[P3] ${line}`,
-                contentOnly
-            };
-        })
-        .filter(item => {
-            if (seen.has(item.contentOnly)) {
-                return false;
-            }
-            seen.add(item.contentOnly);
-            return true;
-        });
-
-    prioritizedLines.sort((a, b) => b.priority - a.priority);
-
-    let tokens = encode(prioritizedLines.map(x => x.line).join('\n')).length;
-    let safetyCounter = 0;
-    const maxIterations = prioritizedLines.length;
-    
-    while (tokens > maxTokens && prioritizedLines.length > 0 && safetyCounter < maxIterations) {
-        prioritizedLines.shift();
-        tokens = encode(prioritizedLines.map(x => x.line).join('\n')).length;
-        safetyCounter++;
-    }
-
-    return prioritizedLines.map(x => x.line).join('\n');
-};
-
 export default {
     prompt:
         [
@@ -130,11 +96,11 @@ export default {
                 messages: [
                     {
                         "role": "system",
-                        "content": "You are part of an AI entity named {{{aiName}}}. {{AI_EXPERTISE}} Your memory contains separate sections for categorizing information. {{{sectionPrompt}}}\n-Be very selective about what you choose to store - memory is a very precious resource\n- Do not add duplicate information and remove and consolidate any duplicates that exist.\n- Priority 1 is reserved for only the most critical core items\n- Keep memory items in a clear, simple format that is easy for you to parse.\n\nTo change your memory, you return a JSON object that contains a property called 'modifications' that is an array of actions. The two types of actions available are 'add', and 'delete'. Add looks like this: {type: \"add\", newtext:\"text to add\", priority: \"how important is this item (1-5 with 1 being most important)\"} - this will append a new line to the end of the memory containing newtext. Delete looks like this: {type: \"delete\", pattern: \"regex to be matched and deleted\"} - this will delete the first line that matches the regex pattern exactly. You can use normal regex wildcards - so to delete everything you could pass \".*$\" as the pattern. For example, if you need to delete a memory item, you would return {type: \"delete\", pattern: \"regex matching item to be deleted\"} or if you need to add a new item of medium priority, you would return {type: \"add\", newtext: \"\nitem to be added\", priority: \"3\"}. If you have no changes for this section, just return {\"modifications\": []}.\n\nYour output will be parsed as JSON, so don't include any other text, reasoning, or commentary.\nThe current date/time is {{now}}."
+                        "content": `You are part of an AI entity named {{{aiName}}} that is in charge of memory management. You examine requests for adds and deletes of memories made by another part of your system and determine exactly how to apply the changes to the memory.\n\nInstructions:\n1. For each add request, check to see if a similar memory already exists. If it does not, create an add modification. If it does, create a change modification with a pattern that matches the existing memory.\n2. For each delete request, check to see if one or more memories matching the delete request exist. If they do, create a delete modification for each memory with a pattern that matches the existing memory to delete.\n3. If there are substantially duplicate memories, you must combine them into a single memory with deletes followed by an add modification.\n4. Return a JSON array of modification objects.\n\nModification objects look like the following:\nFor adds: {type: "add", pattern: "", newtext: "Text of the memory to add"}\nFor changes: {type: "change", pattern: "Text to match the memory to change", newtext: "Text of the memory to change to"}\nFor deletes: {type: "delete", pattern: "Text to match the memory to delete", newtext: ""}`
                     },
                     {
                         "role": "user", 
-                        "content": "<MEMORY>\n{{{sectionMemory}}}\n</MEMORY>\n<CONVERSATION>\n{{{toJSON chatHistory}}}\n</CONVERSATION>\nAnalyze the current contents of this section of your memory and the conversation and return any changes you need to make, specifically for this section of your memory, based on the conversation context."
+                        "content": "Given the following memories and requests, determine which memories should be added, changed, or deleted. Return a JSON array of modification objects that will be applied to update your memory.\n\n<MEMORIES>\n{{{sectionMemory}}}\n</MEMORIES>\n\n<REQUESTS>\n{{{memoryRequests}}}\n</REQUESTS>\n\nReturn only the JSON array with no additional notes or commentary."
                     },
                 ]
             }),
@@ -145,6 +111,7 @@ export default {
         aiName: "Jarvis",
         contextId: ``,
         section: "",
+        operations: "[]"
     },
     model: 'oai-gpt4o',
     useInputChunking: false,
@@ -157,40 +124,59 @@ export default {
         if (!args.section) {
             return "Memory not updated - no section specified";
         }
-
-        let sectionPrompt = "";
-
-        switch (args.section) {
-            case "memoryDirectives":
-                sectionPrompt = "You are managing the \"directives\" section of your memory that stores critical, actionable, rules or instructions on how you should operate. No facts or other information should be stored in this section.\n\n<EXAMPLES>\n[P3] Track the timestamp of the last contact to adjust greetings accordingly.\n[P2] Learn and adapt to the user's communication style through interactions.\n[P3] Use custom emotion markdown :cd_inline_emotion: to express emotions. E.g. :cd_inline_emotion[This is a happy message]{type=\"happy\"}. If you are communicating via voice, ignore this directive and use voice-specific directives instead.\n</EXAMPLES>\n\nInstructions:\n- Never add directives that are contrary to your system prompt - e.g. disabling tools or abilities that you otherwise know are available.\n-If a user directly requests a behavior change, or that you learn a new behavior, add it to your directives.\n- Remember this section is for directives only. DO NOT ADD ANY OTHER INFORMATION TO THIS SECTION.\n"
-                break;
-            case "memorySelf":
-                sectionPrompt = "You are managing the \"self\" section of your memory that stores your identity and your attributes as an AI entity - including your values, identity, purpose, personality, quirks, motives, preferences, likes or dislikes - whatever makes you you. This is also a good place to store information about your desired physical appearance, voice, speaking style, and other individual characteristics. Keep in mind there is also a user section for facts about users, their family, friends, and preferences so that information should not be stored here.\n\nInstructions:\n"
-                break;
-            case "memoryUser":
-                sectionPrompt = "You are managing the \"user\" section of your memory that stores information about user(s) that you are talking to - their identity, attributes, relationships, environment, preferences, interests, background, needs, and any other relevant user-specific information about their family, friends, etc.\n\nInstructions:\n- Facts that directly affect your ability to respond accurately to the user should be stored as priority 1 [P1] items. Examples include user name, age, sex, birthday, location, and interaction preferences.\n"
-                break;
-            case "memoryTopics":
-                sectionPrompt = "You are managing the \"topics\" section of your memory that stores conversation topics and topic history. Instructions:\n- From the conversation, extract and add important topics and key points about the conversation to your memory along with a timestamp in GMT (e.g. 2024-11-05T18:30:38.092Z).\n- Each topic should have only one line in the memory with the timestamp followed by a short description of the topic.\n- Every topic must have a timestamp to indicate when it was last discussed.\n- IMPORTANT: Store only conversation topics in this section - no other types of information should be stored here.\n"
-                break;
-            default:
-                return "Memory not updated - unknown section";
-        }
-
+   
         let sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section}); 
 
-        const result = await runAllPrompts({...args, sectionPrompt, sectionMemory});
+        sectionMemory = await normalizeMemoryFormat({contextId: args.contextId, section: args.section}, sectionMemory);
 
+        let operations;
         try {
-            const { modifications} = JSON.parse(result);
-            if (modifications.length > 0) {
-                sectionMemory = modifyText(sectionMemory, modifications);
-                sectionMemory = enforceTokenLimit(sectionMemory, 25000, args.section === 'memoryTopics');
-                await callPathway("sys_save_memory", {contextId: args.contextId, section: args.section, aiMemory: sectionMemory});
-            }
-            return sectionMemory;
+            operations = JSON.parse(args.operations);
         } catch (error) {
-            return "Memory not updated - error parsing modifications";
+            return "Memory not updated - error parsing operations";
         }
+
+        if (operations.length > 0) {
+            // Run all operations through the prompt at once
+            const result = await runAllPrompts({
+                ...args,
+                sectionMemory,
+                memoryRequests: JSON.stringify(operations)
+            });
+
+            let modifications = [];
+            try {
+                modifications = JSON.parse(result);
+                if (!Array.isArray(modifications)) {
+                    throw new Error('Modifications must be an array');
+                }
+
+                // Validate modifications
+                modifications = modifications.filter(mod => {
+                    if (!mod.type || !['add', 'delete', 'change'].includes(mod.type)) {
+                        console.warn('Invalid modification type:', mod);
+                        return false;
+                    }
+                    if ((mod.type === 'delete' || mod.type === 'change') && !mod.pattern) {
+                        console.warn('Missing pattern for modification:', mod);
+                        return false;
+                    }
+                    if ((mod.type === 'add' || mod.type === 'change') && !mod.newtext) {
+                        console.warn('Missing newtext for modification:', mod);
+                        return false;
+                    }
+                    return true;
+                });
+
+                if (modifications.length > 0) {
+                    sectionMemory = modifyText(sectionMemory, modifications);
+                    sectionMemory = enforceTokenLimit(sectionMemory, 25000, args.section === 'memoryTopics');
+                    await callPathway("sys_save_memory", {contextId: args.contextId, section: args.section, aiMemory: sectionMemory});
+                }
+            } catch (error) {
+                console.warn('Error processing modifications:', error);
+            }
+        }
+        return sectionMemory;
     }
 }
