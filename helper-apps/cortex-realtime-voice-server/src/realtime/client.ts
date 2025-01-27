@@ -486,6 +486,7 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> imple
     delete sessionCopy['model'];
     delete sessionCopy['expires_at'];
     delete sessionCopy['client_secret'];
+    delete sessionCopy['custom_voice_id'];
     this.sessionConfig = sessionCopy;
   }
 

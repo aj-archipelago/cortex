@@ -23,6 +23,18 @@ type ChatProps = {
   voice: Voice,
 }
 
+const audioPlayer: RealtimeAudioPlayer = new RealtimeAudioPlayerModule.RealtimeAudioPlayer({
+  sampleRate: 24000,
+  encoding: AudioEncoding.pcm16bitInteger,
+  channelCount: 1
+});
+
+const audioRecorder: RealtimeAudioRecorder = new RealtimeAudioRecorderModule.RealtimeAudioRecorder({
+    sampleRate: 24000,
+    encoding: AudioEncoding.pcm16bitInteger,
+    channelCount: 1
+  },
+  true);
 
 export default function Chat({
                                userId,
@@ -36,16 +48,6 @@ export default function Chat({
   const [isRecording, setIsRecording] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const audioEvent = useEvent(RealtimeAudioRecorderModule, "onAudioCaptured");
-  const audioRef = useRef<RealtimeAudioPlayer>(new RealtimeAudioPlayerModule.RealtimeAudioPlayer({
-    sampleRate: 24000,
-    encoding: AudioEncoding.pcm16bitInteger,
-    channelCount: 1
-  }));
-  const recordingRef = useRef<RealtimeAudioRecorder>(new RealtimeAudioRecorderModule.RealtimeAudioRecorder({
-    sampleRate: 24000,
-    encoding: AudioEncoding.pcm16bitInteger,
-    channelCount: 1
-  }));
   const socketRef =
     useRef<Socket<ServerToClientEvents, ClientToServerEvents>>(
       io(`${process.env.EXPO_PUBLIC_SOCKET_URL}/?userId=${userId}&userName=${userName}&aiName=${aiName}&voice=${voice}`,
@@ -61,15 +63,14 @@ export default function Chat({
 
   useEffect(() => {
     if (audioEvent) {
-      console.log("Audio payload received");
       socketRef.current?.emit('appendAudio', audioEvent.audioBuffer);
     }
   }, [audioEvent]);
 
   const stopConversation = useCallback(async () => {
     console.log('Stopping conversation');
-    await recordingRef.current.stopRecording();
-    await audioRef.current.stop();
+    await audioRecorder.stopRecording();
+    await audioPlayer.stop();
     const socket = socketRef.current;
     socket.emit('conversationCompleted');
     socket.removeAllListeners();
@@ -91,7 +92,7 @@ export default function Chat({
       });
     });
     socket.on('ready', () => {
-      recordingRef.current.startRecording();
+      audioRecorder.startRecording();
       console.log('Recording started');
       setIsRecording(true);
     });
@@ -103,9 +104,9 @@ export default function Chat({
     });
     socket.on('conversationUpdated', (item, delta) => {
       if (delta?.audio) {
-        audioRef.current.addBuffer(delta.audio);
+        audioPlayer.addBuffer(delta.audio);
       } else {
-        console.log('conversationUpdated', item, delta);
+        // console.log('conversationUpdated', item, delta);
         setMessages((prev) => {
           // Skip messages that start with <INSTRUCTIONS>
           if (item.role === 'user' &&

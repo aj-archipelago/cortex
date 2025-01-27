@@ -38,8 +38,10 @@
         "backgroundColor": "#ffffff"
       },
       "permissions": [
+        "android.permission.RECORD_AUDIO",
         "android.permission.RECORD_AUDIO"
-      ]
+      ],
+      "package": "com.anonymous.cortex"
     },
     "web": {
       "favicon": "./assets/favicon.png"
