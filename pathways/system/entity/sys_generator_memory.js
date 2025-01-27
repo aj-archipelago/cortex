@@ -19,7 +19,7 @@ export default {
 
         const memoryContext = await callPathway('sys_search_memory', { ...args, section: 'memoryAll', updateContext: true });
         if (memoryContext) {
-            args.chatHistory.splice(-1, 0, { role: 'assistant', content: memoryContext });
+            args.chatHistory.splice(-1, 0, { role: 'user', content: memoryContext });
         }
 
         let result;

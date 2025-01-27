@@ -26,38 +26,43 @@ export default {
         try {
 
             args = { ...args, ...config.get('entityConstants') };
-
-            const memory = await callPathway('sys_read_memory', { ...args });
             let parsedMemory;
-            
-            try {
-                parsedMemory = JSON.parse(memory);
-            } catch (error) {
-                parsedMemory = {};
-            }
 
-            // if parsedMemory is empty or all sections are empty, set all sections to defaults
-            if (Object.keys(parsedMemory).length === 0 || Object.values(parsedMemory).every(section => 
-                section === null || 
-                section === undefined || 
-                (typeof section === 'string' && section.trim() === "") ||
-                (typeof section !== 'string')
-            )) {
-                await callPathway('sys_save_memory', { ...args, aiMemory: AI_MEMORY_DEFAULTS });
-            } else if (parsedMemory.memoryVersion !== MEMORY_VERSION) {
-                // Upgrade memory to current version
-                const normalizePromises = Object.keys(parsedMemory).map(async (section) => {
-                    const normalized = await normalizeMemoryFormat(args, parsedMemory[section]);
-                    return [section, normalized];
-                });
-                
-                const normalizedResults = await Promise.all(normalizePromises);
-                normalizedResults.forEach(([section, normalized]) => {
-                    parsedMemory[section] = normalized;
-                });
-                
-                parsedMemory.memoryVersion = MEMORY_VERSION;
-                await callPathway('sys_save_memory', { ...args, aiMemory: JSON.stringify(parsedMemory) });
+            // check if memoryVersion is set and correct.  If it's correct, skip all of the correction logic   
+            parsedMemory = await callPathway('sys_read_memory', { ...args, section: 'memoryVersion' });
+
+            if (parsedMemory?.memoryVersion !== MEMORY_VERSION) {
+
+                try {
+                    parsedMemory = JSON.parse(await callPathway('sys_read_memory', { ...args, section: 'memoryAll' }));
+                } catch (error) {
+                    logger.error('Error in memory manager:', error);
+                    return "";
+                }
+
+                // if parsedMemory is empty or all sections are empty, set all sections to defaults
+                if (Object.keys(parsedMemory).length === 0 || Object.values(parsedMemory).every(section => 
+                    section === null || 
+                    section === undefined || 
+                    (typeof section === 'string' && section.trim() === "") ||
+                    (typeof section !== 'string')
+                )) {
+                    await callPathway('sys_save_memory', { ...args, aiMemory: AI_MEMORY_DEFAULTS });
+                } else {
+                    // Upgrade memory to current version
+                    const normalizePromises = Object.keys(parsedMemory).map(async (section) => {
+                        const normalized = await normalizeMemoryFormat(args, parsedMemory[section]);
+                        return [section, normalized];
+                    });
+                    
+                    const normalizedResults = await Promise.all(normalizePromises);
+                    normalizedResults.forEach(([section, normalized]) => {
+                        parsedMemory[section] = normalized;
+                    });
+                    
+                    parsedMemory.memoryVersion = MEMORY_VERSION;
+                    await callPathway('sys_save_memory', { ...args, aiMemory: JSON.stringify(parsedMemory) });
+                }
             }
 
             // Update context for the conversation turn
