@@ -40,10 +40,41 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
             return {
                 isAccessible: true,
                 contentLength,
-                durationSeconds: durationSeconds || 60
+                durationSeconds: durationSeconds || 60,
+                isAzureUrl: videoUrl.includes('.blob.core.windows.net')
             };
         } catch (error) {
             throw new Error(`Failed to access video: ${error.message}`);
+        }
+    }
+
+    async uploadToFileHandler(videoUrl) {
+        try {
+            // Get the file handler URL from config
+            const fileHandlerUrl = config.get("whisperMediaApiUrl");
+            if (!fileHandlerUrl) {
+                throw new Error("File handler URL is not configured");
+            }
+
+            // Use the file handler's fetch endpoint
+            const response = await axios.get(fileHandlerUrl, {
+                params: {
+                    requestId: this.requestId,
+                    fetch: videoUrl
+                }
+            });
+
+            if (!response.data?.url) {
+                throw new Error("File handler did not return a valid URL");
+            }
+
+            return response.data.url;
+        } catch (error) {
+            logger.error(`Failed to upload video to file handler: ${error.message}`);
+            if (error.response?.data) {
+                logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
+            }
+            throw new Error(`Failed to upload video to file handler: ${error.message}`);
         }
     }
 
@@ -131,8 +162,8 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         if (AzureVideoTranslatePlugin.lastProcessingRate && this.videoContentLength) {
             estimatedTotalTime = this.videoContentLength / AzureVideoTranslatePlugin.lastProcessingRate;
         } else {
-            // First run: estimate based on 1x calculated video duration
-            estimatedTotalTime = (this.videoContentLength * 8) / (2.5 * 1024 * 1024);
+            // First run: estimate based on 2x calculated video duration
+            estimatedTotalTime = 2 * (this.videoContentLength * 8) / (2.5 * 1024 * 1024);
         }
 
         // eslint-disable-next-line no-constant-condition
@@ -248,7 +279,7 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         
         try {
             const translationId = `cortex-translation-${this.requestId}`;
-            const videoUrl = requestParameters.sourcevideooraudiofilepath;
+            let videoUrl = requestParameters.sourcevideooraudiofilepath;
             const sourceLanguage = requestParameters.sourcelocale;
             const targetLanguage = requestParameters.targetlocale;
             const voiceKind = requestParameters.voicekind || 'PlatformVoice';
@@ -259,6 +290,13 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
             const videoInfo = await this.verifyVideoAccess(videoUrl);
             this.videoContentLength = videoInfo.contentLength;
             logger.debug(`Video info: ${JSON.stringify(videoInfo, null, 2)}`);
+
+            // If the video is not from Azure storage, upload it to file handler
+            if (!videoInfo.isAzureUrl) {
+                logger.debug('Video is not from Azure storage, uploading to file handler...');
+                videoUrl = await this.uploadToFileHandler(videoUrl);
+                logger.debug(`Video uploaded to file handler: ${videoUrl}`);
+            }
 
             // Create translation
             const { operationUrl } = await this.createTranslation({
