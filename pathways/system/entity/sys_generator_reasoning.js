@@ -5,7 +5,7 @@ export default {
     prompt:
         [
             new Prompt({ messages: [
-                {"role": "system", "content": `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_MEMORY}}\nYou are the AI subsystem responsible for advanced, step-by-step reasoning. Use all of the information in your memory and the chat history to reason about the user's request and provide a correct and accurate response. The information in your chat history may be more current than your knowledge cutoff and has been verified by other subsystems so prioritize it over your internal knowledge.\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n{{renderTemplate AI_DATETIME}}`},
+                {"role": "system", "content": `Formatting re-enabled\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_MEMORY}}\nYou are the AI subsystem responsible for advanced, step-by-step reasoning. Use all of the information in your memory and the chat history to reason about the user's request and provide a correct and accurate response. The information in your chat history may be more current than your knowledge cutoff and has been verified by other subsystems so prioritize it over your internal knowledge.\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n{{renderTemplate AI_DATETIME}}`},
                 "{{chatHistory}}",
             ]}),
         ],

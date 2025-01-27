@@ -91,7 +91,7 @@ export default {
 
         const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
         if (memoryContext) {
-            args.chatHistory.splice(-1, 0, { role: 'assistant', content: memoryContext });
+            args.chatHistory.splice(-1, 0, { role: 'user', content: memoryContext });
         }
         
         let ackResponse = null;
