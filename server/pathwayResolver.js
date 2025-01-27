@@ -375,7 +375,7 @@ class PathwayResolver {
     // Process the request and return the result        
     async processRequest({ text, ...parameters }) {
         text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
-        const chunks = text && this.processInputText(text) || [];
+        const chunks = text && this.processInputText(text) || [text];
 
         let anticipatedRequestCount = chunks.length * this.prompts.length   
 
