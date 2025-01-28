@@ -21,7 +21,7 @@
     "react-markdown": "9.0.3",
     "react-native": "0.76.6",
     "react-native-picker-select": "9.3.1",
-    "react-native-realtime-audio": "1.0.4",
+    "react-native-realtime-audio": "1.0.6",
     "react-native-reanimated": "3.16.7",
     "react-native-safe-area-context": "5.1.0",
     "socket.io-client": "4.8.1",

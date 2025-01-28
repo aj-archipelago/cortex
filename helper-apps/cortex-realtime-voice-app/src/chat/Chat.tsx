@@ -97,10 +97,9 @@ export default function Chat({
       setIsRecording(true);
     });
     socket.on('conversationInterrupted', async () => {
-      console.log('conversationInterrupted');
-      if (isRecording) {
-        socket.emit('cancelResponse');
-      }
+      console.log("Stopping conversation due to interruption");
+      // socket.emit('cancelResponse');
+      await audioPlayer.stop();
     });
     socket.on('conversationUpdated', (item, delta) => {
       if (delta?.audio) {
