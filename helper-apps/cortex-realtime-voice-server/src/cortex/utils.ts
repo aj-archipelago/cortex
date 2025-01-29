@@ -56,6 +56,7 @@ export type CortexVariables = {
   priority?: number;
   recentHours?: number;
   numResults?: number;
+  stripMetadata?: boolean;
 }
 
 function truncateBody(body: any): string {

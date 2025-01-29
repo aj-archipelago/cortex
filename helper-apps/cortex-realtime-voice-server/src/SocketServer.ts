@@ -566,10 +566,10 @@ export class SocketServer {
 
     // Parallelize memory reads
     const [memorySelf, memoryUser, memoryDirectives, memoryTopics, voiceSample] = await Promise.all([
-      readMemory(socket.data.userId, socket.data.aiName, "memorySelf", 1, 0, 0, true),
-      readMemory(socket.data.userId, socket.data.aiName, "memoryUser", 1, 0, 0, true),
-      readMemory(socket.data.userId, socket.data.aiName, "memoryDirectives", 1, 0, 0, true),
-      readMemory(socket.data.userId, socket.data.aiName, "memoryTopics", 0, 0, 10, false),
+      readMemory(socket.data.userId, "memorySelf", 1, 0, 0, true),
+      readMemory(socket.data.userId, "memoryUser", 1, 0, 0, true),
+      readMemory(socket.data.userId, "memoryDirectives", 1, 0, 0, true),
+      readMemory(socket.data.userId, "memoryTopics", 0, 0, 10, false),
       style(socket.data.userId, socket.data.aiName, socket.data.aiStyle, [], "")
     ]);
 
