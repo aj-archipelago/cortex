@@ -72,7 +72,8 @@ export async function readMemory(contextId: string,
                                  section: MemorySection,
                                  priority: number = 0,
                                  recentHours: number = 0,
-                                 numResults: number = 0
+                                 numResults: number = 0,
+                                 stripMetadata: boolean = false
 ) {
 
   const variables: CortexVariables = {
