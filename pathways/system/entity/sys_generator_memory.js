@@ -1,4 +1,5 @@
 import { callPathway } from '../../../lib/pathwayTools.js';
+import { addToolCalls, addToolResults } from './memory/shared/sys_memory_helpers.js';
 
 export default {
     prompt:
@@ -19,7 +20,8 @@ export default {
 
         const memoryContext = await callPathway('sys_search_memory', { ...args, section: 'memoryAll', updateContext: true });
         if (memoryContext) {
-            args.chatHistory.splice(-1, 0, { role: 'user', content: memoryContext });
+            const {toolCallId} = addToolCalls(args.chatHistory, "search memory for relevant information", "memory_lookup");
+            addToolResults(args.chatHistory, memoryContext, toolCallId);
         }
 
         let result;

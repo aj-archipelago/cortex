@@ -511,14 +511,14 @@ test('processMemoryContent filters by recency correctly', t => {
 
 test('processMemoryContent applies numResults limit correctly', t => {
     const input = `
-1|2024-03-19T10:00:00Z|First
-2|2024-03-19T11:00:00Z|Second
-3|2024-03-19T12:00:00Z|Third`.trim();
+1|2024-03-19T10:00:00.000Z|First
+2|2024-03-19T11:00:00.000Z|Second
+3|2024-03-19T12:00:00.000Z|Third`.trim();
 
     const result = processMemoryContent(input, { numResults: 2 });
-    t.false(result.includes('First'));
-    t.true(result.includes('Second'));
-    t.true(result.includes('Third'));
+    t.true(result.includes('Third'));  // Newest
+    t.true(result.includes('Second')); // Second newest
+    t.false(result.includes('First')); // Oldest
     t.is(result.split('\n').length, 2);
 });
 

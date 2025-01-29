@@ -1,5 +1,6 @@
 import { callPathway } from '../../../../../lib/pathwayTools.js';
 import { encode } from '../../../../../lib/encodeCache.js';
+import { getUniqueId } from '../../../../../lib/util.js';
 
 const normalizeMemoryFormat = async (args, content) => {
     if (!content) return '';
@@ -110,5 +111,32 @@ const enforceTokenLimit = (text, maxTokens = 1000, isTopicsSection = false) => {
     return finalText;
 };
 
+const addToolCalls = (chatHistory, toolArgs, toolName, toolCallId = getUniqueId()) => {
+    const toolCall = {
+        "role": "assistant",
+        "tool_calls": [
+            {
+                "id": toolCallId,
+                "type": "function",
+                "function": {
+                    "arguments": JSON.stringify(toolArgs),
+                    "name": toolName
+                }
+            }
+        ]
+    };
+    chatHistory.push(toolCall);
+    return { chatHistory, toolCallId };
+};
 
-export { normalizeMemoryFormat, enforceTokenLimit };
+const addToolResults = (chatHistory, result, toolCallId) => {
+    const toolResult = {
+        "role": "tool",
+        "content": result,
+        "tool_call_id": toolCallId
+    };
+    chatHistory.push(toolResult);
+    return { chatHistory, toolCallId };
+};
+
+export { normalizeMemoryFormat, enforceTokenLimit, addToolCalls, addToolResults };

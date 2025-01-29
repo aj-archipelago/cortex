@@ -24,7 +24,8 @@ export const processMemoryContent = (content, { priority = 0, recentHours = 0, n
     const currentTime = Date.now();
     const cutoffTime = recentHours > 0 ? currentTime - (recentHours * 60 * 60 * 1000) : 0;
     
-    const processedLines = [];
+    // Create array of lines with their timestamps for sorting
+    const processedLinesWithDates = [];
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const parts = line.split('|');
@@ -46,18 +47,27 @@ export const processMemoryContent = (content, { priority = 0, recentHours = 0, n
             if (entryTime < cutoffTime) continue;
         }
         
-        // Process content
+        // Store the line with its timestamp for sorting
+        const timestamp = isValidISOTimestamp(parts[1]) ? new Date(parts[1]).getTime() : 0;
+        
+        // If stripMetadata is true, only keep the content part
         const processedLine = stripMetadata && parts.length >= 3 
             ? parts.slice(2).join('|')  // Strip metadata if requested and format is valid
             : line;                     // Keep original line otherwise
-        
-        processedLines.push(processedLine);
+            
+        processedLinesWithDates.push({ line: processedLine, timestamp });
     }
     
-    // Apply numResults limit if specified
-    return numResults > 0 
-        ? processedLines.slice(-numResults).join('\n')
-        : processedLines.join('\n');
+    // Sort by timestamp descending (newest first)
+    processedLinesWithDates.sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Take the top N results if specified
+    const finalLines = numResults > 0
+        ? processedLinesWithDates.slice(0, numResults)
+        : processedLinesWithDates;
+    
+    // Extract just the lines and join them
+    return finalLines.map(entry => entry.line).join('\n');
 };
 
 export default {
