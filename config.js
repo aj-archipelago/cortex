@@ -539,6 +539,8 @@ const buildPathways = async (config) => {
     // Add pathways to config
     config.load({ pathways });
 
+    config.pathwayManager = pathwayManager; 
+
     return { pathwayManager, pathways };
 }
 
