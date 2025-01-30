@@ -5,6 +5,10 @@ import axios from 'axios';
 import FormData from 'form-data';
 import { port, publicFolder, ipAddress } from '../start.js';
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+import os from 'os';
+import fs from 'fs';
+import { execSync } from 'child_process';
 
 // Add these helper functions at the top after imports
 const baseUrl = `http://localhost:${port}/api/CortexFileHandler`;
@@ -597,8 +601,7 @@ test.serial('should handle hash reuse with Azure storage', async t => {
     const originalUrl = upload1.data.url;
     
     // Check hash exists and returns the correct URL
-    const hashCheck1 = await axios.get(baseUrl, {
-        params: { hash: testHash, checkHash: true },
+    const hashCheck1 = await axios.get(baseUrl, { hash: testHash, checkHash: true }, {
         validateStatus: status => true
     });
     t.is(hashCheck1.status, 200, 'Hash should exist after first upload');
@@ -634,8 +637,7 @@ test.serial('should handle hash reuse with Azure storage', async t => {
     await cleanupUploadedFile(t, originalUrl);
     
     // Verify hash is now gone
-    const hashCheckAfterDelete = await axios.get(baseUrl, {
-        params: { hash: testHash, checkHash: true },
+    const hashCheckAfterDelete = await axios.get(baseUrl, { hash: testHash, checkHash: true }, {
         validateStatus: status => true
     });
     t.is(hashCheckAfterDelete.status, 404, 'Hash should be gone after file deletion');
@@ -760,6 +762,144 @@ test.serial('should handle GCS URL format and accessibility', async t => {
 
     // Clean up
     await cleanupUploadedFile(t, uploadResponse.data.url);
+});
+
+// Add this helper function after other helper functions
+async function createAndUploadTestFile() {
+    // Create a temporary file path
+    const tempDir = path.join(os.tmpdir(), uuidv4());
+    fs.mkdirSync(tempDir, { recursive: true });
+    const tempFile = path.join(tempDir, 'test.mp3');
+
+    // Generate a real MP3 file using ffmpeg
+    try {
+        execSync(`ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 10 -q:a 9 -acodec libmp3lame "${tempFile}"`, {
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        // Upload the real media file
+        const form = new FormData();
+        form.append('file', fs.createReadStream(tempFile));
+        
+        const uploadResponse = await axios.post(baseUrl, form, {
+            headers: form.getHeaders(),
+            validateStatus: status => true,
+            timeout: 5000
+        });
+
+        // Wait a short time to ensure file is available
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Clean up temp file
+        fs.rmSync(tempDir, { recursive: true, force: true });
+
+        return uploadResponse.data.url;
+    } catch (error) {
+        console.error('Error creating test file:', error);
+        throw error;
+    }
+}
+
+test.serial('should handle chunking with GCS integration when configured', async t => {
+    if (!isGCSConfigured()) {
+        t.pass('Skipping test - GCS not configured');
+        return;
+    }
+
+    // Create a large test file first
+    const testFileUrl = await createAndUploadTestFile();
+    const requestId = uuidv4();
+
+    // Request chunking via GET
+    const chunkResponse = await axios.get(baseUrl, {
+        params: {
+            uri: testFileUrl,
+            requestId
+        },
+        validateStatus: status => true,
+        timeout: 5000
+    });
+
+    t.is(chunkResponse.status, 200, 'Chunked request should succeed');
+    t.truthy(chunkResponse.data, 'Response should contain data');
+    t.true(Array.isArray(chunkResponse.data), 'Response should be an array');
+    t.true(chunkResponse.data.length > 0, 'Should have created at least one chunk');
+
+    // Verify each chunk exists in both Azure/Local and GCS
+    for (const chunk of chunkResponse.data) {
+        // Verify Azure/Local URL is accessible
+        const azureResponse = await axios.get(convertToLocalUrl(chunk.uri), {
+            validateStatus: status => true,
+            timeout: 5000
+        });
+        t.is(azureResponse.status, 200, `Chunk should be accessible in Azure/Local: ${chunk.uri}`);
+
+        // Verify GCS URL exists and is in correct format
+        t.truthy(chunk.gcs, 'Chunk should contain GCS URL');
+        t.true(chunk.gcs.startsWith('gs://'), 'GCS URL should use gs:// protocol');
+        
+        // Check if chunk exists in fake GCS
+        const exists = await checkGCSFile(chunk.gcs);
+        t.true(exists, `Chunk should exist in GCS: ${chunk.gcs}`);
+    }
+
+    // Clean up chunks
+    const deleteResponse = await axios.delete(`${baseUrl}?operation=delete&requestId=${requestId}`);
+    t.is(deleteResponse.status, 200, 'Delete should succeed');
+
+    // Verify all chunks are deleted from both storages
+    for (const chunk of chunkResponse.data) {
+        // Verify Azure/Local chunk is gone
+        const azureResponse = await axios.get(convertToLocalUrl(chunk.uri), {
+            validateStatus: status => true,
+            timeout: 5000
+        });
+        t.is(azureResponse.status, 404, `Chunk should not be accessible in Azure/Local after deletion: ${chunk.uri}`);
+
+        // Verify GCS chunk is gone
+        const exists = await checkGCSFile(chunk.gcs);
+        t.false(exists, `Chunk should not exist in GCS after deletion: ${chunk.gcs}`);
+    }
+});
+
+test.serial('should handle chunking errors gracefully with GCS', async t => {
+    if (!isGCSConfigured()) {
+        t.pass('Skipping test - GCS not configured');
+        return;
+    }
+
+    // Create a test file to get a valid URL format
+    const validFileUrl = await createAndUploadTestFile();
+    
+    // Test with invalid URL that matches the format of our real URLs
+    const invalidUrl = validFileUrl.replace(/[^/]+$/, 'nonexistent-file.mp3');
+    const invalidResponse = await axios.get(baseUrl, {
+        params: {
+            uri: invalidUrl,
+            requestId: uuidv4()
+        },
+        validateStatus: status => true,
+        timeout: 5000
+    });
+    
+    t.is(invalidResponse.status, 500, 'Should reject nonexistent file URL');
+    t.true(invalidResponse.data.includes('Error processing media file'), 'Should indicate error processing media file');
+
+    // Test with missing URI
+    const noUriResponse = await axios.get(baseUrl, {
+        params: {
+            requestId: uuidv4()
+        },
+        validateStatus: status => true,
+        timeout: 5000
+    });
+    
+    t.is(noUriResponse.status, 400, 'Should reject request with no URI');
+    t.is(
+        noUriResponse.data,
+        'Please pass a uri and requestId on the query string or in the request body',
+        'Should return proper error message'
+    );
 });
 
 // Legacy MediaFileChunker Tests

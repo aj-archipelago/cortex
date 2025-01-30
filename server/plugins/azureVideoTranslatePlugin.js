@@ -56,19 +56,33 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
                 throw new Error("File handler URL is not configured");
             }
 
-            // Use the file handler's fetch endpoint
-            const response = await axios.get(fileHandlerUrl, {
-                params: {
+            // Start heartbeat progress updates
+            const heartbeat = setInterval(() => {
+                publishRequestProgress({
                     requestId: this.requestId,
-                    fetch: videoUrl
+                    progress: 0,
+                    info: 'Uploading and processing video...'
+                });
+            }, 5000);
+
+            try {
+                // Start the fetch request
+                const response = await axios.get(fileHandlerUrl, {
+                    params: {
+                        requestId: this.requestId,
+                        fetch: videoUrl
+                    }
+                });
+
+                if (!response.data?.url) {
+                    throw new Error("File handler did not return a valid URL");
                 }
-            });
 
-            if (!response.data?.url) {
-                throw new Error("File handler did not return a valid URL");
+                return response.data.url;
+            } finally {
+                // Always clear the heartbeat interval
+                clearInterval(heartbeat);
             }
-
-            return response.data.url;
         } catch (error) {
             logger.error(`Failed to upload video to file handler: ${error.message}`);
             if (error.response?.data) {
