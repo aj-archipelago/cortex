@@ -1,6 +1,6 @@
 {
   "name": "@aj-archipelago/cortex",
-  "version": "1.3.20",
+  "version": "1.3.21",
   "description": "Cortex is a GraphQL API for AI. It provides a simple, extensible interface for using AI services from OpenAI, Azure and others.",
   "private": false,
   "repository": {
