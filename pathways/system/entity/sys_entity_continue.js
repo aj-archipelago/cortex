@@ -57,7 +57,15 @@ export default {
             
             const result = await callPathway(generatorPathway, newArgs, resolver);
 
-            return args.stream ? "" : result;
+            if (args.stream) {
+                return "";
+            }
+
+            if (!result) {
+                result = await callPathway('sys_generator_error', { ...args, text: `Tried to use a tool (${generatorPathway}), but no result was returned`, stream: false }, resolver);
+            }
+
+            return result;
 
         } catch (e) {
             resolver.logError(e.message ?? e);
