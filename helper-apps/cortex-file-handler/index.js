@@ -1,5 +1,5 @@
 import { downloadFile, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs, AZURE_STORAGE_CONTAINER_NAME } from './blobHandler.js';
+import { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs, AZURE_STORAGE_CONTAINER_NAME, uploadChunkToGCS } from './blobHandler.js';
 import { cleanupRedisFileStoreMap, getFileStoreMap, publishRequestProgress, removeFromFileStoreMap, setFileStoreMap } from './redis.js';
 import { ensureEncoded, ensureFileExtension, urlExists } from './helper.js';
 import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
@@ -104,9 +104,7 @@ async function CortexFileHandler(context, req) {
         const azureResult = useAzure ? await deleteBlob(deleteRequestId) : await deleteFolder(deleteRequestId);
         const gcsResult = [];
         if (gcs) {
-            for (const blobName of azureResult) {
-                gcsResult.push(...await deleteGCS(blobName));
-            }
+            gcsResult.push(...await deleteGCS(deleteRequestId));
         }
         
         context.res = {
@@ -393,10 +391,21 @@ async function CortexFileHandler(context, req) {
             // sequential processing of chunks
             for (let index = 0; index < chunks.length; index++) {
                 const chunkPath = chunks[index];
-                const blobName = useAzure ? await saveFileToBlob(chunkPath, requestId) : await moveFileToPublicFolder(chunkPath, requestId);
+                let blobName;
+                let gcsUrl;
+                
+                if (useAzure) {
+                    blobName = await saveFileToBlob(chunkPath, requestId);
+                } else {
+                    blobName = await moveFileToPublicFolder(chunkPath, requestId);
+                }
+                
+                // If GCS is configured, save to GCS
+                gcsUrl = await uploadChunkToGCS(chunkPath, requestId);
+                
                 const chunkOffset = chunkOffsets[index];
-                result.push({ uri: blobName, offset: chunkOffset });
-                console.log(`Saved chunk as: ${blobName}`);
+                result.push({ uri: blobName, offset: chunkOffset, gcs: gcsUrl });
+                console.log(`Saved chunk as: ${blobName}${gcsUrl ? ` and ${gcsUrl}` : ''}`);
                 await sendProgress();
             }
 

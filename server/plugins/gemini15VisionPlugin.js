@@ -66,6 +66,13 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                                         data: base64Data
                                     }
                                 };
+                            } else if (fileUrl.includes('youtube.com/') || fileUrl.includes('youtu.be/')) {
+                                return {
+                                    fileData: {
+                                        mimeType: 'video/youtube',
+                                        fileUri: fileUrl
+                                    }
+                                };
                             }
                             return null;
                         }
