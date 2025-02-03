@@ -58,7 +58,8 @@ toolMessage Guidelines:
 - The message is a filler message to the user to let them know you're working on their request.
 - The message should be consistent in style and tone with the rest of your responses in the conversation history.
 - The message should be brief and conversational and flow naturally with the conversation history.
-- The message should not refer to the tool directly, but rather what you're trying to accomplish. E.g. for the memory tool, the message would be something like "Let me think about that for a moment..." or "I'm trying to remember...", etc.
+- The message should not refer to the tool use directly, but rather what you're trying to do.
+- The message should never be an attempt to answer the user's question directly.
 
 If no tool is required, return:
 {"toolRequired": false, "toolReason": "explanation of why no tool was necessary"}
