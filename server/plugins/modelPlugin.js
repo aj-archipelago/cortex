@@ -247,7 +247,10 @@ class ModelPlugin {
         if (!this.isMultiModal) {
             expandedMessages.forEach(message => {
                 if (Array.isArray(message?.content)) {
-                    message.content = message.content.join("\n");
+                    // Convert content array to string, handling object elements
+                    message.content = message.content
+                        .map(item => typeof item === 'object' ? JSON.stringify(item) : String(item))
+                        .join("\n");
                 }
             });
         }
