@@ -139,4 +139,90 @@ const addToolResults = (chatHistory, result, toolCallId) => {
     return { chatHistory, toolCallId };
 };
 
-export { normalizeMemoryFormat, enforceTokenLimit, addToolCalls, addToolResults };
+const modifyText = (text, modifications) => {
+    let modifiedText = text || '';
+  
+    modifications.forEach(mod => {
+        // Skip invalid modifications
+        if (!mod.type) {
+            console.warn('Modification missing type');
+            return;
+        }
+        if ((mod.type === 'delete' || mod.type === 'change') && !mod.pattern) {
+            console.warn(`${mod.type} modification missing pattern`);
+            return;
+        }
+        if ((mod.type === 'add' || mod.type === 'change') && !mod.newtext) {
+            console.warn(`${mod.type} modification missing newtext`);
+            return;
+        }
+
+        // Create timestamp in GMT
+        const timestamp = new Date().toISOString();
+        
+        switch (mod.type) {
+            case 'add':
+                const priority = mod.priority || '3';
+                modifiedText = modifiedText + (modifiedText ? '\n' : '') + 
+                    `${priority}|${timestamp}|${mod.newtext}`;
+                break;
+            case 'change':
+                // Split into lines
+                const lines = modifiedText.split('\n');
+                modifiedText = lines.map(line => {
+                    const parts = line.split('|');
+                    const priority = parts[0];
+                    const content = parts.slice(2).join('|');
+                    
+                    if (content) {
+                        try {
+                            const trimmedContent = content.trim();
+                            const regex = new RegExp(mod.pattern, 'i');
+                            
+                            // Try exact match first
+                            if (regex.test(trimmedContent)) {
+                                const newPriority = mod.priority || priority || '3';
+                                // Try to extract capture groups if they exist
+                                const match = trimmedContent.match(regex);
+                                let newContent = mod.newtext;
+                                if (match && match.length > 1) {
+                                    // Replace $1, $2, etc with capture group values
+                                    newContent = mod.newtext.replace(/\$(\d+)/g, (_, n) => match[n] || '');
+                                }
+                                return `${newPriority}|${timestamp}|${newContent}`;
+                            }
+                        } catch (e) {
+                            console.warn(`Invalid regex pattern: ${mod.pattern}`);
+                        }
+                    }
+                    return line;
+                }).join('\n');
+                break;
+            case 'delete':
+                // Split into lines, filter out matching lines, and rejoin
+                modifiedText = modifiedText
+                    .split('\n')
+                    .filter(line => {
+                        const parts = line.split('|');
+                        const content = parts.slice(2).join('|');
+                        if (!content) return true;
+                        try {
+                            const regex = new RegExp(mod.pattern, 'i');
+                            return !regex.test(content.trim());
+                        } catch (e) {
+                            console.warn(`Invalid regex pattern: ${mod.pattern}`);
+                            return true;
+                        }
+                    })
+                    .filter(line => line.trim())
+                    .join('\n');
+                break;
+            default:
+                console.warn(`Unknown modification type: ${mod.type}`);
+        }
+    });
+  
+    return modifiedText;
+};
+
+export { normalizeMemoryFormat, enforceTokenLimit, addToolCalls, addToolResults, modifyText };
