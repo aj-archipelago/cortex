@@ -11,8 +11,13 @@ class OpenAIReasoningPlugin extends OpenAIChatPlugin {
                     role: message.role,
                     content: this.parseContent(message.content)
                 });
+            }else if(message.role === 'system') {
+                // System messages to developer: https://platform.openai.com/docs/guides/text-generation#messages-and-roles
+                newMessages.push({
+                    role: "developer",
+                    content: this.parseContent(message.content)
+                });
             }
-            // System messages are simply ignored
         }
 
         messages.length = 0;
