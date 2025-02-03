@@ -100,7 +100,7 @@ Instructions: As part of a conversation with the user, you have been asked to cr
                     model = "replicate-flux-1-schnell";
                 }
                 if (renderText) {
-                    return await callPathway('image_recraft', {...args, text: prompt, stream: false });
+                    return await callPathway('image_recraft', {...args, text: prompt, model, stream: false });
                 } else {
                     return await callPathway('image_flux', {...args, text: prompt, negativePrompt, numberResults, model, stream: false });
                 }
