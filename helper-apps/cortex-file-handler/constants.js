@@ -77,16 +77,23 @@ export const ACCEPTED_MIME_TYPES = {
     'audio/aac': ['.aac'],
     'audio/ogg': ['.ogg'],
     'audio/flac': ['.flac'],
+    'audio/m4a': ['.m4a'],
+    'audio/x-m4a': ['.m4a'],
+    'audio/mp3': ['.mp3'],
+    'audio/mp4': ['.mp4'],
     
     // Video types
     'video/mp4': ['.mp4'],
     'video/mpeg': ['.mpeg', '.mpg'],
+    'video/mov': ['.mov'],
     'video/quicktime': ['.mov'],
     'video/x-msvideo': ['.avi'],
     'video/x-flv': ['.flv'],
+    'video/mpg': ['.mpeg', '.mpg'],
     'video/webm': ['.webm'],
-    'video/x-ms-wmv': ['.wmv'],
-    'video/3gpp': ['.3gp']
+    'video/wmv': ['.wmv'],
+    'video/3gpp': ['.3gp'],
+    'video/m4v': ['.m4v'],
 };
 
 // Helper function to check if a mime type is accepted
