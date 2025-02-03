@@ -102,7 +102,7 @@ class PathwayResolver {
             if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
                 await publishRequestProgress({
                         requestId: this.rootRequestId || this.requestId,
-                        progress: completedCount / totalCount,
+                        progress: Math.min(completedCount,totalCount) / totalCount,
                         data: JSON.stringify(responseData),
                 });
             }
