@@ -44,6 +44,16 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         return acc;
     }, {});
 
+    //Convert messages to single string
+    if(variables.messages){
+        for(let i=0; i<variables.messages.length; i++){
+            //if isarray make it single string
+            if (Array.isArray(variables.messages[i]?.content)) {
+                variables.messages[i].content = variables.messages[i].content.map(item => typeof item === 'object' && item !== null ? JSON.stringify(item) : String(item)).join("\n");
+            }
+        }
+    }
+
     const variableParams = fieldVariableDefs.map(({ name, type }) => `$${name}: ${type}`).join(', ');
     const queryArgs = fieldVariableDefs.map(({ name }) => `${name}: $${name}`).join(', ');
 
