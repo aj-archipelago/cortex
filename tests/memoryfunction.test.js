@@ -1,6 +1,5 @@
 import test from 'ava';
-import { modifyText } from '../pathways/system/entity/memory/sys_memory_update.js';
-import { enforceTokenLimit } from '../pathways/system/entity/memory/shared/sys_memory_helpers.js';
+import { modifyText, enforceTokenLimit } from '../pathways/system/entity/memory/shared/sys_memory_helpers.js';
 import { processMemoryContent } from '../pathways/system/entity/memory/sys_read_memory.js';
 
 test('enforceTokenLimit preserves priority order correctly', t => {
