@@ -13,7 +13,6 @@ export default {
         prompt: "",
         text: "",
         systemPrompt: "",
-        model: '',
         contextId: ``,
         files: [""],
         pathwayName: "", 
@@ -35,7 +34,25 @@ export default {
             let result = "";
 
             for(const prompt of userPathway.prompt) {
-                result = await callPathway("run", {...userPathway,...args, prompt, text: args.text + '\n\n' + result, systemFiles: userPathway.files });
+                let promptText = prompt;
+                let modelOverride = args.model || userPathway.model;
+                //check if prompt is an stringified object
+                try {
+                    if(typeof prompt === 'string') {
+                        const promptObj = JSON.parse(prompt);
+                        promptText = promptObj.text || promptText;
+                        modelOverride = promptObj.model || modelOverride;
+                    }    
+                } catch (error) {
+                    // do nothing
+                }
+                
+                result = await callPathway("run", {...userPathway,...args, 
+                    text: args.text + '\n\n' + result, 
+                    systemFiles: userPathway.files, 
+                    model: modelOverride, 
+                    prompt: promptText 
+                });
             }
 
             return result;
