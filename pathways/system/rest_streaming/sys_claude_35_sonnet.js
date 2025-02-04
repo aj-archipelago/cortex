@@ -11,7 +11,7 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{role: '', content: []}],
     },
     model: 'claude-35-sonnet-vertex',
     useInputChunking: false,
