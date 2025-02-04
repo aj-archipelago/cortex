@@ -28,6 +28,13 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             return Boolean(value);
         } else if (type === 'Int') {
             return parseInt(value, 10);
+        } else if (type === '[MultiMessage]' && Array.isArray(value)) {
+            return value.map(msg => ({
+                ...msg,
+                content: Array.isArray(msg.content) ? 
+                    JSON.stringify(msg.content) : 
+                    msg.content
+            }));
         } else {
             return value;
         }
@@ -58,8 +65,16 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             `;
 
     const result = await server.executeOperation({ query, variables });
-    const resultText = result?.body?.singleResult?.data?.[name]?.result || result?.body?.singleResult?.errors?.[0]?.message || "";
 
+    // if we're streaming and there are errors, we return a standard error code
+    if (Boolean(req.body.stream)) {
+        if (result?.body?.singleResult?.errors) {
+            return `[ERROR] ${result.body.singleResult.errors[0].message.split(';')[0]}`;
+        }
+    }
+    
+    // otherwise errors can just be returned as a string
+    const resultText = result?.body?.singleResult?.data?.[name]?.result || result?.body?.singleResult?.errors?.[0]?.message || "";
     return resultText;
 };
 
@@ -86,7 +101,6 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
 
         // If we haven't sent the stop message yet, do it now
         if (jsonResponse.choices?.[0]?.finish_reason !== "stop") {
-    
             let jsonEndStream = JSON.parse(JSON.stringify(jsonResponse));
     
             if (jsonEndStream.object === 'text_completion') {
@@ -116,7 +130,6 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
     }
 
     const fillJsonResponse = (jsonResponse, inputText, _finishReason) => {
-
         jsonResponse.choices[0].finish_reason = null;
         if (jsonResponse.object === 'text_completion') {
             jsonResponse.choices[0].text = inputText;
@@ -128,6 +141,14 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
     }
 
     startStream(res);
+
+    // If the requestId is an error message, we can't continue
+    if (requestId.startsWith('[ERROR]')) {
+        fillJsonResponse(jsonResponse, requestId, "stop");
+        sendStreamData(jsonResponse);
+        finishStream(res, jsonResponse);
+        return;
+    }
 
     let subscription;
 
