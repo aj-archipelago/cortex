@@ -85,6 +85,11 @@ var config = convict({
         default: false,
         env: 'CORTEX_ENABLE_REST'
     },
+    ollamaUrl: {
+        format: String,
+        default: 'http://127.0.0.1:11434',
+        env: 'OLLAMA_URL'
+    },
     entityConstants: {
         format: Object,
         default: {
@@ -284,7 +289,7 @@ var config = convict({
             },
             "ollama-chat": {
                 "type": "OLLAMA-CHAT",
-                "url": "http://127.0.0.1:11434/api/chat",
+                "url": "{{ollamaUrl}}/api/chat",
                 "headers": {
                   "Content-Type": "application/json"
                 },
@@ -294,7 +299,7 @@ var config = convict({
             },
             "ollama-completion": {
                 "type": "OLLAMA-COMPLETION",
-                "url": "http://127.0.0.1:11434/api/generate",
+                "url": "{{ollamaUrl}}/api/generate",
                 "headers": {
                   "Content-Type": "application/json"
                 },

@@ -1,10 +1,6 @@
 import ModelPlugin from './modelPlugin.js';
 
 class OllamaChatPlugin extends ModelPlugin {
-  constructor(pathway, model) {
-    super(pathway, model);
-    this.apiUrl = model.apiUrl || 'http://localhost:11434';
-  }
 
   getRequestParameters(text, parameters, prompt) {
     const { modelPromptMessages } = this.getCompiledPrompt(text, parameters, prompt);

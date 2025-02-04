@@ -1,10 +1,6 @@
 import ModelPlugin from './modelPlugin.js';
 
 class OllamaCompletionPlugin extends ModelPlugin {
-  constructor(pathway, model) {
-    super(pathway, model);
-    this.apiUrl = model.apiUrl || 'http://localhost:11434';
-  }
 
   getRequestParameters(text, parameters, prompt) {
     const {stream=false, model} = parameters;
