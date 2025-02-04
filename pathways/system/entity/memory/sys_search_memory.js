@@ -53,7 +53,7 @@ export default {
             result = `${result}\n\nThe last time you spoke to the user was ${new Date().toISOString()}.`;
 
         } else {
-            sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section}); 
+            sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section, stripMetadata: (args.section !== 'memoryTopics')}); 
             result = await runAllPrompts({...args, sectionMemory});
         }
 

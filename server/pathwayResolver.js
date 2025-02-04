@@ -102,7 +102,7 @@ class PathwayResolver {
             if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
                 await publishRequestProgress({
                         requestId: this.rootRequestId || this.requestId,
-                        progress: completedCount / totalCount,
+                        progress: Math.min(completedCount,totalCount) / totalCount,
                         data: JSON.stringify(responseData),
                 });
             }
@@ -227,10 +227,10 @@ class PathwayResolver {
                 // Load saved context and core memory if it exists
                 const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
                     (getv && await getv(this.savedContextId)) || {},
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1}),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1, stripMetadata: true }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1, stripMetadata: true }),
                     callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryTopics', priority: 0, numResults: 10 }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1, stripMetadata: true }),
                     callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryContext', priority: 0 }),
                 ]).catch(error => {
                     this.logError(`Failed to load memory: ${error.message}`);
@@ -315,12 +315,12 @@ class PathwayResolver {
     processInputText(text) {
         let chunkTokenLength = 0;
         if (this.pathway.inputChunkSize) {
-            chunkTokenLength = Math.min(this.pathway.inputChunkSize, this.chunkMaxTokenLength);
+            chunkTokenLength = this.pathway.inputChunkSize;
         } else {
             chunkTokenLength = this.chunkMaxTokenLength;
         }
         const encoded = text ? encode(text) : [];
-        if (!this.useInputChunking || encoded.length <= chunkTokenLength) { // no chunking, return as is
+        if (!this.useInputChunking) { // no chunking, return as is
             if (encoded.length > 0 && encoded.length >= chunkTokenLength) {
                 const warnText = `Truncating long input text. Text length: ${text.length}`;
                 this.logWarning(warnText);
@@ -375,7 +375,7 @@ class PathwayResolver {
     // Process the request and return the result        
     async processRequest({ text, ...parameters }) {
         text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
-        const chunks = this.processInputText(text);
+        const chunks = text && this.processInputText(text) || [text];
 
         let anticipatedRequestCount = chunks.length * this.prompts.length   
 

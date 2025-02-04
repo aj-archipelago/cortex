@@ -210,7 +210,7 @@ class ModelPlugin {
     
         // First run handlebars compile on the pathway messages
         const compiledMessages = modelPrompt.messages.map((message) => {
-            if (message.content) {
+            if (message.content && typeof message.content === 'string') {
                 const compileText = HandleBars.compile(message.content);
                 return {
                     ...message,
