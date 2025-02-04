@@ -12,9 +12,10 @@ export default {
     ],
     inputParameters: {
         messages: [{ role: '', content: '' }],
-        model: 'ollama-chat',
+        model: '',
     },
     model: 'ollama-chat',
     useInputChunking: false,
     emulateOpenAIChatModel: 'ollama-chat',
+    timeout: 300,
 }

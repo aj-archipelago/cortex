@@ -5,9 +5,10 @@ export default {
     prompt: `{{text}}`,
     inputParameters: {
         text: '',
-        model: 'ollama-completion',
+        model: '',
     },
     model: 'ollama-completion',
     useInputChunking: false,
     emulateOpenAICompletionModel: 'ollama-completion',
+    timeout: 300,
 }
