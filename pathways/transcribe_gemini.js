@@ -5,36 +5,124 @@ import { Prompt } from "../server/prompt.js";
 
 const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
 
-
-
 export function convertSrtToVtt(data) {
     if (!data || !data.trim()) {
         return "WEBVTT\n\n";
     }
-    // remove dos newlines
-    var srt = data.replace(/\r+/g, "");
-    // trim white space start and end
-    srt = srt.replace(/^\s+|\s+$/g, "");
 
-    // Convert all timestamps from comma to dot format
-    srt = srt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+    // If it's already VTT format and has header
+    if (data.trim().startsWith("WEBVTT")) {
+        const lines = data.split("\n");
+        const result = ["WEBVTT", ""]; // Start with header and blank line
+        let currentCue = [];
 
-    // Add blank lines before sequence numbers that are followed by timecodes
-    srt = srt.replace(/(\n)(\d+)\n(\d{2}:\d{2}:\d{2}[,.])/g, "$1\n$2\n$3");
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
 
-    // get cues
-    var cuelist = srt.split("\n\n");
-    var result = "";
-    if (cuelist.length > 0) {
-        result += "WEBVTT\n\n";
-        for (var i = 0; i < cuelist.length; i = i + 1) {
-            const cue = convertSrtCue(cuelist[i]);
-            // Only add non-empty cues
-            if (cue) {
-                result += cue;
+            // Skip empty lines and the WEBVTT header
+            if (!line || line === "WEBVTT") {
+                continue;
+            }
+
+            // If it's a number by itself, it's a cue identifier
+            if (/^\d+$/.test(line)) {
+                // If we have a previous cue, add it with proper spacing
+                if (currentCue.length > 0) {
+                    result.push(currentCue.join("\n"));
+                    result.push(""); // Add blank line between cues
+                    currentCue = [];
+                }
+                currentCue.push(line);
+                continue;
+            }
+
+            // Check for and convert timestamps
+            const fullTimeRegex = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/;
+            const shortTimeRegex = /^(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2})[,.](\d{3})$/;
+            const ultraShortTimeRegex = /^(\d{1,2})[.](\d{3})\s*-->\s*(\d{1,2})[.](\d{3})$/;
+
+            const fullMatch = line.match(fullTimeRegex);
+            const shortMatch = line.match(shortTimeRegex);
+            const ultraShortMatch = line.match(ultraShortTimeRegex);
+
+            if (fullMatch) {
+                // Already in correct format, just convert comma to dot
+                const convertedTime = line.replace(/,/g, '.');
+                currentCue.push(convertedTime);
+            } else if (shortMatch) {
+                // Convert MM:SS to HH:MM:SS
+                const convertedTime = `00:${shortMatch[1]}:${shortMatch[2]}.${shortMatch[3]} --> 00:${shortMatch[4]}:${shortMatch[5]}.${shortMatch[6]}`;
+                currentCue.push(convertedTime);
+            } else if (ultraShortMatch) {
+                // Convert SS to HH:MM:SS
+                const convertedTime = `00:00:${ultraShortMatch[1].padStart(2, '0')}.${ultraShortMatch[2]} --> 00:00:${ultraShortMatch[3].padStart(2, '0')}.${ultraShortMatch[4]}`;
+                currentCue.push(convertedTime);
+            } else if (!line.includes('-->')) {
+                // Must be subtitle text
+                currentCue.push(line);
             }
         }
+
+        // Add the last cue if there is one
+        if (currentCue.length > 0) {
+            result.push(currentCue.join("\n"));
+            result.push(""); // Add final blank line
+        }
+
+        // Join with newlines and ensure proper ending
+        return result.join("\n") + "\n";
     }
+
+    // remove dos newlines and trim
+    var srt = data.replace(/\r+/g, "");
+    srt = srt.replace(/^\s+|\s+$/g, "");
+
+    // Split into cues and filter out empty ones
+    var cuelist = srt.split("\n\n").filter(cue => cue.trim());
+
+    // Always add WEBVTT header
+    var result = "WEBVTT\n\n";
+
+    // Convert each cue to VTT format
+    for (const cue of cuelist) {
+        const lines = cue.split("\n").map(line => line.trim()).filter(line => line);
+        if (lines.length < 2) continue;
+
+        let output = [];
+        
+        // Handle cue identifier
+        if (/^\d+$/.test(lines[0])) {
+            output.push(lines[0]);
+            lines.shift();
+        }
+
+        // Handle timestamp line
+        const timeLine = lines[0];
+        const fullTimeRegex = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/;
+        const shortTimeRegex = /^(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2})[,.](\d{3})$/;
+        const ultraShortTimeRegex = /^(\d{1,2})[.](\d{3})\s*-->\s*(\d{1,2})[.](\d{3})$/;
+
+        const fullMatch = timeLine.match(fullTimeRegex);
+        const shortMatch = timeLine.match(shortTimeRegex);
+        const ultraShortMatch = timeLine.match(ultraShortTimeRegex);
+
+        if (fullMatch) {
+            output.push(timeLine.replace(/,/g, '.'));
+        } else if (shortMatch) {
+            output.push(`00:${shortMatch[1]}:${shortMatch[2]}.${shortMatch[3]} --> 00:${shortMatch[4]}:${shortMatch[5]}.${shortMatch[6]}`);
+        } else if (ultraShortMatch) {
+            output.push(`00:00:${ultraShortMatch[1].padStart(2, '0')}.${ultraShortMatch[2]} --> 00:00:${ultraShortMatch[3].padStart(2, '0')}.${ultraShortMatch[4]}`);
+        } else {
+            continue; // Invalid timestamp format
+        }
+
+        // Add remaining lines as subtitle text
+        output.push(...lines.slice(1));
+        
+        // Add the cue to result
+        result += output.join("\n") + "\n\n";
+    }
+
     return result;
 }
 
@@ -42,18 +130,20 @@ function convertSrtCue(caption) {
     if (!caption || !caption.trim()) {
         return "";
     }
-    // remove all html tags for security reasons
-    //srt = srt.replace(/<[a-zA-Z\/][^>]*>/g, '');
+
     var cue = "";
     var s = caption.split(/\n/);
-    // concatenate muilt-line string separated in array into one
+
+    // concatenate multi-line string separated in array into one
     while (s.length > 3) {
         for (var i = 3; i < s.length; i++) {
             s[2] += "\n" + s[i];
         }
         s.splice(3, s.length - 3);
     }
+
     var line = 0;
+
     // detect identifier
     if (
         s[0] &&
@@ -67,10 +157,11 @@ function convertSrtCue(caption) {
             line += 1;
         }
     }
+
     // get time strings
     if (s[line] && s[line].match(/\d+:\d+:\d+/)) {
         // convert time string
-        var m = s[1].match(
+        var m = s[line].match(
             /(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*--?>\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/,
         );
         if (m) {
@@ -93,17 +184,43 @@ function convertSrtCue(caption) {
                 "\n";
             line += 1;
         } else {
-            // Unrecognized timestring
-            return "";
+            // Try alternate timestamp format
+            m = s[line].match(
+                /(\d{2}):(\d{2})\.(\d{3})\s*--?>\s*(\d{2}):(\d{2})\.(\d{3})/,
+            );
+            if (m) {
+                // Convert to full timestamp format
+                cue +=
+                    "00:" +
+                    m[1] +
+                    ":" +
+                    m[2] +
+                    "." +
+                    m[3] +
+                    " --> " +
+                    "00:" +
+                    m[4] +
+                    ":" +
+                    m[5] +
+                    "." +
+                    m[6] +
+                    "\n";
+                line += 1;
+            } else {
+                // Unrecognized timestring
+                return "";
+            }
         }
     } else {
         // file format error or comment lines
         return "";
     }
+
     // get cue text
     if (s[line]) {
         cue += s[line] + "\n\n";
     }
+
     return cue;
 }
 
@@ -112,47 +229,58 @@ export function detectSubtitleFormat(text) {
     const cleanText = text.replace(/\r+/g, "").trim();
     const lines = cleanText.split("\n");
 
-    // Check if it's VTT format
+    // Check if it's VTT format - be more lenient with the header
     if (lines[0]?.trim() === "WEBVTT") {
         return "vtt";
     }
 
-    // Check if it's SRT format
-    // SRT files have a specific pattern:
-    // 1. Numeric index
-    // 2. Timestamp in format: 00:00:00,000 --> 00:00:00,000
-    // 3. Subtitle text
-    // 4. Blank line
-    const timeRegex =
-        /(\d{2}:\d{2}:\d{2})[,.](\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2})[,.](\d{3})/;
+    // Define regex patterns for timestamp formats
+    const srtTimeRegex =
+        /(\d{2}:\d{2}:\d{2})[,.]\d{3}\s*-->\s*(\d{2}:\d{2}:\d{2})[,.]\d{3}/;
+    const vttTimeRegex =
+        /(?:\d{2}:)?(\d{1,2})[.]\d{3}\s*-->\s*(?:\d{2}:)?(\d{1,2})[.]\d{3}/;
 
-    let hasValidStructure = false;
-    let index = 1;
+    let hasSrtTimestamps = false;
+    let hasVttTimestamps = false;
+    let hasSequentialNumbers = false;
+    let lastNumber = 0;
 
-    // Check first few entries to confirm SRT structure
+    // Look through first few lines to detect patterns
     for (let i = 0; i < Math.min(lines.length, 12); i++) {
         const line = lines[i]?.trim();
         if (!line) continue;
 
-        // Check if line is a number matching our expected index
-        if (line === index.toString()) {
-            // Look ahead for timestamp
-            const nextLine = lines[i + 1]?.trim();
-            if (nextLine && timeRegex.test(nextLine)) {
-                hasValidStructure = true;
-                index++;
-                i++; // Skip timestamp line since we've verified it
+        // Check for timestamps
+        if (srtTimeRegex.test(line)) {
+            hasSrtTimestamps = true;
+        }
+        if (vttTimeRegex.test(line)) {
+            hasVttTimestamps = true;
+        }
+
+        // Check for sequential numbers
+        const numberMatch = line.match(/^(\d+)$/);
+        if (numberMatch) {
+            const num = parseInt(numberMatch[1]);
+            if (lastNumber === 0 || num === lastNumber + 1) {
+                hasSequentialNumbers = true;
+                lastNumber = num;
             }
         }
     }
 
-    if (hasValidStructure) {
+    // If it has SRT-style timestamps (HH:MM:SS), it's SRT
+    if (hasSrtTimestamps && hasSequentialNumbers) {
         return "srt";
+    }
+
+    // If it has VTT-style timestamps (MM:SS) or WEBVTT header, it's VTT
+    if (hasVttTimestamps) {
+        return "vtt";
     }
 
     return null;
 }
-
 
 export default {
     prompt:
@@ -203,7 +331,6 @@ export default {
             const progress = (completedCount + partialRatio) / totalCount;
             logger.info(`Progress for ${requestId}: ${progress}`);
 
-            console.log(`Progress for ${requestId}: ${progress}`);
             publishRequestProgress({
                 requestId,
                 progress,
@@ -290,7 +417,7 @@ WEBVTT
 Hello World2!
 
 2
-00:05.344 --> 00:00:08.809
+00:00:05.344 --> 00:00:08.809
 Being AI is also great!
 
 - If asked text format, e.g.:
@@ -327,6 +454,7 @@ Even a single newline or space can cause the response to be rejected. You must f
             return messages;
         }
 
+
         const processChunksParallel = async (chunks, args) => {
             try {
                 const chunkPromises = chunks.map(async (chunk, index) => ({
@@ -338,8 +466,6 @@ Even a single newline or space can cause the response to be rejected. You must f
                     })
                 }));
         
-                // const results = await Promise.all(chunkPromises);
-
                 const results = await Promise.all(
                 chunkPromises.map(promise => 
                     promise.then(result => {
@@ -373,6 +499,8 @@ Even a single newline or space can cause the response to be rejected. You must f
         // });
         
         if (['srt','vtt'].includes(responseFormat) || wordTimestamped) { // align subtitles for formats
+
+            
 
             // convert as gemini output is unstable
             for(let i = 0; i < result.length; i++) {
