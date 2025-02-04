@@ -281,7 +281,27 @@ var config = convict({
                 "headers": {
                     "Content-Type": "application/json"
                 },
-            }
+            },
+            "ollama-chat": {
+                "type": "OLLAMA-CHAT",
+                "url": "http://127.0.0.1:11434/api/chat",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 131072,
+                "supportsStreaming": true
+            },
+            "ollama-completion": {
+                "type": "OLLAMA-COMPLETION",
+                "url": "http://127.0.0.1:11434/api/generate",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 131072,
+                "supportsStreaming": true
+            },
         },
         env: 'CORTEX_MODELS'
     },
