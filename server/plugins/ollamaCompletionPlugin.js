@@ -7,7 +7,7 @@ class OllamaCompletionPlugin extends ModelPlugin {
   getRequestParameters(text, parameters, prompt) {
     return {
       data: {
-        model: parameters.model,
+        model: parameters.ollamaModel,
         prompt: text,
         stream: parameters.stream
       },

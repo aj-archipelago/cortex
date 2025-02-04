@@ -5,7 +5,7 @@ export default {
     prompt: `{{text}}`,
     inputParameters: {
         text: '',
-        model: '',
+        ollamaModel: '',
     },
     model: 'ollama-completion',
     useInputChunking: false,

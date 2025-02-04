@@ -302,7 +302,7 @@ function buildRestEndpoints(pathways, app, server, config) {
 
             if (modelName.startsWith('ollama-')) {
                 pathwayName = 'sys_ollama_completion';
-                req.body.model = modelName.replace('ollama-', '');
+                req.body.ollamaModel = modelName.replace('ollama-', '');
             } else {
                 pathwayName = openAICompletionModels[modelName] || openAICompletionModels['*'];
             }
@@ -356,7 +356,7 @@ function buildRestEndpoints(pathways, app, server, config) {
 
             if (modelName.startsWith('ollama-')) {
                 pathwayName = 'sys_ollama_chat';
-                req.body.model = modelName.replace('ollama-', '');
+                req.body.ollamaModel = modelName.replace('ollama-', '');
             } else {
                 pathwayName = openAIChatModels[modelName] || openAIChatModels['*'];
             }

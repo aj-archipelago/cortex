@@ -12,7 +12,7 @@ export default {
     ],
     inputParameters: {
         messages: [{ role: '', content: '' }],
-        model: '',
+        ollamaModel: '',
     },
     model: 'ollama-chat',
     useInputChunking: false,

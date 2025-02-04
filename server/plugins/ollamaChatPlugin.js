@@ -8,7 +8,7 @@ class OllamaChatPlugin extends ModelPlugin {
     const { modelPromptMessages } = this.getCompiledPrompt(text, parameters, prompt);
     return {
       data: {
-        model: parameters.model,
+        model: parameters.ollamaModel,
         messages: modelPromptMessages,
         stream: parameters.stream
       },
