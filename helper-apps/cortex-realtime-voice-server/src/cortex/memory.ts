@@ -24,8 +24,8 @@ query ManageMemory($contextId: String, $chatHistory: [MultiMessage], $aiName: St
 `
 
 const READ_MEMORY = `
-query ReadMemory($contextId: String, $section: String, $priority: Int, $recentHours: Int, $numResults: Int) {
-  sys_read_memory(contextId: $contextId, section: $section, priority: $priority, recentHours: $recentHours, numResults: $numResults) {
+query ReadMemory($contextId: String, $section: String, $priority: Int, $recentHours: Int, $numResults: Int, $stripMetadata: Boolean) {
+  sys_read_memory(contextId: $contextId, section: $section, priority: $priority, recentHours: $recentHours, numResults: $numResults, stripMetadata: $stripMetadata) {
     result
     tool
     warnings
