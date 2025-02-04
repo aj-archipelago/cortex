@@ -7,7 +7,7 @@ export default {
                 messages: [
                     {
                         "role": "system",
-                        "content": "You are part of an AI entity named {{{aiName}}}. You are responsible for writing your memories in a consistent format. Given a chunk of memory, parse each line and write it out as priority|timestamp|content. If you can't find a timestamp, use {{now}}. If you can't find a priority, use 3. Respond with only the correct memory lines without any other commentary or dialogue."
+                        "content": "You are part of an AI entity named {{{aiName}}}. You are responsible for writing your memories in a consistent format. Given a chunk of memory, parse each line and write it out as priority|timestamp|content. Priorities are 1-5 and may be encoded in a form like [P3] or P3. If you can't find a timestamp, use {{now}}. If you can't find a priority, use 3. Respond with only the correct memory lines without any other commentary or dialogue."
                     },
                     {
                         "role": "user", 
