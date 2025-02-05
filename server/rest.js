@@ -6,6 +6,22 @@ import { requestState } from './requestState.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../lib/logger.js';
 import { getSingleTokenChunks } from './chunker.js';
+import axios from 'axios';
+
+const getOllamaModels = async (ollamaUrl) => {
+    try {
+        const response = await axios.get(`${ollamaUrl}/api/tags`);
+        return response.data.models.map(model => ({
+            id: `ollama-${model.name}`,
+            object: 'model',
+            owned_by: 'ollama',
+            permission: ''
+        }));
+    } catch (error) {
+        logger.error(`Error fetching Ollama models: ${error.message}`);
+        return [];
+    }
+};
 
 const chunkTextIntoTokens = (() => {
     let partialToken = '';
@@ -282,7 +298,14 @@ function buildRestEndpoints(pathways, app, server, config) {
         // Create OpenAI compatible endpoints
         app.post('/v1/completions', async (req, res) => {
             const modelName = req.body.model || 'gpt-3.5-turbo';
-            const pathwayName = openAICompletionModels[modelName] || openAICompletionModels['*'];
+            let pathwayName;
+
+            if (modelName.startsWith('ollama-')) {
+                pathwayName = 'sys_ollama_completion';
+                req.body.ollamaModel = modelName.replace('ollama-', '');
+            } else {
+                pathwayName = openAICompletionModels[modelName] || openAICompletionModels['*'];
+            }
 
             if (!pathwayName) {
                 res.status(404).json({
@@ -318,7 +341,6 @@ function buildRestEndpoints(pathways, app, server, config) {
             if (Boolean(req.body.stream)) {
                 jsonResponse.id = `cmpl-${resultText}`;
                 jsonResponse.choices[0].finish_reason = null;
-                //jsonResponse.object = "text_completion.chunk";
 
                 processIncomingStream(resultText, res, jsonResponse, pathway);
             } else {
@@ -330,7 +352,14 @@ function buildRestEndpoints(pathways, app, server, config) {
         
         app.post('/v1/chat/completions', async (req, res) => {
             const modelName = req.body.model || 'gpt-3.5-turbo';
-            const pathwayName = openAIChatModels[modelName] || openAIChatModels['*'];
+            let pathwayName;
+
+            if (modelName.startsWith('ollama-')) {
+                pathwayName = 'sys_ollama_chat';
+                req.body.ollamaModel = modelName.replace('ollama-', '');
+            } else {
+                pathwayName = openAIChatModels[modelName] || openAIChatModels['*'];
+            }
 
             if (!pathwayName) {
                 res.status(404).json({
@@ -385,8 +414,11 @@ function buildRestEndpoints(pathways, app, server, config) {
         app.get('/v1/models', async (req, res) => {
             const openAIModels = { ...openAIChatModels, ...openAICompletionModels };
             const defaultModelId = 'gpt-3.5-turbo';
+            let models = [];
 
-            const models = Object.entries(openAIModels)
+            // Get standard OpenAI-compatible models, filtering out our internal pathway models
+            models = Object.entries(openAIModels)
+                .filter(([modelId]) => !['ollama-chat', 'ollama-completion'].includes(modelId))
                 .map(([modelId]) => {
                     if (modelId.includes('*')) {
                         modelId = defaultModelId;
@@ -397,7 +429,16 @@ function buildRestEndpoints(pathways, app, server, config) {
                         owned_by: 'openai',
                         permission: '',
                     };
-                })
+                });
+
+            // Get Ollama models if configured
+            if (config.get('ollamaUrl')) {
+                const ollamaModels = await getOllamaModels(config.get('ollamaUrl'));
+                models = [...models, ...ollamaModels];
+            }
+
+            // Filter out duplicates and sort
+            models = models
                 .filter((model, index, self) => {
                     return index === self.findIndex((m) => m.id === model.id);
                 })

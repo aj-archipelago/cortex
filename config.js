@@ -85,6 +85,11 @@ var config = convict({
         default: false,
         env: 'CORTEX_ENABLE_REST'
     },
+    ollamaUrl: {
+        format: String,
+        default: 'http://127.0.0.1:11434',
+        env: 'OLLAMA_URL'
+    },
     entityConstants: {
         format: Object,
         default: {
@@ -281,7 +286,27 @@ var config = convict({
                 "headers": {
                     "Content-Type": "application/json"
                 },
-            }
+            },
+            "ollama-chat": {
+                "type": "OLLAMA-CHAT",
+                "url": "{{ollamaUrl}}/api/chat",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 131072,
+                "supportsStreaming": true
+            },
+            "ollama-completion": {
+                "type": "OLLAMA-COMPLETION",
+                "url": "{{ollamaUrl}}/api/generate",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 131072,
+                "supportsStreaming": true
+            },
         },
         env: 'CORTEX_MODELS'
     },
