@@ -28,6 +28,7 @@ import NeuralSpacePlugin from './plugins/neuralSpacePlugin.js';
 import RunwareAiPlugin from './plugins/runwareAiPlugin.js';
 import ReplicateApiPlugin from './plugins/replicateApiPlugin.js';
 import AzureVideoTranslatePlugin from './plugins/azureVideoTranslatePlugin.js';
+import ApptekTranslatePlugin from './plugins/apptekTranslatePlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -115,6 +116,9 @@ class ModelExecutor {
                 break;
             case 'AZURE-VIDEO-TRANSLATE':
                 plugin = new AzureVideoTranslatePlugin(pathway, model);
+                break;
+            case 'APPTEK-TRANSLATE':
+                plugin = new ApptekTranslatePlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);
