@@ -33,6 +33,7 @@
   "type": "module",
   "homepage": "https://github.com/aj-archipelago/cortex#readme",
   "dependencies": {
+    "@aj-archipelago/subvibe": "^1.0.0",
     "@apollo/server": "^4.7.3",
     "@apollo/server-plugin-response-cache": "^4.1.2",
     "@apollo/utils.keyvadapter": "^3.0.0",
@@ -63,7 +64,6 @@
     "ioredis": "^5.3.1",
     "keyv": "^4.5.2",
     "mime-types": "^2.1.35",
-    "subsrt": "^1.1.1",
     "uuid": "^9.0.0",
     "winston": "^3.11.0",
     "ws": "^8.12.0"

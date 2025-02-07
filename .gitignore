@@ -4,3 +4,4 @@ node_modules/
 .vscode/
 **/__pycache__
 **/.venv
+.aider*
