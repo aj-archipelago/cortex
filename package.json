@@ -86,5 +86,8 @@
       "dotenv/config"
     ],
     "concurrency": 1
+  },
+  "overrides": {
+    "whatwg-url": "^12.0.0"
   }
 }
