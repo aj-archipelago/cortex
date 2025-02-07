@@ -46,6 +46,7 @@ export type RealtimeSessionConfig = {
   modalities: Array<Modality>,
   instructions: string,
   voice: Voice,
+  custom_voice_id?: string | null,
   input_audio_format: AudioFormat,
   output_audio_format: AudioFormat,
   input_audio_transcription: null | { model: 'whisper-1' | (string & {}) },
