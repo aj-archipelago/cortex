@@ -380,7 +380,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     cortexRequest.params = {}; // query params
     cortexRequest.stream = stream;
     cortexRequest.urlSuffix = cortexRequest.stream
-      ? ":streamRawPredict"
+      ? ":streamRawPredict?alt=sse"
       : ":rawPredict";
 
     const gcpAuthTokenHelper = this.config.get("gcpAuthTokenHelper");
@@ -392,32 +392,58 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
   processStreamEvent(event, requestProgress) {
     const eventData = JSON.parse(event.data);
+    const baseOpenAIResponse = {
+      id: eventData.message?.id || `chatcmpl-${Date.now()}`,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: this.modelName,
+      choices: [{
+        index: 0,
+        delta: {},
+        finish_reason: null
+      }]
+    };
+
     switch (eventData.type) {
       case "message_start":
-        requestProgress.data = JSON.stringify(eventData.message);
+        // Initial message with role
+        baseOpenAIResponse.choices[0].delta = {
+          role: "assistant",
+          content: ""
+        };
+        requestProgress.data = JSON.stringify(baseOpenAIResponse);
         break;
-      case "content_block_start":
-        break;
-      case "ping":
-        break;
+
       case "content_block_delta":
         if (eventData.delta.type === "text_delta") {
-          requestProgress.data = JSON.stringify(eventData.delta.text);
+          baseOpenAIResponse.choices[0].delta = {
+            content: eventData.delta.text
+          };
+          requestProgress.data = JSON.stringify(baseOpenAIResponse);
         }
         break;
-      case "content_block_stop":
-        break;
-      case "message_delta":
-        break;
+
       case "message_stop":
-        requestProgress.data = "[DONE]";
+        baseOpenAIResponse.choices[0].delta = {};
+        baseOpenAIResponse.choices[0].finish_reason = "stop";
+        requestProgress.data = JSON.stringify(baseOpenAIResponse);
         requestProgress.progress = 1;
         break;
+
       case "error":
-        requestProgress.data = `\n\n*** ${
-          eventData.error.message || eventData.error
-        } ***`;
+        baseOpenAIResponse.choices[0].delta = {
+          content: `\n\n*** ${eventData.error.message || eventData.error} ***`
+        };
+        baseOpenAIResponse.choices[0].finish_reason = "error";
+        requestProgress.data = JSON.stringify(baseOpenAIResponse);
         requestProgress.progress = 1;
+        break;
+
+      // Ignore other event types as they don't map to OpenAI format
+      case "content_block_start":
+      case "content_block_stop":
+      case "message_delta":
+      case "ping":
         break;
     }
 

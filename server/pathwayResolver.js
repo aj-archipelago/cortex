@@ -89,8 +89,13 @@ class PathwayResolver {
                     progress: 1,
                     data: '[DONE]',
                 });
+            } else {
+                publishRequestProgress({
+                    requestId: this.rootRequestId || this.requestId,
+                    progress: 1,
+                    data: error.message || error.toString(),
+                });
             }
-            return;
         }
 
         // If the response is a string, it's a regular long running response
