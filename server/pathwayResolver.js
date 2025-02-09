@@ -79,6 +79,13 @@ class PathwayResolver {
         let streamErrorOccurred = false;
         let responseData = null;
 
+        const publishNestedRequestProgress = (requestProgress) => {
+            if (requestProgress.progress === 1 && this.rootRequestId) {
+                delete requestProgress.progress;
+            }
+            publishRequestProgress(requestProgress);
+        }
+
         try {
             responseData = await this.executePathway(args);
         }
@@ -105,7 +112,7 @@ class PathwayResolver {
             
             // some models don't support progress updates
             if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
-                await publishRequestProgress({
+                await publishNestedRequestProgress({
                         requestId: this.rootRequestId || this.requestId,
                         progress: Math.min(completedCount,totalCount) / totalCount,
                         data: JSON.stringify(responseData),
@@ -144,10 +151,7 @@ class PathwayResolver {
 
                     try {
                         if (!streamEnded && requestProgress.data) {
-                            if (!(this.rootRequestId && requestProgress.progress === 1)) {
-                                logger.debug(`Publishing stream message to requestId ${this.requestId}: ${requestProgress.data}`);
-                                publishRequestProgress(requestProgress);
-                            }
+                            publishNestedRequestProgress(requestProgress);
                             streamEnded = requestProgress.progress === 1;
                         }
                     } catch (error) {

@@ -213,6 +213,10 @@ class Gemini15ChatPlugin extends ModelPlugin {
 
             // If this message also has STOP, mark it for completion but don't overwrite the content
             if (eventData.candidates[0].finishReason === "STOP") {
+                // Send the content first
+                requestProgress.data = JSON.stringify(createChunk({ 
+                    content: eventData.candidates[0].content.parts[0].text
+                }));
                 requestProgress.progress = 1;
             }
         } else if (eventData.candidates?.[0]?.finishReason === "STOP") {
