@@ -36,6 +36,7 @@ async function MogrtHandler(context, req) {
         if (method === 'POST') {
             const files = [];
             const uploadId = uuidv4();
+            let name = null;
             console.log('Generated uploadId:', uploadId);
 
             const busboy = Busboy({ 
@@ -79,6 +80,9 @@ async function MogrtHandler(context, req) {
 
                 busboy.on('field', (fieldname, value) => {
                     console.log('Received field:', fieldname, value);
+                    if (fieldname === 'name') {
+                        name = value;
+                    }
                 });
 
                 busboy.on('finish', async () => {
@@ -107,6 +111,7 @@ async function MogrtHandler(context, req) {
 
                         const manifest = {
                             id: uploadId,
+                            name: name || uploadId, // Use uploadId as fallback if name not provided
                             mogrtFile: uploadResults.find(r => path.extname(r.key).toLowerCase() === ALLOWED_EXTENSIONS.MOGRT)?.key,
                             previewFile: uploadResults.find(r => ALLOWED_EXTENSIONS.PREVIEW.includes(path.extname(r.key).toLowerCase()))?.key,
                             uploadDate: new Date().toISOString()

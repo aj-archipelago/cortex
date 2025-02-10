@@ -67,6 +67,8 @@ app.get('/health', (req, res) => {
  *           schema:
  *             type: object
  *             properties:
+ *               name:
+ *                 type: string
  *               mogrt:
  *                 type: string
  *                 format: binary
@@ -78,6 +80,7 @@ app.get('/health', (req, res) => {
  *             required:
  *               - mogrt
  *               - preview
+ *               - name
  *     responses:
  *       200:
  *         description: Files uploaded successfully
@@ -89,6 +92,9 @@ app.get('/health', (req, res) => {
  *                 id:
  *                   type: string
  *                   description: Unique identifier for the upload
+ *                 name:
+ *                   type: string
+ *                   description: Name of the MOGRT
  *                 mogrtUrl:
  *                   type: string
  *                   description: URL to access the uploaded MOGRT file

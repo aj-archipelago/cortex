@@ -74,7 +74,7 @@ async function getMasterManifest() {
             console.warn('Master manifest is not an array. Resetting to empty manifest.');
             manifest = [];
         }
-        const requiredKeys = ['id', 'mogrtFile', 'previewFile', 'uploadDate'];
+        const requiredKeys = ['id', 'mogrtFile','name', 'previewFile', 'uploadDate'];
         const validManifest = manifest.filter(entry => {
             const missingKeys = requiredKeys.filter(key => !(Object.prototype.hasOwnProperty.call(entry, key) && entry[key] !== undefined && entry[key] !== null));
             if (missingKeys.length > 0) {
@@ -113,12 +113,13 @@ async function updateMasterManifest(manifest) {
     console.log('📊 Current manifest entries:', manifest.length);
     
     // Remove signed URLs before saving
-    const manifestToSave = manifest.map(({ id, mogrtFile, previewFile, uploadDate }) => {
+    const manifestToSave = manifest.map(({ id, mogrtFile, previewFile, name, uploadDate }) => {
         console.log(`🔖 Processing entry ${id}:`, { mogrtFile, previewFile, uploadDate });
         return {
             id,
             mogrtFile,
             previewFile,
+            name,
             uploadDate
         };
     });
@@ -239,8 +240,8 @@ export async function saveManifest(manifest) {
         console.log('Saving manifest:', manifest);
         
         // Remove signed URLs if they exist
-        const { id, mogrtFile, previewFile, uploadDate } = manifest;
-        const manifestToSave = { id, mogrtFile, previewFile, uploadDate };
+        const { id, mogrtFile, name, previewFile, uploadDate } = manifest;
+        const manifestToSave = { id, mogrtFile, name, previewFile, uploadDate };
 
         // Save individual manifest
         await uploadToS3(
