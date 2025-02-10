@@ -1,5 +1,5 @@
 export default {
     prompt:["{{text}}"],
-    model: 'azure-dalle3',
+    model: 'oai-dalle3',
     enableDuplicateRequests: false,
 }

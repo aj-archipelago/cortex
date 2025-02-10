@@ -1,5 +1,5 @@
 import { encode, decode } from '../lib/encodeCache.js';
-import cheerio from 'cheerio';
+import * as cheerio from 'cheerio';
 
 const getLastNToken = (text, maxTokenLen) => { 
     const encoded = encode(text);

@@ -1,4 +1,5 @@
 import { callPathway } from '../../../lib/pathwayTools.js';
+import { addToolCalls, addToolResults } from './memory/shared/sys_memory_helpers.js';
 
 export default {
     prompt:
@@ -13,16 +14,21 @@ export default {
     useInputChunking: false,
     enableDuplicateRequests: false,
     executePathway: async ({args, resolver}) => {
-        const memoryContext = await callPathway('sys_search_memory', { ...args, section: 'memoryAll', updateContext: true });
+
+        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
+        const styleModel = aiStyle === "Anthropic" ? AI_STYLE_ANTHROPIC : AI_STYLE_OPENAI;
+
+        const memoryContext = await callPathway('sys_search_memory', { ...args, stream: false, section: 'memoryAll', updateContext: true });
         if (memoryContext) {
-            args.chatHistory.splice(-1, 0, { role: 'assistant', content: memoryContext });
+            const {toolCallId} = addToolCalls(args.chatHistory, "search memory for relevant information", "memory_lookup");
+            addToolResults(args.chatHistory, memoryContext, toolCallId);
         }
 
         let result;
         if (args.voiceResponse) {
-            result = await callPathway('sys_generator_quick', { ...args, stream: false });
+            result = await callPathway('sys_generator_quick', { ...args, model: styleModel, stream: false }, resolver);
         } else {
-            result = await callPathway('sys_generator_quick', { ...args });
+            result = await callPathway('sys_generator_quick', { ...args, model: styleModel }, resolver);
         }
 
         resolver.tool = JSON.stringify({ toolUsed: "memory" });

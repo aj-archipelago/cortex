@@ -363,14 +363,19 @@ export class RealtimeVoiceClient extends EventEmitter<RealtimeVoiceEvents> imple
     if (!this.isConnected) {
       throw new Error('Not connected');
     }
+    
+    // Create a new config object without custom_voice_id
+    const { custom_voice_id, ...filteredConfig } = {
+      ...this.sessionConfig,
+      ...sessionConfig
+    };
+
     const message = JSON.stringify({
       event_id: createId(),
       type: 'session.update',
-      session: {
-        ...this.sessionConfig,
-        ...sessionConfig,
-      },
+      session: filteredConfig,
     });
+    
     // No need to log session update messages as they can be noisy
     logger.log('Sending session update message:', message);
     this.ws?.send(message);

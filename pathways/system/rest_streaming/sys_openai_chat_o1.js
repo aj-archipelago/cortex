@@ -10,7 +10,7 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{role: '', content: []}],
     },
     model: 'oai-o1',
     useInputChunking: false,

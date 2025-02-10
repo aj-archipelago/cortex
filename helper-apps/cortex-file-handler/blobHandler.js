@@ -494,25 +494,37 @@ async function deleteGCS(blobName) {
   if (!gcs) throw new Error("Google Cloud Storage is not initialized");
 
   try {
+    const bucket = gcs.bucket(GCS_BUCKETNAME);
+    const deletedFiles = [];
+
     if (process.env.STORAGE_EMULATOR_HOST) {
       // For fake GCS server, use HTTP API directly
-      const response = await axios.delete(
-        `http://localhost:4443/storage/v1/b/${GCS_BUCKETNAME}/o/${encodeURIComponent(blobName)}`,
-        { validateStatus: status => status === 200 || status === 404 }
+      const response = await axios.get(
+        `http://localhost:4443/storage/v1/b/${GCS_BUCKETNAME}/o`,
+        { params: { prefix: blobName } }
       );
-      if (response.status === 200) {
-        console.log(`Cleaned GCS file: ${blobName}`);
-        return [blobName];
+      if (response.data.items) {
+        for (const item of response.data.items) {
+          await axios.delete(
+            `http://localhost:4443/storage/v1/b/${GCS_BUCKETNAME}/o/${encodeURIComponent(item.name)}`,
+            { validateStatus: status => status === 200 || status === 404 }
+          );
+          deletedFiles.push(item.name);
+        }
       }
-      return [];
     } else {
       // For real GCS, use the SDK
-      const bucket = gcs.bucket(GCS_BUCKETNAME);
-      const file = bucket.file(blobName);
-      await file.delete();
-      console.log(`Cleaned GCS file: ${blobName}`);
-      return [blobName];
+      const [files] = await bucket.getFiles({ prefix: blobName });
+      for (const file of files) {
+        await file.delete();
+        deletedFiles.push(file.name);
+      }
     }
+
+    if (deletedFiles.length > 0) {
+      console.log(`Cleaned GCS files: ${deletedFiles.join(', ')}`);
+    }
+    return deletedFiles;
   } catch (error) {
     if (error.code !== 404) {
       console.error(`Error in deleteGCS: ${error}`);
@@ -541,4 +553,15 @@ async function ensureGCSUpload(context, existingFile) {
   return existingFile;
 }
 
-export { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs };
+// Helper function to upload a chunk to GCS
+async function uploadChunkToGCS(chunkPath, requestId) {
+    if (!gcs) return null;
+    
+    const gcsFileName = `${requestId}/${path.basename(chunkPath)}`;
+    await gcs.bucket(GCS_BUCKETNAME).upload(chunkPath, {
+        destination: gcsFileName
+    });
+    return `gs://${GCS_BUCKETNAME}/${gcsFileName}`;
+}
+
+export { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs, uploadChunkToGCS };

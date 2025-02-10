@@ -1,5 +1,4 @@
-// sys_google_code_chat.js
-// override handler for palm-code-chat
+// sys_openai_chat_o3_mini.js
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -11,9 +10,10 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{role: '', content: []}],
     },
-    model: 'palm-code-chat',
+    model: 'oai-o3-mini',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'palm-code-chat',
+    emulateOpenAIChatModel: 'o3-mini',
+    enableDuplicateRequests: false,
 }

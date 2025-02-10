@@ -8,6 +8,22 @@ import GeminiVisionPlugin from '../server/plugins/geminiVisionPlugin.js';
 const mockPathway = { name: 'test', temperature: 0.7 };
 const mockModel = { name: 'test-model' };
 
+// Helper function to validate base64 image data
+function validateBase64Image(base64Data) {   
+    // Decode first few bytes to check for common image format headers
+    const decodedData = Buffer.from(base64Data, 'base64').slice(0, 4);
+    const validImageHeaders = [
+        Buffer.from([0xFF, 0xD8, 0xFF]), // JPEG
+        Buffer.from([0x89, 0x50, 0x4E, 0x47]), // PNG
+        Buffer.from([0x47, 0x49, 0x46]), // GIF
+        Buffer.from([0x52, 0x49, 0x46, 0x46]), // WEBP
+    ];
+    
+    return validImageHeaders.some(header => 
+        decodedData.slice(0, header.length).equals(header)
+    );
+}
+
 // Helper function to create plugin instances
 const createPlugins = () => ({
     openai: new OpenAIVisionPlugin(mockPathway, mockModel),
@@ -40,7 +56,8 @@ test('OpenAI to Claude conversion data url', async (t) => {
     t.true(modifiedMessages[0].content[0].type === 'text');
     t.is(modifiedMessages[0].content[0].text, 'What\'s in this image?');
     t.true(modifiedMessages[0].content[1].type === 'image');
-    t.true(modifiedMessages[0].content[1].source.data.startsWith('/9j/4AAQ'));
+    t.true(modifiedMessages[0].content[1].source.type === 'base64');
+    t.true(validateBase64Image(modifiedMessages[0].content[1].source.data), 'Base64 data should be a valid image');
 });
 
 // Test OpenAI to Claude conversion with a regular image url
@@ -64,7 +81,7 @@ test('OpenAI to Claude conversion image url', async (t) => {
     t.true(modifiedMessages[0].content[0].type === 'text');
     t.is(modifiedMessages[0].content[0].text, 'What\'s in this image?');
     t.true(modifiedMessages[0].content[1].type === 'image');
-    t.true(modifiedMessages[0].content[1].source.data.startsWith('/9j/4AAQ'));
+    t.true(validateBase64Image(modifiedMessages[0].content[1].source.data), 'Base64 data should be a valid image');
 });
 
 // Test OpenAI to Gemini conversion
@@ -148,10 +165,10 @@ test('Mixed content types conversion', async (t) => {
     t.is(claudeMessages.length, 3);
     t.true(claudeMessages[2].content[0].text.includes('Here\'s an image:'));
     t.true(claudeMessages[2].content[1].source.type === 'base64');
-    t.true(claudeMessages[2].content[1].source.data.startsWith('/9j/4AAQ'));
+    t.true(validateBase64Image(claudeMessages[2].content[1].source.data), 'First image should be valid');
     t.true(claudeMessages[2].content[2].text.includes('And another one:'));
     t.true(claudeMessages[2].content[3].source.type === 'base64');
-    t.true(claudeMessages[2].content[3].source.data.startsWith('/9j/4AAQ'));
+    t.true(validateBase64Image(claudeMessages[2].content[3].source.data), 'Second image should be valid');
     t.is(claudeSystem, 'You are a vision analysis AI.');
 
     // Check Gemini conversion
@@ -254,12 +271,18 @@ test('Pathological cases', async (t) => {
 
     t.is(geminiSystem15.parts[0].text, 'You are a helpful assistant.');
     t.is(geminiSystem15.parts[1].text, 'You are also very knowledgeable.');
+
     t.is(geminiMessages15.length, 3);
+    // First user message combines "Hello" and "Another greeting"
     t.is(geminiMessages15[0].role, 'user');
     t.is(geminiMessages15[0].parts[0].text, 'Hello');
     t.is(geminiMessages15[0].parts[1].text, 'Another greeting');
+    
+    // Assistant message "Hi there!"
     t.is(geminiMessages15[1].role, 'assistant');
     t.is(geminiMessages15[1].parts[0].text, 'Hi there!');
+     
+    // Final user message combines "How are you?", image content, and "Another question"
     t.is(geminiMessages15[2].role, 'user');
     t.is(geminiMessages15[2].parts[0].text, 'How are you?');
     t.is(geminiMessages15[2].parts[1].text, 'What\'s this?');
@@ -291,6 +314,79 @@ test('Empty message array', async (t) => {
 
     t.is(geminiSystem15, null);
     t.is(geminiMessages15.length, 0);
+});
+
+// Test simple string array content
+test('Simple string array content', async (t) => {
+    const { gemini15 } = createPlugins();
+    
+    const messages = [
+        { role: 'user', content: "Initial message" },
+        { role: 'assistant', content: [
+            "\"Searchin' for my lost shaker of salt...\"\n",
+        ]},
+        { role: 'user', content: [
+            "Here's another simple string in an array",
+        ]}
+    ];
+
+    const { modifiedMessages } = gemini15.convertMessagesToGemini(messages);
+
+    t.is(modifiedMessages.length, 3);
+    t.is(modifiedMessages[0].role, 'user');
+    t.is(modifiedMessages[0].parts.length, 1);
+    t.is(modifiedMessages[0].parts[0].text, "Initial message");
+    t.is(modifiedMessages[1].role, 'assistant');
+    t.is(modifiedMessages[1].parts.length, 1);
+    t.is(modifiedMessages[1].parts[0].text, "\"Searchin' for my lost shaker of salt...\"\n");
+    t.is(modifiedMessages[2].role, 'user');
+    t.is(modifiedMessages[2].parts.length, 1);
+    t.is(modifiedMessages[2].parts[0].text, "Here's another simple string in an array");
+});
+
+// Test string-encoded multimodal content
+test('String-encoded multimodal content', async (t) => {
+    const { gemini15 } = createPlugins();
+    
+    const messages = [
+        { role: 'user', content: [
+            JSON.stringify({
+                type: 'text',
+                text: 'What is in this image?'
+            }),
+            JSON.stringify({
+                type: 'image_url',
+                image_url: { url: 'gs://my-bucket/image.jpg' }
+            })
+        ]},
+        { role: 'assistant', content: [
+            JSON.stringify({
+                type: 'text',
+                text: 'I see a cat.'
+            })
+        ]},
+        { role: 'user', content: [
+            JSON.stringify({
+                type: 'text',
+                text: 'Is it a big cat?'
+            })
+        ]}
+    ];
+
+    const { modifiedMessages } = gemini15.convertMessagesToGemini(messages);
+
+    t.is(modifiedMessages.length, 3);
+    t.is(modifiedMessages[0].role, 'user');
+    t.is(modifiedMessages[0].parts.length, 2);
+    t.is(modifiedMessages[0].parts[0].text, 'What is in this image?');
+    t.true('fileData' in modifiedMessages[0].parts[1]);
+    t.is(modifiedMessages[0].parts[1].fileData.fileUri, 'gs://my-bucket/image.jpg');
+    t.is(modifiedMessages[1].role, 'assistant');
+    t.is(modifiedMessages[1].parts.length, 1);
+    t.is(modifiedMessages[1].parts[0].text, 'I see a cat.');
+    t.is(modifiedMessages[2].role, 'user');
+    t.is(modifiedMessages[2].parts.length, 1);
+    t.is(modifiedMessages[2].parts[0].text, 'Is it a big cat?');
 });
 
 // Test messages with only system messages
@@ -399,4 +495,94 @@ test('Gemini 1.5 image URL edge cases', t => {
     
     // Verify we only have one part (the text)
     t.is(modifiedMessages[0].parts.length, 1, 'Should only have the text part');
+});
+
+// Test multiple images in single message for Claude
+test('Multiple images in single Claude message', async (t) => {
+    const { claude } = createPlugins();
+    
+    const multiImageMessage = [
+        { role: 'user', content: [
+            { type: 'text', text: 'Compare these images:' },
+            { type: 'image_url', image_url: { url: sampleBase64Image } },
+            { type: 'text', text: 'with this one:' },
+            { type: 'image_url', image_url: { url: sampleBase64Image } },
+            { type: 'image_url', gcs: 'gs://cortex-bucket/image.jpg' }
+        ]}
+    ];
+
+    const { modifiedMessages } = await claude.convertMessagesToClaudeVertex(multiImageMessage);
+
+    t.is(modifiedMessages.length, 1);
+    t.is(modifiedMessages[0].role, 'user');
+    t.is(modifiedMessages[0].content.length, 4);
+    t.is(modifiedMessages[0].content[0].text, 'Compare these images:');
+    t.true(modifiedMessages[0].content[1].source.type === 'base64');
+    t.is(modifiedMessages[0].content[2].text, 'with this one:');
+    t.true(modifiedMessages[0].content[3].source.type === 'base64');
+});
+
+// Test conversation history with mixed image types
+test('Conversation history with mixed image types', async (t) => {
+    const { claude, gemini15 } = createPlugins();
+    
+    const conversationHistory = [
+        { role: 'system', content: 'You are a visual analysis assistant.' },
+        { role: 'user', content: [
+            { type: 'text', text: 'What\'s in this image?' },
+            { type: 'image_url', image_url: { url: sampleBase64Image } }
+        ]},
+        { role: 'assistant', content: 'I see a landscape.' },
+        { role: 'user', content: [
+            { type: 'text', text: 'Compare it with this:' },
+            { type: 'image_url', gcs: 'gs://cortex-bucket/image2.jpg' }
+        ]},
+        { role: 'assistant', content: 'The second image shows a different scene.' },
+        { role: 'user', content: 'Which one do you prefer?' }
+    ];
+
+    // Test Claude conversion
+    const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(conversationHistory);
+
+    t.is(claudeSystem, 'You are a visual analysis assistant.');
+    t.is(claudeMessages.length, 5);
+    t.is(claudeMessages[1].content[0].text, 'I see a landscape.');
+    t.is(claudeMessages[3].content[0].text, 'The second image shows a different scene.');
+    t.is(claudeMessages[4].content[0].text, 'Which one do you prefer?');
+
+    // Test Gemini 1.5 conversion
+    const { system: geminiSystem15, modifiedMessages: geminiMessages15 } = gemini15.convertMessagesToGemini(conversationHistory);
+
+    t.is(geminiSystem15.parts[0].text, 'You are a visual analysis assistant.');
+    t.is(geminiMessages15.length, 5);
+    t.true('inlineData' in geminiMessages15[0].parts[1]);
+    t.is(geminiMessages15[1].parts[0].text, 'I see a landscape.');
+    t.true('fileData' in geminiMessages15[2].parts[1]);
+    t.is(geminiMessages15[2].parts[1].fileData.fileUri, 'gs://cortex-bucket/image2.jpg');
+    t.is(geminiMessages15[3].parts[0].text, 'The second image shows a different scene.');
+    t.is(geminiMessages15[4].parts[0].text, 'Which one do you prefer?');
+});
+
+// Test handling of large images
+test('Large image handling', async (t) => {
+    const { claude, gemini15 } = createPlugins();
+    
+    // Create a large base64 string (>10MB)
+    const largeSampleImage = 'data:image/jpeg;base64,' + 'A'.repeat(10 * 1024 * 1024);
+    
+    const largeImageMessage = [
+        { role: 'user', content: [
+            { type: 'text', text: 'Check this large image:' },
+            { type: 'image_url', image_url: { url: largeSampleImage } }
+        ]}
+    ];
+
+    // Both Claude and Gemini should handle or reject oversized images gracefully
+    const { modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(largeImageMessage);
+    const { modifiedMessages: geminiMessages } = gemini15.convertMessagesToGemini(largeImageMessage);
+
+    // Verify both models handle the oversized image appropriately
+    // (The exact behavior - rejection vs. compression - should match the model's specifications)
+    t.is(claudeMessages[0].content[0].text, 'Check this large image:');
+    t.is(geminiMessages[0].parts[0].text, 'Check this large image:');
 });

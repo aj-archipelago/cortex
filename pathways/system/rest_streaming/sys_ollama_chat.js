@@ -1,5 +1,5 @@
-// sys_openai_chat_16.js
-// override handler for gpt-3.5-turbo-16k
+// sys_ollama_chat.js
+// override handler for ollama chat model
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -11,9 +11,11 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{ role: '', content: '' }],
+        ollamaModel: '',
     },
-    model: 'azure-turbo-16',
+    model: 'ollama-chat',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-3.5-turbo-16k',
+    emulateOpenAIChatModel: 'ollama-chat',
+    timeout: 300,
 }

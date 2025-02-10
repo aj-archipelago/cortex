@@ -11,7 +11,7 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{role: '', content: []}],
     },
     model: 'gemini-pro-chat',
     useInputChunking: false,

@@ -11,6 +11,8 @@ axios.defaults.cache = false;
 
 class AzureVideoTranslatePlugin extends ModelPlugin {
     static lastProcessingRate = null; // bytes per second
+    static processingRates = []; // Array to store historical processing rates
+    static maxHistorySize = 10; // Maximum number of rates to store
     
     constructor(pathway, model) {
         super(pathway, model);
@@ -38,10 +40,55 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
             return {
                 isAccessible: true,
                 contentLength,
-                durationSeconds: durationSeconds || 60
+                durationSeconds: durationSeconds || 60,
+                isAzureUrl: videoUrl.includes('.blob.core.windows.net')
             };
         } catch (error) {
             throw new Error(`Failed to access video: ${error.message}`);
+        }
+    }
+
+    async uploadToFileHandler(videoUrl) {
+        try {
+            // Get the file handler URL from config
+            const fileHandlerUrl = config.get("whisperMediaApiUrl");
+            if (!fileHandlerUrl) {
+                throw new Error("File handler URL is not configured");
+            }
+
+            // Start heartbeat progress updates
+            const heartbeat = setInterval(() => {
+                publishRequestProgress({
+                    requestId: this.requestId,
+                    progress: 0,
+                    info: 'Uploading and processing video...'
+                });
+            }, 5000);
+
+            try {
+                // Start the fetch request
+                const response = await axios.get(fileHandlerUrl, {
+                    params: {
+                        requestId: this.requestId,
+                        fetch: videoUrl
+                    }
+                });
+
+                if (!response.data?.url) {
+                    throw new Error("File handler did not return a valid URL");
+                }
+
+                return response.data.url;
+            } finally {
+                // Always clear the heartbeat interval
+                clearInterval(heartbeat);
+            }
+        } catch (error) {
+            logger.error(`Failed to upload video to file handler: ${error.message}`);
+            if (error.response?.data) {
+                logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
+            }
+            throw new Error(`Failed to upload video to file handler: ${error.message}`);
         }
     }
 
@@ -129,8 +176,8 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         if (AzureVideoTranslatePlugin.lastProcessingRate && this.videoContentLength) {
             estimatedTotalTime = this.videoContentLength / AzureVideoTranslatePlugin.lastProcessingRate;
         } else {
-            // First run: estimate based on 1x calculated video duration
-            estimatedTotalTime = (this.videoContentLength * 8) / (2.5 * 1024 * 1024);
+            // First run: estimate based on 2x calculated video duration
+            estimatedTotalTime = 2 * (this.videoContentLength * 8) / (2.5 * 1024 * 1024);
         }
 
         // eslint-disable-next-line no-constant-condition
@@ -246,7 +293,7 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         
         try {
             const translationId = `cortex-translation-${this.requestId}`;
-            const videoUrl = requestParameters.sourcevideooraudiofilepath;
+            let videoUrl = requestParameters.sourcevideooraudiofilepath;
             const sourceLanguage = requestParameters.sourcelocale;
             const targetLanguage = requestParameters.targetlocale;
             const voiceKind = requestParameters.voicekind || 'PlatformVoice';
@@ -257,6 +304,13 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
             const videoInfo = await this.verifyVideoAccess(videoUrl);
             this.videoContentLength = videoInfo.contentLength;
             logger.debug(`Video info: ${JSON.stringify(videoInfo, null, 2)}`);
+
+            // If the video is not from Azure storage, upload it to file handler
+            if (!videoInfo.isAzureUrl) {
+                logger.debug('Video is not from Azure storage, uploading to file handler...');
+                videoUrl = await this.uploadToFileHandler(videoUrl);
+                logger.debug(`Video uploaded to file handler: ${videoUrl}`);
+            }
 
             // Create translation
             const { operationUrl } = await this.createTranslation({
@@ -299,8 +353,9 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
 
                 // Update processing rate for future estimates
                 const totalSeconds = (Date.now() - this.startTime) / 1000;
-                AzureVideoTranslatePlugin.lastProcessingRate = this.videoContentLength / totalSeconds;
-                logger.debug(`Updated processing rate: ${AzureVideoTranslatePlugin.lastProcessingRate} bytes/second`);
+                const newRate = this.videoContentLength / totalSeconds;
+                AzureVideoTranslatePlugin.updateProcessingRate(newRate);
+                logger.debug(`Updated processing rate: ${AzureVideoTranslatePlugin.lastProcessingRate} bytes/second (from ${newRate} bytes/second)`);
 
                 const output = await this.getTranslationOutput(translationId, iteration.id);
                 return JSON.stringify(output);
@@ -314,8 +369,23 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         }
     }
 
-    cleanup() {
-        // No cleanup needed for direct API implementation
+    static updateProcessingRate(newRate) {
+        // Add new rate to history
+        AzureVideoTranslatePlugin.processingRates.push(newRate);
+        
+        // Keep only the last maxHistorySize entries
+        if (AzureVideoTranslatePlugin.processingRates.length > AzureVideoTranslatePlugin.maxHistorySize) {
+            AzureVideoTranslatePlugin.processingRates.shift();
+        }
+        
+        // Calculate weighted average - more recent measurements have higher weight
+        const sum = AzureVideoTranslatePlugin.processingRates.reduce((acc, rate, index) => {
+            const weight = index + 1; // Weight increases with recency
+            return acc + (rate * weight);
+        }, 0);
+        
+        const weightSum = AzureVideoTranslatePlugin.processingRates.reduce((acc, _, index) => acc + (index + 1), 0);
+        AzureVideoTranslatePlugin.lastProcessingRate = sum / weightSum;
     }
 }
 

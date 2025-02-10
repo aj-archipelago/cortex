@@ -1,5 +1,5 @@
 import { Prompt } from '../../../server/prompt.js';
-import entityConstants from './shared/sys_entity_constants.js';
+import { config } from '../../../config.js';
 
 export default {
     inputParameters: {
@@ -97,5 +97,5 @@ Example JSON objects and messages for different queries:
     useInputChunking: false,
     enableDuplicateRequests: false,
     json: true,
-    ...entityConstants
+    ...config.get('entityConstants')
 }

@@ -5,7 +5,7 @@ import HandleBars from '../lib/handleBars.js';
 import { mockConfig, mockPathwayString, mockPathwayFunction, mockPathwayMessages, mockPathwayResolverString } from './mocks.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
-const DEFAULT_PROMPT_TOKEN_RATIO = 0.5;
+const DEFAULT_PROMPT_TOKEN_RATIO = 1.0;
 
 // Mock configuration and pathway objects
 const { config, pathway, model } = mockPathwayResolverString;
