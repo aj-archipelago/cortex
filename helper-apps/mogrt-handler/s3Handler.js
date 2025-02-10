@@ -208,7 +208,7 @@ export async function getManifest(uploadId) {
         return getMasterManifest();
     }
 
-    const key = `uploads/${uploadId}/manifest.json`;
+    const key = `${uploadId}/manifest.json`;
     
     try {
         const response = await getS3Client().send(
