@@ -48,7 +48,7 @@ test('POST /completions', async (t) => {
 test('POST /chat/completions', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o',
       messages: [{ role: 'user', content: 'Hello!' }],
       stream: false,
     },
@@ -63,7 +63,7 @@ test('POST /chat/completions', async (t) => {
 test('POST /chat/completions with multimodal content', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'claude-3.5-sonnet',
+      model: 'gpt-4o',
       messages: [{
         role: 'user',
         content: [
@@ -153,7 +153,7 @@ test('POST SSE: /v1/completions should send a series of events and a [DONE] even
 
 test('POST SSE: /v1/chat/completions should send a series of events and a [DONE] event', async (t) => {
     const payload = {
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o',
         messages: [
         {
             role: 'user',
@@ -177,7 +177,7 @@ test('POST SSE: /v1/chat/completions should send a series of events and a [DONE]
 
 test('POST SSE: /v1/chat/completions with multimodal content should send a series of events and a [DONE] event', async (t) => {
     const payload = {
-        model: 'claude-3.5-sonnet',
+        model: 'gpt-4o',
         messages: [{
           role: 'user',
           content: [
@@ -213,7 +213,7 @@ test('POST SSE: /v1/chat/completions with multimodal content should send a serie
 test('POST /chat/completions should handle multimodal content for non-multimodal model', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o',
       messages: [{
         role: 'user',
         content: [
@@ -242,7 +242,7 @@ test('POST /chat/completions should handle multimodal content for non-multimodal
 
 test('POST SSE: /v1/chat/completions should handle streaming multimodal content for non-multimodal model', async (t) => {
   const payload = {
-    model: 'gpt-3.5-turbo',
+    model: 'gpt-4o',
     messages: [{
       role: 'user',
       content: [
@@ -282,7 +282,7 @@ test('POST SSE: /v1/chat/completions should handle streaming multimodal content 
 test('POST /chat/completions should handle malformed multimodal content', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'claude-3.5-sonnet',
+      model: 'gpt-4o',
       messages: [{
         role: 'user',
         content: [
@@ -310,7 +310,7 @@ test('POST /chat/completions should handle malformed multimodal content', async 
 test('POST /chat/completions should handle invalid image data', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'claude-3.5-sonnet',
+      model: 'gpt-4o',
       messages: [{
         role: 'user',
         content: [
@@ -361,7 +361,7 @@ test('POST /completions should handle model parameters', async (t) => {
 test('POST /chat/completions should handle function calling', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o',
       messages: [{ role: 'user', content: 'What is the weather in Boston?' }],
       functions: [{
         name: 'get_weather',
@@ -401,7 +401,7 @@ test('POST /chat/completions should handle function calling', async (t) => {
 test('POST /chat/completions should validate response format', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o',
       messages: [{ role: 'user', content: 'Hello!' }],
       stream: false,
     },
@@ -426,7 +426,7 @@ test('POST /chat/completions should validate response format', async (t) => {
 test('POST /chat/completions should handle system messages', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o',
       messages: [
         { role: 'system', content: 'You are a helpful assistant.' },
         { role: 'user', content: 'Hello!' }
@@ -443,24 +443,23 @@ test('POST /chat/completions should handle system messages', async (t) => {
 });
 
 test('POST /chat/completions should handle errors gracefully', async (t) => {
-  const response = await got.post(`${API_BASE}/chat/completions`, {
-    json: {
-      // Missing required model field
-      messages: [{ role: 'user', content: 'Hello!' }],
-    },
-    responseType: 'json',
-  });
-
-  t.is(response.statusCode, 200);
-  t.is(response.body.object, 'chat.completion');
-  t.true(Array.isArray(response.body.choices));
-  t.truthy(response.body.choices[0].message.content);
+  const error = await t.throwsAsync(
+    () => got.post(`${API_BASE}/chat/completions`, {
+      json: {
+        // Missing required model field
+        messages: [{ role: 'user', content: 'Hello!' }],
+      },
+      responseType: 'json',
+    })
+  );
+  
+  t.is(error.response.statusCode, 404);
 });
 
 test('POST /chat/completions should handle token limits', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-3.5-turbo',
+      model: 'gpt-4o',
       messages: [{ 
         role: 'user', 
         content: 'Hello!'.repeat(5000) // Very long message
@@ -476,4 +475,25 @@ test('POST /chat/completions should handle token limits', async (t) => {
   t.true(Array.isArray(response.body.choices));
   t.truthy(response.body.choices[0].message.content);
 });  
+
+test('POST /chat/completions should return complete responses from gpt-4o', async (t) => {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
+    json: {
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant. Always end your response with the exact string "END_MARKER_XYZ".' },
+        { role: 'user', content: 'Say hello and explain why complete responses matter.' }
+      ],
+      stream: false,
+    },
+    responseType: 'json',
+  });
+
+  t.is(response.statusCode, 200);
+  t.is(response.body.object, 'chat.completion');
+  t.true(Array.isArray(response.body.choices));
+  console.log('GPT-4o Response:', JSON.stringify(response.body.choices[0].message.content));
+  const content = response.body.choices[0].message.content;
+  t.regex(content, /END_MARKER_XYZ$/);
+}); 
   

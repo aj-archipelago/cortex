@@ -136,7 +136,16 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     // Extract system messages
     const systemMessages = messagesCopy.filter(message => message.role === "system");
     if (systemMessages.length > 0) {
-      system = systemMessages.map(message => message.content).join("\n");
+      system = systemMessages.map(message => {
+        if (Array.isArray(message.content)) {
+          // For content arrays, extract text content and join
+          return message.content
+            .filter(item => item.type === 'text')
+            .map(item => item.text)
+            .join("\n");
+        }
+        return message.content;
+      }).join("\n");
     }
   
     // Filter out system messages and empty messages
