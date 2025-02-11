@@ -491,26 +491,8 @@ Even a single newline or space can cause the response to be rejected. You must f
         // }
         
         const result = await processChunksParallel(chunks, args);
-
-        // publishRequestProgress({
-        //     requestId: this.rootRequestId || this.requestId,
-        //     progress: 1,
-        //     data: "a",
-        // });
         
         if (['srt','vtt'].includes(responseFormat) || wordTimestamped) { // align subtitles for formats
-
-            
-
-            // convert as gemini output is unstable
-            for(let i = 0; i < result.length; i++) {
-                try{
-                    result[i] = convertSrtToVtt(result[i]);
-                }catch(error){
-                    logger.error(`Error converting to vtt: ${error}`);
-                }
-            }
-
             const offsets = chunks.map((chunk, index) => chunk?.offset || index * OFFSET_CHUNK);
             return alignSubtitles(result, responseFormat, offsets);
         }
