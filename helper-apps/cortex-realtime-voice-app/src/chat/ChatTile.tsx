@@ -1,8 +1,7 @@
 import {ChatBubble} from './ChatBubble';
 import {ChatMessageInput} from './ChatMessageInput';
 import {useEffect, useRef} from 'react';
-import {useWindowDimensions, Image, View, ScrollView} from "react-native";
-import {useSafeAreaInsets} from "react-native-safe-area-context";
+import {Image, View, ScrollView} from "react-native";
 
 export type ChatMessage = {
   id: string;
@@ -14,14 +13,12 @@ export type ChatMessage = {
 };
 
 type ChatTileProps = {
+  height: number;
   messages: ChatMessage[];
   onSend?: (message: string) => Promise<void>;
-  onStartStop?: () => void;
 };
 
-export const ChatTile = ({messages, onSend, onStartStop}: ChatTileProps) => {
-  const size = useWindowDimensions();
-  const insets = useSafeAreaInsets();
+export const ChatTile = ({height, messages, onSend}: ChatTileProps) => {
   const containerRef = useRef<any>(null);
   useEffect(() => {
     if (containerRef.current) {
@@ -35,7 +32,7 @@ export const ChatTile = ({messages, onSend, onStartStop}: ChatTileProps) => {
       <View
         className="flex flex-col h-full"
         style={{
-          height: size.height - insets.top - insets.bottom - 44,
+          height:height,
         }}
       >
         <ScrollView
@@ -69,7 +66,6 @@ export const ChatTile = ({messages, onSend, onStartStop}: ChatTileProps) => {
         <ChatMessageInput
           placeholder="Type a message"
           onSend={onSend}
-          onStartStop={onStartStop}
         />
       </View>
     </View>

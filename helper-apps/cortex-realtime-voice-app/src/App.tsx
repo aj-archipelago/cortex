@@ -4,7 +4,6 @@ import "./global.css";
 import {useEffect, useState} from 'react';
 import {SettingsModal} from "./SettingsModal";
 import {SettingsData} from "./SettingsModal";
-import type {Voice} from '../../cortex-realtime-voice-server/src/realtime/realtimeTypes';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Chat from "./chat/Chat";
 import {SafeAreaView, SafeAreaProvider} from "react-native-safe-area-context";
@@ -18,7 +17,7 @@ export default function App() {
   const [language, setLanguage] = useState('en');
   const [aiMemorySelfModify, setAiMemorySelfModify] = useState(false);
   const [aiStyle, setAiStyle] = useState('Anthropic');
-  const [voice, setVoice] = useState('alloy' as Voice);
+  const [voice, setVoice] = useState('alloy');
 
   const onCloseSettings = () => setSettingsOpen(false);
   const onSaveSettings = async (settings: SettingsData) => {
@@ -45,7 +44,7 @@ export default function App() {
     setAiStyle(settings.aiStyle);
     await AsyncStorage.setItem('aiStyle', settings.aiStyle);
 
-    setVoice(settings.voice as Voice);
+    setVoice(settings.voice);
     await AsyncStorage.setItem('voice', settings.voice);
   };
 
@@ -79,7 +78,7 @@ export default function App() {
       if (savedAiStyle) setAiStyle(savedAiStyle);
 
       const savedVoice = await AsyncStorage.getItem('voice');
-      if (savedVoice) setVoice(savedVoice as Voice);
+      if (savedVoice) setVoice(savedVoice);
 
       setLoading(false);
     }

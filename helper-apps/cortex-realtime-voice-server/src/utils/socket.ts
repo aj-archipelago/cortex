@@ -1,4 +1,4 @@
-import type {RealtimeItem} from "./realtimeTypes";
+import type {RealtimeItem} from "openai-realtime-socket-client";
 
 type DeltaType = {
   transcript?: string;

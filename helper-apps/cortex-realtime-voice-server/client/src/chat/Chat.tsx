@@ -6,7 +6,7 @@ import {WavRecorder} from './audio/WavRecorder';
 import {WavStreamPlayer} from './audio/WavStreamPlayer';
 import {ChatMessage, ChatTile} from './ChatTile';
 import {arrayBufferToBase64, base64ToArrayBuffer} from "./utils/audio";
-import {ClientToServerEvents, ServerToClientEvents} from "../../../src/realtime/socket";
+import {ClientToServerEvents, ServerToClientEvents} from "../../../src/utils/socket";
 import { AudioVisualizer } from './components/AudioVisualizer';
 import { MicrophoneVisualizer } from './components/MicrophoneVisualizer';
 import { ImageOverlay } from './components/ImageOverlay';
@@ -16,7 +16,6 @@ import PhoneEnabledIcon from '@mui/icons-material/PhoneEnabled';
 import CallEndIcon from '@mui/icons-material/CallEnd';
 import CloseIcon from '@mui/icons-material/Close';
 import ChatIcon from '@mui/icons-material/Chat';
-import type { Voice } from '../../../src/realtime/realtimeTypes';
 import {SoundEffects} from './audio/SoundEffects';
 import { logger } from '../utils/logger';
 import {ScreenshotCapture} from './components/ScreenshotCapture';
@@ -28,7 +27,7 @@ type ChatProps = {
   language: string;
   aiMemorySelfModify: boolean;
   aiStyle: string;
-  voice: Voice;
+  voice: string;
 };
 
 export default function Chat({
@@ -43,7 +42,6 @@ export default function Chat({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const cleanupPromiseRef = useRef<Promise<void> | null>(null);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [overlayKey, setOverlayKey] = useState(0);
@@ -146,12 +144,12 @@ export default function Chat({
 
   const startConversation = useCallback(() => {
     logger.log('Starting conversation');
-    
+
     // Clean up any existing socket connection first
     if (socketRef.current?.connected) {
       socketRef.current.disconnect();
     }
-    
+
     // Create a new socket instance
     socketRef.current = io(`/?userId=${userId}&userName=${userName}&aiName=${aiName}&voice=${voice}&aiStyle=${aiStyle}&language=${language}`, {
       autoConnect: false,
@@ -162,7 +160,7 @@ export default function Chat({
 
     // Remove ALL existing listeners before adding new ones
     socket.removeAllListeners();
-    
+
     // Create fresh audio context
     if (audioContextRef.current) {
       audioContextRef.current.close();
@@ -176,16 +174,16 @@ export default function Chat({
     const updateOrCreateMessage = (item: any, delta: any, isNewMessage = false) => {
       setMessages((prev) => {
         // Skip messages that start with <INSTRUCTIONS>
-        if (item.role === 'user' && 
-            (item.content?.[0]?.text?.startsWith('<INSTRUCTIONS>') || 
-             delta.text?.startsWith('<INSTRUCTIONS>') || 
+        if (item.role === 'user' &&
+            (item.content?.[0]?.text?.startsWith('<INSTRUCTIONS>') ||
+             delta.text?.startsWith('<INSTRUCTIONS>') ||
              delta.transcript?.startsWith('<INSTRUCTIONS>'))) {
           return prev;
         }
 
         // Try to find an existing message from the same turn
-        const existingIndex = prev.findIndex(m => 
-          m.id === item.id || 
+        const existingIndex = prev.findIndex(m =>
+          m.id === item.id ||
           m.id === `local-${item.timestamp}` ||  // This matches our local message ID format
           // Match user messages by timestamp (within 1 second) to catch server echoes
           (item.role === 'user' && m.isSelf && Math.abs(m.timestamp - (item.timestamp || Date.now())) < 1000)
@@ -217,15 +215,15 @@ export default function Chat({
           return prev;
         } else if (isNewMessage) {
           // Only create if we don't have a matching message
-          const messageContent = 
-            delta.text || 
-            delta.transcript || 
-            item.content?.[0]?.text || 
+          const messageContent =
+            delta.text ||
+            delta.transcript ||
+            item.content?.[0]?.text ||
             '';
 
           // For user messages, use a timestamp slightly before now
           // For AI messages, use current timestamp
-          const timestamp = item.role === 'user' ? 
+          const timestamp = item.role === 'user' ?
             Date.now() - 500 : // 500ms earlier for user messages
             Date.now();
 
@@ -255,7 +253,7 @@ export default function Chat({
     socket.on('ready', () => {
       wavRecorder.record((data) => {
         socket?.emit('appendAudio', arrayBufferToBase64(data.mono));
-        
+
         if (!sourceNodeRef.current && wavRecorder.getStream()) {
           sourceNodeRef.current = audioContextRef.current!.createMediaStreamSource(wavRecorder.getStream()!);
         }
@@ -295,7 +293,7 @@ export default function Chat({
         const audio = base64ToArrayBuffer(delta.audio);
         wavStreamPlayer.add16BitPCM(audio, item.id);
         setIsAudioPlaying(true);
-        
+
         // Set up track completion callback if not already set
         if (!wavStreamPlayer.onTrackComplete) {
           wavStreamPlayer.setTrackCompleteCallback((trackId) => {
@@ -312,9 +310,9 @@ export default function Chat({
 
       // For user messages, filter out audio-only updates
       if (item.role === 'user') {
-        const hasUserContent = 
-          delta.transcript || 
-          delta.text || 
+        const hasUserContent =
+          delta.transcript ||
+          delta.text ||
           item.content?.[0]?.text ||
           (item.content?.[0]?.type === 'input_text' && item.content[0].text);
 
@@ -326,11 +324,11 @@ export default function Chat({
 
       // Process message if it has any kind of content
       const hasContent = !!(
-        delta.text || 
-        delta.transcript || 
+        delta.text ||
+        delta.transcript ||
         item.content?.[0]?.text
       );
-      
+
       if (hasContent) {
         updateOrCreateMessage(item, delta, true);
       }
@@ -349,7 +347,7 @@ export default function Chat({
       logger.log('Connection error');
       setIsLoading(false);
     });
-  }, [aiName, stopConversation, userName]);
+  }, [aiName, stopConversation, userName, aiStyle, voice, language, userId]);
 
   const postMessage = useCallback(async (message: string) => {
     if (socketRef.current?.connected) {
@@ -360,7 +358,7 @@ export default function Chat({
 
   const onStartStop = useCallback(async () => {
     if (isLoading) return;  // Prevent any action while loading
-    
+
     try {
       if (isRecording) {
         setIsLoading(true);
@@ -439,7 +437,7 @@ export default function Chat({
                            backdrop-blur-sm border-t border-gray-700/50 shadow-2xl
                            rounded-t-2xl z-50 transition-transform duration-300 ease-in-out
                            transform translate-y-full ${showChat ? 'translate-y-0' : ''}`;
-  
+
   logger.log('Render state:', {
     showChat,
     mounted,
@@ -457,11 +455,11 @@ export default function Chat({
         {socketRef.current?.connected && (
           <ScreenshotCapture socket={socketRef.current} />
         )}
-        
+
         <div className={`flex flex-col bg-gray-800/50 backdrop-blur-sm rounded-2xl 
                         shadow-2xl border border-gray-700/50 px-6 pt-6 pb-2
                         transition-all duration-300 ease-in-out`}
-             style={showChat ? { 
+             style={showChat ? {
                height: '34vh'
              } : { height: '100%' }}>
           <div className="flex flex-col justify-center flex-1">
@@ -471,7 +469,7 @@ export default function Chat({
               {isRecording ? (
                 <div className={`animate-fadeIn h-full aspect-square flex items-center justify-center
                                transition-all duration-300 ease-in-out`}>
-                  <AudioVisualizer 
+                  <AudioVisualizer
                     audioContext={audioContextRef.current}
                     analyserNode={outputAnalyserRef.current}
                     width={showChat ? window.innerHeight * (100 - 66) / 100 * 0.6 : window.innerHeight * 0.75}
@@ -484,11 +482,11 @@ export default function Chat({
                             rounded-lg bg-gray-900/50 border border-gray-800 
                             animate-pulse transition-all duration-300 ease-in-out`}
                        style={{
-                         width: showChat ? 
-                           window.innerHeight * (100 - 66) / 100 * 0.6 : 
+                         width: showChat ?
+                           window.innerHeight * (100 - 66) / 100 * 0.6 :
                            window.innerHeight * 0.75,
-                         height: showChat ? 
-                           window.innerHeight * (100 - 66) / 100 * 0.6 : 
+                         height: showChat ?
+                           window.innerHeight * (100 - 66) / 100 * 0.6 :
                            window.innerHeight * 0.75
                        }}>
                     <span className={`text-gray-500 transition-all duration-300 ease-in-out
@@ -498,9 +496,9 @@ export default function Chat({
                   </div>
                 </div>
               )}
-              
+
               <div className="absolute inset-0 flex items-center justify-center">
-                <ImageOverlay 
+                <ImageOverlay
                   key={overlayKey}
                   imageUrls={imageUrls}
                   onComplete={handleImagesComplete}
@@ -523,7 +521,7 @@ export default function Chat({
                     />
                   </div>
                 )}
-                <button 
+                <button
                   onClick={handleMicMute}
                   className={`absolute inset-0 z-10 flex items-center justify-center rounded-full transition duration-300 shadow-lg ${
                     !isRecording
@@ -539,7 +537,7 @@ export default function Chat({
                 </button>
               </div>
 
-              <button 
+              <button
                 onClick={onStartStop}
                 disabled={isLoading}
                 className={`flex items-center justify-center ${showChat ? 'w-12 h-12' : 'w-16 h-16'} rounded-full transition duration-300 shadow-lg ${
@@ -574,13 +572,13 @@ export default function Chat({
         {mounted && showChat && (
           <div className={`bg-gray-800/95 backdrop-blur-sm border-t border-gray-700/50 
                           shadow-2xl rounded-t-2xl transition-all duration-300 ease-in-out`}
-               style={{ 
+               style={{
                  height: '66vh',
                  transform: showChat ? 'none' : 'translateY(100%)',
                }}>
             <div className="h-full">
-              <ChatTile 
-                messages={messages} 
+              <ChatTile
+                messages={messages}
                 onSend={postMessage}
                 isConnected={isRecording}
               />

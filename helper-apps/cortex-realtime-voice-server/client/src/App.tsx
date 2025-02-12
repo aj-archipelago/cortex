@@ -3,7 +3,6 @@ import ClipLoader from "react-spinners/ClipLoader";
 import Chat from "./chat/Chat";
 import {SettingsModal} from "./SettingsModal";
 import { SettingsData } from "./SettingsModal";
-import type { Voice } from '../../src/realtime/realtimeTypes';
 
 function App() {
   const [loading, setLoading] = useState(true);
@@ -14,7 +13,7 @@ function App() {
   const [language, setLanguage] = useState('en');
   const [aiMemorySelfModify, setAiMemorySelfModify] = useState(false);
   const [aiStyle, setAiStyle] = useState('Anthropic');
-  const [voice, setVoice] = useState('alloy' as Voice);
+  const [voice, setVoice] = useState('alloy');
 
   const onCloseSettings = () => setSettingsOpen(false);
   const onSaveSettings = (settings: SettingsData) => {
@@ -28,20 +27,20 @@ function App() {
     }
     setUserId(newUserId);
     localStorage.setItem('userId', newUserId);
-    
+
     setAiName(settings.aiName);
     localStorage.setItem('aiName', settings.aiName);
-    
+
     setLanguage(settings.language);
     localStorage.setItem('language', settings.language);
-    
+
     setAiMemorySelfModify(settings.aiMemorySelfModify);
     localStorage.setItem('aiMemorySelfModify', String(settings.aiMemorySelfModify));
-    
+
     setAiStyle(settings.aiStyle);
     localStorage.setItem('aiStyle', settings.aiStyle);
-    
-    setVoice(settings.voice as Voice);
+
+    setVoice(settings.voice);
     localStorage.setItem('voice', settings.voice);
   };
 
@@ -66,16 +65,16 @@ function App() {
     }
     const savedLanguage = localStorage.getItem('language');
     if (savedLanguage) setLanguage(savedLanguage);
-    
+
     const savedAiMemorySelfModify = localStorage.getItem('aiMemorySelfModify');
     if (savedAiMemorySelfModify) setAiMemorySelfModify(savedAiMemorySelfModify === 'true');
-    
+
     const savedAiStyle = localStorage.getItem('aiStyle');
     if (savedAiStyle) setAiStyle(savedAiStyle);
-    
+
     const savedVoice = localStorage.getItem('voice');
-    if (savedVoice) setVoice(savedVoice as Voice);
-    
+    if (savedVoice) setVoice(savedVoice);
+
     setLoading(false);
   }, []);
 
@@ -89,18 +88,18 @@ function App() {
 
   return (
     <div className="h-screen overflow-hidden bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900">
-      <button 
+      <button
         className="fixed top-4 right-4 z-10 p-2 text-gray-400 hover:text-cyan-400 transition-colors duration-200"
         onClick={() => setSettingsOpen(true)}
         aria-label="Settings"
       >
         ⚙️
       </button>
-      
+
       {userName && userName.length > 0 && (
-        <Chat 
-          userId={userId} 
-          userName={userName} 
+        <Chat
+          userId={userId}
+          userName={userName}
           aiName={aiName}
           language={language}
           aiMemorySelfModify={aiMemorySelfModify}
@@ -108,7 +107,7 @@ function App() {
           voice={voice}
         />
       )}
-      <SettingsModal 
+      <SettingsModal
         aiName={aiName}
         userName={userName}
         userId={userId}

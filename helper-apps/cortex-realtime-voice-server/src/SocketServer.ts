@@ -4,14 +4,13 @@ import {serve} from "@hono/node-server";
 import type {Server as HTTPServer} from "node:http";
 import {createId} from '@paralleldrive/cuid2';
 import {Tools} from "./Tools";
-import type {ClientToServerEvents, ServerToClientEvents} from "./realtime/socket";
-import {RealtimeVoiceClient} from "./realtime/client";
+import type {ClientToServerEvents, ServerToClientEvents} from "./utils/socket";
 import {manageMemory, readMemory, searchMemory} from "./cortex/memory";
 import {MemorySection, type ChatMessage} from "./cortex/utils";
 import {style} from "./cortex/style";
-import type { Voice } from './realtime/realtimeTypes';
 import { logger } from './utils/logger';
 import {sendPrompt} from "./utils/prompt";
+import {RealtimeVoiceClient, Voice} from "openai-realtime-socket-client";
 
 export interface InterServerEvents {
 }
@@ -87,13 +86,13 @@ export class SocketServer {
 
   private async cleanup(socket: Socket) {
     logger.log(`Cleaning up resources for socket ${socket.id}`);
-    
+
     // Clear any pending timers first
     this.clearIdleTimer(socket);
-    
+
     // Wait a small amount of time to ensure any in-flight operations complete
     await new Promise(resolve => setTimeout(resolve, 100));
-    
+
     // Clear all state maps
     this.currentFunctionCall.delete(socket.id);
     this.aiResponding.delete(socket.id);
@@ -105,7 +104,7 @@ export class SocketServer {
     this.voiceSample.delete(socket.id);
     this.audioMessages.delete(socket.id);
     this.messageQueue.delete(socket.id);
-    
+
     // Only disconnect if we're still connected
     if (socket.connected) {
       socket.disconnect(true);
@@ -130,7 +129,7 @@ export class SocketServer {
     const baseTimeout = SocketServer.BASE_IDLE_TIMEOUT * Math.pow(4, cycles);
     const randomFactor = 0.8 + (Math.random() * 0.4);
     const timeout = Math.min(baseTimeout * randomFactor, SocketServer.MAX_IDLE_TIMEOUT);
-    
+
     logger.log(`Calculated idle timeout for socket ${socket.id}: ${timeout}ms (cycle ${cycles})`);
     return timeout;
   }
@@ -138,7 +137,7 @@ export class SocketServer {
   public async sendPrompt(client: RealtimeVoiceClient, socket: Socket, prompt: string, allowTools: boolean = true, disposable: boolean = true): Promise<{skipped: boolean}> {
     logger.log(`Sending prompt for socket ${socket.id}`);
     try {
-      const result = await sendPrompt(client, prompt, () => ({
+      return await sendPrompt(client, prompt, () => ({
         allowTools,
         disposable,
         aiResponding: this.aiResponding.get(socket.id) || false,
@@ -146,7 +145,6 @@ export class SocketServer {
         lastUserMessageTime: this.lastUserMessageTime.get(socket.id) || 0,
         userSpeaking: this.userSpeaking.get(socket.id) || false
       }));
-      return result;
     } catch (error: any) {
       logger.error(`Error sending system prompt: ${error.message}`);
       if (error.message === 'Not connected') {
@@ -166,7 +164,7 @@ export class SocketServer {
     const isInteractive = idleCycle <= (SocketServer.IDLE_CYCLE_TO_NONINTERACTIVE - 1);
     this.isInteractive.set(socket.id, isInteractive);
 
-    const prompt = isInteractive ? 
+    const prompt = isInteractive ?
       `You are an autonomous AI entity and this is your autonomy prompt. You can choose to either talk to the user, make tool calls to find more information or perform actions, or use the MuteAudio tool with mute="true" to be quiet. If the user has said goodbye or asked you for time or to take a break, you should use the MuteAudio tool now. If you choose to say something instead, follow these instructions:
 - Use a natural sounding phrase or utterance that flows naturally from the last thing you said.
 - Make sure it fits the tone and style of the rest of the conversation and your unique voice.
@@ -181,7 +179,7 @@ export class SocketServer {
 
     logger.log(`Sending ${isInteractive ? 'interactive' : 'non-interactive'} idle prompt for socket ${socket.id}`);
     const result = await this.sendPrompt(client, socket, prompt, true);
-    
+
     logger.log(`Idle prompt result:`, result);
 
     if (!result.skipped) {
@@ -194,15 +192,15 @@ export class SocketServer {
   private startIdleTimer(client: RealtimeVoiceClient, socket: Socket) {
     // Clear any existing timer for this socket
     this.clearIdleTimer(socket);
-    
+
     // Calculate timeout based on idle cycles
     const timeout = this.calculateIdleTimeout(socket);
-    
+
     // Create new timer
     const timerId = setTimeout(() => {
       this.sendIdlePrompt(client, socket);
     }, timeout);
-    
+
     this.idleTimers.set(socket.id, timerId);
     logger.log(`Started idle timer for socket ${socket.id} with timeout ${timeout}ms`);
   }
@@ -245,7 +243,7 @@ export class SocketServer {
       InterServerEvents,
       SocketData>) {
     logger.log(`Connecting socket ${socket.id} with key "${this.apiKey.slice(0, 3)}..."`);
-    
+
     // Initialize states
     this.aiResponding.set(socket.id, false);
     this.audioPlaying.set(socket.id, false);
@@ -263,9 +261,9 @@ export class SocketServer {
       aiStyle: socket.handshake.query.aiStyle as string,
       language: socket.handshake.query.language as string,
     };
-    
+
     logger.log('Client parameters:', clientParams);
-    
+
     // Assign to socket.data
     socket.data.userId = clientParams.userId;
     socket.data.aiName = clientParams.aiName;
@@ -295,7 +293,7 @@ export class SocketServer {
       const errorMessage = event.error?.message || 'Unknown error';
       logger.error(`Client error: ${errorMessage}`, event);
       socket.emit('error', errorMessage);
-      
+
       // Only cleanup if we know reconnection is no longer possible
       if (!client.canReconnect()) {
         void this.cleanup(socket);
@@ -304,7 +302,7 @@ export class SocketServer {
 
     client.on('close', async (event) => {
       logger.log(`WebSocket closed for socket ${socket.id}, error: ${event.error}`);
-      
+
       if (!client.canReconnect()) {
         await this.cleanup(socket);
       } else {
@@ -325,7 +323,7 @@ export class SocketServer {
     });
 
     // Track audio playback
-    client.on('response.audio.delta', ({delta}) => {
+    client.on('response.audio.delta', ({}) => {
       if (this.isInteractive.get(socket.id)) {
         this.audioPlaying.set(socket.id, true);
         this.clearIdleTimer(socket);
@@ -366,7 +364,7 @@ export class SocketServer {
       this.clearIdleTimer(socket);
     });
 
-    client.on('input_audio_buffer.cancelled', () => {
+    client.on('input_audio_buffer.speech_stopped', () => {
       this.userSpeaking.set(socket.id, false);
     });
 
@@ -386,7 +384,7 @@ export class SocketServer {
         this.sendUserMessage(client, message, true);
       }
     });
-    
+
     socket.on('cancelResponse', () => {
       logger.log('User cancelled response');
       this.aiResponding.set(socket.id, false);
@@ -398,7 +396,7 @@ export class SocketServer {
       logger.log('Conversation completed, clearing idle timer');
       this.cleanup(socket);
     });
-    
+
     // Handle cleanup and disconnection
     socket.on('disconnecting', async (reason) => {
       logger.log('Socket disconnecting', socket.id, reason);
@@ -419,11 +417,11 @@ export class SocketServer {
       switch (item.type) {
         case 'function_call_output':
           break;
-          
+
         case 'function_call':
           this.clearIdleTimer(socket);
           break;
-          
+
         case 'message':
           // Track all audio messages (both user input_audio and assistant audio)
           console.log('conversation.item.created', item);
@@ -510,7 +508,7 @@ export class SocketServer {
         // Process any queued messages
         const queue = this.messageQueue.get(socket.id) || [];
         this.messageQueue.set(socket.id, []);
-        
+
         for (const {message, response} of queue) {
           if (socket.connected) {  // Check connection before each message
             await this.sendUserMessage(client, message, response);
@@ -556,7 +554,7 @@ export class SocketServer {
       this.sendUserMessage(client, memoryText, false);
     }
   }
-    
+
   protected async fetchMemory(client: RealtimeVoiceClient,
                               socket: Socket<ClientToServerEvents,
                                 ServerToClientEvents,
@@ -574,8 +572,8 @@ export class SocketServer {
     ]);
 
     if (writeToConversation.length > 0) {
-      const sectionsToSend = writeToConversation.includes('memoryAll') ? 
-        ['memorySelf', 'memoryUser', 'memoryDirectives', 'memoryTopics'] as const : 
+      const sectionsToSend = writeToConversation.includes('memoryAll') ?
+        ['memorySelf', 'memoryUser', 'memoryDirectives', 'memoryTopics'] as const :
         writeToConversation;
 
       const memoryMessages: Record<Exclude<MemorySection, 'memoryAll'>, string> = {
@@ -693,7 +691,7 @@ export class SocketServer {
   }
 
   private isAudioMessage(item: any): boolean {
-    return item.type === 'message' && item.content?.some((c: { type: string }) => 
+    return item.type === 'message' && item.content?.some((c: { type: string }) =>
       c.type === 'input_audio' || c.type === 'audio'
     );
   }

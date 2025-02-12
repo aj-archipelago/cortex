@@ -1,17 +1,19 @@
-import type {Voice} from '../../../cortex-realtime-voice-server/src/realtime/realtimeTypes';
 import {ChatMessage, ChatTile} from "./ChatTile";
 import {useCallback, useEffect, useRef, useState} from "react";
 import {io, Socket} from "socket.io-client";
-import {ClientToServerEvents, ServerToClientEvents} from "../../../cortex-realtime-voice-server/src/realtime/socket";
+import {ClientToServerEvents, ServerToClientEvents} from "../../../cortex-realtime-voice-server/src/utils/socket";
 import {
   RealtimeAudioModule,
-  RealtimeAudioRecorderModule,
-  RealtimeAudioPlayerModule,
-  RealtimeAudioPlayer,
-  RealtimeAudioRecorder,
-  AudioEncoding
+  RealtimeAudioPlayerViewRef,
+  RealtimeAudioRecorderViewRef,
+  RealtimeAudioPlayerView,
+  RealtimeAudioRecorderView,
+  AudioEncoding,
+  Visualizers
 } from 'react-native-realtime-audio';
-import {useEvent, useEventListener} from "expo";
+import {FlatList, View, StyleSheet, Text, useWindowDimensions, Pressable} from "react-native";
+import {useSafeAreaInsets} from "react-native-safe-area-context";
+import type {ViewToken} from "@react-native/virtualized-lists";
 
 type ChatProps = {
   userId: string,
@@ -20,21 +22,8 @@ type ChatProps = {
   language: string,
   aiMemorySelfModify: boolean,
   aiStyle: string,
-  voice: Voice,
+  voice: string,
 }
-
-const audioPlayer: RealtimeAudioPlayer = new RealtimeAudioPlayerModule.RealtimeAudioPlayer({
-  sampleRate: 24000,
-  encoding: AudioEncoding.pcm16bitInteger,
-  channelCount: 1
-});
-
-const audioRecorder: RealtimeAudioRecorder = new RealtimeAudioRecorderModule.RealtimeAudioRecorder({
-    sampleRate: 24000,
-    encoding: AudioEncoding.pcm16bitInteger,
-    channelCount: 1
-  },
-  true);
 
 export default function Chat({
                                userId,
@@ -45,37 +34,39 @@ export default function Chat({
                                aiStyle,
                                voice
                              }: ChatProps) {
+  const {width, height} = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const [currentVisibleIndex, setCurrentVisibleIndex] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const audioEvent = useEvent(RealtimeAudioRecorderModule, "onAudioCaptured");
   const socketRef =
     useRef<Socket<ServerToClientEvents, ClientToServerEvents>>(
-      io(`${process.env.EXPO_PUBLIC_SOCKET_URL}/?userId=${userId}&userName=${userName}&aiName=${aiName}&voice=${voice}`,
+      io(`${process.env.EXPO_PUBLIC_SOCKET_URL}/?userId=${userId}&userName=${userName}&aiName=${aiName}&voice=${voice}&aiStyle=${aiStyle}&language=${language}`,
         {autoConnect: false})
     );
+  const playerRef = useRef<RealtimeAudioPlayerViewRef>(null);
+  const recorderRef = useRef<RealtimeAudioRecorderViewRef>(null);
 
-  useEventListener(RealtimeAudioPlayerModule, "onPlaybackStopped", () => {
-    console.log('onPlaybackStopped');
-    if (socketRef.current?.connected) {
-      socketRef.current?.emit('audioPlaybackComplete', "trackId");
+  const onViewableItemsChanged = useCallback(({viewableItems}: {
+    viewableItems: Array<ViewToken<{ id: string }>>;
+  }) => {
+    if (viewableItems[0]) {
+      setCurrentVisibleIndex(viewableItems[0].index || 0);
+      console.log('Current visible index:', viewableItems[0].index);
     }
-  })
+  }, []);
 
-  useEffect(() => {
-    if (audioEvent) {
-      socketRef.current?.emit('appendAudio', audioEvent.audioBuffer);
-    }
-  }, [audioEvent]);
-
-  const stopConversation = useCallback(async () => {
+  const stopConversation = useCallback(() => {
     console.log('Stopping conversation');
-    await audioRecorder.stopRecording();
-    await audioPlayer.stop();
+    recorderRef.current?.stopRecording();
+    playerRef.current?.stop();
     const socket = socketRef.current;
     socket.emit('conversationCompleted');
     socket.removeAllListeners();
     socket.disconnect();
     setIsRecording(false);
+    setIsConnected(false);
   }, []);
 
 
@@ -87,23 +78,36 @@ export default function Chat({
     });
     socket.on('disconnect', () => {
       console.log('Disconnected', socket.id);
-      stopConversation().then(() => {
-        console.log('Conversation stopped by disconnect');
-      });
+      stopConversation()
+      console.log('Conversation stopped by disconnect');
     });
     socket.on('ready', () => {
-      audioRecorder.startRecording();
+      recorderRef.current?.startRecording();
       console.log('Recording started');
+      setIsConnected(true);
       setIsRecording(true);
     });
-    socket.on('conversationInterrupted', async () => {
+    socket.on('conversationInterrupted', () => {
       console.log("Stopping conversation due to interruption");
       // socket.emit('cancelResponse');
-      await audioPlayer.stop();
+      playerRef.current?.stop();
+    });
+    socket.on('imageCreated', (imageUrl) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: imageUrl,
+          isSelf: false,
+          name: aiName,
+          message: imageUrl,
+          isImage: true,
+          timestamp: Date.now(),
+        }
+      ]);
     });
     socket.on('conversationUpdated', (item, delta) => {
       if (delta?.audio) {
-        audioPlayer.addBuffer(delta.audio);
+        playerRef.current?.addBuffer(delta.audio);
       } else {
         // console.log('conversationUpdated', item, delta);
         setMessages((prev) => {
@@ -164,14 +168,24 @@ export default function Chat({
   }, []);
 
   const onStartStop = useCallback(() => {
-    if (isRecording) {
-      stopConversation().then(() => {
-        console.log('Conversation stopped by user');
-      });
+    if (isConnected) {
+      stopConversation()
+      console.log('Conversation stopped by user');
     } else {
       startConversation();
     }
-  }, [isRecording, startConversation, stopConversation]);
+  }, [isConnected, startConversation, stopConversation]);
+
+  const onMuteUnmute = useCallback(() => {
+    if (isRecording) {
+      recorderRef.current?.stopRecording();
+    } else if (isConnected) {
+      recorderRef.current?.startRecording();
+    } else {
+      return;
+    }
+    setIsRecording(!isRecording);
+  }, [isRecording]);
 
   useEffect(() => {
     const checkPermissions = async () => {
@@ -181,10 +195,116 @@ export default function Chat({
     checkPermissions().then(() => console.log("Permissions checked."));
   }, []);
 
+  const totalHeight = height - insets.top - insets.bottom - 35;
+  const controlsHeight = 100;
+  const listHeight = totalHeight - controlsHeight;
+  const renderItem = ({item}: { item: { id: string } }) => {
+    if (item.id === 'audio') {
+      return (
+        <View
+          className={'justify-center items-center'}
+          style={{width: width, height: listHeight}}>
+          <RealtimeAudioPlayerView
+            ref={playerRef}
+            style={[styles.audioContainer, {width: width - 20, height: width - 20}]}
+            audioFormat={{
+              sampleRate: 24000,
+              encoding: AudioEncoding.pcm16bitInteger,
+              channelCount: 1
+            }}
+            waveformColor={'#459cb2'}
+            visualizer={Visualizers.tripleCircle}
+            onPlaybackStopped={() => {
+              console.log('onPlaybackStopped');
+              if (socketRef.current?.connected) {
+                socketRef.current?.emit('audioPlaybackComplete', "trackId");
+              }
+            }}
+          />
+          <RealtimeAudioRecorderView
+            ref={recorderRef}
+            style={[styles.audioContainer, {width: width - 20, height: 100, marginTop: 20}]}
+            audioFormat={{
+              sampleRate: 24000,
+              encoding: AudioEncoding.pcm16bitInteger,
+              channelCount: 1
+            }}
+            echoCancellationEnabled={true}
+            waveformColor={'#459cb2'}
+            onAudioCaptured={(audioEvent) => {
+              if (socketRef.current?.connected) {
+                socketRef.current?.emit('appendAudio', audioEvent.nativeEvent.audioBuffer);
+              }
+            }}
+            />
+        </View>
+      );
+    } else {
+      return (
+        <View style={[styles.audioContainer, {width: width, height: listHeight}]}>
+          <ChatTile
+            height={listHeight}
+            messages={messages}
+            onSend={postMessage}
+          />
+        </View>
+      );
+    }
+  }
+
   return (
-    <ChatTile
-      messages={messages}
-      onSend={postMessage}
-      onStartStop={onStartStop}/>
-  );
+    <View className={'bg-gray-800'} style={{height: totalHeight}}>
+      <FlatList
+        data={[{id: 'audio'}, {id: 'text'}]}
+        horizontal
+        snapToInterval={width}
+        decelerationRate="fast"
+        showsHorizontalScrollIndicator={false}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={[styles.listContainer, {width: width * 2, height: listHeight}]}
+        snapToAlignment="start"
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={{itemVisiblePercentThreshold: 60}}
+      />
+      <View
+        className={'bg-gray-950 border-t-2 border-gray-900 border-solid'}
+        style={{height: controlsHeight, width: width}}>
+        <View
+          className={'flex-row justify-center items-center'}
+          style={{height: controlsHeight - 70}}>
+          <View className={`${currentVisibleIndex === 0 ? 'bg-gray-200' : 'bg-gray-800'} p-1.5 rounded-lg m-2`}/>
+          <View className={`${currentVisibleIndex === 1 ? 'bg-gray-200' : 'bg-gray-800'} p-1.5 rounded-lg m-2`}/>
+        </View>
+        <View className={'flex-row justify-center items-center'}>
+          {isConnected && (
+            <Pressable
+              onPress={onMuteUnmute}
+              className={`${isRecording ? 'bg-gray-800' : 'bg-red-950'} p-3 rounded-3xl mx-3`}
+            >
+              <Text className={'text-gray-200 font-bold text-3xl'}>🎙️</Text>
+            </Pressable>
+          )}
+          <Pressable
+            onPress={onStartStop}
+            className={`${isConnected ? 'bg-red-700' : 'bg-green-700'} p-3 rounded-3xl mx-3`}
+          >
+            <Text className={'text-gray-200 font-bold text-3xl'}>📞</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  )
 }
+
+const styles = StyleSheet.create({
+  listContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
+  },
+  audioContainer: {
+    backgroundColor: '#06034e',
+    borderRadius: 10,
+  }
+})

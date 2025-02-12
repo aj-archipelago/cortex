@@ -1,17 +1,17 @@
 import {Socket} from "socket.io";
 import {createId} from "@paralleldrive/cuid2";
 import type {InterServerEvents, SocketData} from "./SocketServer";
-import type {RealtimeVoiceClient} from "./realtime/client";
-import type {ClientToServerEvents, ServerToClientEvents} from "./realtime/socket";
+import type {ClientToServerEvents, ServerToClientEvents} from "./utils/socket";
 import {search} from "./cortex/search";
 import {expert} from "./cortex/expert";
 import {image} from "./cortex/image";
 import {vision, type MultiMessage} from "./cortex/vision";
 import {reason} from "./cortex/reason";
-import { logger } from './utils/logger';
-import { searchMemory } from "./cortex/memory";
-import { MemorySection, type ChatMessage } from "./cortex/utils";
+import {logger} from './utils/logger';
+import {searchMemory} from "./cortex/memory";
+import {MemorySection} from "./cortex/utils";
 import type {SocketServer} from "./SocketServer";
+import type {RealtimeVoiceClient} from "openai-realtime-socket-client";
 
 interface ScreenshotArgs {
   lastUserMessage: string;
@@ -36,8 +36,8 @@ interface ImageMessage {
 }
 
 export class Tools {
-  private realtimeClient: RealtimeVoiceClient;
-  private socket: Socket<ClientToServerEvents,
+  private readonly realtimeClient: RealtimeVoiceClient;
+  private readonly socket: Socket<ClientToServerEvents,
     ServerToClientEvents,
     InterServerEvents,
     SocketData>;
@@ -260,7 +260,7 @@ export class Tools {
     // tool specific initializations
     switch (name.toLowerCase()) {
       case 'memorylookup':
-        initialPrompt =`You are currently using the MemoryLookup tool to help yourself remember something. It will be a few seconds before you remember the information. Stall the user for a few seconds with natural banter while you use this tool. Don't talk directly about the tool - just say "let me think about that" or something else that fits the conversation.`;
+        initialPrompt = `You are currently using the MemoryLookup tool to help yourself remember something. It will be a few seconds before you remember the information. Stall the user for a few seconds with natural banter while you use this tool. Don't talk directly about the tool - just say "let me think about that" or something else that fits the conversation.`;
         isSilent = false;
         promptOnCompletion = true;
         promptOnIdle = false;
@@ -283,7 +283,7 @@ export class Tools {
       timeoutId = setTimeout(sendFillerMessage, calculateFillerTimeout(fillerIndex));
     }
 
-    let finishPrompt =`You have finished using the ${name} tool to help with the user's request. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. If you choose not to call another tool because you have everything you need, respond to the user via audio`;
+    let finishPrompt = `You have finished using the ${name} tool to help with the user's request. If you didn't get the results you wanted, need more information, or have more steps in your process, you can call another tool right now. If you choose not to call another tool because you have everything you need, respond to the user via audio`;
 
     try {
       const cortexHistory = this.getCortexHistory(parsedArgs);
@@ -316,7 +316,7 @@ export class Tools {
         case 'muteaudio':
           const parsedMuteArgs = JSON.parse(args);
           this.socketServer.setMuted(this.socket, parsedMuteArgs.mute);
-          response = { result: `Audio ${parsedMuteArgs.mute ? 'muted' : 'unmuted'} successfully` };
+          response = {result: `Audio ${parsedMuteArgs.mute ? 'muted' : 'unmuted'} successfully`};
           if (!parsedMuteArgs.mute) {
             finishPrompt = 'You have used the MuteAudio tool to unmute yourself and address the user. You may now respond to the user via audio. The user may have been idle for some time. So you might want to start with "you there?" or something similarly fitting.';
           }
@@ -342,24 +342,24 @@ export class Tools {
             cortexHistory,
             JSON.stringify({query: args})
           );
-          
+
           // Extract image URLs from markdown ![...](url), HTML <img src="url">, and standard markdown links [text](url)
           const markdownImagePattern = /!\[.*?\]\((.*?)\)/g;
           const htmlPattern = /<img.*?src=["'](.*?)["']/g;
           const markdownLinkPattern = /\[.*?\]\((.*?)\)/g;
-          
+
           let match;
-          
+
           // Find markdown image URLs
           while ((match = markdownImagePattern.exec(response.result)) !== null) {
             imageUrls.add(match[1]);
           }
-          
+
           // Find HTML image URLs
           while ((match = htmlPattern.exec(response.result)) !== null) {
             imageUrls.add(match[1]);
           }
-          
+
           // Find standard markdown link URLs
           while ((match = markdownLinkPattern.exec(response.result)) !== null) {
             const url = match[1];
@@ -393,7 +393,7 @@ export class Tools {
 
         case 'screenshot':
           const parsedScreenshotArgs = JSON.parse(args) as ScreenshotArgs;
-          
+
           // Create a Promise that will resolve when we get the screenshot
           const screenshotPromise = new Promise((resolve, reject) => {
             let imageChunks: string[] = [];
@@ -427,7 +427,7 @@ export class Tools {
                   throw new Error(`Missing chunks: expected ${totalChunks}, got ${imageChunks.length}`);
                 }
                 const completeImage = imageChunks.join('');
-                
+
                 // Add the screenshot to the cortex history as a user message with image
                 const imageMessage: MultiMessage = {
                   role: 'user',
@@ -444,11 +444,11 @@ export class Tools {
                     })
                   ]
                 };
-                
+
                 // Get current history and append the image message
                 const baseHistory = this.getCortexHistory();
                 const updatedHistory = [...baseHistory, imageMessage];
-                
+
                 // Send to vision for analysis
                 const visionResponse = await vision(
                   contextId,
@@ -456,7 +456,7 @@ export class Tools {
                   updatedHistory,
                   JSON.stringify({query: parsedScreenshotArgs.lastUserMessage})
                 );
-                
+
                 cleanup();
                 resolve(visionResponse);
               } catch (error) {
@@ -482,7 +482,7 @@ export class Tools {
             logger.log('Requesting screenshot');
             this.socket.emit('requestScreenshot');
           });
-          
+
           // Wait for the screenshot and analysis
           response = await screenshotPromise;
           break;
@@ -498,7 +498,7 @@ export class Tools {
         // This is to avoid voice run-on if we were using please wait...
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
-      
+
       this.realtimeClient.createConversationItem({
         id: createId(),
         type: 'function_call_output',
@@ -542,13 +542,13 @@ export class Tools {
         }
       });
 
-      // Add lastUserMessage or detailedInstructions if they were provided
-      if (parsedArgs.lastUserMessage || parsedArgs.detailedInstructions) {
-        history.push({
-          role: 'user',
-          content: parsedArgs.lastUserMessage || parsedArgs.detailedInstructions
-        });
-      }
+    // Add lastUserMessage or detailedInstructions if they were provided
+    if (parsedArgs.lastUserMessage || parsedArgs.detailedInstructions) {
+      history.push({
+        role: 'user',
+        content: parsedArgs.lastUserMessage || parsedArgs.detailedInstructions
+      });
+    }
 
     return history;
   }
