@@ -3,6 +3,7 @@ import ClipLoader from "react-spinners/ClipLoader";
 import Chat from "./chat/Chat";
 import {SettingsModal} from "./SettingsModal";
 import { SettingsData } from "./SettingsModal";
+import {Voice} from "openai-realtime-socket-client";
 
 function App() {
   const [loading, setLoading] = useState(true);
@@ -13,7 +14,7 @@ function App() {
   const [language, setLanguage] = useState('en');
   const [aiMemorySelfModify, setAiMemorySelfModify] = useState(false);
   const [aiStyle, setAiStyle] = useState('Anthropic');
-  const [voice, setVoice] = useState('alloy');
+  const [voice, setVoice] = useState<Voice>('alloy');
 
   const onCloseSettings = () => setSettingsOpen(false);
   const onSaveSettings = (settings: SettingsData) => {
@@ -72,7 +73,7 @@ function App() {
     const savedAiStyle = localStorage.getItem('aiStyle');
     if (savedAiStyle) setAiStyle(savedAiStyle);
 
-    const savedVoice = localStorage.getItem('voice');
+    const savedVoice = localStorage.getItem('voice') as Voice;
     if (savedVoice) setVoice(savedVoice);
 
     setLoading(false);

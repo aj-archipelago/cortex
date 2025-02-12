@@ -19,6 +19,7 @@ import ChatIcon from '@mui/icons-material/Chat';
 import {SoundEffects} from './audio/SoundEffects';
 import { logger } from '../utils/logger';
 import {ScreenshotCapture} from './components/ScreenshotCapture';
+import {Voice} from "openai-realtime-socket-client";
 
 type ChatProps = {
   userId: string;
@@ -27,7 +28,7 @@ type ChatProps = {
   language: string;
   aiMemorySelfModify: boolean;
   aiStyle: string;
-  voice: string;
+  voice: Voice;
 };
 
 export default function Chat({

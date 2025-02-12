@@ -1,5 +1,5 @@
 import {ChangeEvent, FormEvent, useState} from 'react';
-import type { Voice, OpenAIVoice, AzureVoice } from '../../src/realtime/realtimeTypes';
+import {AzureVoice, OpenAIVoice, Voice} from "openai-realtime-socket-client";
 
 type SettingsModalProps = {
   aiName: string;
@@ -68,7 +68,7 @@ export const SettingsModal = (
           <h3 className="text-lg font-medium leading-6 text-gray-100 mb-4">
             System Configuration
           </h3>
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1">

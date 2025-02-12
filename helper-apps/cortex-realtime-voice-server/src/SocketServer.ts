@@ -75,7 +75,6 @@ export class SocketServer {
   private static readonly MAX_IDLE_TIMEOUT: number = 60 * 1000;
   private static readonly IDLE_CYCLE_TO_NONINTERACTIVE: number = 1;
   private static readonly FUNCTION_CALL_TIMEOUT_MS = 120 * 1000;
-  private isAzure: boolean;
 
   private getTimeString(socket: Socket): string {
     const now = new Date();
@@ -116,8 +115,6 @@ export class SocketServer {
     this.corsHosts = corsHosts;
     this.io = null;
     this.httpServer = null;
-    const realtimeUrl = process.env.REALTIME_VOICE_API_URL || 'wss://api.openai.com/v1';
-    this.isAzure = realtimeUrl.includes('azure.com');
   }
 
   private calculateIdleTimeout(socket: Socket) {
@@ -273,6 +270,8 @@ export class SocketServer {
 
     const client = new RealtimeVoiceClient({
       apiKey: this.apiKey,
+      realtimeUrl: process.env.REALTIME_VOICE_API_URL || 'wss://api.openai.com/v1/realtime',
+      model: process.env.REALTIME_MODEL || 'gpt-4o-realtime-preview',
       autoReconnect: true,
       debug: process.env.NODE_ENV !== 'production',
       filterDeltas: true,
