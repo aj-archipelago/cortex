@@ -49,6 +49,22 @@ async function testSubtitleTranslation(t, text, language = 'English', format = '
 
     const originalTimestamps = text.match(timestampPattern);
     const translatedTimestamps = result.match(timestampPattern);
+
+    // Find differences
+    const differences = originalTimestamps?.map((timestamp, index) => {
+        if (timestamp !== translatedTimestamps?.[index]) {
+            return {
+                index,
+                original: timestamp,
+                translated: translatedTimestamps?.[index]
+            };
+        }
+        return null;
+    }).filter(Boolean);
+
+    if (differences?.length > 0) {
+        console.log('Differences found:', differences);
+    }
     
     t.deepEqual(originalTimestamps, translatedTimestamps, 'All timestamps should be present and unchanged');
 
