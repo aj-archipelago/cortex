@@ -231,7 +231,7 @@ export default {
 
                 if (args.stream) {
                     if (!ackResponse) {
-                        await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
+                        await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10, args.voiceResponse ? true : false);
                     }
                     pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
                     await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver);
