@@ -104,7 +104,7 @@ export default {
 
         function getMessages(file, format) {
 
-            const responseFormat = format!== 'text' ? 'SRT' : 'text';
+            const responseFormat = format!== 'text' ? 'VTT' : 'text';
 
             const messages = [
                 {"role": "system", "content": `Instructions:\nYou are an AI entity with expertise of transcription. Your response only contains the transcription, no comments or additonal stuff. 
