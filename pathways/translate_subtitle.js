@@ -110,7 +110,9 @@ export default {
       // Select best translation for each caption
       const finalCaptions = captions.map(caption => {
         const translations = translationMap.get(caption.index) || [caption];
-        return selectBestTranslation(translations, caption.index, caption.index);
+        const bestTranslation = selectBestTranslation(translations, caption.index, caption.index);
+        const text = bestTranslation?.text || caption?.text;
+        return { ...caption, text };
       });
 
       return build(finalCaptions,format);
