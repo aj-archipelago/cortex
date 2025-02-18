@@ -28,6 +28,8 @@ import NeuralSpacePlugin from './plugins/neuralSpacePlugin.js';
 import RunwareAiPlugin from './plugins/runwareAiPlugin.js';
 import ReplicateApiPlugin from './plugins/replicateApiPlugin.js';
 import AzureVideoTranslatePlugin from './plugins/azureVideoTranslatePlugin.js';
+import OllamaChatPlugin from './plugins/ollamaChatPlugin.js';
+import OllamaCompletionPlugin from './plugins/ollamaCompletionPlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -115,6 +117,12 @@ class ModelExecutor {
                 break;
             case 'AZURE-VIDEO-TRANSLATE':
                 plugin = new AzureVideoTranslatePlugin(pathway, model);
+                break;
+            case 'OLLAMA-CHAT':
+                plugin = new OllamaChatPlugin(pathway, model);
+                break;
+            case 'OLLAMA-COMPLETION':
+                plugin = new OllamaCompletionPlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);

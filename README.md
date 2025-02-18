@@ -561,6 +561,70 @@ Each model configuration can include:
 }
 ```
 
+### API Compatibility
+
+Cortex provides OpenAI-compatible REST endpoints that allow you to use various models through a standardized interface. When `enableRestEndpoints` is set to `true`, Cortex exposes the following endpoints:
+
+- `/v1/models`: List available models
+- `/v1/chat/completions`: Chat completion endpoint
+- `/v1/completions`: Text completion endpoint
+
+This means you can use Cortex with any client library or tool that supports the OpenAI API format. For example:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:4000/v1",  # Point to your Cortex server
+    api_key="your-key"  # If you have configured cortexApiKeys
+)
+
+response = client.chat.completions.create(
+    model="gpt-4",  # Or any model configured in Cortex
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+#### Ollama Integration
+
+Cortex includes built-in support for Ollama models through its OpenAI-compatible REST interface. When `ollamaUrl` is configured in your settings, Cortex will:
+1. Automatically discover and expose all available Ollama models through the `/v1/models` endpoint with an "ollama-" prefix
+2. Route any requests using an "ollama-" prefixed model to the appropriate Ollama endpoint
+
+To enable Ollama support, add the following to your configuration:
+
+```json
+{
+    "enableRestEndpoints": true,
+    "ollamaUrl": "http://localhost:11434"  // or your Ollama server URL
+}
+```
+
+You can then use any Ollama model through the standard OpenAI-compatible endpoints:
+
+```bash
+# List available models (will include Ollama models with "ollama-" prefix)
+curl http://localhost:4000/v1/models
+
+# Use an Ollama model for chat
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama-llama2",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Use an Ollama model for completions
+curl http://localhost:4000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama-codellama",
+    "prompt": "Write a function that"
+  }'
+```
+
+This integration allows you to seamlessly use local Ollama models alongside cloud-based models through a single, consistent interface.
+
 ### Other Configuration Properties
 
 The following properties can be configured through environment variables or the configuration file:
