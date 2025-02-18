@@ -198,15 +198,16 @@ export default function Chat({
   const totalHeight = height - insets.top - insets.bottom - 35;
   const controlsHeight = 100;
   const listHeight = totalHeight - controlsHeight;
+  const itemWidth = width * 0.9;
   const renderItem = ({item}: { item: { id: string } }) => {
     if (item.id === 'audio') {
       return (
         <View
           className={'justify-center items-center'}
-          style={{width: width, height: listHeight}}>
+          style={{width: itemWidth, height: listHeight}}>
           <RealtimeAudioPlayerView
             ref={playerRef}
-            style={[styles.audioContainer, {width: width - 20, height: width - 20}]}
+            style={[styles.audioContainer, {width: itemWidth - 20, height: itemWidth - 20}]}
             audioFormat={{
               sampleRate: 24000,
               encoding: AudioEncoding.pcm16bitInteger,
@@ -223,7 +224,7 @@ export default function Chat({
           />
           <RealtimeAudioRecorderView
             ref={recorderRef}
-            style={[styles.audioContainer, {width: width - 20, height: 100, marginTop: 20}]}
+            style={[styles.audioContainer, {width: itemWidth - 20, height: 100, marginTop: 20}]}
             audioFormat={{
               sampleRate: 24000,
               encoding: AudioEncoding.pcm16bitInteger,
@@ -241,7 +242,7 @@ export default function Chat({
       );
     } else {
       return (
-        <View style={[styles.audioContainer, {width: width, height: listHeight}]}>
+        <View style={[styles.audioContainer, {width: itemWidth, height: listHeight}]}>
           <ChatTile
             height={listHeight}
             messages={messages}
@@ -257,12 +258,13 @@ export default function Chat({
       <FlatList
         data={[{id: 'audio'}, {id: 'text'}]}
         horizontal
+        initialNumToRender={2}
         snapToInterval={width}
         decelerationRate="fast"
         showsHorizontalScrollIndicator={false}
         renderItem={renderItem}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={[styles.listContainer, {width: width * 2, height: listHeight}]}
+        contentContainerStyle={[styles.listContainer, {width: itemWidth * 2, height: listHeight}]}
         snapToAlignment="start"
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={{itemVisiblePercentThreshold: 60}}

@@ -20,7 +20,8 @@
             "Microphone"
           ]
         }
-      ]
+      ],
+      "react-native-realtime-audio"
     ],
     "ios": {
       "supportsTablet": true,
