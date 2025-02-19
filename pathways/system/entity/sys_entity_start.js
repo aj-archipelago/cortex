@@ -5,6 +5,7 @@ import logger from  '../../../lib/logger.js';
 import { chatArgsHasImageUrl } from  '../../../lib/util.js';
 import { QueueServiceClient } from '@azure/storage-queue';
 import { config } from '../../../config.js';
+import { addToolCalls, addToolResults } from './memory/shared/sys_memory_helpers.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
@@ -86,9 +87,13 @@ export default {
             args.model = pathwayResolver.modelName;
         }
 
+        // Stuff the memory context into the chat history
+        const chatHistoryBeforeMemory = [...args.chatHistory];
+
         const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
         if (memoryContext) {
-            args.chatHistory.splice(-1, 0, { role: 'assistant', content: memoryContext });
+            const { toolCallId } = addToolCalls(args.chatHistory, "search memory for relevant information", "memory_lookup");
+            addToolResults(args.chatHistory, memoryContext, toolCallId);
         }
         
         let ackResponse = null;
@@ -103,15 +108,13 @@ export default {
         const fetchChatResponse = async (args, pathwayResolver) => {
             const [chatResponse, chatTitleResponse] = await Promise.all([
                 callPathway('sys_generator_quick', {...args, model: styleModel}, pathwayResolver),
-                callPathway('chat_title', { ...args, stream: false}),
+                callPathway('chat_title', { ...args, chatHistory: chatHistoryBeforeMemory, stream: false}),
             ]);
 
             title = chatTitleResponse;
 
             return chatResponse;
         };
-            
-        const { chatHistory } = args;
 
         // start fetching the default response - we may need it later
         let fetchChatResponsePromise;
@@ -125,13 +128,13 @@ export default {
             // Get tool routing response
             const toolRequiredResponse = await callPathway('sys_router_tool', { 
                 ...args,
-                chatHistory: chatHistory.slice(-4),
+                chatHistory: chatHistoryBeforeMemory.slice(-4),
                 stream: false
             });
 
             // Asynchronously manage memory for this context
             if (args.aiMemorySelfModify) {
-                callPathway('sys_memory_manager', {  ...args, stream: false })    
+                callPathway('sys_memory_manager', {  ...args, chatHistory: chatHistoryBeforeMemory, stream: false })    
                 .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
             }
 
@@ -228,7 +231,7 @@ export default {
 
                 if (args.stream) {
                     if (!ackResponse) {
-                        await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10);
+                        await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10, args.voiceResponse ? true : false);
                     }
                     pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
                     await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver);

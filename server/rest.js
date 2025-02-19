@@ -6,6 +6,22 @@ import { requestState } from './requestState.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../lib/logger.js';
 import { getSingleTokenChunks } from './chunker.js';
+import axios from 'axios';
+
+const getOllamaModels = async (ollamaUrl) => {
+    try {
+        const response = await axios.get(`${ollamaUrl}/api/tags`);
+        return response.data.models.map(model => ({
+            id: `ollama-${model.name}`,
+            object: 'model',
+            owned_by: 'ollama',
+            permission: ''
+        }));
+    } catch (error) {
+        logger.error(`Error fetching Ollama models: ${error.message}`);
+        return [];
+    }
+};
 
 const chunkTextIntoTokens = (() => {
     let partialToken = '';
@@ -28,6 +44,13 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             return Boolean(value);
         } else if (type === 'Int') {
             return parseInt(value, 10);
+        } else if (type === '[MultiMessage]' && Array.isArray(value)) {
+            return value.map(msg => ({
+                ...msg,
+                content: Array.isArray(msg.content) ? 
+                    JSON.stringify(msg.content) : 
+                    msg.content
+            }));
         } else {
             return value;
         }
@@ -58,8 +81,16 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             `;
 
     const result = await server.executeOperation({ query, variables });
-    const resultText = result?.body?.singleResult?.data?.[name]?.result || result?.body?.singleResult?.errors?.[0]?.message || "";
 
+    // if we're streaming and there are errors, we return a standard error code
+    if (Boolean(req.body.stream)) {
+        if (result?.body?.singleResult?.errors) {
+            return `[ERROR] ${result.body.singleResult.errors[0].message.split(';')[0]}`;
+        }
+    }
+    
+    // otherwise errors can just be returned as a string
+    const resultText = result?.body?.singleResult?.data?.[name]?.result || result?.body?.singleResult?.errors?.[0]?.message || "";
     return resultText;
 };
 
@@ -86,7 +117,6 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
 
         // If we haven't sent the stop message yet, do it now
         if (jsonResponse.choices?.[0]?.finish_reason !== "stop") {
-    
             let jsonEndStream = JSON.parse(JSON.stringify(jsonResponse));
     
             if (jsonEndStream.object === 'text_completion') {
@@ -116,7 +146,6 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
     }
 
     const fillJsonResponse = (jsonResponse, inputText, _finishReason) => {
-
         jsonResponse.choices[0].finish_reason = null;
         if (jsonResponse.object === 'text_completion') {
             jsonResponse.choices[0].text = inputText;
@@ -128,6 +157,14 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
     }
 
     startStream(res);
+
+    // If the requestId is an error message, we can't continue
+    if (requestId.startsWith('[ERROR]')) {
+        fillJsonResponse(jsonResponse, requestId, "stop");
+        sendStreamData(jsonResponse);
+        finishStream(res, jsonResponse);
+        return;
+    }
 
     let subscription;
 
@@ -261,7 +298,14 @@ function buildRestEndpoints(pathways, app, server, config) {
         // Create OpenAI compatible endpoints
         app.post('/v1/completions', async (req, res) => {
             const modelName = req.body.model || 'gpt-3.5-turbo';
-            const pathwayName = openAICompletionModels[modelName] || openAICompletionModels['*'];
+            let pathwayName;
+
+            if (modelName.startsWith('ollama-')) {
+                pathwayName = 'sys_ollama_completion';
+                req.body.ollamaModel = modelName.replace('ollama-', '');
+            } else {
+                pathwayName = openAICompletionModels[modelName] || openAICompletionModels['*'];
+            }
 
             if (!pathwayName) {
                 res.status(404).json({
@@ -297,7 +341,6 @@ function buildRestEndpoints(pathways, app, server, config) {
             if (Boolean(req.body.stream)) {
                 jsonResponse.id = `cmpl-${resultText}`;
                 jsonResponse.choices[0].finish_reason = null;
-                //jsonResponse.object = "text_completion.chunk";
 
                 processIncomingStream(resultText, res, jsonResponse, pathway);
             } else {
@@ -309,7 +352,14 @@ function buildRestEndpoints(pathways, app, server, config) {
         
         app.post('/v1/chat/completions', async (req, res) => {
             const modelName = req.body.model || 'gpt-3.5-turbo';
-            const pathwayName = openAIChatModels[modelName] || openAIChatModels['*'];
+            let pathwayName;
+
+            if (modelName.startsWith('ollama-')) {
+                pathwayName = 'sys_ollama_chat';
+                req.body.ollamaModel = modelName.replace('ollama-', '');
+            } else {
+                pathwayName = openAIChatModels[modelName] || openAIChatModels['*'];
+            }
 
             if (!pathwayName) {
                 res.status(404).json({
@@ -364,8 +414,11 @@ function buildRestEndpoints(pathways, app, server, config) {
         app.get('/v1/models', async (req, res) => {
             const openAIModels = { ...openAIChatModels, ...openAICompletionModels };
             const defaultModelId = 'gpt-3.5-turbo';
+            let models = [];
 
-            const models = Object.entries(openAIModels)
+            // Get standard OpenAI-compatible models, filtering out our internal pathway models
+            models = Object.entries(openAIModels)
+                .filter(([modelId]) => !['ollama-chat', 'ollama-completion'].includes(modelId))
                 .map(([modelId]) => {
                     if (modelId.includes('*')) {
                         modelId = defaultModelId;
@@ -376,7 +429,16 @@ function buildRestEndpoints(pathways, app, server, config) {
                         owned_by: 'openai',
                         permission: '',
                     };
-                })
+                });
+
+            // Get Ollama models if configured
+            if (config.get('ollamaUrl')) {
+                const ollamaModels = await getOllamaModels(config.get('ollamaUrl'));
+                models = [...models, ...ollamaModels];
+            }
+
+            // Filter out duplicates and sort
+            models = models
                 .filter((model, index, self) => {
                     return index === self.findIndex((m) => m.id === model.id);
                 })

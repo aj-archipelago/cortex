@@ -24,19 +24,24 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                 const { role, author, content } = message;
     
                 if (role === 'system') {
-                    systemParts.push({ text: content });
+                    if (Array.isArray(content)) {
+                        content.forEach(item => systemParts.push({ text: item }));
+                    } else {
+                        systemParts.push({ text: content });
+                    }
                     return;
                 }
     
                 // Convert content to Gemini format, trying to maintain compatibility
                 const convertPartToGemini = (inputPart) => {
                     try {
+                        // First try to parse as JSON if it's a string
                         const part = typeof inputPart === 'string' ? JSON.parse(inputPart) : inputPart;
                         const {type, text, image_url, gcs} = part;
                         let fileUrl = gcs || image_url?.url;
 
                         if (typeof part === 'string') {
-                            return { text: text };
+                            return { text: inputPart };
                         } else if (type === 'text') {
                             return { text: text };
                         } else if (type === 'image_url') {
@@ -66,11 +71,19 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                                         data: base64Data
                                     }
                                 };
+                            } else if (fileUrl.includes('youtube.com/') || fileUrl.includes('youtu.be/')) {
+                                return {
+                                    fileData: {
+                                        mimeType: 'video/youtube',
+                                        fileUri: fileUrl
+                                    }
+                                };
                             }
                             return null;
                         }
                     } catch (e) {
-                        // this space intentionally left blank
+                        // If JSON parsing fails or any other error, treat as plain text
+                        return inputPart ? { text: inputPart } : null;
                     }
                     return inputPart ? { text: inputPart } : null;
                 };

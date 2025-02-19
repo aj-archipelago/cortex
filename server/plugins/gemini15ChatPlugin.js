@@ -56,7 +56,11 @@ class Gemini15ChatPlugin extends ModelPlugin {
                 const { role, author, content } = message;
         
                 if (role === 'system') {
-                    systemParts.push({ text: content });
+                    if (Array.isArray(content)) {
+                        content.forEach(item => systemParts.push({ text: item }));
+                    } else {
+                        systemParts.push({ text: content });
+                    }
                     return;
                 }
         
@@ -167,6 +171,95 @@ class Gemini15ChatPlugin extends ModelPlugin {
         cortexRequest.auth.Authorization = `Bearer ${authToken}`;
 
         return this.executeRequest(cortexRequest);
+    }
+
+    processStreamEvent(event, requestProgress) {
+        const eventData = JSON.parse(event.data);
+        
+        // Initialize requestProgress if needed
+        requestProgress = requestProgress || {};
+        requestProgress.data = requestProgress.data || null;
+        
+        // Create a helper function to generate message chunks
+        const createChunk = (delta) => ({
+            id: eventData.responseId || `chatcmpl-${Date.now()}`,
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: this.modelName,
+            choices: [{
+                index: 0,
+                delta,
+                finish_reason: null
+            }]
+        });
+
+        // Handle content chunks - do this first before handling any finish conditions
+        if (eventData.candidates?.[0]?.content?.parts?.[0]?.text) {
+            if (!requestProgress.started) {
+                // First chunk - send role
+                requestProgress.data = JSON.stringify(createChunk({ role: "assistant" }));
+                requestProgress.started = true;
+                
+                // Immediately follow up with the first content chunk
+                requestProgress.data = JSON.stringify(createChunk({ 
+                    content: eventData.candidates[0].content.parts[0].text 
+                }));
+            } else {
+                // Send content chunk
+                requestProgress.data = JSON.stringify(createChunk({ 
+                    content: eventData.candidates[0].content.parts[0].text 
+                }));
+            }
+
+            // If this message also has STOP, mark it for completion but don't overwrite the content
+            if (eventData.candidates[0].finishReason === "STOP") {
+                // Send the content first
+                requestProgress.data = JSON.stringify(createChunk({ 
+                    content: eventData.candidates[0].content.parts[0].text
+                }));
+                requestProgress.progress = 1;
+            }
+        } else if (eventData.candidates?.[0]?.finishReason === "STOP") {
+            // Only send DONE if there was no content in this message
+            requestProgress.data = '[DONE]';
+            requestProgress.progress = 1;
+        }
+
+        // Handle safety blocks
+        if (eventData.candidates?.[0]?.safetyRatings?.some(rating => rating.blocked)) {
+            requestProgress.data = JSON.stringify({
+                id: eventData.responseId || `chatcmpl-${Date.now()}`,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: this.modelName,
+                choices: [{
+                    index: 0,
+                    delta: { content: "\n\n*** Response blocked due to safety ratings ***" },
+                    finish_reason: "content_filter"
+                }]
+            });
+            requestProgress.progress = 1;
+            return requestProgress;
+        }
+
+        // Handle prompt feedback blocks
+        if (eventData.promptFeedback?.blockReason) {
+            requestProgress.data = JSON.stringify({
+                id: eventData.responseId || `chatcmpl-${Date.now()}`,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: this.modelName,
+                choices: [{
+                    index: 0,
+                    delta: { content: `\n\n*** Response blocked: ${eventData.promptFeedback.blockReason} ***` },
+                    finish_reason: "content_filter"
+                }]
+            });
+            requestProgress.progress = 1;
+            return requestProgress;
+        }
+
+        return requestProgress;
     }
 
     // Override the logging function to display the messages and responses

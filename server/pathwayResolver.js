@@ -79,6 +79,13 @@ class PathwayResolver {
         let streamErrorOccurred = false;
         let responseData = null;
 
+        const publishNestedRequestProgress = (requestProgress) => {
+            if (requestProgress.progress === 1 && this.rootRequestId) {
+                delete requestProgress.progress;
+            }
+            publishRequestProgress(requestProgress);
+        }
+
         try {
             responseData = await this.executePathway(args);
         }
@@ -89,8 +96,13 @@ class PathwayResolver {
                     progress: 1,
                     data: '[DONE]',
                 });
+            } else {
+                publishRequestProgress({
+                    requestId: this.rootRequestId || this.requestId,
+                    progress: 1,
+                    data: error.message || error.toString(),
+                });
             }
-            return;
         }
 
         // If the response is a string, it's a regular long running response
@@ -100,9 +112,9 @@ class PathwayResolver {
             
             // some models don't support progress updates
             if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
-                await publishRequestProgress({
+                await publishNestedRequestProgress({
                         requestId: this.rootRequestId || this.requestId,
-                        progress: completedCount / totalCount,
+                        progress: Math.min(completedCount,totalCount) / totalCount,
                         data: JSON.stringify(responseData),
                 });
             }
@@ -139,10 +151,7 @@ class PathwayResolver {
 
                     try {
                         if (!streamEnded && requestProgress.data) {
-                            if (!(this.rootRequestId && requestProgress.progress === 1)) {
-                                logger.debug(`Publishing stream message to requestId ${this.requestId}: ${requestProgress.data}`);
-                                publishRequestProgress(requestProgress);
-                            }
+                            publishNestedRequestProgress(requestProgress);
                             streamEnded = requestProgress.progress === 1;
                         }
                     } catch (error) {
@@ -227,10 +236,10 @@ class PathwayResolver {
                 // Load saved context and core memory if it exists
                 const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
                     (getv && await getv(this.savedContextId)) || {},
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1}),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1, stripMetadata: true }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1, stripMetadata: true }),
                     callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryTopics', priority: 0, numResults: 10 }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1 }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1, stripMetadata: true }),
                     callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryContext', priority: 0 }),
                 ]).catch(error => {
                     this.logError(`Failed to load memory: ${error.message}`);
@@ -315,12 +324,12 @@ class PathwayResolver {
     processInputText(text) {
         let chunkTokenLength = 0;
         if (this.pathway.inputChunkSize) {
-            chunkTokenLength = Math.min(this.pathway.inputChunkSize, this.chunkMaxTokenLength);
+            chunkTokenLength = this.pathway.inputChunkSize;
         } else {
             chunkTokenLength = this.chunkMaxTokenLength;
         }
         const encoded = text ? encode(text) : [];
-        if (!this.useInputChunking || encoded.length <= chunkTokenLength) { // no chunking, return as is
+        if (!this.useInputChunking) { // no chunking, return as is
             if (encoded.length > 0 && encoded.length >= chunkTokenLength) {
                 const warnText = `Truncating long input text. Text length: ${text.length}`;
                 this.logWarning(warnText);
@@ -375,7 +384,7 @@ class PathwayResolver {
     // Process the request and return the result        
     async processRequest({ text, ...parameters }) {
         text = await this.summarizeIfEnabled({ text, ...parameters }); // summarize if flag enabled
-        const chunks = this.processInputText(text);
+        const chunks = text && this.processInputText(text) || [text];
 
         let anticipatedRequestCount = chunks.length * this.prompts.length   
 

@@ -15,6 +15,21 @@ async function convertContentItem(item, maxImageSize, plugin) {
           case "text":
             return item.text ? { type: "text", text: item.text } : null;
 
+          case "tool_use":
+            return {
+              type: "tool_use",
+              id: item.id,
+              name: item.name,
+              input: typeof item.input === 'string' ? { query: item.input } : item.input
+            };
+
+          case "tool_result":
+            return {
+              type: "tool_result",
+              tool_use_id: item.tool_use_id,
+              content: item.content
+            };
+
           case "image_url":
             imageUrl = item.url || item.image_url?.url || item.image_url;
 
@@ -121,14 +136,56 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     // Extract system messages
     const systemMessages = messagesCopy.filter(message => message.role === "system");
     if (systemMessages.length > 0) {
-      system = systemMessages.map(message => message.content).join("\n");
+      system = systemMessages.map(message => {
+        if (Array.isArray(message.content)) {
+          // For content arrays, extract text content and join
+          return message.content
+            .filter(item => item.type === 'text')
+            .map(item => item.text)
+            .join("\n");
+        }
+        return message.content;
+      }).join("\n");
     }
   
     // Filter out system messages and empty messages
     let modifiedMessages = messagesCopy
-      .filter(message => message.role !== "system" && message.content)
-      .map(message => ({ ...message }));
-  
+      .filter(message => message.role !== "system")
+      .map(message => {
+        // Handle OpenAI tool calls format conversion to Claude format
+        if (message.tool_calls) {
+          return {
+            role: message.role,
+            content: message.tool_calls.map(toolCall => ({
+              type: "tool_use",
+              id: toolCall.id,
+              name: toolCall.function.name,
+              input: JSON.parse(toolCall.function.arguments)
+            }))
+          };
+        }
+        
+        // Handle OpenAI tool response format conversion to Claude format
+        if (message.role === "tool") {
+          return {
+            role: "user",
+            content: [{
+              type: "tool_result",
+              tool_use_id: message.tool_call_id,
+              content: message.content
+            }]
+          };
+        }
+
+        return { ...message };
+      })
+      .filter(message => {
+        // Filter out messages with empty content
+        if (!message.content) return false;
+        if (Array.isArray(message.content) && message.content.length === 0) return false;
+        return true;
+      });
+
     // Combine consecutive messages from the same author
     const combinedMessages = modifiedMessages.reduce((acc, message) => {
       if (acc.length === 0 || message.role !== acc[acc.length - 1].role) {
@@ -191,10 +248,68 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       prompt,
       cortexRequest
     );
+
     const { system, modifiedMessages } =
       await this.convertMessagesToClaudeVertex(requestParameters.messages);
     requestParameters.system = system;
     requestParameters.messages = modifiedMessages;
+
+    // Convert OpenAI tools format to Claude format if present
+    if (parameters.tools) {
+      requestParameters.tools = parameters.tools.map(tool => {
+        if (tool.type === 'function') {
+          return {
+            name: tool.function.name,
+            description: tool.function.description,
+                  input_schema: {
+              type: "object",
+              properties: tool.function.parameters.properties,
+              required: tool.function.parameters.required || []
+            }
+          };
+        }
+        return tool;
+      });
+    }
+
+    // If there are function calls in messages, generate tools block
+    if (modifiedMessages?.some(msg => 
+      Array.isArray(msg.content) && msg.content.some(item => item.type === 'tool_use')
+    )) {
+      const toolsMap = new Map();
+      
+      // Collect all unique tool uses from messages
+      modifiedMessages.forEach(msg => {
+        if (Array.isArray(msg.content)) {
+          msg.content.forEach(item => {
+            if (item.type === 'tool_use') {
+              toolsMap.set(item.name, {
+                name: item.name,
+                description: `Tool for ${item.name}`,
+                input_schema: {
+                  type: "object",
+                  properties: item.input ? Object.keys(item.input).reduce((acc, key) => {
+                    acc[key] = {
+                      type: typeof item.input[key] === 'string' ? 'string' : 'object',
+                      description: `Parameter ${key} for ${item.name}`
+                    };
+                    return acc;
+                  }, {}) : {},
+                  required: item.input ? Object.keys(item.input) : []
+                }
+              });
+            }
+          });
+        }
+      });
+      
+      if (requestParameters.tools) {
+        requestParameters.tools.push(...Array.from(toolsMap.values()));
+      } else {
+        requestParameters.tools = Array.from(toolsMap.values());
+      }
+    }
+
     requestParameters.max_tokens = this.getModelMaxReturnTokens();
     requestParameters.anthropic_version = "vertex-2023-10-16";
     return requestParameters;
@@ -274,7 +389,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     cortexRequest.params = {}; // query params
     cortexRequest.stream = stream;
     cortexRequest.urlSuffix = cortexRequest.stream
-      ? ":streamRawPredict"
+      ? ":streamRawPredict?alt=sse"
       : ":rawPredict";
 
     const gcpAuthTokenHelper = this.config.get("gcpAuthTokenHelper");
@@ -286,32 +401,58 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
   processStreamEvent(event, requestProgress) {
     const eventData = JSON.parse(event.data);
+    const baseOpenAIResponse = {
+      id: eventData.message?.id || `chatcmpl-${Date.now()}`,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: this.modelName,
+      choices: [{
+        index: 0,
+        delta: {},
+        finish_reason: null
+      }]
+    };
+
     switch (eventData.type) {
       case "message_start":
-        requestProgress.data = JSON.stringify(eventData.message);
+        // Initial message with role
+        baseOpenAIResponse.choices[0].delta = {
+          role: "assistant",
+          content: ""
+        };
+        requestProgress.data = JSON.stringify(baseOpenAIResponse);
         break;
-      case "content_block_start":
-        break;
-      case "ping":
-        break;
+
       case "content_block_delta":
         if (eventData.delta.type === "text_delta") {
-          requestProgress.data = JSON.stringify(eventData.delta.text);
+          baseOpenAIResponse.choices[0].delta = {
+            content: eventData.delta.text
+          };
+          requestProgress.data = JSON.stringify(baseOpenAIResponse);
         }
         break;
-      case "content_block_stop":
-        break;
-      case "message_delta":
-        break;
+
       case "message_stop":
-        requestProgress.data = "[DONE]";
+        baseOpenAIResponse.choices[0].delta = {};
+        baseOpenAIResponse.choices[0].finish_reason = "stop";
+        requestProgress.data = JSON.stringify(baseOpenAIResponse);
         requestProgress.progress = 1;
         break;
+
       case "error":
-        requestProgress.data = `\n\n*** ${
-          eventData.error.message || eventData.error
-        } ***`;
+        baseOpenAIResponse.choices[0].delta = {
+          content: `\n\n*** ${eventData.error.message || eventData.error} ***`
+        };
+        baseOpenAIResponse.choices[0].finish_reason = "error";
+        requestProgress.data = JSON.stringify(baseOpenAIResponse);
         requestProgress.progress = 1;
+        break;
+
+      // Ignore other event types as they don't map to OpenAI format
+      case "content_block_start":
+      case "content_block_stop":
+      case "message_delta":
+      case "ping":
         break;
     }
 

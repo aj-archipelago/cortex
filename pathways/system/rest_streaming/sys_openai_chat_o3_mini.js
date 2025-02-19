@@ -1,4 +1,4 @@
-// sys_openai_chat_o1.js
+// sys_openai_chat_o3_mini.js
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -12,8 +12,8 @@ export default {
     inputParameters: {
         messages: [{role: '', content: []}],
     },
-    model: 'oai-o1',
+    model: 'oai-o3-mini',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'o1',
+    emulateOpenAIChatModel: 'o3-mini',
     enableDuplicateRequests: false,
 }

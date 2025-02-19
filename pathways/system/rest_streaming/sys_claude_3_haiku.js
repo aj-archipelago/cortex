@@ -11,7 +11,7 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{role: '', content: []}],
     },
     model: 'claude-3-haiku-vertex',
     useInputChunking: false,

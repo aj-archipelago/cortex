@@ -1,5 +1,5 @@
 # Cortex
-Cortex simplifies and accelerates the process of creating applications that harness the power of modern AI models like GPT-4o (chatGPT), o1, Gemini, the Claude series, Flux, Grok and more by poviding a structured interface (GraphQL or REST) to a powerful prompt execution environment. This enables complex augmented prompting and abstracts away most of the complexity of managing model connections like chunking input, rate limiting, formatting output, caching, and handling errors.
+Cortex simplifies and accelerates the process of creating applications that harness the power of modern AI models like GPT-4o (chatGPT), o1, o3-mini, Gemini, the Claude series, Flux, Grok and more by poviding a structured interface (GraphQL or REST) to a powerful prompt execution environment. This enables complex augmented prompting and abstracts away most of the complexity of managing model connections like chunking input, rate limiting, formatting output, caching, and handling errors.
 ## Why build Cortex?
 Modern AI models are transformational, but a number of complexities emerge when developers start using them to deliver application-ready functions. Most models require precisely formatted, carefully engineered and sequenced prompts to produce consistent results, and the responses are typically largely unstructured text without validation or formatting. Additionally, these models are evolving rapidly, are typically costly and slow to query and implement hard request size and rate restrictions that need to be carefully navigated for optimum throughput. Cortex offers a solution to these problems and provides a simple and extensible package for interacting with NL AI models.
 
@@ -20,7 +20,7 @@ Just about anything! It's kind of an LLM swiss army knife.  Here are some ideas:
   - OpenAI models:
     - GPT-4 Omni (GPT-4o)
     - GPT-4 Omni Mini (GPT-4o-mini)
-    - O1 (including o1-mini and o1-preview) (Advanced reasoning models)
+    - O1 and O3-mini (Advanced reasoning models)
     - Most of the earlier GPT models (GPT-4, 3.5 Turbo, etc.)
   - Google models:
     - Gemini 1.5 Pro
@@ -521,7 +521,7 @@ Models are configured in the `models` section of the config. Each model can have
 
 - `OPENAI-CHAT`: For OpenAI chat models (legacy GPT-3.5)
 - `OPENAI-VISION`: For multimodal models (GPT-4o, GPT-4o-mini) supporting text, images, and other content types
-- `OPENAI-REASONING`: For O1 reasoning model with vision capabilities
+- `OPENAI-REASONING`: For O1 and O3-mini reasoning models with vision capabilities
 - `OPENAI-COMPLETION`: For OpenAI completion models
 - `OPENAI-WHISPER`: For Whisper transcription
 - `GEMINI-1.5-CHAT`: For Gemini 1.5 Pro chat models
@@ -560,6 +560,70 @@ Each model configuration can include:
     ]
 }
 ```
+
+### API Compatibility
+
+Cortex provides OpenAI-compatible REST endpoints that allow you to use various models through a standardized interface. When `enableRestEndpoints` is set to `true`, Cortex exposes the following endpoints:
+
+- `/v1/models`: List available models
+- `/v1/chat/completions`: Chat completion endpoint
+- `/v1/completions`: Text completion endpoint
+
+This means you can use Cortex with any client library or tool that supports the OpenAI API format. For example:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:4000/v1",  # Point to your Cortex server
+    api_key="your-key"  # If you have configured cortexApiKeys
+)
+
+response = client.chat.completions.create(
+    model="gpt-4",  # Or any model configured in Cortex
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+#### Ollama Integration
+
+Cortex includes built-in support for Ollama models through its OpenAI-compatible REST interface. When `ollamaUrl` is configured in your settings, Cortex will:
+1. Automatically discover and expose all available Ollama models through the `/v1/models` endpoint with an "ollama-" prefix
+2. Route any requests using an "ollama-" prefixed model to the appropriate Ollama endpoint
+
+To enable Ollama support, add the following to your configuration:
+
+```json
+{
+    "enableRestEndpoints": true,
+    "ollamaUrl": "http://localhost:11434"  // or your Ollama server URL
+}
+```
+
+You can then use any Ollama model through the standard OpenAI-compatible endpoints:
+
+```bash
+# List available models (will include Ollama models with "ollama-" prefix)
+curl http://localhost:4000/v1/models
+
+# Use an Ollama model for chat
+curl http://localhost:4000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama-llama2",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Use an Ollama model for completions
+curl http://localhost:4000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama-codellama",
+    "prompt": "Write a function that"
+  }'
+```
+
+This integration allows you to seamlessly use local Ollama models alongside cloud-based models through a single, consistent interface.
 
 ### Other Configuration Properties
 

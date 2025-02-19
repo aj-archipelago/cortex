@@ -1,4 +1,5 @@
-// sys_openai_chat_o1_mini.js
+// sys_ollama_chat.js
+// override handler for ollama chat model
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -10,10 +11,11 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{ role: '', content: '' }],
+        ollamaModel: '',
     },
-    model: 'oai-o1-mini',
+    model: 'ollama-chat',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'o1-mini',
-    enableDuplicateRequests: false,
+    emulateOpenAIChatModel: 'ollama-chat',
+    timeout: 300,
 }

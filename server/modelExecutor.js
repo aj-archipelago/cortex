@@ -28,6 +28,8 @@ import NeuralSpacePlugin from './plugins/neuralSpacePlugin.js';
 import RunwareAiPlugin from './plugins/runwareAiPlugin.js';
 import ReplicateApiPlugin from './plugins/replicateApiPlugin.js';
 import AzureVideoTranslatePlugin from './plugins/azureVideoTranslatePlugin.js';
+import OllamaChatPlugin from './plugins/ollamaChatPlugin.js';
+import OllamaCompletionPlugin from './plugins/ollamaCompletionPlugin.js';
 import ApptekTranslatePlugin from './plugins/apptekTranslatePlugin.js';
 
 class ModelExecutor {
@@ -117,6 +119,11 @@ class ModelExecutor {
             case 'AZURE-VIDEO-TRANSLATE':
                 plugin = new AzureVideoTranslatePlugin(pathway, model);
                 break;
+            case 'OLLAMA-CHAT':
+                plugin = new OllamaChatPlugin(pathway, model);
+                break;
+            case 'OLLAMA-COMPLETION':
+                plugin = new OllamaCompletionPlugin(pathway, model);
             case 'APPTEK-TRANSLATE':
                 plugin = new ApptekTranslatePlugin(pathway, model);
                 break;
