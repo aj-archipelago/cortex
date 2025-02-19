@@ -1,1 +1,169 @@
-{}
+{
+    "defaultModelName": "oai-gpturbo",
+    "models": {
+        "azure-translate": {
+            "type": "AZURE-TRANSLATE",
+            "url": "https://api.cognitive.microsofttranslator.com/translate?api-version=3.0",
+            "headers": {
+                "Ocp-Apim-Subscription-Key": "{{ARCHIPELAGO_TRANSLATE_KEY}}",
+                "Ocp-Apim-Subscription-Region": "eastus",
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 2000
+        },
+
+        "gemini-pro-chat": {
+            "type": "GEMINI-CHAT",
+            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/gemini-pro:streamGenerateContent",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 32768,
+            "maxReturnTokens": 8192,
+            "supportsStreaming": true
+        },
+        "gemini-pro-vision": {
+            "type": "GEMINI-VISION",
+            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/gemini-pro-vision:streamGenerateContent",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 32768,
+            "maxReturnTokens": 2048,
+            "supportsStreaming": true
+        },
+        "gemini-pro-15-vision": {
+            "type": "GEMINI-VISION",
+            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/gemini-1.5-pro-preview-0215:streamGenerateContent",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 1048576,
+            "maxReturnTokens": 2048,
+            "supportsStreaming": true
+        },
+        "claude-3-haiku-vertex": {
+            "type": "CLAUDE-3-VERTEX",
+            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/anthropic/models/claude-3-haiku@20240307",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 200000,
+            "maxReturnTokens": 2048,
+            "supportsStreaming": true
+        },
+        "claude-35-sonnet-vertex": {
+            "type": "CLAUDE-3-VERTEX",
+            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/anthropic/models/claude-3-5-sonnet@20240229",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 200000,
+            "maxReturnTokens": 2048,
+            "supportsStreaming": true
+        },
+        "oai-gpturbo": {
+            "type": "OPENAI-CHAT",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-3.5-turbo"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 8192
+        },
+        "oai-gpt4": {
+            "type": "OPENAI-CHAT",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-4"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 8192
+        },
+        "oai-gpt4-32": {
+            "type": "OPENAI-CHAT",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-4-32"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 32768
+        },
+        "oai-gpt4o": {
+            "type": "OPENAI-VISION",
+            "url": "https://api.openai.com/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "gpt-4o"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 131072,
+            "maxReturnTokens": 4096,
+            "supportsStreaming": true
+        },
+        "apptek-translate": {
+            "type": "APPTEK-TRANSLATE",
+            "url": "https://api.apptek.com",
+            "headers": {
+                "x-token": "{{APPTEK_API_KEY}}"
+            }
+        },
+        "palm-text": {
+            "type": "PALM-COMPLETION",
+            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/text-bison@001:predict",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 2048,
+            "maxReturnTokens": 1024
+        },
+        "palm-chat": {
+            "type": "PALM-CHAT",
+            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/chat-bison@001:predict",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 2048,
+            "maxReturnTokens": 1024   
+        },
+        "local-llama13B": {
+            "type": "LOCAL-CPP-MODEL",
+            "executablePath": "../llm/llama.cpp/main",
+            "args": [
+                "-m", "../llm/llama.cpp/models/13B/ggml-model-q4_0.bin",
+                "--repeat_penalty", "1.0",
+                "--keep", "0",
+                "-t", "8",
+                "--mlock"
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 1024
+        }
+    },
+    "enableCache": false,
+    "enableRestEndpoints": false,
+    "subscriptionKeepAlive": 10000
+}
