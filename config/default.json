@@ -12,7 +12,6 @@
             "requestsPerSecond": 10,
             "maxTokenLength": 2000
         },
-
         "gemini-pro-chat": {
             "type": "GEMINI-CHAT",
             "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/gemini-pro:streamGenerateContent",
@@ -147,16 +146,20 @@
             },
             "requestsPerSecond": 10,
             "maxTokenLength": 2048,
-            "maxReturnTokens": 1024   
+            "maxReturnTokens": 1024
         },
         "local-llama13B": {
             "type": "LOCAL-CPP-MODEL",
             "executablePath": "../llm/llama.cpp/main",
             "args": [
-                "-m", "../llm/llama.cpp/models/13B/ggml-model-q4_0.bin",
-                "--repeat_penalty", "1.0",
-                "--keep", "0",
-                "-t", "8",
+                "-m",
+                "../llm/llama.cpp/models/13B/ggml-model-q4_0.bin",
+                "--repeat_penalty",
+                "1.0",
+                "--keep",
+                "0",
+                "-t",
+                "8",
                 "--mlock"
             ],
             "requestsPerSecond": 10,
@@ -165,5 +168,13 @@
     },
     "enableCache": false,
     "enableRestEndpoints": false,
-    "subscriptionKeepAlive": 10000
+    "subscriptionKeepAlive": 10000,
+    "enabledTranslationModels": [
+        "translate",
+        "translate_azure",
+        "translate_apptek",
+        "translate_gpt4",
+        "translate_gpt4_turbo",
+        "translate_turbo"
+    ]
 }
