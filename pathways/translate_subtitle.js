@@ -37,7 +37,7 @@ function selectBestTranslation(translations, startIndex, endIndex) {
 }
 
 async function translateChunk(chunk, args, maxRetries = 3) {
-  const chunkText = build(chunk.captions, { format: 'srt', preserveIndexes: true });
+  const chunkText = build(chunk.captions, { format: args.format, preserveIndexes: true });
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -83,7 +83,7 @@ export default {
   executePathway: async ({args}) => {
     try {
       const { text, format = 'srt' } = args;
-      const parsed = parse(text);
+      const parsed = parse(text, { format, preserveIndexes: true });
       const captions = parsed.cues;
   
       if (!captions || captions.length === 0) {
@@ -115,7 +115,7 @@ export default {
         return { ...caption, text };
       });
 
-      return build(finalCaptions,format);
+      return build(finalCaptions, { format, preserveIndexes: true });
     } catch (e) {
       logger.error(`Subtitle translation failed: ${e}`);
       throw e;
