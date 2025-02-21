@@ -105,22 +105,12 @@ export default {
             }
         }
 
-        const fetchChatResponse = async (args, pathwayResolver) => {
-            const [chatResponse, chatTitleResponse] = await Promise.all([
-                callPathway('sys_generator_quick', {...args, model: styleModel}, pathwayResolver),
-                callPathway('chat_title', { ...args, chatHistory: chatHistoryBeforeMemory, stream: false}),
-            ]);
-
-            title = chatTitleResponse;
-
-            return chatResponse;
-        };
-
-        // start fetching the default response - we may need it later
+        // start fetching responses in parallel if not streaming
         let fetchChatResponsePromise;
         if (!args.stream) {
-            fetchChatResponsePromise = fetchChatResponse({ ...args, ackResponse }, pathwayResolver);
+            fetchChatResponsePromise = callPathway('sys_generator_quick', {...args, model: styleModel, ackResponse}, pathwayResolver);
         }
+        const fetchTitleResponsePromise = callPathway('chat_title', {...args, chatHistory: chatHistoryBeforeMemory, stream: false});
 
         const visionContentPresent = chatArgsHasImageUrl(args);
 
@@ -223,6 +213,8 @@ export default {
                 }
             }
 
+            title = await fetchTitleResponsePromise;
+
             if (toolCallbackMessage) {
                 if (args.skipCallbackMessage) {
                     pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
@@ -233,9 +225,9 @@ export default {
                     if (!ackResponse) {
                         await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10, args.voiceResponse ? true : false);
                     }
-                    pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
                     await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver);
-                    return "";
+                    pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title }); 
+                    return;
                 }
                 
                 pathwayResolver.tool = JSON.stringify({ 
@@ -250,15 +242,15 @@ export default {
                 return toolCallbackMessage || "One moment please.";
             }
 
-            const chatResponse = await (fetchChatResponsePromise || fetchChatResponse({ ...args, ackResponse }, pathwayResolver));
+            const chatResponse = await (fetchChatResponsePromise || callPathway('sys_generator_quick', {...args, model: styleModel, ackResponse}, pathwayResolver));
             pathwayResolver.tool = JSON.stringify({ search: false, title });
-            return args.stream ? "" : chatResponse;
+            return args.stream ? null : chatResponse;
 
         } catch (e) {
             pathwayResolver.logError(e);
-            const chatResponse = await (fetchChatResponsePromise || fetchChatResponse({ ...args, ackResponse }, pathwayResolver));
+            const chatResponse = await (fetchChatResponsePromise || callPathway('sys_generator_quick', {...args, model: styleModel, ackResponse}, pathwayResolver));
             pathwayResolver.tool = JSON.stringify({ search: false, title });
-            return args.stream ? "" : chatResponse;
+            return args.stream ? null : chatResponse;
         }
     }
 };
