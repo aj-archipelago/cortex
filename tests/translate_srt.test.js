@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import fs from 'fs';
 import path from 'path';
+import { SubtitleUtils } from '@aj-archipelago/subvibe';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,12 +46,50 @@ async function testSubtitleTranslation(t, text, language = 'English', format = '
     // Check timestamps based on format
     const timestampPattern = format === 'srt' 
         ? /\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/g
-        : /\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}/g;
+        : /(?:\d{2}:)?\d{2}:\d{2}\.\d{3} --> (?:\d{2}:)?\d{2}:\d{2}\.\d{3}/g;
 
     const originalTimestamps = text.match(timestampPattern);
     const translatedTimestamps = result.match(timestampPattern);
+
+    // Compare timestamps using SubtitleUtils.parseLooseTime
+    const areTimestampsEquivalent = originalTimestamps?.every((timestamp, index) => {
+        const [origStart, origEnd] = timestamp.split(' --> ');
+        const [transStart, transEnd] = translatedTimestamps[index].split(' --> ');
+        
+        const origStartTime = SubtitleUtils.parseLooseTime(origStart);
+        const origEndTime = SubtitleUtils.parseLooseTime(origEnd);
+        const transStartTime = SubtitleUtils.parseLooseTime(transStart);
+        const transEndTime = SubtitleUtils.parseLooseTime(transEnd);
+        
+        return origStartTime === transStartTime && origEndTime === transEndTime;
+    });
+
+    if (!areTimestampsEquivalent) {
+        const differences = originalTimestamps?.map((timestamp, index) => {
+            const [origStart, origEnd] = timestamp.split(' --> ');
+            const [transStart, transEnd] = translatedTimestamps[index].split(' --> ');
+            
+            const origStartTime = SubtitleUtils.parseLooseTime(origStart);
+            const origEndTime = SubtitleUtils.parseLooseTime(origEnd);
+            const transStartTime = SubtitleUtils.parseLooseTime(transStart);
+            const transEndTime = SubtitleUtils.parseLooseTime(transEnd);
+            
+            if (origStartTime !== transStartTime || origEndTime !== transEndTime) {
+                return {
+                    index,
+                    original: timestamp,
+                    translated: translatedTimestamps[index],
+                    parsedOriginal: { start: origStartTime, end: origEndTime },
+                    parsedTranslated: { start: transStartTime, end: transEndTime }
+                };
+            }
+            return null;
+        }).filter(Boolean);
+
+        console.log('Timestamp differences found:', differences);
+    }
     
-    t.deepEqual(originalTimestamps, translatedTimestamps, 'All timestamps should be present and unchanged');
+    t.true(areTimestampsEquivalent, 'All timestamps should be equivalent when parsed');
 
     // Check line count (accounting for WEBVTT header in VTT)
     const originalLineCount = text.split('\n').length;
