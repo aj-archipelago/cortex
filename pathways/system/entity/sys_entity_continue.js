@@ -48,6 +48,10 @@ export default {
                 chatHistory: args.chatHistory.slice(-20)
             };
 
+            if (generatorPathway === 'coding') {
+                return;
+            }
+
             if (generatorPathway === 'sys_generator_document') {
                 generatorPathway = 'sys_generator_results';
                 newArgs.dataSources = ["mydata"];
