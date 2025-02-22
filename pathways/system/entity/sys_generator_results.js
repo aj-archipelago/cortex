@@ -341,7 +341,7 @@ Here are the information sources that were found:
                 clearTimeout(timeoutId);
             }
             
-            if (!args.stream) {
+            if (!args.voiceResponse) {
                 const referencedSources = extractReferencedSources(result);
                 searchResults = searchResults.length ? pruneSearchResults(searchResults, referencedSources) : [];
             }

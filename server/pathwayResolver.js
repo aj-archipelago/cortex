@@ -83,43 +83,23 @@ class PathwayResolver {
             if (requestProgress.progress === 1 && this.rootRequestId) {
                 delete requestProgress.progress;
             }
-            publishRequestProgress(requestProgress);
+            publishRequestProgress({...requestProgress, info: this.tool || ''});
         }
 
         try {
             responseData = await this.executePathway(args);
         }
         catch (error) {
-            if (!args.async) {
-                publishRequestProgress({
-                    requestId: this.rootRequestId || this.requestId,
-                    progress: 1,
-                    data: '[DONE]',
-                });
-            } else {
-                publishRequestProgress({
-                    requestId: this.rootRequestId || this.requestId,
-                    progress: 1,
-                    data: error.message || error.toString(),
-                });
-            }
+            publishRequestProgress({
+                requestId: this.rootRequestId || this.requestId,
+                progress: 1,
+                data: '',
+                info: 'ERROR: ' + error.message || error.toString()
+            });
         }
 
-        // If the response is a string, it's a regular long running response
-        if (args.async || typeof responseData === 'string') {
-            const { completedCount=1, totalCount=1 } = requestState[this.requestId];
-            requestState[this.requestId].data = responseData;
-            
-            // some models don't support progress updates
-            if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
-                await publishNestedRequestProgress({
-                        requestId: this.rootRequestId || this.requestId,
-                        progress: Math.min(completedCount,totalCount) / totalCount,
-                        data: JSON.stringify(responseData),
-                });
-            }
-        // If the response is an object, it's a streaming response
-        } else {
+        // If the response is a stream, handle it as streaming response
+        if (responseData && typeof responseData.on === 'function') {
             try {
                 const incomingMessage = responseData;
                 let streamEnded = false;
@@ -184,10 +164,24 @@ class PathwayResolver {
                 publishRequestProgress({
                     requestId: this.requestId,
                     progress: 1,
-                    data: '[DONE]',
+                    data: '',
+                    info: 'ERROR: Stream read failed'
                 });
             } else {
                 return;
+            }
+        } else {
+            const { completedCount = 1, totalCount = 1 } = requestState[this.requestId];
+            requestState[this.requestId].data = responseData;
+            
+            // some models don't support progress updates
+            if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
+                await publishNestedRequestProgress({
+                        requestId: this.rootRequestId || this.requestId,
+                        progress: Math.min(completedCount, totalCount) / totalCount,
+                        data: responseData,
+                        info: this.tool || ''
+                });
             }
         }
     }
@@ -197,7 +191,13 @@ class PathwayResolver {
             this.previousResult = mergeData.previousResult ? mergeData.previousResult : this.previousResult;
             this.warnings = [...this.warnings, ...(mergeData.warnings || [])];
             this.errors = [...this.errors, ...(mergeData.errors || [])];
-            this.tool = mergeData.tool || this.tool;
+            try {
+                const mergeDataTool = typeof mergeData.tool === 'string' ? JSON.parse(mergeData.tool) : mergeData.tool || {};
+                const thisTool = typeof this.tool === 'string' ? JSON.parse(this.tool) : this.tool || {};
+                this.tool = JSON.stringify({ ...thisTool, ...mergeDataTool });
+            } catch (error) {
+                logger.warn('Error merging pathway resolver tool objects: ' + error);
+            }
         }
     }
 
