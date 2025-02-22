@@ -215,9 +215,18 @@ export default {
 
             title = await fetchTitleResponsePromise;
 
+            pathwayResolver.tool = JSON.stringify({ 
+                hideFromModel: toolCallbackName ? true : false, 
+                toolCallbackName, 
+                title,
+                search: toolCallbackName === 'sys_generator_results' ? true : false,
+                coding: toolCallbackName === 'coding' ? true : false,
+                codeRequestId,
+                toolCallbackId
+            });
+
             if (toolCallbackMessage) {
                 if (args.skipCallbackMessage) {
-                    pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
                     return await callPathway('sys_entity_continue', { ...args, stream: false, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
                 }
 
@@ -225,20 +234,10 @@ export default {
                     if (!ackResponse) {
                         await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10, args.voiceResponse ? true : false);
                     }
-                    await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver);
-                    pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title }); 
+                    await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver); 
                     return;
                 }
                 
-                pathwayResolver.tool = JSON.stringify({ 
-                    hideFromModel: toolCallbackName ? true : false, 
-                    toolCallbackName, 
-                    title,
-                    search: toolCallbackName === 'sys_generator_results' ? true : false,
-                    coding: toolCallbackName === 'coding' ? true : false,
-                    codeRequestId,
-                    toolCallbackId
-                });
                 return toolCallbackMessage || "One moment please.";
             }
 
