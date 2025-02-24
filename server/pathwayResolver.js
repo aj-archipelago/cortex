@@ -179,7 +179,8 @@ class PathwayResolver {
                 await publishNestedRequestProgress({
                         requestId: this.rootRequestId || this.requestId,
                         progress: Math.min(completedCount, totalCount) / totalCount,
-                        data: responseData,
+                        // Clients expect these to be strings
+                        data: JSON.stringify(responseData),
                         info: this.tool || ''
                 });
             }
