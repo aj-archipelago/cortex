@@ -171,7 +171,7 @@ function validateProgressMessage(t, progress, requestId = null) {
   }
 }
 
-test('Request progress messages have string data and info fields', async (t) => {
+test.serial('Request progress messages have string data and info fields', async (t) => {
   // Execute an async pathway that will generate progress messages
   const response = await testServer.executeOperation({
     query: `
@@ -219,7 +219,7 @@ test('Request progress messages have string data and info fields', async (t) => 
   }
 });
 
-test('sys_entity_start streaming works correctly', async (t) => {
+test.serial('sys_entity_start streaming works correctly', async (t) => {
   // Execute sys_entity_start with streaming
   const response = await testServer.executeOperation({
     query: `
@@ -283,7 +283,7 @@ test('sys_entity_start streaming works correctly', async (t) => {
   }
 });
 
-test('Translate pathway handles chunked async processing correctly', async (t) => {
+test.serial('Translate pathway handles chunked async processing correctly', async (t) => {
   // Create a long text that will be split into chunks
   const longText = `In the heart of the bustling metropolis, where skyscrapers pierce the clouds and streets pulse with endless energy, 
     a story unfolds. It's a tale of innovation and perseverance, of dreams taking flight in the digital age. 
