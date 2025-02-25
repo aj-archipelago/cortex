@@ -48,7 +48,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             return value.map(msg => ({
                 ...msg,
                 content: Array.isArray(msg.content) ? 
-                    JSON.stringify(msg.content) : 
+                    msg.content.map(item => JSON.stringify(item)) : 
                     msg.content
             }));
         } else {
