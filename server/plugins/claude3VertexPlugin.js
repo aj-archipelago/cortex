@@ -6,6 +6,45 @@ async function convertContentItem(item, maxImageSize, plugin) {
   let imageUrl = "";
 
   try {
+
+    // Handle array of items
+    if (Array.isArray(item)) {
+      // Collect all text content first to combine them
+      let textContents = [];
+      let otherItems = [];
+
+      for (const i of item) {
+        if (typeof i === "string") {
+          textContents.push(i);
+        } else if (i.type === "text") {
+          textContents.push(i.text);
+        } else {
+          const convertedItem = await convertContentItem(
+            i,
+            maxImageSize,
+            plugin
+          );
+          if (convertedItem) {
+            if (Array.isArray(convertedItem)) {
+              otherItems.push(...convertedItem);
+            } else {
+              otherItems.push(convertedItem);
+            }
+          }
+        }
+      }
+
+      // Combine results
+      const results = [];
+      const combinedText = textContents.join("\n").trim();
+      if (combinedText) {
+        results.push({ type: "text", text: combinedText });
+      }
+      results.push(...otherItems);
+
+      return results;
+    }
+
     switch (typeof item) {
       case "string":
         return item ? { type: "text", text: item } : null;
@@ -214,23 +253,47 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     const claude3Messages = await Promise.all(
       finalMessages.map(async (message) => {
         const contentArray = Array.isArray(message.content) ? message.content : [message.content];
-        const claude3Content = await Promise.all(contentArray.map(async item => {
-          const convertedItem = await convertContentItem(item, this.getModelMaxImageSize(), this);
-          
-          // Track image count
-          if (convertedItem?.type === 'image') {
-            imageCount++;
-            if (imageCount > maxImages) {
-              logger.warn(`Maximum number of images (${maxImages}) exceeded - skipping additional images.`);
-              return null;
+        
+        // Process all content items first
+        const processedItems = await Promise.all(
+          contentArray.map(item => convertContentItem(item, this.getModelMaxImageSize(), this))
+        );
+
+        // Flatten and organize content
+        const textParts = [];
+        const otherItems = [];
+        
+        // Process each item or array of items
+        processedItems.flat().forEach(item => {
+          if (item) {
+            if (item.type === 'text') {
+              textParts.push(item.text);
+            } else if (item.type === 'image') {
+              imageCount++;
+              if (imageCount <= maxImages) {
+                otherItems.push(item);
+              } else {
+                logger.warn(`Maximum number of images (${maxImages}) exceeded - skipping additional images.`);
+              }
+            } else {
+              otherItems.push(item);
             }
           }
-          
-          return convertedItem;
-        }));
+        });
+
+        // Combine all text parts into a single item if there are any
+        const finalContent = [];
+        if (textParts.length > 0) {
+          finalContent.push({
+            type: 'text',
+            text: textParts.join('\n')
+          });
+        }
+        finalContent.push(...otherItems);
+
         return {
           role: message.role,
-          content: claude3Content.filter(Boolean),
+          content: finalContent
         };
       })
     );

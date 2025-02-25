@@ -212,3 +212,62 @@ test('convertMessagesToClaudeVertex user message with no content', async (t) => 
   t.deepEqual(output, { system: '', modifiedMessages: [] });
 });
 
+test('convertMessagesToClaudeVertex array content items', async (t) => {
+    const plugin = new Claude3VertexPlugin(pathway, model);
+    const messages = [{
+        role: 'user',
+        content: [
+            { type: 'text', text: 'First message' },
+            'Simple text',
+            { type: 'text', text: 'Third message' }
+        ]
+    }];
+
+    const output = await plugin.convertMessagesToClaudeVertex(messages);
+    t.deepEqual(output, {
+        system: '',
+        modifiedMessages: [{
+            role: 'user',
+            content: [{
+                type: 'text',
+                text: 'First message\nSimple text\nThird message'
+            }]
+        }]
+    });
+});
+
+test('convertMessagesToClaudeVertex mixed array content', async (t) => {
+    const plugin = new Claude3VertexPlugin(pathway, model);
+    const messages = [{
+        role: 'user',
+        content: [
+            { type: 'text', text: 'Text content' },
+            { 
+                type: 'image_url', 
+                image_url: 'https://static.toiimg.com/thumb/msid-102827471,width-1280,height-720,resizemode-4/102827471.jpg'
+            },
+            { type: 'text', text: 'More text' }
+        ]
+    }];
+
+    const output = await plugin.convertMessagesToClaudeVertex(messages);
+    
+    // Verify structure
+    t.is(output.modifiedMessages[0].role, 'user');
+    t.is(output.modifiedMessages[0].content.length, 2);
+    
+    // Verify text content is combined
+    t.deepEqual(output.modifiedMessages[0].content[0], {
+        type: 'text',
+        text: 'Text content\nMore text'
+    });
+    
+    // Verify image content
+    const imageContent = output.modifiedMessages[0].content[1];
+    t.is(imageContent.type, 'image');
+    t.is(imageContent.source.type, 'base64');
+    t.is(imageContent.source.media_type, 'image/jpeg');
+    t.true(typeof imageContent.source.data === 'string');
+    t.true(imageContent.source.data.length > 100);
+});
+
