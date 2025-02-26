@@ -212,3 +212,57 @@ test('convertMessagesToClaudeVertex user message with no content', async (t) => 
   t.deepEqual(output, { system: '', modifiedMessages: [] });
 });
 
+test('convertMessagesToClaudeVertex with multi-part content array', async (t) => {
+  const plugin = new Claude3VertexPlugin(pathway, model);
+  
+  // Test with multi-part content array
+  const multiPartContent = [
+    {
+      type: 'text', 
+      text: 'Hello world'
+    },
+    {
+      type: 'text', 
+      text: 'Hello2 world2'
+    },
+    {
+      type: 'image_url', 
+      image_url: 'https://static.toiimg.com/thumb/msid-102827471,width-1280,height-720,resizemode-4/102827471.jpg'
+    }
+  ];
+  
+  const messages = [
+    { role: 'system', content: 'System message' },
+    { role: 'user', content: multiPartContent }
+  ];
+  
+  const output = await plugin.convertMessagesToClaudeVertex(messages);
+  
+  // Verify system message is preserved
+  t.is(output.system, 'System message');
+  
+  // Verify the user message role is preserved
+  t.is(output.modifiedMessages[0].role, 'user');
+  
+  // Verify the content array has the correct number of items
+  // We expect 3 items: 2 text items and 1 image item
+  t.is(output.modifiedMessages[0].content.length, 3);
+  
+  // Verify the text content items
+  t.is(output.modifiedMessages[0].content[0].type, 'text');
+  t.is(output.modifiedMessages[0].content[0].text, 'Hello world');
+  
+  t.is(output.modifiedMessages[0].content[1].type, 'text');
+  t.is(output.modifiedMessages[0].content[1].text, 'Hello2 world2');
+  
+  // Verify the image content item
+  t.is(output.modifiedMessages[0].content[2].type, 'image');
+  t.is(output.modifiedMessages[0].content[2].source.type, 'base64');
+  t.is(output.modifiedMessages[0].content[2].source.media_type, 'image/jpeg');
+  
+  // Check if the base64 data looks reasonable
+  const base64Data = output.modifiedMessages[0].content[2].source.data;
+  const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+  t.true(base64Data.length > 100); // Check if the data is sufficiently long
+  t.true(base64Regex.test(base64Data)); // Check if the data matches the base64 regex
+});
