@@ -77,6 +77,13 @@ export default {
                 args.chatHistory = args.chatHistory.slice(-20);
             }
 
+            // We'll get an initial acknowledgment from the LLM instead of using a canned message
+            const ackResponse = await callPathway('sys_generator_ack', { ...args, stream: false });
+            if (ackResponse && ackResponse !== "none") {
+                await say(resolver.requestId, ackResponse, 100);
+                args.chatHistory.push({ role: 'assistant', content: ackResponse });
+            }
+
             // Asynchronously manage memory for this context
             if (args.aiMemorySelfModify) {
                 callPathway('sys_memory_manager', {  ...args, stream: false })    
@@ -234,6 +241,17 @@ async function executeToolStep({ args, resolver, toolFunction, toolMessage, styl
     try {
         logger.info(`[executeToolStep] Starting execution for tool: ${toolFunction}`);
         
+        // Stream the actual tool message for single-step operations
+        if (!args.skipCallbackMessage && args.agentStepCount === 0 && toolMessage) {
+            // Use the actual tool message from the LLM
+            const messageToStream = typeof toolMessage === 'string' ? 
+                toolMessage : 
+                (toolMessage?.message || `Using ${toolFunction}...`);
+                
+            await say(resolver.requestId, messageToStream, 100);
+            args.chatHistory.push({ role: 'assistant', content: messageToStream });
+        }
+        
         // We'll get the result first, then add both call and result together
         let result = null;
         
@@ -385,6 +403,29 @@ async function executeAgentToolStep({ args, resolver, toolFunction, toolMessage,
     
     try {
         logger.info(`[executeAgentToolStep] Starting tool execution for step ${args.agentStepCount}, tool: ${toolFunction}`);
+        
+        // Find the tool reason from the agent history
+        const toolStep = args.agentToolHistory.find(step => step.step === args.agentStepCount - 1);
+        
+        // Stream the actual tool message or reason to the user
+        let messageToStream;
+        
+        if (toolMessage && typeof toolMessage === 'string') {
+            // Use the tool message if it's a string
+            messageToStream = toolMessage;
+        } else if (toolMessage?.message) {
+            // Use the message property if available
+            messageToStream = toolMessage.message;
+        } else if (toolStep?.reason) {
+            // Use the reason from the tool history
+            messageToStream = `Step ${args.agentStepCount}: ${toolStep.reason}`;
+        } else {
+            // Fallback to a generic message with the tool name
+            messageToStream = `Step ${args.agentStepCount}: Using ${toolFunction} to continue working on your request...`;
+        }
+        
+        await say(resolver.requestId, messageToStream, 100);
+        args.chatHistory.push({ role: 'assistant', content: messageToStream });
         
         // We'll get the result first, then add both call and result together
         let result = null;
