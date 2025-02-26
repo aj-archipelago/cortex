@@ -73,12 +73,6 @@ const getTypedefs = (pathways, pathwayManager) => {
         cancelRequest(requestId: String!): Boolean
     }
 
-    ${getPathwayTypeDef('ExecuteWorkspace', 'String')}
-    
-    extend type Query {
-        executeWorkspace(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): ExecuteWorkspace
-    }
-
     type RequestSubscription {
         requestId: String
         progress: Float
@@ -116,21 +110,10 @@ const getResolvers = (config, pathways, pathwayManager) => {
 
     const pathwayManagerResolvers = pathwayManager?.getResolvers() || {};
 
-    const executeWorkspaceResolver = async (_, args, contextValue, info) => {
-        const { userId, pathwayName, ...pathwayArgs } = args;
-        const userPathway = await pathwayManager.getPathway(userId, pathwayName);
-        
-        contextValue.pathway = userPathway;
-        contextValue.config = config;
-        
-        const result = await userPathway.rootResolver(null, pathwayArgs, contextValue, info);
-        return result;
-    };
 
     const resolvers = {
         Query: {
             ...resolverFunctions,
-            executeWorkspace: executeWorkspaceResolver
         },
         Mutation: {
             'cancelRequest': cancelRequestResolver,
