@@ -1,26 +1,7 @@
 import test from 'ava';
-import serverFactory from '../index.js';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 import Claude3VertexPlugin from '../server/plugins/claude3VertexPlugin.js';
 import { mockPathwayResolverMessages } from './mocks.js';
 import { config } from '../config.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-let testServer;
-test.before(async () => {
-  const { server, startServer } = await serverFactory();
-  if (startServer) await startServer();
-  testServer = server;
-});
-
-test.after.always('cleanup', async () => {
-  if (testServer) {
-    await testServer.stop();
-  }
-});
 
 const { pathway, modelName, model } = mockPathwayResolverMessages;
 
