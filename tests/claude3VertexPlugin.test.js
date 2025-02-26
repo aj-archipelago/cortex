@@ -231,15 +231,11 @@ test('convertMessagesToClaudeVertex user message with no content', async (t) => 
   t.deepEqual(output, { system: '', modifiedMessages: [] });
 });
 
-test('content array handling in rest endpoint via API call', async (t) => {
-  // This test verifies the functionality in server/rest.js where array content is JSON stringified
-  // Specifically testing: content: Array.isArray(msg.content) ? msg.content.map(item => JSON.stringify(item)) : msg.content
+test('convertMessagesToClaudeVertex with multi-part content array', async (t) => {
+  const plugin = new Claude3VertexPlugin(pathway, model);
   
-  // Import axios for making HTTP requests
-  const axios = await import('axios');
-  
-  // Create a request with MultiMessage array content
-  const testContent = [
+  // Test with multi-part content array
+  const multiPartContent = [
     {
       type: 'text', 
       text: 'Hello world'
@@ -249,110 +245,43 @@ test('content array handling in rest endpoint via API call', async (t) => {
       text: 'Hello2 world2'
     },
     {
-      type: 'image', 
-      url: 'https://example.com/test.jpg'
+      type: 'image_url', 
+      image_url: 'https://static.toiimg.com/thumb/msid-102827471,width-1280,height-720,resizemode-4/102827471.jpg'
     }
   ];
   
-  try {
-    // First, check if the API server is running and get available models
-    let modelToUse = '*'; // Default fallback model
-    try {
-      const modelsResponse = await axios.default.get('http://localhost:4000/v1/models');
-      if (modelsResponse.data && modelsResponse.data.data && modelsResponse.data.data.length > 0) {
-        const models = modelsResponse.data.data.map(model => model.id);
-        
-        // Priority 1: Find sonnet with highest version (e.g., claude-3.7-sonnet)
-        const sonnetVersions = models
-          .filter(id => id.includes('-sonnet') && id.startsWith('claude-'))
-          .sort((a, b) => {
-            // Extract version numbers and compare
-            const versionA = a.match(/claude-(\d+\.\d+)-sonnet/);
-            const versionB = b.match(/claude-(\d+\.\d+)-sonnet/);
-            if (versionA && versionB) {
-              return parseFloat(versionB[1]) - parseFloat(versionA[1]); // Descending order
-            }
-            return 0;
-          });
-        
-        if (sonnetVersions.length > 0) {
-          modelToUse = sonnetVersions[0]; // Use highest version sonnet
-        } else {
-          // Priority 2: Any model ending with -sonnet
-          const anySonnet = models.find(id => id.endsWith('-sonnet'));
-          if (anySonnet) {
-            modelToUse = anySonnet;
-          } else {
-            // Priority 3: Any model starting with claude-
-            const anyClaude = models.find(id => id.startsWith('claude-'));
-            if (anyClaude) {
-              modelToUse = anyClaude;
-            } else {
-              // Fallback: Just use the first available model
-              modelToUse = models[0];
-            }
-          }
-        }
-        
-        t.log(`Using model: ${modelToUse}`);
-      }
-    } catch (modelError) {
-      t.log('Could not get available models, using default model');
-    }
-    
-    // Make a direct HTTP request to the REST API
-    const response = await axios.default.post('http://localhost:4000/v1/chat/completions', {
-      model: modelToUse,
-      messages: [
-        {
-          role: 'user',
-          content: testContent
-        }
-      ]
-    });
-
-    t.log('Response:', response.data.choices[0].message);
-
-    const message = response.data.choices[0].message;
-
-    //message should not have anything similar to:
-    //Execution failed for sys_claude_37_sonnet: HTTP error: 400 Bad Request
-    //HTTP error:
-    t.falsy(message.content.startsWith('HTTP error:'));
-    //400 Bad Request
-    t.falsy(message.content.startsWith('400 Bad Request'));
-    //Execution failed
-    t.falsy(message.content.startsWith('Execution failed'));
-    //Invalid JSON
-    t.falsy(message.content.startsWith('Invalid JSON'));
-
-    
-    // If the request succeeds, it means the array content was properly processed
-    // If the JSON.stringify was not applied correctly, the request would fail
-    t.truthy(response.data);
-    t.pass('REST API successfully processed array content');
-  } catch (error) {
-    // If there's a connection error (e.g., API not running), we'll skip this test
-    if (error.code === 'ECONNREFUSED') {
-      t.pass('Skipping test - REST API not available');
-    } else {
-      // Check if the error response contains useful information
-      if (error.response) {
-        // We got a response from the server, but with an error status
-        t.log('Server responded with:', error.response.data);
-        
-        // Skip the test if the server is running but no pathway is configured to handle the request
-        if (error.response.status === 404 && 
-            error.response.data.error && 
-            error.response.data.error.includes('not found')) {
-          t.pass('Skipping test - No suitable pathway configured for this API endpoint');
-        } else {
-          t.fail(`API request failed with status ${error.response.status}: ${error.response.statusText}`);
-        }
-      } else {
-        // No response received
-        t.fail(`API request failed: ${error.message}`);
-      }
-    }
-  }
+  const messages = [
+    { role: 'system', content: 'System message' },
+    { role: 'user', content: multiPartContent }
+  ];
+  
+  const output = await plugin.convertMessagesToClaudeVertex(messages);
+  
+  // Verify system message is preserved
+  t.is(output.system, 'System message');
+  
+  // Verify the user message role is preserved
+  t.is(output.modifiedMessages[0].role, 'user');
+  
+  // Verify the content array has the correct number of items
+  // We expect 3 items: 2 text items and 1 image item
+  t.is(output.modifiedMessages[0].content.length, 3);
+  
+  // Verify the text content items
+  t.is(output.modifiedMessages[0].content[0].type, 'text');
+  t.is(output.modifiedMessages[0].content[0].text, 'Hello world');
+  
+  t.is(output.modifiedMessages[0].content[1].type, 'text');
+  t.is(output.modifiedMessages[0].content[1].text, 'Hello2 world2');
+  
+  // Verify the image content item
+  t.is(output.modifiedMessages[0].content[2].type, 'image');
+  t.is(output.modifiedMessages[0].content[2].source.type, 'base64');
+  t.is(output.modifiedMessages[0].content[2].source.media_type, 'image/jpeg');
+  
+  // Check if the base64 data looks reasonable
+  const base64Data = output.modifiedMessages[0].content[2].source.data;
+  const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+  t.true(base64Data.length > 100); // Check if the data is sufficiently long
+  t.true(base64Regex.test(base64Data)); // Check if the data matches the base64 regex
 });
