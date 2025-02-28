@@ -2,7 +2,7 @@ import { parse, build } from "@aj-archipelago/subvibe";
 import logger from "../lib/logger.js";
 import { callPathway } from "../lib/pathwayTools.js";
 
-function splitIntoOverlappingChunks(captions, chunkSize = 20, overlap = 3) {
+export function splitIntoOverlappingChunks(captions, chunkSize = 20, overlap = 3) {
   const chunks = [];
   for (let i = 0; i < captions.length; i += (chunkSize - overlap)) {
     const end = Math.min(i + chunkSize, captions.length);
@@ -17,7 +17,7 @@ function splitIntoOverlappingChunks(captions, chunkSize = 20, overlap = 3) {
   return chunks;
 }
 
-function selectBestTranslation(translations, startIndex, endIndex) {
+export function selectBestTranslation(translations, startIndex, endIndex) {
   try {
     if (!translations || !Array.isArray(translations)) {
       logger.warn(`Invalid translations input: ${JSON.stringify(translations)}`);
@@ -61,7 +61,7 @@ function selectBestTranslation(translations, startIndex, endIndex) {
   }
 }
 
-async function translateChunk(chunk, args, maxRetries = 3) {
+export async function translateChunk(chunk, args, maxRetries = 3) {
   const chunkText = build(chunk.captions, { format: args.format, preserveIndexes: true });
   
   for (let attempt = 0; attempt < maxRetries; attempt++) {
