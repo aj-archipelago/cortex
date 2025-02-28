@@ -18,22 +18,47 @@ function splitIntoOverlappingChunks(captions, chunkSize = 20, overlap = 3) {
 }
 
 function selectBestTranslation(translations, startIndex, endIndex) {
-  // If we only have one translation for this caption, use it
-  if (translations.length === 1) return translations[0];
+  try {
+    if (!translations || !Array.isArray(translations)) {
+      logger.warn(`Invalid translations input: ${JSON.stringify(translations)}`);
+      return null;
+    }
+    
+    if (translations.length === 0) {
+      logger.warn(`No translations available for selection`);
+      return null;
+    }
+    
+    // If we only have one translation for this caption, use it
+    if (translations.length === 1) return translations[0];
 
-  // For multiple translations, prefer the one from the middle of its chunk
-  // This helps avoid edge effects in translation
-  return translations.reduce((best, current) => {
-    const currentDistance = Math.min(
-      Math.abs(current.chunkStart - startIndex),
-      Math.abs(current.chunkEnd - endIndex)
-    );
-    const bestDistance = Math.min(
-      Math.abs(best.chunkStart - startIndex),
-      Math.abs(best.chunkEnd - endIndex)
-    );
-    return currentDistance < bestDistance ? current : best;
-  });
+    // Use the first translation as a starting point
+    const first = translations[0];
+    
+    // For multiple translations, prefer the one whose identifier is closest to the middle
+    // of the requested range
+    const targetValue = (Number(startIndex) + Number(endIndex)) / 2;
+    
+    return translations.reduce((best, current) => {
+      try {
+        // Use identifier for comparison if available, otherwise use index
+        const currentValue = Number(current.identifier !== undefined ? current.identifier : current.index || 0);
+        const bestValue = Number(best.identifier !== undefined ? best.identifier : best.index || 0);
+        
+        const currentDistance = Math.abs(currentValue - targetValue);
+        const bestDistance = Math.abs(bestValue - targetValue);
+        
+        return currentDistance < bestDistance ? current : best;
+      } catch (err) {
+        logger.warn(`Error comparing translations: ${err.message}`);
+        return best; // Fallback to existing best on error
+      }
+    }, first);
+  } catch (err) {
+    logger.error(`Error in selectBestTranslation: ${err.message}`);
+    // Return the first translation if available, otherwise null
+    return translations && translations.length ? translations[0] : null;
+  }
 }
 
 async function translateChunk(chunk, args, maxRetries = 3) {
@@ -101,16 +126,16 @@ export default {
       // Create a map of caption index to all its translations
       const translationMap = new Map();
       translatedChunks.flat().forEach(caption => {
-        if (!translationMap.has(caption.index)) {
-          translationMap.set(caption.index, []);
+        if (!translationMap.has(caption.identifier)) {
+          translationMap.set(caption.identifier, []);
         }
-        translationMap.get(caption.index).push(caption);
+        translationMap.get(caption.identifier).push(caption);
       });
       
       // Select best translation for each caption
       const finalCaptions = captions.map(caption => {
-        const translations = translationMap.get(caption.index) || [caption];
-        const bestTranslation = selectBestTranslation(translations, caption.index, caption.index);
+        const translations = translationMap.get(caption.identifier) || [caption];
+        const bestTranslation = selectBestTranslation(translations, caption.identifier, caption.identifier);
         const text = bestTranslation?.text || caption?.text;
         return { ...caption, text };
       });
