@@ -107,7 +107,7 @@ export default {
   timeout: 3600,
   executePathway: async ({args}) => {
     try {
-      const { text, format = 'srt' } = args;
+      const { text, format = 'vtt' } = args;
       const parsed = parse(text, { format, preserveIndexes: true });
       const captions = parsed.cues;
   
@@ -126,16 +126,18 @@ export default {
       // Create a map of caption index to all its translations
       const translationMap = new Map();
       translatedChunks.flat().forEach(caption => {
-        if (!translationMap.has(caption.identifier)) {
-          translationMap.set(caption.identifier, []);
+        const identifier = caption.identifier || caption.index;
+        if (!translationMap.has(identifier)) {
+          translationMap.set(identifier, []);
         }
-        translationMap.get(caption.identifier).push(caption);
+        translationMap.get(identifier).push(caption);
       });
       
       // Select best translation for each caption
       const finalCaptions = captions.map(caption => {
-        const translations = translationMap.get(caption.identifier) || [caption];
-        const bestTranslation = selectBestTranslation(translations, caption.identifier, caption.identifier);
+        const identifier = caption.identifier || caption.index;
+        const translations = translationMap.get(identifier) || [caption];
+        const bestTranslation = selectBestTranslation(translations, identifier, identifier);
         const text = bestTranslation?.text || caption?.text;
         return { ...caption, text };
       });

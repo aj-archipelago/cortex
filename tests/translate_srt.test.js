@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import fs from 'fs';
 import path from 'path';
-import { SubtitleUtils } from '@aj-archipelago/subvibe';
+import { SubtitleUtils, parse } from '@aj-archipelago/subvibe';
 import { selectBestTranslation, splitIntoOverlappingChunks } from '../pathways/translate_subtitle.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -362,3 +362,196 @@ test("selectBestTranslation picks the best translation based on proximity to tar
       "Should handle undefined input gracefully"
     );
 });
+
+
+test("subtitle translation with translation coverage verification", async (t) => {
+    t.timeout(400000); // Long timeout for potentially large file
+    const text = fs.readFileSync(path.join(__dirname, "subchunk.srt"), "utf8");
+  
+    const response = await testServer.executeOperation({
+      query:
+        "query translate_subtitle($text: String!, $to: String, $format: String) { translate_subtitle(text: $text, to: $to, format: $format) { result } }",
+      variables: {
+        to: "Arabic",
+        text,
+        format: "srt",
+      },
+    });
+  
+    t.falsy(response.body?.singleResult?.errors);
+  
+    const result = response.body?.singleResult?.data?.translate_subtitle?.result;
+
+    t.log(`Result: ${result}`);
+
+    t.true(result?.length > text.length * 0.5);
+  
+    // Parse both original and translated subtitles
+    const originalSubs = parse(text, { format: "srt" });
+    const translatedSubs = parse(result, { format: "srt" });
+  
+    // Ensure we have the same number of cues/captions
+    t.is(
+      originalSubs.cues.length,
+      translatedSubs.cues.length,
+      "Should have same number of captions"
+    );
+  
+    // Check that all lines have been translated to Arabic
+    let untranslatedCount = 0;
+    let translatedCount = 0;
+    let nonArabicCount = 0;
+    let exactMatchCount = 0;
+
+    // Store all original texts to check for duplicates
+    const allOriginalTexts = originalSubs.cues.map(cue => cue.text.toLowerCase().trim());
+    
+    // Track translated texts to check for duplicates within translations
+    const translatedTextsSet = new Set();
+    const duplicateTranslations = new Map(); // Map to store duplicate counts
+  
+    // Regular expression to match Arabic characters (Unicode range for Arabic script)
+    const arabicRegex = /[\u0600-\u06FF]/;
+  
+    translatedSubs.cues.forEach((cue, index) => {
+      const originalText = originalSubs.cues[index].text;
+      const translatedText = cue.text;
+  
+      // Skip empty lines
+      if (!originalText.trim()) return;
+  
+      // Check if the text has been translated (different from original)
+      const isDifferent =
+        translatedText.toLowerCase().trim() !== originalText.toLowerCase().trim();
+      
+      // Check if it's an exact match with ANY original line (not just its own line)
+      const normalizedTranslated = translatedText.toLowerCase().trim();
+      const isExactMatchWithAny = allOriginalTexts.includes(normalizedTranslated);
+      
+      // Track duplicate translations
+      if (translatedTextsSet.has(normalizedTranslated)) {
+        if (duplicateTranslations.has(normalizedTranslated)) {
+          duplicateTranslations.set(
+            normalizedTranslated, 
+            duplicateTranslations.get(normalizedTranslated) + 1
+          );
+        } else {
+          duplicateTranslations.set(normalizedTranslated, 2); // 2 occurrences total
+        }
+      } else {
+        translatedTextsSet.add(normalizedTranslated);
+      }
+      
+      if (isExactMatchWithAny) {
+        exactMatchCount++;
+        console.log(
+          `Line ${index + 1} matches an original line: "${originalText}" => "${translatedText}"`
+        );
+      }
+  
+      // Check if it contains Arabic characters
+      const containsArabic = arabicRegex.test(translatedText);
+  
+      if (isDifferent && containsArabic) {
+        translatedCount++;
+      } else if (isDifferent && !containsArabic) {
+        nonArabicCount++;
+        console.log(
+          `Line ${
+            index + 1
+          } translated but not to Arabic: "${originalText}" => "${translatedText}"`
+        );
+      } else {
+        untranslatedCount++;
+        console.log(
+          `Line ${
+            index + 1
+          } not translated: "${originalText}" => "${translatedText}"`
+        );
+      }
+    });
+  
+    // Log translation statistics
+    const totalCaptions = originalSubs.cues.length;
+    console.log(
+      `Translation coverage: ${translatedCount}/${totalCaptions} (${(
+        (translatedCount / totalCaptions) *
+        100
+      ).toFixed(2)}%)`
+    );
+  
+    console.log(
+      `Lines with non-Arabic translation: ${nonArabicCount}/${totalCaptions} (${(
+        (nonArabicCount / totalCaptions) *
+        100
+      ).toFixed(2)}%)`
+    );
+    
+    console.log(
+      `Lines that exactly match some original line: ${exactMatchCount}/${totalCaptions} (${(
+        (exactMatchCount / totalCaptions) *
+        100
+      ).toFixed(2)}%)`
+    );
+    
+    // Log duplicate translation statistics
+    const duplicateCount = [...duplicateTranslations.values()].reduce((a, b) => a + b, 0) - duplicateTranslations.size;
+    console.log(
+      `Duplicate translations: ${duplicateCount}/${totalCaptions} (${(
+        (duplicateCount / totalCaptions) *
+        100
+      ).toFixed(2)}%)`
+    );
+    
+    // If there are many duplicates, log the most common ones for debugging
+    if (duplicateCount > totalCaptions * 0.05) { // More than 5% are duplicates
+      console.log("Most common duplicate translations:");
+      [...duplicateTranslations.entries()]
+        .sort((a, b) => b[1] - a[1]) // Sort by frequency, highest first
+        .slice(0, 5) // Top 5 duplicates
+        .forEach(([text, count]) => {
+          console.log(`"${text}" appears ${count} times`);
+        });
+    }
+  
+    // Ensure at least 95% of lines are translated to Arabic
+    const arabicTranslationCoverage = translatedCount / totalCaptions;
+    t.true(
+      arabicTranslationCoverage > 0.95,
+      `At least 95% of lines should be translated to Arabic (actual: ${(
+        arabicTranslationCoverage * 100
+      ).toFixed(2)}%)`
+    );
+    
+    // Ensure that no more than 5% of lines exactly match any original line
+    const exactMatchPercentage = exactMatchCount / totalCaptions;
+    t.true(
+      exactMatchPercentage < 0.05,
+      `No more than 5% of lines should match original text (actual: ${(
+        exactMatchPercentage * 100
+      ).toFixed(2)}%)`
+    );
+    
+    // Ensure that duplicate translations are limited
+    // For a file with distinct English inputs, we'd expect distinct Arabic outputs
+    // Allow some duplication for very simple phrases like "Yes" or "Thank you"
+    const duplicatePercentage = duplicateCount / totalCaptions;
+    t.true(
+      duplicatePercentage < 0.15, // Allow up to 15% duplicate translations
+      `No more than 15% of lines should be duplicate translations (actual: ${(
+        duplicatePercentage * 100
+      ).toFixed(2)}%)`
+    );
+  
+    // Check timestamps are preserved
+    const timestampPattern =
+      /\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/g;
+    const originalTimestamps = text.match(timestampPattern);
+    const translatedTimestamps = result.match(timestampPattern);
+  
+    t.deepEqual(
+      originalTimestamps,
+      translatedTimestamps,
+      "Timestamps should be preserved exactly"
+    );
+  });
