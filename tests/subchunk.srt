@@ -52,7 +52,7 @@ Perfect.
 
 14
 00:00:40,439 --> 00:00:44,759
-My first, well this is a project that is directed by Alya, my colleague.
+My first, well this is a project that is directed by, my colleague.
 
 15
 00:00:44,799 --> 00:00:47,799
@@ -92,19 +92,19 @@ So my first question for you is your age, your name, what part of Mexico are you
 
 24
 00:01:21,959 --> 00:01:28,959
-My name is Fernando, and I currently have three children.
+My name, and I currently have three children.
 
 25
 00:01:29,620 --> 00:01:34,620
-I'm 26 years old, and I'm from Mexico City.
+I'm years old, and I'm from.
 
 26
 00:01:34,620 --> 00:01:37,620
-What part of Mexico City?
+What part?
 
 27
 00:01:37,620 --> 00:01:40,620
-Well, from there, from Mexico City.
+Well, from there, from.
 
 28
 00:01:40,620 --> 00:01:41,620
@@ -112,11 +112,11 @@ Perfect.
 
 29
 00:01:41,620 --> 00:01:46,620
-I also come from Mexico City, so I would locate the area.
+I also come from, so I would locate the area.
 
 30
 00:01:46,620 --> 00:01:51,620
-My second question for you, just a second, because I'm reading what Alya sent me.
+My second question for you, just a second, because I'm reading what sent me.
 
 31
 00:01:51,620 --> 00:01:54,620
@@ -124,7 +124,7 @@ It would be, why did you decide to leave?
 
 32
 00:01:54,620 --> 00:01:58,620
-What was the situation that led you to make the decision to leave the United States?
+What was the situation that led you to make the decision to leave?
 
 33
 00:01:59,279 --> 00:02:05,279
@@ -196,31 +196,31 @@ And how was the transition when you got there?
 
 50
 00:03:19,259 --> 00:03:27,259
-Well, when we were at the border, we had to cross by swimming through the river,
+Well, by swimming through the river,
 
 51
 00:03:29,259 --> 00:03:34,259
-until we got to the side of here, the United States.
+until we got to the side of here.
 
 52
 00:03:36,259 --> 00:03:39,259
-And what was the route you took to get to the United States?
+And what was the route you took to get to the?
 
 53
 00:03:39,259 --> 00:03:41,259
-It took you 200 days.
+It took you days.
 
 54
 00:03:41,259 --> 00:03:43,259
-And what was the border like?
+And what was the like?
 
 55
 00:03:43,919 --> 00:03:49,919
-Well, I was at Nuevo Laredo,
+Well, I was at,
 
 56
 00:03:52,919 --> 00:03:59,919
-and I don't really remember how it was, because it was at night when I crossed the river.
+and I don't really remember how it was, because it was at night when I crossed.
 
 57
 00:04:01,919 --> 00:04:03,919
@@ -228,7 +228,7 @@ And did you go in a group?
 
 58
 00:04:04,919 --> 00:04:10,919
-Well, there were only four of us, but no one else was there.
+Well, there were only, but no one else was there.
 
 59
 00:04:11,580 --> 00:04:14,580
@@ -280,15 +280,15 @@ About ten minutes.
 
 71
 00:05:07,899 --> 00:05:13,899
-And the situation at the border with the authorities, were they present? How was it?
+And the situation at the border with, were they present? How was it?
 
 72
 00:05:14,899 --> 00:05:22,899
-Well, I don't really remember, because we just hid in the woods,
+Well, I don't really remember,
 
 73
 00:05:23,559 --> 00:05:28,559
-and then a car comes to pick us up, and we have to get in quickly,
+and then and we have to get in quickly,
 
 74
 00:05:29,559 --> 00:05:34,559
@@ -296,7 +296,7 @@ but we have to hide as best we can in the car.
 
 75
 00:05:35,559 --> 00:05:46,559
-And how dangerous was it to swim or cross the river?
+And how dangerous was it
 
 76
 00:05:47,559 --> 00:05:51,559
@@ -308,7 +308,7 @@ because you don't know the risks you can have, especially at night,
 
 78
 00:06:01,220 --> 00:06:06,220
-because when I crossed, the water was too cold,
+because the water was too cold,
 
 79
 00:06:07,220 --> 00:06:14,220
@@ -340,11 +340,11 @@ So you just have to see for yourself.
 
 86
 00:06:55,540 --> 00:06:59,540
-How long did your immigration process take?
+How long did your process take?
 
 87
 00:07:00,540 --> 00:07:03,540
-Or what is your current status to work in the United States?
+Or what is your current status?
 
 88
 00:07:04,540 --> 00:07:06,540
@@ -352,7 +352,7 @@ Well, I'm still illegally.
 
 89
 00:07:07,200 --> 00:07:12,200
-And how long do you think the immigration process lasted, or what did they tell you?
+And how long do you think the process lasted, or what did they tell you?
 
 90
 00:07:13,200 --> 00:07:19,200
@@ -364,7 +364,7 @@ and I haven't done anything legally.
 
 92
 00:07:27,200 --> 00:07:31,200
-And is your life in the United States what you expected it to be?
+And is your life what you expected it to be?
 
 93
 00:07:32,200 --> 00:07:34,200
@@ -392,7 +392,7 @@ and it's long hours of work.
 
 99
 00:08:03,519 --> 00:08:06,519
-What do you do in the United States?
+What do you do in?
 
 100
 00:08:07,519 --> 00:08:09,519
@@ -400,7 +400,7 @@ I paint houses.
 
 101
 00:08:10,519 --> 00:08:16,519
-And would you like at some point to make the decision to try to regularize your immigration status?
+And would you like at some point to make the decision to try to regularize your status?
 
 102
 00:08:17,519 --> 00:08:19,519
@@ -432,7 +432,7 @@ aquí en cada estado, pues puede ser más difícil.
 
 109
 00:08:46,480 --> 00:08:49,160
-Usted lleva ahorita ya seis años en Estados Unidos.
+Usted lleva ahorita ya seis años.
 
 110
 00:08:51,000 --> 00:08:52,000
@@ -476,7 +476,7 @@ Y a su familia no le gustaría en algún momento unirse
 
 120
 00:09:36,360 --> 00:09:38,559
-a Estados Unidos?
+a?
 
 121
 00:09:38,559 --> 00:09:43,720
@@ -488,7 +488,7 @@ Y eso es porque les gusta mucho México,
 
 123
 00:09:47,959 --> 00:09:50,519
-porque Estados Unidos suena muy difícil de momento.
+porque suena muy difícil de momento.
 
 124
 00:09:51,720 --> 00:09:54,919
@@ -500,7 +500,7 @@ venir acá, porque es costoso cruzar así legalmente.
 
 126
 00:10:05,680 --> 00:10:08,279
-Y la vida en los Estados Unidos es
+Y la vida en
 
 127
 00:10:08,279 --> 00:10:12,680
@@ -516,7 +516,7 @@ Me encanta tanto.
 
 130
 00:10:17,800 --> 00:10:20,760
-Dónde? Cómo se siente en los Estados Unidos?
+Dónde? Cómo se siente?
 
 131
 00:10:20,760 --> 00:10:24,040
@@ -552,7 +552,7 @@ Y desde que me vine para acá a este país no he regresado.
 
 139
 00:10:50,039 --> 00:10:53,399
-Y otra pregunta que Alia estaba haciendo aquí fue si nos pudiera describir
+Y otra pregunta que estaba haciendo aquí fue si nos pudiera describir
 
 140
 00:10:53,639 --> 00:10:56,960
@@ -624,7 +624,7 @@ Entonces fue México con una mochila, dos camisas, un desayuno ligero y fue todo
 
 157
 00:12:19,800 --> 00:12:24,880
-Y cuánto tiempo le tomó en Estados Unidos llegar y establecerse después de el
+Y cuánto tiempo le tomó en y establecerse después de el
 
 158
 00:12:24,880 --> 00:12:25,880
@@ -804,7 +804,7 @@ personas.
 
 202
 00:15:57,920 --> 00:16:01,000
-Tiene algo mi amiga, mi compañera, mi colega Alia,
+Tiene algo mi amiga, mi compañera, mi colega,
 
 203
 00:16:01,000 --> 00:16:05,720
@@ -836,7 +836,7 @@ y estaba sin nada.
 
 210
 00:16:23,679 --> 00:16:27,880
-Y cuando llega usted a Estados Unidos con que llega después de pasar por el río
+Y cuando llega usted a después de pasar por el río
 
 211
 00:16:27,880 --> 00:16:28,720
@@ -1064,7 +1064,7 @@ tienes que comprar un vehículo.
 
 267
 00:20:23,520 --> 00:20:27,399
-Entiendo. Y cómo es su día a día en los Estados Unidos de momento?
+Entiendo. Y cómo es su día a día de momento?
 
 268
 00:20:29,600 --> 00:20:32,960
@@ -1144,7 +1144,7 @@ Creo que por el momento es todo.
 
 287
 00:21:45,000 --> 00:21:48,440
-Creo que por el momento es todo, pero si llegara a surgir alguna otra duda,
+Creo que por el momento es todo, pero si a surgir alguna otra duda,
 
 288
 00:21:48,839 --> 00:21:50,239
@@ -1240,11 +1240,11 @@ Yes, so he says he prefers us to use another name.
 
 311
 00:22:52,760 --> 00:22:54,040
-And right now he's 26.
+And right now.
 
 312
 00:22:54,079 --> 00:22:56,959
-He's been in the U.S. for six years now, since 2019.
+He's been in the for six years now, since.
 
 313
 00:22:58,200 --> 00:23:00,399
@@ -1316,7 +1316,7 @@ Nos vemos. Muchas gracias.
 
 330
 00:23:33,839 --> 00:23:35,320
-Hasta luego. Bye, Alia.
+Hasta luego. Bye.
 
 331
 00:23:35,480 --> 00:23:36,480
@@ -1328,7 +1328,7 @@ Recording stopped.
 
 333
 00:23:41,559 --> 00:23:42,559
-Hey, Alia.
+Hey.
 
 334
 00:23:42,559 --> 00:23:43,559
@@ -1364,7 +1364,7 @@ But I asked many other things that maybe will help in the context of your
 
 342
 00:24:04,079 --> 00:24:06,519
-piece. Things like how is your life in the U.S.?
+piece. Things like how is your life
 
 343
 00:24:06,679 --> 00:24:08,640
@@ -1388,7 +1388,7 @@ Oh, gosh. Yeah.
 
 348
 00:24:18,320 --> 00:24:21,160
-And did you talk about what he does in the U.S. now?
+And did you talk about what he does
 
 349
 00:24:22,200 --> 00:24:23,720
@@ -1456,4 +1456,4 @@ Sorry, tell me, please go ahead. I'll ask.
 
 365
 00:25:00,000 --> 00:25:12,000
-Something interesting that he said as well was that it was dangerous, of course, on the side of the U.S. because of the border control and stuff when he was crossing, but it was equally difficult on the Mexican side because he's afraid of the U.S.
+Something interesting that he said as well was that it was dangerous
