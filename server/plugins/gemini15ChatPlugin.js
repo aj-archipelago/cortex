@@ -140,7 +140,7 @@ class Gemini15ChatPlugin extends ModelPlugin {
             dataToMerge = data.contents;
         } else if (data && data.candidates && Array.isArray(data.candidates)) {
             const { content, finishReason, safetyRatings } = data.candidates[0];
-            if (finishReason === 'STOP') {
+            if (finishReason === 'STOP' || finishReason === 'MAX_TOKENS') {
                 return content?.parts?.[0]?.text ?? '';
             } else {
                 const returnString = `Response was not completed.  Finish reason: ${finishReason}, Safety ratings: ${JSON.stringify(safetyRatings, null, 2)}`;
