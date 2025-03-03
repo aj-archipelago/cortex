@@ -143,8 +143,8 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                 if (data.error.code === 400 && data.error.message === 'Precondition check failed.') {
                     throw new Error('One or more of the included files is too large to process. Please try again with a smaller file.');
                 }
-            throw e;
             }
+            throw e;
         }
         return result; 
     }
