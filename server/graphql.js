@@ -85,6 +85,7 @@ const getTypedefs = (pathways, pathwayManager) => {
         status: String
         data: String
         info: String
+        error: String
     }
 
     type Subscription {

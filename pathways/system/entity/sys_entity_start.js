@@ -87,15 +87,21 @@ export default {
             args.model = pathwayResolver.modelName;
         }
 
-        // Stuff the memory context into the chat history
+        // Save a copy of the chat history before the memory context is added
         const chatHistoryBeforeMemory = [...args.chatHistory];
 
-        const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
-        if (memoryContext) {
-            const { toolCallId } = addToolCalls(args.chatHistory, "search memory for relevant information", "memory_lookup");
-            addToolResults(args.chatHistory, memoryContext, toolCallId);
+        // Add the memory context to the chat history if applicable
+        if (args.chatHistory.length > 1) {
+            const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
+            if (memoryContext) {
+                const lastMessage = args.chatHistory.length > 0 ? args.chatHistory.pop() : null;
+                const { toolCallId } = addToolCalls(args.chatHistory, "search memory for relevant information", "memory_lookup");
+                addToolResults(args.chatHistory, memoryContext, toolCallId);
+                args.chatHistory.push(lastMessage);
+            }
         }
         
+        // If we're using voice, get a quick response to say
         let ackResponse = null;
         if (args.voiceResponse) {
             ackResponse = await callPathway('sys_generator_ack', { ...args, stream: false });

@@ -94,8 +94,10 @@ class PathwayResolver {
                 requestId: this.rootRequestId || this.requestId,
                 progress: 1,
                 data: '',
-                info: 'ERROR: ' + error.message || error.toString()
+                info: '',
+                error: error.message || error.toString()
             });
+            return;
         }
 
         // If the response is a stream, handle it as streaming response
@@ -165,7 +167,8 @@ class PathwayResolver {
                     requestId: this.requestId,
                     progress: 1,
                     data: '',
-                    info: 'ERROR: Stream read failed'
+                    info: '',
+                    error: 'Stream read failed'
                 });
             } else {
                 return;
@@ -180,7 +183,7 @@ class PathwayResolver {
                         requestId: this.rootRequestId || this.requestId,
                         progress: Math.min(completedCount, totalCount) / totalCount,
                         // Clients expect these to be strings
-                        data: JSON.stringify(responseData),
+                        data: JSON.stringify(responseData || ''),
                         info: this.tool || ''
                 });
             }

@@ -121,8 +121,8 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
             const operationUrl = response.headers['operation-location'];
             return { translation: response.data, operationUrl };
         } catch (error) {
-            const errorText = error.response?.data || error.message;
-            throw new Error(`Failed to create translation: ${error.message}\nDetails: ${errorText}`);
+            const errorText = error.response?.data?.error?.innererror?.message || error.message;
+            throw new Error(`Failed to create translation: ${errorText}`);
         }
     }
 
@@ -151,8 +151,8 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
             });
             return response.data;
         } catch (error) {
-            const errorText = error.response?.data || error.message;
-            throw new Error(`Failed to get iteration status: ${error.message}\nDetails: ${errorText}`);
+            const errorText = error.response?.data?.error?.innererror?.message || error.message;
+            throw new Error(`Failed to get iteration status: ${errorText}`);
         }
     }
 
@@ -165,8 +165,8 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
             });
             return response.data;
         } catch (error) {
-            const errorText = error.response?.data || error.message;
-            throw new Error(`Failed to poll operation: ${error.message}\nDetails: ${errorText}`);
+            const errorText = error.response?.data?.error?.innererror?.message || error.message;
+            throw new Error(`Failed to poll operation: ${errorText}`);
         }
     }
 
@@ -360,8 +360,8 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
                 const output = await this.getTranslationOutput(translationId, iteration.id);
                 return JSON.stringify(output);
             } catch (error) {
-                const errorText = error.response?.data || error.message;
-                throw new Error(`Failed to create iteration: ${error.message}\nDetails: ${errorText}`);
+                const errorText = error.response?.data?.error?.innererror?.message || error.message;
+                throw new Error(`Failed to create iteration: ${errorText}`);
             }
         } catch (error) {
             logger.error(`Error in video translation: ${error.message}`);
