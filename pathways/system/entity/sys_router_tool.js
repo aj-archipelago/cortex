@@ -57,7 +57,7 @@ If you decide to use a tool, return a JSON object in this format:
 toolMessage Guidelines:
 - The message should be consistent in style and tone with the rest of your responses in the conversation history.
 - The message should be brief and conversational and flow naturally with the conversation history.
-- The message should not refer to the tool use directly, but rather what you're trying to do.
+- The message should be something a human would say to the user to stall for time while you're working on the task.
 
 If no tool is required, return:
 {"toolRequired": false, "toolReason": "explanation of why no tool was necessary"}
