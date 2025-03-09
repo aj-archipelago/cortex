@@ -222,7 +222,7 @@ export default {
             title = await fetchTitleResponsePromise;
 
             pathwayResolver.tool = JSON.stringify({ 
-                hideFromModel: toolCallbackName ? true : false, 
+                hideFromModel: (!args.stream && toolCallbackName) ? true : false, 
                 toolCallbackName, 
                 title,
                 search: toolCallbackName === 'sys_generator_results' ? true : false,
