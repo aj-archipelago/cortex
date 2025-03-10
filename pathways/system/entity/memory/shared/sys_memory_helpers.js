@@ -139,7 +139,7 @@ const addToolResults = (chatHistory, result, toolCallId) => {
     return { chatHistory, toolCallId };
 };
 
-const insertToolCallAndResults = (chatHistory, toolArgs, toolName, toolCallId = getUniqueId(), result = null) => {
+const insertToolCallAndResults = (chatHistory, toolArgs, toolName, result = null, toolCallId = getUniqueId()) => {
     const lastMessage = chatHistory.length > 0 ? chatHistory.pop() : null;
     addToolCalls(chatHistory, toolArgs, toolName, toolCallId);
     addToolResults(chatHistory, result, toolCallId);

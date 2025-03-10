@@ -97,7 +97,7 @@ export default {
                 insertToolCallAndResults(args.chatHistory, "search memory for relevant information", "memory_lookup", memoryContext);
             }
         }
-        
+      
         // If we're using voice, get a quick response to say
         let ackResponse = null;
         if (args.voiceResponse) {
