@@ -9,7 +9,7 @@ export default {
     height: 1024,
     aspectRatio: "custom",
     numberResults: 1,
-    safety_tolerance: 5,
+    safety_tolerance: 6,
     output_format: "webp",
     output_quality: 80,
     steps: 4,

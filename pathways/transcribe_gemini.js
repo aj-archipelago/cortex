@@ -5,7 +5,6 @@ import { Prompt } from "../server/prompt.js";
 
 const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
 
-// Function to properly detect YouTube URLs
 function isYoutubeUrl(url) {
     try {
         const urlObj = new URL(url);
@@ -22,6 +21,10 @@ function isYoutubeUrl(url) {
             // For embed URLs, verify they have a video ID in the path
             if (urlObj.pathname.startsWith("/embed/")) {
                 return urlObj.pathname.length > 7; // '/embed/' is 7 chars
+            }
+            // For shorts URLs, verify they have a video ID in the path
+            if (urlObj.pathname.startsWith("/shorts/")) {
+                return urlObj.pathname.length > 8; // '/shorts/' is 8 chars
             }
             return false;
         }
@@ -45,7 +48,7 @@ export default {
             "{{messages}}",
         ]}),
     ],
-    model: 'gemini-flash-20-vision',
+    model: 'gemini-pro-20-vision',
     inputParameters: {
         file: ``,
         language: ``,
@@ -96,7 +99,10 @@ export default {
         sendProgress(true);
         intervalId = setInterval(() => sendProgress(true), 3000);
 
-        const { file, responseFormat, wordTimestamped, maxLineWidth } = args;
+        const { file, wordTimestamped, maxLineWidth } = args;
+
+        const responseFormat = args.responseFormat || 'text';
+
         if(!file) {
             throw new Error("Please provide a file to transcribe.");
         }
@@ -129,9 +135,7 @@ export default {
             respectLimitsPrompt += `  These subtitles will be shown in a ${possiblePlacement} formatted video player.  Each subtitle line should not exceed ${maxLineWidth} characters to fit the player.`;
         }
 
-        function getMessages(file, format) {
-
-            const responseFormat = format !== 'text' ? 'VTT' : 'text';
+        function getMessages(file) {
             
             // Base system content that's always included
             let systemContent = `Instructions:
@@ -216,7 +220,7 @@ REMEMBER:
             const messages = [
                 {"role": "system", "content": systemContent},
                 {"role": "user", "content": [
-                    `{ type: 'text', text: 'Transcribe this file in ${responseFormat} format.${respectLimitsPrompt}' }`,
+                    `{ type: 'text', text: 'Transcribe this file in ${responseFormat} format.${respectLimitsPrompt} Output only the transcription, no other text or comments or formatting.' }`,
                     JSON.stringify({
                         type: 'image_url',
                         url: file,
@@ -266,7 +270,7 @@ REMEMBER:
         
         const result = await processChunksParallel(chunks, args);
         
-        if (['srt','vtt'].includes(responseFormat) || wordTimestamped) { // align subtitles for formats
+        if (['srt','vtt'].includes(responseFormat.toLowerCase()) || wordTimestamped) { // align subtitles for formats
             const offsets = chunks.map((chunk, index) => chunk?.offset || index * OFFSET_CHUNK);
             return alignSubtitles(result, responseFormat, offsets);
         }

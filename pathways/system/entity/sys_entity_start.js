@@ -5,7 +5,7 @@ import logger from  '../../../lib/logger.js';
 import { chatArgsHasImageUrl } from  '../../../lib/util.js';
 import { QueueServiceClient } from '@azure/storage-queue';
 import { config } from '../../../config.js';
-import { addToolCalls, addToolResults } from './memory/shared/sys_memory_helpers.js';
+import { insertToolCallAndResults } from './memory/shared/sys_memory_helpers.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
@@ -94,13 +94,10 @@ export default {
         if (args.chatHistory.length > 1) {
             const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
             if (memoryContext) {
-                const lastMessage = args.chatHistory.length > 0 ? args.chatHistory.pop() : null;
-                const { toolCallId } = addToolCalls(args.chatHistory, "search memory for relevant information", "memory_lookup");
-                addToolResults(args.chatHistory, memoryContext, toolCallId);
-                args.chatHistory.push(lastMessage);
+                insertToolCallAndResults(args.chatHistory, "search memory for relevant information", "memory_lookup", memoryContext);
             }
         }
-        
+      
         // If we're using voice, get a quick response to say
         let ackResponse = null;
         if (args.voiceResponse) {
@@ -222,7 +219,7 @@ export default {
             title = await fetchTitleResponsePromise;
 
             pathwayResolver.tool = JSON.stringify({ 
-                hideFromModel: toolCallbackName ? true : false, 
+                hideFromModel: (!args.stream && toolCallbackName) ? true : false, 
                 toolCallbackName, 
                 title,
                 search: toolCallbackName === 'sys_generator_results' ? true : false,
