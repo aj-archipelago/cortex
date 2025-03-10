@@ -3,7 +3,7 @@
 import { callPathway } from '../../../lib/pathwayTools.js';
 import { Prompt } from '../../../server/prompt.js';
 import logger from '../../../lib/logger.js';
-import { addToolCalls, addToolResults } from './memory/shared/sys_memory_helpers.js';
+import { insertToolCallAndResults } from './memory/shared/sys_memory_helpers.js';
 
 export default {
     prompt: [],
@@ -73,8 +73,7 @@ Instructions: As part of a conversation with the user, you have been asked to cr
 
             // add the tool_calls and tool_results to the chatHistory
             imageResults.forEach((imageResult, index) => {
-                const { toolCallId } = addToolCalls(chatHistory, imagePrompts[index], "generate_image");
-                addToolResults(chatHistory, imageResult, toolCallId, "generate_image");
+                insertToolCallAndResults(chatHistory, imagePrompts[index], "generate_image", imageResult);
             });
             
             const result = await runAllPrompts({ ...args });

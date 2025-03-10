@@ -139,6 +139,14 @@ const addToolResults = (chatHistory, result, toolCallId) => {
     return { chatHistory, toolCallId };
 };
 
+const insertToolCallAndResults = (chatHistory, toolArgs, toolName, toolCallId = getUniqueId(), result = null) => {
+    const lastMessage = chatHistory.length > 0 ? chatHistory.pop() : null;
+    addToolCalls(chatHistory, toolArgs, toolName, toolCallId);
+    addToolResults(chatHistory, result, toolCallId);
+    chatHistory.push(lastMessage);
+    return { chatHistory, toolCallId };
+};
+
 const modifyText = (text, modifications) => {
     let modifiedText = text || '';
   
@@ -225,4 +233,4 @@ const modifyText = (text, modifications) => {
     return modifiedText;
 };
 
-export { normalizeMemoryFormat, enforceTokenLimit, addToolCalls, addToolResults, modifyText };
+export { normalizeMemoryFormat, enforceTokenLimit, addToolCalls, addToolResults, modifyText, insertToolCallAndResults };
