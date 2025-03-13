@@ -134,7 +134,7 @@ Here are the information sources that were found:
 
             logger.debug(`Search helper response: ${helper}`);
             const parsedHelper = JSON.parse(helper);
-            const { searchAJA, searchAJE, searchWires, searchPersonal, searchBing, dateFilter, languageStr, titleOnly } = parsedHelper;
+            const { searchAJA, searchAJE, searchWires, searchTony, searchPersonal, searchBing, dateFilter, languageStr, titleOnly } = parsedHelper;
 
             // calculate whether we have room to do RAG in the current conversation context
             const baseSystemPrompt = pathwayResolver?.prompts[0]?.messages[0]?.content;
@@ -189,6 +189,10 @@ Here are the information sources that were found:
 
             if(searchWires && (allowAllSources || dataSources.includes('wires'))){
                 promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchWires), indexName: 'indexwires', stream: false }));
+            }
+
+            if(searchTony && (allowAllSources || dataSources.includes('tony'))){
+                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchTony), indexName: 'azureblob-index-tony', stream: false }));
             }
 
             const bingAvailable = !!config.getEnv()["AZURE_BING_KEY"];
