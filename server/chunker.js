@@ -19,10 +19,13 @@ const getFirstNToken = (text, maxTokenLen) => {
 }
 
 const getFirstNTokenSingle = (text, maxTokenLen) => {
+  if (maxTokenLen <= 0 || !text) {
+    return '';
+  }
+
   const encoded = encode(text);
   if (encoded.length > maxTokenLen) {
-      text = decode(encoded.slice(0, maxTokenLen + 1));
-      text = text.slice(0,text.search(/\s[^\s]*$/)); // skip potential partial word
+      text = decode(encoded.slice(0, maxTokenLen));
   }
   return text;
 }
@@ -30,6 +33,10 @@ const getFirstNTokenSingle = (text, maxTokenLen) => {
 function getFirstNTokenArray(content, tokensToKeep) {
   let totalTokens = 0;
   let result = [];
+
+  if (tokensToKeep <= 0 || !content || content.length === 0) {
+    return result;
+  }
 
   for (let i = content.length - 1; i >= 0; i--) {
       const message = content[i];
@@ -262,7 +269,20 @@ const semanticTruncate = (text, maxLength) => {
 
 const getSingleTokenChunks = (text) => {
   if (text === '') return [''];
-  return encode(text).map(token => decode([token]));
+  
+  const tokens = encode(text);
+  
+  // To maintain reversibility, we need to decode tokens in sequence
+  // Create an array of chunks where each position represents the text up to that token
+  const chunks = [];
+  for (let i = 0; i < tokens.length; i++) {
+    // Decode current token
+    const currentChunk = decode(tokens.slice(i, i+1));
+    // Add to result
+    chunks.push(currentChunk);
+  }
+  
+  return chunks;
 }
 
 export {

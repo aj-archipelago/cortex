@@ -12,7 +12,7 @@ class PalmCodeCompletionPlugin extends PalmCompletionPlugin {
     getRequestParameters(text, parameters, prompt, pathwayResolver) {
         const { modelPromptText, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
         // Define the model's max token length
-        const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
+        const modelTargetTokenLength = this.getModelMaxPromptTokens();
     
         const truncatedPrompt = this.truncatePromptIfNecessary(modelPromptText, tokenLength, this.getModelMaxTokenLength(), modelTargetTokenLength, pathwayResolver);
     

@@ -162,12 +162,18 @@ function validateProgressMessage(t, progress, requestId = null) {
   }
 
   // Validate info field if present and not an error
-  if (progress.info && !progress.info.startsWith('ERROR:')) {
+  if (progress.info) {
     t.true(typeof progress.info === 'string', 'Info field should be a string');
     t.notThrows(() => {
       const parsedInfo = JSON.parse(progress.info);
       t.true(typeof parsedInfo === 'object', 'Info should be valid JSON object');
     }, 'Info should be valid JSON');
+  }
+
+  // Validate error field if present
+  if (progress.error) {
+    t.true(typeof progress.error === 'string', 'Error field should be a string');
+    t.notThrows(() => JSON.parse(progress.error), 'Error should be valid JSON');
   }
 }
 

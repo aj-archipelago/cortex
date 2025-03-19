@@ -200,7 +200,7 @@ test('Unsupported mime type conversion', async (t) => {
     const pdfMessage = [
         { role: 'user', content: [
             { type: 'text', text: 'Can you analyze this PDF?' },
-            { type: 'image_url', image_url: { url: 'https://unec.edu.az/application/uploads/2014/12/pdf-sample.pdf' } }
+            { type: 'image_url', image_url: { url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' } }
         ]}
     ];
 

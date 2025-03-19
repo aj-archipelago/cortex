@@ -24,7 +24,7 @@ class LocalModelPlugin extends ModelPlugin {
 
     getRequestParameters(text, parameters, prompt) {
         let { modelPromptMessages, modelPromptText, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
-        const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
+        const modelTargetTokenLength = this.getModelMaxPromptTokens();
         
         if (modelPromptMessages) {
             const minMsg = [{ role: "system", content: "" }];

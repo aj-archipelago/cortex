@@ -71,6 +71,27 @@ test('getPromptTokenRatio', (t) => {
     t.is(modelPlugin.getPromptTokenRatio(), DEFAULT_PROMPT_TOKEN_RATIO, 'getPromptTokenRatio should return default prompt token ratio');
 });
 
+test('getModelMaxPromptTokens', (t) => {
+    const { modelPlugin } = t.context;
+    
+    // Default case - should use token ratio
+    t.is(
+        modelPlugin.getModelMaxPromptTokens(), 
+        Math.floor(DEFAULT_MAX_TOKENS * DEFAULT_PROMPT_TOKEN_RATIO), 
+        'Should return maxTokenLength * tokenRatio when maxReturnTokens is not defined'
+    );
+    
+    // When maxReturnTokens is defined
+    const returnTokens = 256;
+    modelPlugin.promptParameters.maxReturnTokens = returnTokens;
+    
+    t.is(
+        modelPlugin.getModelMaxPromptTokens(), 
+        DEFAULT_MAX_TOKENS - returnTokens, 
+        'Should return maxTokenLength - maxReturnTokens when maxReturnTokens is defined'
+    );
+});
+
 test('default parseResponse', (t) => {
     const { modelPlugin } = t.context;
     const multipleChoicesResponse = {

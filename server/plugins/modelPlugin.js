@@ -64,82 +64,122 @@ class ModelPlugin {
     }
 
     safeGetEncodedLength(data) {
-        if (data && data.length > 100000) {
-            return data.length * 3 / 16;
-        } else {
-            return encode(data).length;
-        }
+        return encode(data).length;
     }
 
     truncateMessagesToTargetLength(messages, targetTokenLength) {
-        // Calculate the token length of each message
-        const tokenLengths = messages.map((message) => ({
+        const truncationMarker = '[truncated]';
+        const truncationMarkerTokenLength = encode(truncationMarker).length;
+
+        // If no messages, return empty array
+        if (!messages || messages.length === 0 || !targetTokenLength) return [];
+
+        // Calculate token length for each message
+        const messagesWithTokens = messages.map((message, index) => ({
             message,
             tokenLength: this.safeGetEncodedLength(this.messagesToChatML([message], false)),
+            role: message.role || message.author,
+            originalIndex: index // Add original index for reliable ordering
         }));
-    
-        // Calculate the total token length of all messages
-        let totalTokenLength = tokenLengths.reduce(
-            (sum, { tokenLength }) => sum + tokenLength,
-            0
-        );
-    
-        // If we're already under the target token length, just bail
-        if (totalTokenLength <= targetTokenLength) return messages;
-    
-        // Remove and/or truncate messages until the target token length is reached
-        let index = 0;
-        while ((totalTokenLength > targetTokenLength) && (index < tokenLengths.length)) {
-            const message = tokenLengths[index].message;
 
-            // Skip system messages
-            if (message?.role === 'system') {
-                index++;
-                continue;
-            }
+        // Sort into our priority groups
+        const mostRecentMessage = messagesWithTokens[messagesWithTokens.length - 1];
+        const systemMessages = messagesWithTokens
+            .filter(item => item.role === 'system')
+            .reverse(); // Most recent first
+        const otherMessages = messagesWithTokens
+            .filter(item => item.role !== 'system' && item !== mostRecentMessage)
+            .reverse(); // Most recent first
 
-            const currentTokenLength = tokenLengths[index].tokenLength;
+        // Helper function to truncate a message
+        const truncateMessage = (item, remainingTokens, isRecent = false) => {
+            const emptyContentLength = encode(this.messagesToChatML([{ ...item.message, content: '' }], false)).length;
+            const tokensToKeep = remainingTokens - (emptyContentLength + truncationMarkerTokenLength);
             
-            if (totalTokenLength - currentTokenLength >= targetTokenLength) {
-                // Remove the message entirely if doing so won't go below the target token length
-                totalTokenLength -= currentTokenLength;
-                tokenLengths.splice(index, 1);
+            if (tokensToKeep > 0 && !Array.isArray(item.message?.content)) {
+                // Truncate the message
+                const truncatedContent = getFirstNToken(item.message?.content ?? item.message, tokensToKeep) + truncationMarker;
+                const truncatedMessage = { ...item.message, content: truncatedContent };
+                const truncatedTokenLength = this.safeGetEncodedLength(this.messagesToChatML([truncatedMessage], false));
+                
+                if (isRecent) {
+                    logger.warn(`Most recent message truncated to fit token limit: ${truncatedContent.substring(0, 50)}...`);
+                }
+                
+                return {
+                    message: truncatedMessage,
+                    tokenLength: truncatedTokenLength,
+                    originalIndex: item.originalIndex
+                };
+            } else if (isRecent) {
+                // For the most recent message, use placeholder if can't truncate
+                logger.warn(`Most recent message too large to fit in token limit even after truncation. Using empty message.`);
+                const emptyMessage = { ...item.message, content: '[Content too large to fit in context window]' };
+                const emptyMessageTokenLength = this.safeGetEncodedLength(this.messagesToChatML([emptyMessage], false));
+                
+                return {
+                    message: emptyMessage,
+                    tokenLength: emptyMessageTokenLength,
+                    originalIndex: item.originalIndex
+                };
+            }
+            
+            return null;
+        };
+
+        // Start with the most recent message, truncate if needed
+        let resultMessages = [];
+        let currentTokenLength = 0;
+        
+        // Process most recent message first - truncate if too large
+        if (mostRecentMessage.tokenLength <= targetTokenLength) {
+            // Most recent message fits completely
+            resultMessages.push(mostRecentMessage);
+            currentTokenLength = mostRecentMessage.tokenLength;
+        } else {
+            // Need to truncate most recent message
+            const truncated = truncateMessage(mostRecentMessage, targetTokenLength, true);
+            if (truncated) {
+                resultMessages.push(truncated);
+                currentTokenLength = truncated.tokenLength;
+            }
+        }
+        
+        // Add system messages
+        for (const item of systemMessages) {
+            if (currentTokenLength + item.tokenLength <= targetTokenLength) {
+                resultMessages.push(item);
+                currentTokenLength += item.tokenLength;
             } else {
-                // Truncate the message to fit the remaining target token length
-                const emptyContentLength = encode(this.messagesToChatML([{ ...message, content: '' }], false)).length;
-                const otherMessageTokens = totalTokenLength - currentTokenLength;
-                const tokensToKeep = targetTokenLength - (otherMessageTokens + emptyContentLength);
-
-                if (tokensToKeep <= 0 || Array.isArray(message?.content)) {  
-                    // If the message needs to be empty to make the target, remove it entirely
-                    totalTokenLength -= currentTokenLength;
-                    tokenLengths.splice(index, 1);
-                    if(tokenLengths.length == 0){
-                        throw new Error(`Unable to process your request as your single message content is too long. Please try again with a shorter message.`);
-                    }
+                logger.warn(`System message too large to fit in token limit. Skipping: ${item.message.content?.substring(0, 50)}...`);
+                break;
+            }
+        }
+        
+        // Add other messages from most recent to oldest until we hit the token limit
+        for (const item of otherMessages) {
+            if (currentTokenLength + item.tokenLength <= targetTokenLength) {
+                // We can add the whole message
+                resultMessages.push(item);
+                currentTokenLength += item.tokenLength;
+            } else {
+                // Try to add a truncated version
+                const truncated = truncateMessage(item, targetTokenLength - currentTokenLength);
+                if (truncated) {
+                    resultMessages.push(truncated);
+                    // We've reached the limit
+                    break;
                 } else {
-                    // Otherwise, update the message and token length
-                    const truncatedContent = getFirstNToken(message?.content ?? message, tokensToKeep);
-                    const truncatedMessage = { ...message, content: truncatedContent };
-
-                    tokenLengths[index] = {
-                        message: truncatedMessage,
-                        tokenLength: this.safeGetEncodedLength(this.messagesToChatML([ truncatedMessage ], false))
-                    }
-
-                    // calculate the length again to keep us honest
-                    totalTokenLength = tokenLengths.reduce(
-                        (sum, { tokenLength }) => sum + tokenLength,
-                        0
-                    );
-
-                    index++;
+                    // Can't fit any more messages
+                    break;
                 }
             }
         }
-    
-        // Return the modified messages array
-        return tokenLengths.map(({ message }) => message);
+        
+        // Return the messages in original chronological order using the originalIndex
+        return resultMessages
+            .sort((a, b) => a.originalIndex - b.originalIndex)
+            .map(item => item.message);
     }
     
     //convert a messages array to a simple chatML format
@@ -171,7 +211,16 @@ class ModelPlugin {
 
         const combinedParameters = mergeParameters(this.promptParameters, parameters);
         const modelPrompt = this.getModelPrompt(prompt, parameters);
-        const modelPromptText = modelPrompt.prompt ? HandleBars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+        let modelPromptText = '';
+        
+        try {
+            modelPromptText = modelPrompt.prompt ? HandleBars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+        } catch (error) {
+            // If compilation fails, log the error and use the original prompt
+            logger.warn(`Handlebars compilation failed in getCompiledPrompt: ${error.message}. Using original text.`);
+            modelPromptText = modelPrompt.prompt || '';
+        }
+        
         const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
         const modelPromptMessagesML = this.messagesToChatML(modelPromptMessages);
 
@@ -184,6 +233,16 @@ class ModelPlugin {
 
     getModelMaxTokenLength() {
         return (this.promptParameters.maxTokenLength ?? this.model.maxTokenLength ?? DEFAULT_MAX_TOKENS);
+    }
+
+    getModelMaxPromptTokens() {
+        const hasMaxReturnTokens = this.promptParameters.maxReturnTokens !== undefined || this.model.maxReturnTokens !== undefined;
+        
+        const maxPromptTokens = hasMaxReturnTokens
+            ? this.getModelMaxTokenLength() - this.getModelMaxReturnTokens()
+            : Math.floor(this.getModelMaxTokenLength() * this.getPromptTokenRatio());
+        
+        return maxPromptTokens;
     }
 
     getModelMaxReturnTokens() {
@@ -211,11 +270,17 @@ class ModelPlugin {
         // First run handlebars compile on the pathway messages
         const compiledMessages = modelPrompt.messages.map((message) => {
             if (message.content && typeof message.content === 'string') {
-                const compileText = HandleBars.compile(message.content);
-                return {
-                    ...message,
-                    content: compileText({ ...combinedParameters, text }),
-                };
+                try {
+                    const compileText = HandleBars.compile(message.content);
+                    return {
+                        ...message,
+                        content: compileText({ ...combinedParameters, text }),
+                    };
+                } catch (error) {
+                    // If compilation fails, log the error and return the original content
+                    logger.warn(`Handlebars compilation failed: ${error.message}. Using original text.`);
+                    return message;
+                }
             } else {
                 return message;
             }
@@ -224,12 +289,18 @@ class ModelPlugin {
         // Next add in any parameters that are referenced by name in the array
         const expandedMessages = compiledMessages.flatMap((message) => {
             if (typeof message === 'string') {
-                const match = message.match(/{{(.+?)}}/);
-                const placeholder = match ? match[1] : null;
-                if (placeholder === null) {
+                try {
+                    const match = message.match(/{{(.+?)}}/);
+                    const placeholder = match ? match[1] : null;
+                    if (placeholder === null) {
+                        return message;
+                    } else {
+                        return combinedParameters[placeholder] || [];
+                    }
+                } catch (error) {
+                    // If there's an error processing the string, return it as is
+                    logger.warn(`Error processing message placeholder: ${error.message}. Using original text.`);
                     return message;
-                } else {
-                    return combinedParameters[placeholder] || [];
                 }
             } else {
                 return [message];

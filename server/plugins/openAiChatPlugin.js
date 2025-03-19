@@ -48,7 +48,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         const { stream } = parameters;
     
         // Define the model's max token length
-        const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
+        const modelTargetTokenLength = this.getModelMaxPromptTokens();
     
         let requestMessages = modelPromptMessages || [{ "role": "user", "content": modelPromptText }];
         

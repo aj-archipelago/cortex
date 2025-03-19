@@ -241,12 +241,11 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     };
   }
   
-  async getRequestParameters(text, parameters, prompt, cortexRequest) {
+  async getRequestParameters(text, parameters, prompt) {
     const requestParameters = await super.getRequestParameters(
       text,
       parameters,
-      prompt,
-      cortexRequest
+      prompt
     );
 
     const { system, modifiedMessages } =

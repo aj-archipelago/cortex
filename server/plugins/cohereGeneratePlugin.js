@@ -11,7 +11,7 @@ class CohereGeneratePlugin extends ModelPlugin {
         let { modelPromptText, tokenLength } = this.getCompiledPrompt(text, parameters, prompt);
 
         // Define the model's max token length
-        const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
+        const modelTargetTokenLength = this.getModelMaxPromptTokens();
     
         // Check if the token length exceeds the model's max token length
         if (tokenLength > modelTargetTokenLength) {
