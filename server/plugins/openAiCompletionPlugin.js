@@ -26,7 +26,7 @@ class OpenAICompletionPlugin extends ModelPlugin {
         const { stream } = parameters;
         let modelPromptMessagesML = '';
         // Define the model's max token length
-        const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
+        const modelTargetTokenLength = this.getModelMaxPromptTokens();
         let requestParameters = {};
     
         if (modelPromptMessages) {

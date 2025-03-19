@@ -2,6 +2,7 @@ import test from 'ava';
 import Claude3VertexPlugin from '../server/plugins/claude3VertexPlugin.js';
 import { mockPathwayResolverMessages } from './mocks.js';
 import { config } from '../config.js';
+import { encode } from '../lib/encodeCache.js';
 
 const { pathway, modelName, model } = mockPathwayResolverMessages;
 
@@ -11,13 +12,15 @@ test('constructor', (t) => {
     t.is(plugin.pathwayPrompt, mockPathwayResolverMessages.pathway.prompt);
 });
 
+// Note: The large message handling tests have been moved to tokenHandlingTests.test.js
+
 test('getRequestParameters', async (t) => {
     const plugin = new Claude3VertexPlugin(pathway, model);
     const text = 'Help me';
     const parameters = { name: 'John', age: 30, stream: false };
     const prompt = mockPathwayResolverMessages.pathway.prompt;
 
-    const result = await plugin.getRequestParameters(text, parameters, prompt, { messages: [] });
+    const result = await plugin.getRequestParameters(text, parameters, prompt);
     t.deepEqual(result, {
         system: '',
         messages: [
@@ -199,7 +202,7 @@ test('convertMessagesToClaudeVertex system message with user message', async (t)
 test('convertMessagesToClaudeVertex user message with unsupported image type', async (t) => {
   const plugin = new Claude3VertexPlugin(pathway, model);
   // Test with unsupported image type
-  const messages = [{ role: 'user', content: { type: 'image_url', image_url: 'https://unec.edu.az/application/uploads/2014/12/pdf-sample.pdf' } }];
+  const messages = [{ role: 'user', content: { type: 'image_url', image_url: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf' } }];
   const output = await plugin.convertMessagesToClaudeVertex(messages);
   t.deepEqual(output, { system: '', modifiedMessages: [{role: 'user', content: [] }] });
 });

@@ -364,7 +364,7 @@ class PathwayResolver {
     getChunkMaxTokenLength() {
         // Skip expensive calculations if not using input chunking
         if (!this.useInputChunking) {
-            return this.modelExecutor.plugin.getModelMaxTokenLength();
+            return this.modelExecutor.plugin.getModelMaxPromptTokens();
         }
 
         // find the longest prompt
@@ -373,10 +373,7 @@ class PathwayResolver {
         // find out if any prompts use both text input and previous result
         const hasBothProperties = this.prompts.some(prompt => prompt.usesTextInput && prompt.usesPreviousResult);
         
-        // the token ratio is the ratio of the total prompt to the result text - both have to be included
-        // in computing the max token length
-        const promptRatio = this.modelExecutor.plugin.getPromptTokenRatio();
-        let chunkMaxTokenLength = promptRatio * this.modelExecutor.plugin.getModelMaxTokenLength() - maxPromptTokenLength - 1;
+        let chunkMaxTokenLength = this.modelExecutor.plugin.getModelMaxPromptTokens() - maxPromptTokenLength - 1;
         
         // if we have to deal with prompts that have both text input
         // and previous result, we need to split the maxChunkToken in half
