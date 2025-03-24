@@ -70,6 +70,123 @@ class ModelPlugin {
     truncateMessagesToTargetLength(messages, targetTokenLength = null, maxMessageTokenLength = Infinity) {
         const truncationMarker = '[...]';
         const truncationMarkerTokenLength = encode(truncationMarker).length;
+        const messageOverhead = 4; // Per-message overhead tokens
+        const conversationOverhead = 3; // Conversation formatting overhead
+
+        // Helper function to truncate text content
+        const truncateTextContent = (text, maxTokens) => {
+            if (this.safeGetEncodedLength(text) <= maxTokens) return text;
+            return getFirstNToken(text, maxTokens - truncationMarkerTokenLength) + truncationMarker;
+        };
+
+        // Helper function to truncate multimodal content
+        const truncateMultimodalContent = (content, maxTokens) => {
+            const newContent = [];
+            let contentTokensUsed = 0;
+            let truncationAdded = false;
+            
+            for (let item of content) {
+                // Convert string items to text objects
+                if (typeof item === 'string') {
+                    item = { type: 'text', text: item };
+                }
+
+                // Handle text items
+                if (item.type === 'text') {
+                    if (contentTokensUsed < maxTokens) {
+                        const remainingTokens = maxTokens - contentTokensUsed;
+                        
+                        if (this.safeGetEncodedLength(item.text) <= remainingTokens) {
+                            // Text fits completely
+                            newContent.push(item);
+                            contentTokensUsed += this.safeGetEncodedLength(item.text);
+                        } else {
+                            // Truncate text
+                            const truncatedText = getFirstNToken(item.text, remainingTokens);
+                            newContent.push({ type: 'text', text: truncatedText + truncationMarker });
+                            contentTokensUsed += this.safeGetEncodedLength(truncatedText) + truncationMarkerTokenLength;
+                            truncationAdded = true;
+                            break;
+                        }
+                    }
+                } 
+                // Handle image items - prioritize them but account for their token usage
+                else if (item.type === 'image_url') {
+                    const imageTokens = 100; // Estimated token count for images
+                    if (contentTokensUsed + imageTokens <= maxTokens) {
+                        newContent.push(item);
+                        contentTokensUsed += imageTokens;
+                    }
+                }
+                // Other non-text content
+                else {
+                    newContent.push(item);
+                }
+            }
+            
+            // Add truncation marker if needed and not already added
+            if (content.length > newContent.length && !truncationAdded) {
+                newContent.push({ type: 'text', text: truncationMarker });
+                contentTokensUsed += truncationMarkerTokenLength;
+            }
+            
+            return { content: newContent, tokensUsed: contentTokensUsed };
+        };
+
+        // Helper function to truncate any message content
+        const truncateMessageContent = (message, availableTokens, maxPerMessageTokens) => {
+            // Calculate max content tokens (minimum of available tokens or max per message)
+            const maxContentTokens = Math.min(
+                availableTokens,
+                maxPerMessageTokens - message.roleTokens - messageOverhead
+            );
+            
+            const messageToAdd = { ...message };
+            delete messageToAdd.tokenLength;
+            delete messageToAdd.roleTokens;
+            delete messageToAdd.contentTokens;
+            // Keep originalIndex for sorting later
+            
+            let contentTokensUsed = 0;
+            
+            // Handle extreme constraints (zero or negative token availability)
+            if (maxContentTokens <= 0) {
+                // For extreme constraints, just add truncation marker or empty content
+                if (typeof message.content === 'string') {
+                    messageToAdd.content = truncationMarker;
+                    contentTokensUsed = truncationMarkerTokenLength;
+                } else if (Array.isArray(message.content)) {
+                    messageToAdd.content = [{ type: 'text', text: truncationMarker }];
+                    contentTokensUsed = truncationMarkerTokenLength;
+                }
+                
+                const totalTokensUsed = message.roleTokens + contentTokensUsed + messageOverhead;
+                return { message: messageToAdd, tokensUsed: totalTokensUsed };
+            }
+            
+            // Truncate text content
+            if (typeof message.content === 'string') {
+                // Leave room for truncation marker if needed
+                const contentSpace = Math.max(0, maxContentTokens);
+                messageToAdd.content = truncateTextContent(message.content, contentSpace);
+                contentTokensUsed = this.safeGetEncodedLength(messageToAdd.content);
+            } 
+            // Handle multimodal content
+            else if (Array.isArray(message.content)) {
+                const result = truncateMultimodalContent(message.content, maxContentTokens);
+                messageToAdd.content = result.content;
+                contentTokensUsed = result.tokensUsed;
+                
+                // Skip message if no content after truncation
+                if (result.content.length === 0) {
+                    messageToAdd.content = [{ type: 'text', text: truncationMarker }];
+                    contentTokensUsed = truncationMarkerTokenLength;
+                }
+            }
+            
+            const totalTokensUsed = message.roleTokens + contentTokensUsed + messageOverhead;
+            return { message: messageToAdd, tokensUsed: totalTokensUsed };
+        };
 
         // If no messages, return empty array
         if (!messages || messages.length === 0) return [];
@@ -81,27 +198,22 @@ class ModelPlugin {
         
         // First check if all messages already fit within the target length
         const initialTokenCount = this.countMessagesTokens(messages);
-        if (initialTokenCount <= targetTokenLength && maxMessageTokenLength == Infinity) {
+        if (initialTokenCount <= targetTokenLength && maxMessageTokenLength === Infinity) {
             return messages;
         }
 
-        // Calculate safety margin as a percentage of target length with a minimum value
-        // Scale down the percentage for small targets
+        // Calculate safety margin
         const safetyMarginPercent = targetTokenLength > 1000 ? 0.05 : 0.02; // 5% or 2% for small targets
         const safetyMarginMinimum = Math.min(20, Math.floor(targetTokenLength * 0.01)); // At most 1% for minimum
         const safetyMargin = Math.max(safetyMarginMinimum, Math.round(targetTokenLength * safetyMarginPercent));
         
-        // Adjust targetTokenLength to account for conversation formatting overhead (3 tokens)
-        const conversationOverhead = 3;
+        // Adjust targetTokenLength to account for overheads and safety margin
         const effectiveTargetLength = Math.max(0, targetTokenLength - conversationOverhead - safetyMargin);
 
         // Calculate token lengths for each message and track original index
         const messagesWithTokens = messages.map((message, index) => {
             // Count tokens for the role/author
             const roleTokens = this.safeGetEncodedLength(message.role || message.author || "");
-
-            // Add per-message overhead (4 tokens)
-            const messageOverhead = 4;
 
             // Count tokens for content
             const tokenLength = this.countMessagesTokens([message]);
@@ -133,126 +245,27 @@ class ModelPlugin {
         let usedTokens = 0;
         const result = [];
 
-        // Single pass: process messages in priority order
+        // Process messages in priority order
         for (const message of prioritizedMessages) {
             // Calculate how many tokens we have available
             const remainingTokens = effectiveTargetLength - usedTokens;
             
             // If we have very few tokens left, skip this message
-            // For very small messages, we need to be less strict
             const minimumUsableTokens = 10; 
             if (remainingTokens < minimumUsableTokens) break;
             
-            // Create a copy of the message to modify, but keep the originalIndex
-            let messageToAdd = { ...message };
-            delete messageToAdd.tokenLength;
-            delete messageToAdd.roleTokens;
-            delete messageToAdd.contentTokens;
-            // Keep originalIndex for sorting later
+            const { message: truncatedMessage, tokensUsed } = truncateMessageContent(
+                message, 
+                remainingTokens, 
+                maxMessageTokenLength
+            );
             
-            const roleTokens = message.roleTokens;
-            const messageOverhead = 4;
-            // Calculate available tokens for content
-            const availableContentTokens = remainingTokens - roleTokens - messageOverhead;
-            
-            // Skip if we can't even fit the role + minimum content
-            if (availableContentTokens <= 0) continue;
-            
-            // Determine if we need to truncate the content
-            const needsTruncation = message.contentTokens > availableContentTokens 
-                               || message.contentTokens > (maxMessageTokenLength - roleTokens - messageOverhead);
-            
-            if (needsTruncation) {
-                // Maximum content tokens (smallest of available tokens or max per message)
-                const maxContentTokens = Math.min(
-                    availableContentTokens,
-                    maxMessageTokenLength - roleTokens - messageOverhead
-                );
-                
-                // Truncate text content
-                if (typeof message.content === 'string') {
-                    // Calculate space for content (leave room for truncation marker if needed)
-                    const contentSpace = Math.max(truncationMarkerTokenLength, maxContentTokens - truncationMarkerTokenLength);
-                    const truncatedContent = contentSpace > truncationMarkerTokenLength ? getFirstNToken(message.content, contentSpace) : "";
-                    
-                    // Only add truncation marker if we actually truncated
-                    if (truncatedContent.length < message.content.length) {
-                        messageToAdd.content = truncatedContent + truncationMarker;
-                    } else {
-                        messageToAdd.content = truncatedContent;
-                    }
-                    
-                    const updatedContentTokens = this.safeGetEncodedLength(messageToAdd.content);
-                    usedTokens += roleTokens + updatedContentTokens + messageOverhead;
-                } 
-                // Handle multimodal content
-                else if (Array.isArray(message.content)) {
-                    const newContent = [];
-                    let contentTokensUsed = 0;
-                    const contentLimit = maxContentTokens - truncationMarkerTokenLength;
-                    let truncationAdded = false;
-                    
-                    for (let item of message.content) {
-                        // items might be strings or objects
-                        if (typeof item === 'string') {
-                            item = { type: 'text', text: item };
-                        }
-
-                        // Handle text items
-                        if (item.type === 'text') {
-                            if (contentTokensUsed < contentLimit) {
-                                const remainingTokens = contentLimit - contentTokensUsed;
-                                
-                                if (this.safeGetEncodedLength(item.text) <= remainingTokens) {
-                                    // Text fits completely
-                                    newContent.push(item);
-                                    contentTokensUsed += this.safeGetEncodedLength(item.text);
-                                } else {
-                                    // Truncate text
-                                    const truncatedText = getFirstNToken(item.text, remainingTokens);
-                                    newContent.push({ type: 'text', text: truncatedText + truncationMarker });
-                                    contentTokensUsed += this.safeGetEncodedLength(truncatedText) + truncationMarkerTokenLength;
-                                    truncationAdded = true;
-                                    break;
-                                }
-                            }
-                        } 
-                        // Handle image items - prioritize them but account for their token usage
-                        else if (item.type === 'image_url') {
-                            const imageTokens = 100; // Estimated token count for images
-                            if (contentTokensUsed + imageTokens <= contentLimit) {
-                                newContent.push(item);
-                                contentTokensUsed += imageTokens;
-                            }
-                        }
-                        // Other non-text content
-                        else {
-                            newContent.push(item);
-                        }
-                    }
-                    
-                    // Add truncation marker if needed and not already added
-                    if (message.content.length > newContent.length && !truncationAdded) {
-                        newContent.push({ type: 'text', text: truncationMarker });
-                        contentTokensUsed += truncationMarkerTokenLength;
-                    }
-                    
-                    if (newContent.length > 0) {
-                        messageToAdd.content = newContent;
-                        usedTokens += roleTokens + contentTokensUsed + messageOverhead;
-                    } else {
-                        continue; // Skip message if no content after truncation
-                    }
-                }
-            } else {
-                // Message fits without truncation
-                usedTokens += message.tokenLength;
+            if (truncatedMessage) {
+                result.push(truncatedMessage);
+                usedTokens += tokensUsed;
             }
             
-            result.push(messageToAdd);
-            
-            // If we're close to target token length, stop processing more messages earlier
-            // Use a proportional cutoff to ensure we don't get too close to the limit
+            // If we're close to target token length, stop processing more messages
             const cutoffThreshold = Math.min(20, Math.floor(effectiveTargetLength * 0.01));
             if (effectiveTargetLength - usedTokens < cutoffThreshold) break;
         }
@@ -261,82 +274,27 @@ class ModelPlugin {
         if (result.length === 0 && prioritizedMessages.length > 0) {
             // Force at least one message (highest priority) to fit
             const highestPriorityMessage = prioritizedMessages[0];
-            const roleTokens = highestPriorityMessage.roleTokens;
-            const messageOverhead = 4;
-            const availableForContent = effectiveTargetLength - roleTokens - messageOverhead;
+            const availableForContent = effectiveTargetLength - highestPriorityMessage.roleTokens - messageOverhead;
             
             if (availableForContent > truncationMarkerTokenLength) {
-                let messageToAdd = { ...highestPriorityMessage };
-                delete messageToAdd.tokenLength;
-                delete messageToAdd.roleTokens;
-                delete messageToAdd.contentTokens;
-                // Keep originalIndex for sorting later
+                const { message: truncatedMessage } = truncateMessageContent(
+                    highestPriorityMessage,
+                    availableForContent,
+                    Infinity // No per-message limit in this case
+                );
                 
-                // Truncate content to fit available space
-                if (typeof highestPriorityMessage.content === 'string') {
-                    const truncatedContent = getFirstNToken(
-                        highestPriorityMessage.content, 
-                        availableForContent - truncationMarkerTokenLength
-                    );
-                    messageToAdd.content = truncatedContent + truncationMarker;
-                    result.push(messageToAdd);
-                } else if (Array.isArray(highestPriorityMessage.content)) {
-                    const newContent = [];
-                    let contentTokensUsed = 0;
-                    const contentLimit = availableForContent - truncationMarkerTokenLength;
-                    let truncationAdded = false;
-                    
-                    for (const item of highestPriorityMessage.content) {
-                        if (item.type === 'text') {
-                            if (contentTokensUsed < contentLimit) {
-                                const remainingTokens = contentLimit - contentTokensUsed;
-                                const tokenCount = this.safeGetEncodedLength(item.text);
-                                
-                                if (tokenCount <= remainingTokens) {
-                                    // Text fits completely
-                                    newContent.push(item);
-                                    contentTokensUsed += tokenCount;
-                                } else {
-                                    // Truncate text
-                                    const truncatedText = getFirstNToken(item.text, remainingTokens);
-                                    newContent.push({ type: 'text', text: truncatedText + truncationMarker });
-                                    contentTokensUsed += this.safeGetEncodedLength(truncatedText) + truncationMarkerTokenLength;
-                                    truncationAdded = true;
-                                    break;
-                                }
-                            }
-                        } else if (item.type === 'image_url') {
-                            const imageTokens = 100;
-                            if (contentTokensUsed + imageTokens <= contentLimit) {
-                                newContent.push(item);
-                                contentTokensUsed += imageTokens;
-                            }
-                        } else {
-                            newContent.push(item);
-                        }
-                    }
-                    
-                    // Add truncation marker if needed and not already added
-                    if (highestPriorityMessage.content.length > newContent.length && !truncationAdded) {
-                        newContent.push({ type: 'text', text: truncationMarker });
-                        contentTokensUsed += truncationMarkerTokenLength;
-                    }
-                    
-                    if (newContent.length > 0) {
-                        messageToAdd.content = newContent;
-                        result.push(messageToAdd);
-                    }
+                if (truncatedMessage) {
+                    result.push(truncatedMessage);
                 }
             }
         }
         
-        // Before returning, verify we're under the limit with countMessagesTokens
-        // If we're still over, aggressively truncate the last message
+        // Before returning, verify we're under the limit and fix if needed
         const finalTokenCount = this.countMessagesTokens(result);
         if (finalTokenCount > targetTokenLength && result.length > 0) {
             const lastResult = result[result.length - 1];
             
-            // If the last message has string content, truncate it more
+            // Aggressively truncate the last message more
             if (typeof lastResult.content === 'string') {
                 const overage = finalTokenCount - targetTokenLength + safetyMargin/2;
                 const currentLength = this.safeGetEncodedLength(lastResult.content);
