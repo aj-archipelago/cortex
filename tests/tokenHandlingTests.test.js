@@ -488,9 +488,7 @@ test('truncateMessagesToTargetLength handles very long content', async (t) => {
     'Final user message should be preserved');
   
   // Verify total token count is within limit
-  const totalTokens = plugin.safeGetEncodedLength(
-    plugin.messagesToChatML(truncatedMessages, false)
-  );
+  const totalTokens = plugin.countMessagesTokens(truncatedMessages);
   t.true(totalTokens <= maxTokens,
     `Total token count (${totalTokens}) should be within model limit (${maxTokens})`);
   
@@ -517,6 +515,73 @@ test('truncateMessagesToTargetLength handles very long content', async (t) => {
     const msgTokens = plugin.safeGetEncodedLength(
       plugin.messagesToChatML([msg], false)
     );
+    console.log(`  ${msg.role} message ${i + 1}: ${msgTokens} tokens`);
+  });
+}); 
+
+// Test truncateMessagesToTargetLength with very long content for per message token length
+test('truncateMessagesToTargetLength handles very long content for per message token length', async (t) => {
+  const plugin = new Claude3VertexPlugin(pathway, model);
+  
+  // Load large content
+  const largeContent = loadTestData('largeContent.txt');
+  
+  // Create a conversation with very long content
+  const messages = [
+    { role: 'system', content: 'System message' },
+    { role: 'user', content: largeContent }, // Very long message as a single string
+    { role: 'assistant', content: 'Short response' },
+    { role: 'user', content: [{type: 'text', text: largeContent}, {type: 'text', text: largeContent}] }, // Another very long message as an array of text objects
+    { role: 'assistant', content: 'Another short response' },
+    { role: 'user', content: [largeContent, largeContent] }, // Another very long message as an array of strings
+    { role: 'assistant', content: 'A third short response' },
+    { role: 'user', content: 'Final important question that should be preserved' }
+  ];
+  
+  // Get the model's max token length
+  const maxTokens = plugin.getModelMaxPromptTokens();
+  
+  // Truncate messages
+  const truncatedMessages = plugin.truncateMessagesToTargetLength(messages, null, 1000);
+  
+  // Log initial and final message counts
+  console.log(`Truncation test:
+  - Initial message count: ${messages.length}
+  - Final message count: ${truncatedMessages.length}
+  - Target token limit: 1000`);
+  
+  // Verify we got a result
+  t.truthy(truncatedMessages, 'Should return truncated messages');
+  t.true(truncatedMessages.length > 0, 'Should have at least one message');
+  
+  // Verify the last user message is preserved
+  const lastUserMessage = truncatedMessages[truncatedMessages.length - 1];
+  t.is(lastUserMessage.role, 'user');
+  t.true(lastUserMessage.content.includes('Final important question'),
+    'Final user message should be preserved');
+  
+  // Verify total token count is within limit
+  const totalTokens = plugin.countMessagesTokens(truncatedMessages);
+  t.true(totalTokens <= maxTokens,
+    `Total token count (${totalTokens}) should be within model limit (${maxTokens})`);
+  
+  // Verify message order is preserved
+  const originalOrder = messages.map(m => m.role);
+  const truncatedOrder = truncatedMessages.map(m => m.role);
+  t.deepEqual(truncatedOrder, originalOrder.slice(0, truncatedOrder.length),
+    'Message order should be preserved');
+  
+  // Verify no messages are empty
+  for (const msg of truncatedMessages) {
+    t.true(msg.content && msg.content.length > 0,
+      'No messages should be empty');
+  }
+  
+  // Log detailed message sizes
+  console.log('Message sizes after truncation:');
+  truncatedMessages.forEach((msg, i) => {
+    const msgTokens = plugin.countMessagesTokens([msg]);
+    t.true(msgTokens <= 1010, `Message ${i + 1} tokens (${msgTokens}) should be near target limit (1000)`);
     console.log(`  ${msg.role} message ${i + 1}: ${msgTokens} tokens`);
   });
 }); 

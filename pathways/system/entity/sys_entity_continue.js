@@ -1,6 +1,7 @@
 import { callPathway } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
+import { chatArgsHasImageUrl, removeOldImageAndFileContent } from '../../../lib/util.js';
 
 export default {
     prompt: [],
@@ -43,6 +44,13 @@ export default {
             // Get the generator pathway name from args or use default
             let generatorPathway = args.generatorPathway || 'sys_generator_results';
 
+            // remove old image and file content
+            const visionContentPresent = chatArgsHasImageUrl(args);
+            visionContentPresent && (args.chatHistory = removeOldImageAndFileContent(args.chatHistory));
+
+            // truncate the chat history
+            const truncatedChatHistory = pathwayResolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
+
             const newArgs = {
                 ...args,
                 chatHistory: args.chatHistory.slice(-20)
@@ -62,11 +70,11 @@ export default {
             let result = await callPathway(generatorPathway, newArgs, resolver);
 
             if (!result && !args.stream) {
-                result = await callPathway('sys_generator_error', { ...args, text: `Tried to use a tool (${generatorPathway}), but no result was returned`, stream: false }, resolver);
+                result = await callPathway('sys_generator_error', { ...args, chatHistory: truncatedChatHistory, text: `Tried to use a tool (${generatorPathway}), but no result was returned`, stream: false }, resolver);
             }
 
             if (resolver.errors.length > 0) {
-                result = await callPathway('sys_generator_error', { ...args, text: resolver.errors.join('\n'), stream: false }, resolver);
+                result = await callPathway('sys_generator_error', { ...args, chatHistory: truncatedChatHistory, text: resolver.errors.join('\n'), stream: false }, resolver);
                 resolver.errors = [];
             }
 

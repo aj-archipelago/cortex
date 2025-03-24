@@ -2,9 +2,22 @@ import test from 'ava';
 import Claude3VertexPlugin from '../server/plugins/claude3VertexPlugin.js';
 import { mockPathwayResolverMessages } from './mocks.js';
 import { config } from '../config.js';
-import { encode } from '../lib/encodeCache.js';
+import fs from 'fs';
+import path from 'path';
 
-const { pathway, modelName, model } = mockPathwayResolverMessages;
+// Helper function to load test data from files
+function loadTestData(filename) {
+  try {
+    const filePath = path.join(process.cwd(), 'tests', 'data', filename);
+    return fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    console.error(`Error loading test data file ${filename}:`, error);
+    // Return a smaller fallback test string if file loading fails
+    return 'a '.repeat(1000); 
+  }
+}
+
+const { pathway, model } = mockPathwayResolverMessages;
 
 test('constructor', (t) => {
     const plugin = new Claude3VertexPlugin(pathway, model);
@@ -12,7 +25,6 @@ test('constructor', (t) => {
     t.is(plugin.pathwayPrompt, mockPathwayResolverMessages.pathway.prompt);
 });
 
-// Note: The large message handling tests have been moved to tokenHandlingTests.test.js
 
 test('getRequestParameters', async (t) => {
     const plugin = new Claude3VertexPlugin(pathway, model);
@@ -57,6 +69,69 @@ test('getRequestParameters', async (t) => {
         stream: false,
         temperature: 0.7,
     });
+});
+
+test('getRequestParameters with long message in chatHistory', async (t) => {
+    const plugin = new Claude3VertexPlugin(pathway, model);
+    const text = 'Final message';
+    
+    // Load long content from file
+    const longContent = loadTestData('largecontent.txt');
+    
+    // Set up chatHistory with a long message
+    const chatHistory = [
+        { role: 'user', content: 'Short message' },
+        { role: 'assistant', content: 'Short response' },
+        { role: 'user', content: longContent },
+        { role: 'assistant', content: 'Long content response' },
+        { role: 'user', content: 'Final message' }
+    ];
+    
+    // Create a custom prompt that includes the chatHistory
+    const prompt = {
+        ...mockPathwayResolverMessages.pathway.prompt,
+        messages: chatHistory
+    };
+    
+    const parameters = { stream: false };
+    plugin.promptParameters.manageTokenLength = true;
+
+    const result = await plugin.getRequestParameters(text, parameters, prompt);
+    
+    // Verify we have messages in the result
+    t.truthy(result.messages);
+    
+    // Check that the long message was truncated (should be shorter than original)
+    const userMessages = result.messages.filter(msg => 
+        msg.role === 'user' && 
+        msg.content[0].type === 'text'
+    );
+    
+    // Verify we have user messages in the result
+    t.true(userMessages.length > 0, 'Should include user messages');
+    
+    // Find the long message that was truncated
+    const longMessage = userMessages.find(msg => 
+        msg.content[0].text.length < longContent.length && 
+        msg.content[0].text.length > 100  // Ensure it's the long message, not other short ones
+    );
+    
+    // Verify the long message was truncated
+    t.truthy(longMessage, 'Long user message should be truncated');
+    t.true(longMessage.content[0].text.length < longContent.length, 'Truncated message should be shorter than original');
+    
+    // Verify the final user input message is included
+    const finalInputMessage = result.messages.find(msg => 
+        msg.role === 'user' && 
+        msg.content[0].type === 'text' && 
+        msg.content[0].text.includes(text)
+    );
+    
+    t.truthy(finalInputMessage, 'Final user input should be included');
+    
+    // Log token counts for debugging/verification
+    console.log(`Original content length: ${longContent.length} chars`);
+    console.log(`Truncated content length: ${longMessage.content[0].text.length} chars`);
 });
 
 test('parseResponse', (t) => {

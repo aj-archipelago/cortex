@@ -2,7 +2,7 @@
 // Beginning of the rag workflow for Jarvis
 import { callPathway, say } from '../../../lib/pathwayTools.js';
 import logger from  '../../../lib/logger.js';
-import { chatArgsHasImageUrl } from  '../../../lib/util.js';
+import { chatArgsHasImageUrl, removeOldImageAndFileContent } from  '../../../lib/util.js';
 import { QueueServiceClient } from '@azure/storage-queue';
 import { config } from '../../../config.js';
 import { insertToolCallAndResults } from './memory/shared/sys_memory_helpers.js';
@@ -87,12 +87,16 @@ export default {
             args.model = pathwayResolver.modelName;
         }
 
-        // Save a copy of the chat history before the memory context is added
-        const chatHistoryBeforeMemory = [...args.chatHistory];
+        // remove old image and file content
+        const visionContentPresent = chatArgsHasImageUrl(args);
+        visionContentPresent && (args.chatHistory = removeOldImageAndFileContent(args.chatHistory));
+
+        // truncate the chat history
+        const truncatedChatHistory = pathwayResolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
 
         // Add the memory context to the chat history if applicable
         if (args.chatHistory.length > 1) {
-            const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
+            const memoryContext = await callPathway('sys_read_memory', { ...args, chatHistory: truncatedChatHistory, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
             if (memoryContext) {
                 insertToolCallAndResults(args.chatHistory, "search memory for relevant information", "memory_lookup", memoryContext);
             }
@@ -101,7 +105,7 @@ export default {
         // If we're using voice, get a quick response to say
         let ackResponse = null;
         if (args.voiceResponse) {
-            ackResponse = await callPathway('sys_generator_ack', { ...args, stream: false });
+            ackResponse = await callPathway('sys_generator_ack', { ...args, chatHistory: truncatedChatHistory, stream: false });
             if (ackResponse && ackResponse !== "none") {
                 await say(pathwayResolver.requestId, ackResponse, 100);
                 args.chatHistory.push({ role: 'assistant', content: ackResponse });
@@ -113,21 +117,19 @@ export default {
         if (!args.stream) {
             fetchChatResponsePromise = callPathway('sys_generator_quick', {...args, model: styleModel, ackResponse}, pathwayResolver);
         }
-        const fetchTitleResponsePromise = callPathway('chat_title', {...args, chatHistory: chatHistoryBeforeMemory, stream: false});
-
-        const visionContentPresent = chatArgsHasImageUrl(args);
+        const fetchTitleResponsePromise = callPathway('chat_title', {...args, chatHistory: truncatedChatHistory, stream: false});
 
         try {
             // Get tool routing response
             const toolRequiredResponse = await callPathway('sys_router_tool', { 
                 ...args,
-                chatHistory: chatHistoryBeforeMemory.slice(-4),
+                chatHistory: truncatedChatHistory.slice(-4),
                 stream: false
             });
 
             // Asynchronously manage memory for this context
             if (args.aiMemorySelfModify) {
-                callPathway('sys_memory_manager', {  ...args, chatHistory: chatHistoryBeforeMemory, stream: false })    
+                callPathway('sys_memory_manager', {  ...args, chatHistory: truncatedChatHistory, stream: false })    
                 .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
             }
 
