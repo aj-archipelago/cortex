@@ -48,7 +48,7 @@ export default {
             "{{messages}}",
         ]}),
     ],
-    model: 'gemini-pro-20-vision',
+    model: 'gemini-pro-25-vision',
     inputParameters: {
         file: ``,
         language: ``,
