@@ -89,17 +89,11 @@ def main():
     # --- Configuration ---
     try:
         connection_string = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
-    except KeyError:
-        print("Error: AZURE_STORAGE_CONNECTION_STRING environment variable not set.", file=sys.stderr)
+        container_name = os.environ["AZURE_STORAGE_CONTAINER"]
+    except KeyError as e:
+        print(f"Error: Required environment variable {e} is not set.", file=sys.stderr)
         sys.exit(1)
         
-    container_name = "cortex-entity-indexed"
-    # converter_script_path = os.path.abspath("helper-apps/cortex-file-converter/key_to_pdf.py") # No longer needed
-    # ---------------------
-
-    # if not os.path.exists(converter_script_path): # No longer needed
-    #     print(f"Error: Converter script not found at {converter_script_path}", file=sys.stderr)
-    #     sys.exit(1)
 
     print(f"Connecting to Azure Blob Storage container: {container_name}")
     try:
