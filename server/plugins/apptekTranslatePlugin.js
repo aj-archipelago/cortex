@@ -46,7 +46,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
 
         // Construct the URL with language pair for translation
         const langPair = `${requestParameters.params.from}-${to}`;
-        cortexRequest.url = `${this.apiEndpoint}/api/v1/quicktranslate/${langPair}`;
+        cortexRequest.url = `${this.apiEndpoint}/api/v2/quicktranslate/${langPair}`;
         cortexRequest.data = requestParameters.data;
         cortexRequest.method = 'POST';
         cortexRequest.headers = {
