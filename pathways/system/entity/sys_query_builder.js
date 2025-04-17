@@ -61,7 +61,7 @@ Example JSON objects and messages for different queries:
     "titleOnly": false,
     "language": "eng",
     "languageStr": "English",
-    "searchQuery": "latest wires"
+    "searchQuery": "latest wires",
     "searchKeywordsGeneric": "*",
     "searchKeywordsSpecific": "latest news today",
     "searchQuestion": "what's the latest on the wires?"
