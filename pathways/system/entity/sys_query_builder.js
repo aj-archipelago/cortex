@@ -21,6 +21,10 @@ You have the ability to search one or more of the following indexes:
 - "aja" for all news articles published by Al Jazeera Arabic (written in Arabic)
 - "wires" for latest news wires from all wires sources (news & articles)
 - "personal" for the user's documents and uploaded files
+- "searchQuery" for a search query that best describes the user's query
+- "searchKeywordsGeneric" for a generic search keyword query
+- "searchKeywordsSpecific" for a specific search keyword query
+- "searchQuestion" for a question search query
 
 AJE and AJA are not just translations of each other - they are different news organizations with different reporting styles and focus, so often searching both indexes will provide a more complete answer.
 
@@ -56,7 +60,11 @@ Example JSON objects and messages for different queries:
     "dateFilter": "date ge 2024-02-22T00:00:00Z",
     "titleOnly": false,
     "language": "eng",
-    "languageStr": "English"
+    "languageStr": "English",
+    "searchQuery": "latest wires"
+    "searchKeywordsGeneric": "*",
+    "searchKeywordsSpecific": "latest news today",
+    "searchQuestion": "what's the latest on the wires?"
 }
     
 "What's going on in the world today?"
@@ -69,7 +77,11 @@ Example JSON objects and messages for different queries:
     "dateFilter": "date ge 2024-02-22T00:00:00Z",
     "titleOnly": false,
     "language": "eng",
-    "languageStr": "English"
+    "languageStr": "English",
+    "searchQuery": "world news today",
+    "searchKeywordsGeneric": "*",
+    "searchKeywordsSpecific": "world news today",
+    "searchQuestion": "what's going on in the world today?"
 }
     
 "What is this document about?"
@@ -77,7 +89,11 @@ Example JSON objects and messages for different queries:
     "searchRequired": true,
     "searchPersonal": "*",
     "language": "eng",
-    "languageStr": "English"
+    "languageStr": "English",
+    "searchQuery": "what is this document about?",
+    "searchKeywordsGeneric": "*",
+    "searchKeywordsSpecific": "what is this document about?",
+    "searchQuestion": "what is this document about?"
 }
     
 "What topics were covered last week on AJE?"
@@ -87,13 +103,18 @@ Example JSON objects and messages for different queries:
     "dateFilter": "date ge 2024-02-22T00:00:00Z and date le 2024-02-28T23:59:59Z",
     "titleOnly": true,
     "language": "eng",
-    "languageStr": "English"
+    "languageStr": "English",
+    "searchQuery": "AJE last week",
+    "searchKeywordsGeneric": "*",
+    "searchKeywordsSpecific": "AJE last week",
+    "searchQuestion": "what topics were covered last week on AJE?"
 }`,
             },
             {"role": "user", "content": "Examine the Conversation History and decide what data sources if any to search to help the user and produce a JSON object with fields that communicate your decisions."},
         ]}),
     ],
     model: 'oai-gpt4o',
+    // model: 'gemini-pro-25-vision',
     useInputChunking: false,
     enableDuplicateRequests: false,
     json: true,

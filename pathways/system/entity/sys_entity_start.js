@@ -6,6 +6,7 @@ import { chatArgsHasImageUrl, removeOldImageAndFileContent } from  '../../../lib
 import { QueueServiceClient } from '@azure/storage-queue';
 import { config } from '../../../config.js';
 import { insertToolCallAndResults } from './memory/shared/sys_memory_helpers.js';
+import { getEntityConfig } from './utils.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
@@ -55,7 +56,8 @@ export default {
         messages: [],
         voiceResponse: false,
         codeRequestId: ``,
-        skipCallbackMessage: false
+        skipCallbackMessage: false,
+        entityId: ``,
     },
     timeout: 600,
   
@@ -85,6 +87,18 @@ export default {
         // if the model has been overridden, make sure to use it
         if (pathwayResolver.modelName) {
             args.model = pathwayResolver.modelName;
+        }
+
+        const { entityId } = args;
+        if (entityId) {
+            const entityConfig = getEntityConfig(entityId);
+            if(!entityConfig){
+                logger.error(`Entity config not found for entityId: ${entityId}`);
+                return "Entity config not found";
+            }
+            //execute sys_entity pathway
+            const entityResponse = await callPathway('sys_entity', { ...args, stream: false, entityId, entityConfig }, pathwayResolver);
+            return entityResponse;
         }
 
         // remove old image and file content
