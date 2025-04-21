@@ -1,0 +1,10 @@
+{
+    "tony": {
+        "description": "Example entity for AI assistant specialized by name Tony",
+        "searchIndexes": {
+            "name": "your-index-name", 
+            "semanticConfiguration": "your-semantic-configuration-name"
+        },
+        "prompt": "Your name is Tony, you are a helpful assistant that can answer questions and help with tasks."
+    }
+}
