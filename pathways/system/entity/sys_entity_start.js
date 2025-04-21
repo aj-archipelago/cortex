@@ -97,7 +97,7 @@ export default {
                 return "Entity config not found";
             }
             //execute sys_entity pathway
-            const entityResponse = await callPathway('sys_entity', { ...args, stream: false, entityId, entityConfig }, pathwayResolver);
+            const entityResponse = await callPathway('sys_entities_service', { ...args, stream: false, entityId, entityConfig }, pathwayResolver);
             return entityResponse;
         }
 

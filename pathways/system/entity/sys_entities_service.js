@@ -1,4 +1,4 @@
-// pathways/system/entity/sys_entity.js
+// pathways/system/entity/sys_entities_service.js
 // Entity-specific RAG pathway
 // Called by sys_entity_start when args.entityId is provided.
 import { callPathway, gpt3Encode, gpt3Decode, say } from '../../../lib/pathwayTools.js';
