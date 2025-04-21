@@ -68,9 +68,17 @@ export const mockConfig = {
 
   export const mockPathwayResolverMessages = {
     model: {
-      name: 'testModel',
-      url: 'https://api.example.com/testModel',
-      type: 'OPENAI-COMPLETION',
+        name: 'testModel',
+        type: 'OPENAI-CHAT',
+        url: 'https://api.openai.com/v1/chat/completions',
+        endpoints: [{
+            name: 'Test Endpoint',
+            url: 'https://api.openai.com/v1/chat/completions',
+            headers: {
+                'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        }]
     },
     modelName: 'testModel',
     pathway: mockPathwayMessages,

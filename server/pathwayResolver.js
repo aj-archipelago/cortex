@@ -297,6 +297,21 @@ class PathwayResolver {
                 break;
             }
 
+            // Handle tool calls in the response
+            if (data.tool_calls) {
+                // Parse existing tool calls if they exist
+                const existingTool = typeof this.tool === 'string' ? JSON.parse(this.tool) : this.tool || {};
+                const existingToolCalls = existingTool.tool_calls || [];
+                
+                // Append new tool calls to existing ones
+                this.tool = JSON.stringify({
+                    ...existingTool,
+                    tool_calls: [...existingToolCalls, ...data.tool_calls]
+                });
+
+                return data;
+            }
+
             data = await this.responseParser.parse(data);
             if (data !== null) {
                 break;
