@@ -62,7 +62,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
     async detectLanguage(text) {
         try {
             // Make language detection request
-            const detectionResponse = await fetch(`${this.apiEndpoint}/api/v2/language_id`, {
+            const resultResponse = await fetch(`${this.apiEndpoint}/api/v2/quick_lid`, {
                 method: 'POST',
                 headers: {
                     'x-token': this.apiKey,
@@ -72,38 +72,12 @@ class ApptekTranslatePlugin extends ModelPlugin {
                 body: text
             });
 
-            if (!detectionResponse.ok) {
-                throw new Error(`Language detection failed: ${detectionResponse.status}`);
-            }
-
-            const detectionResult = await detectionResponse.json();
-            if (!detectionResult.success) {
-                throw new Error(`Language detection failed: ${detectionResult.error || 'Unknown error'}`);
-            }
-
-            // Get detection result
-            const detectionRequestId = detectionResult.request_id;
             let detectedLanguage = null;
 
-            // Poll for language detection result using config from pathway parameters
-            const maxAttempts = this.promptParameters.config.maxPollingAttempts || 30;
-            const pollingInterval = this.promptParameters.config.pollingInterval || 1.0;
 
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
-                const resultResponse = await fetch(`${this.apiEndpoint}/api/v2/language_id/${detectionRequestId}`, {
-                    headers: {
-                        'x-token': this.apiKey,
-                        'Accept': 'text/plain'
-                    }
-                });
-
-                if (resultResponse.status === 200) {
-                    const result = await resultResponse.text();
-                    detectedLanguage = result.split('\n')[0].split(';')[0];
-                    break;
-                }
-
-                await new Promise(resolve => setTimeout(resolve, pollingInterval * 1000));
+            if (resultResponse.status === 200) {
+                const result = await resultResponse.text();
+                detectedLanguage = result.split('\n')[0].split(';')[0];
             }
 
             if (!detectedLanguage) {

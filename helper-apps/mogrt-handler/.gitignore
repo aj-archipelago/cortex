@@ -46,3 +46,4 @@ jspm_packages/
 .vscode/
 *.swp
 *.swo
+.env

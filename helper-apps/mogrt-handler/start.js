@@ -4,6 +4,7 @@ import cors from 'cors';
 import swaggerUi from 'swagger-ui-express';
 import swaggerSpec from './swagger.js';
 import MogrtHandler from './index.js';
+import GlossaryHandler from './glossaryHandler.js';
 
 const app = express();
 const port = process.env.PORT || 7072; // Using 7072 to avoid conflict with file-handler
@@ -130,6 +131,19 @@ app.all('/api/MogrtHandler', async (req, res) => {
 
     try {
         await MogrtHandler(context, req);
+        res.status(context.res.status || 200).send(context.res.body);
+    } catch (error) {
+        const status = error.status || 500;
+        const message = error.message || 'Internal server error';
+        res.status(status).send({ error: message });
+    }
+});
+
+// New endpoint for Glossary handling
+app.all('/api/glossary/*', async (req, res) => {
+    const context = { req, res, log: console.log };
+    try {
+        await GlossaryHandler(context, req);
         res.status(context.res.status || 200).send(context.res.body);
     } catch (error) {
         const status = error.status || 500;
