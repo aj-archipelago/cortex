@@ -24,18 +24,11 @@ describe('Glossary API Proxy', () => {
     app = createApp();
   });
 
-  it('should reject requests without x-token', async () => {
-    const res = await request(app)
-      .get('/api/glossary/list')
-      .expect(401);
-    expect(res.body.error).toMatch(/x-token/i);
-  });
-
   it('should proxy GET /list to AppTek', async () => {
     // This test expects the real AppTek API or a mock server
     // To run as a unit test, mock fetch in glossaryHandler.js
     // Here we just check the request shape
-    const res = await request(app)
+    await request(app)
       .get('/api/glossary/list')
       .expect(res => {
         // Accept either 200 or 401/403 from upstream

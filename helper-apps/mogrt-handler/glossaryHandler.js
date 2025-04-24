@@ -9,7 +9,7 @@ const APPTEK_TOKEN = process.env.APPTEK_TOKEN;
 export default async function GlossaryHandler(context, req) {
     const { method, url, body, query, headers } = req;
     // Use token from header if present, else from env
-    const token = headers['x-token'] || headers['X-Token'] || APPTEK_TOKEN;
+    const token = APPTEK_TOKEN;
     if (!token) {
         context.res = { status: 401, body: { error: 'Missing x-token or APPTEK_TOKEN' } };
         return;
@@ -21,7 +21,6 @@ export default async function GlossaryHandler(context, req) {
                 method: 'GET',
                 headers: { 'accept': 'application/json', 'x-token': token }
             });
-            console.log(resp)
             const data = await resp.json();
             context.res = { status: resp.status, body: data };
             return;
@@ -30,11 +29,16 @@ export default async function GlossaryHandler(context, req) {
         if (method === 'POST' && url.match(/\/api\/glossary\/[a-z]{2}-[a-z]{2}/)) {
             const langPair = url.match(/\/api\/glossary\/([a-z]{2}-[a-z]{2})/)[1];
             const name = query.name || (body && body.name) || '';
+
+            for (const entry of body.entries) {
+                entry.target_alternatives = [];
+            }
             const resp = await fetch(`${APPTEK_BASE_URL}/${langPair}?name=${encodeURIComponent(name)}`, {
                 method: 'POST',
                 headers: { 'accept': 'application/json', 'x-token': token, 'content-type': 'application/json' },
                 body: JSON.stringify(body)
             });
+            console.log(resp)
             const data = await resp.json();
             context.res = { status: resp.status, body: data };
             return;
