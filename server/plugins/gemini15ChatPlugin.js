@@ -99,7 +99,7 @@ class Gemini15ChatPlugin extends ModelPlugin {
         const { geminiSafetySettings, geminiTools, max_tokens } = cortexRequest ? cortexRequest.pathway : {};
 
         // Define the model's max token length
-        const modelTargetTokenLength = this.getModelMaxTokenLength() * this.getPromptTokenRatio();
+        const modelTargetTokenLength = this.getModelMaxPromptTokens();
     
         const geminiMessages = this.convertMessagesToGemini(modelPromptMessages || [{ "role": "user", "parts": [{ "text": modelPromptText }]}]);
         
@@ -140,7 +140,7 @@ class Gemini15ChatPlugin extends ModelPlugin {
             dataToMerge = data.contents;
         } else if (data && data.candidates && Array.isArray(data.candidates)) {
             const { content, finishReason, safetyRatings } = data.candidates[0];
-            if (finishReason === 'STOP') {
+            if (finishReason === 'STOP' || finishReason === 'MAX_TOKENS') {
                 return content?.parts?.[0]?.text ?? '';
             } else {
                 const returnString = `Response was not completed.  Finish reason: ${finishReason}, Safety ratings: ${JSON.stringify(safetyRatings, null, 2)}`;

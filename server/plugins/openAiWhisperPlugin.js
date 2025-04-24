@@ -72,13 +72,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             if(maxLineWidth) tsparams.max_line_width = maxLineWidth;
             if(maxLineCount) tsparams.max_line_count = maxLineCount;
             if(maxWordsPerLine) tsparams.max_words_per_line = maxWordsPerLine;
-            if(wordTimestamped!=null) {
-                if(!wordTimestamped) {
-                    tsparams.word_timestamps = "False";
-                }else{
-                    tsparams.word_timestamps = wordTimestamped;    
-                }
-            }
+            tsparams.word_timestamps = !wordTimestamped ? "False" : wordTimestamped;
 
             const cortexRequest = new CortexRequest({ pathwayResolver });
             cortexRequest.url = WHISPER_TS_API_URL;
@@ -157,7 +151,8 @@ async function processURI(uri) {
 
     const intervalId = setInterval(() => sendProgress(true), 3000);
 
-    const useTS = WHISPER_TS_API_URL && (wordTimestamped || highlightWords);
+    //const useTS = WHISPER_TS_API_URL && (wordTimestamped || highlightWords); // use TS API only for word timestamped
+    const useTS = !!WHISPER_TS_API_URL; // use TS API always if URL is set
 
     if (useTS) {
         _promise = processTS;

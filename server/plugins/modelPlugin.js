@@ -64,82 +64,264 @@ class ModelPlugin {
     }
 
     safeGetEncodedLength(data) {
-        if (data && data.length > 100000) {
-            return data.length * 3 / 16;
-        } else {
-            return encode(data).length;
-        }
+        return encode(data).length;
     }
 
-    truncateMessagesToTargetLength(messages, targetTokenLength) {
-        // Calculate the token length of each message
-        const tokenLengths = messages.map((message) => ({
-            message,
-            tokenLength: this.safeGetEncodedLength(this.messagesToChatML([message], false)),
-        }));
-    
-        // Calculate the total token length of all messages
-        let totalTokenLength = tokenLengths.reduce(
-            (sum, { tokenLength }) => sum + tokenLength,
-            0
-        );
-    
-        // If we're already under the target token length, just bail
-        if (totalTokenLength <= targetTokenLength) return messages;
-    
-        // Remove and/or truncate messages until the target token length is reached
-        let index = 0;
-        while ((totalTokenLength > targetTokenLength) && (index < tokenLengths.length)) {
-            const message = tokenLengths[index].message;
+    truncateMessagesToTargetLength(messages, targetTokenLength = null, maxMessageTokenLength = Infinity) {
+        const truncationMarker = '[...]';
+        const truncationMarkerTokenLength = encode(truncationMarker).length;
+        const messageOverhead = 4; // Per-message overhead tokens
+        const conversationOverhead = 3; // Conversation formatting overhead
 
-            // Skip system messages
-            if (message?.role === 'system') {
-                index++;
-                continue;
-            }
+        // Helper function to truncate text content
+        const truncateTextContent = (text, maxTokens) => {
+            if (this.safeGetEncodedLength(text) <= maxTokens) return text;
+            return getFirstNToken(text, maxTokens - truncationMarkerTokenLength) + truncationMarker;
+        };
 
-            const currentTokenLength = tokenLengths[index].tokenLength;
+        // Helper function to truncate multimodal content
+        const truncateMultimodalContent = (content, maxTokens) => {
+            const newContent = [];
+            let contentTokensUsed = 0;
+            let truncationAdded = false;
             
-            if (totalTokenLength - currentTokenLength >= targetTokenLength) {
-                // Remove the message entirely if doing so won't go below the target token length
-                totalTokenLength -= currentTokenLength;
-                tokenLengths.splice(index, 1);
-            } else {
-                // Truncate the message to fit the remaining target token length
-                const emptyContentLength = encode(this.messagesToChatML([{ ...message, content: '' }], false)).length;
-                const otherMessageTokens = totalTokenLength - currentTokenLength;
-                const tokensToKeep = targetTokenLength - (otherMessageTokens + emptyContentLength);
+            for (let item of content) {
+                // Convert string items to text objects
+                if (typeof item === 'string') {
+                    item = { type: 'text', text: item };
+                }
 
-                if (tokensToKeep <= 0 || Array.isArray(message?.content)) {  
-                    // If the message needs to be empty to make the target, remove it entirely
-                    totalTokenLength -= currentTokenLength;
-                    tokenLengths.splice(index, 1);
-                    if(tokenLengths.length == 0){
-                        throw new Error(`Unable to process your request as your single message content is too long. Please try again with a shorter message.`);
+                // Handle text items
+                if (item.type === 'text') {
+                    if (contentTokensUsed < maxTokens) {
+                        const remainingTokens = maxTokens - contentTokensUsed;
+                        
+                        if (this.safeGetEncodedLength(item.text) <= remainingTokens) {
+                            // Text fits completely
+                            newContent.push(item);
+                            contentTokensUsed += this.safeGetEncodedLength(item.text);
+                        } else {
+                            // Truncate text
+                            const truncatedText = getFirstNToken(item.text, remainingTokens);
+                            newContent.push({ type: 'text', text: truncatedText + truncationMarker });
+                            contentTokensUsed += this.safeGetEncodedLength(truncatedText) + truncationMarkerTokenLength;
+                            truncationAdded = true;
+                            break;
+                        }
                     }
-                } else {
-                    // Otherwise, update the message and token length
-                    const truncatedContent = getFirstNToken(message?.content ?? message, tokensToKeep);
-                    const truncatedMessage = { ...message, content: truncatedContent };
-
-                    tokenLengths[index] = {
-                        message: truncatedMessage,
-                        tokenLength: this.safeGetEncodedLength(this.messagesToChatML([ truncatedMessage ], false))
+                } 
+                // Handle image items - prioritize them but account for their token usage
+                else if (item.type === 'image_url') {
+                    const imageTokens = 100; // Estimated token count for images
+                    if (contentTokensUsed + imageTokens <= maxTokens) {
+                        newContent.push(item);
+                        contentTokensUsed += imageTokens;
                     }
+                }
+                // Other non-text content
+                else {
+                    newContent.push(item);
+                }
+            }
+            
+            // Add truncation marker if needed and not already added
+            if (content.length > newContent.length && !truncationAdded) {
+                newContent.push({ type: 'text', text: truncationMarker });
+                contentTokensUsed += truncationMarkerTokenLength;
+            }
+            
+            return { content: newContent, tokensUsed: contentTokensUsed };
+        };
 
-                    // calculate the length again to keep us honest
-                    totalTokenLength = tokenLengths.reduce(
-                        (sum, { tokenLength }) => sum + tokenLength,
-                        0
-                    );
+        // Helper function to truncate any message content
+        const truncateMessageContent = (message, availableTokens, maxPerMessageTokens) => {
+            // Calculate max content tokens (minimum of available tokens or max per message)
+            const maxContentTokens = Math.min(
+                availableTokens,
+                maxPerMessageTokens - message.roleTokens - messageOverhead
+            );
+            
+            const messageToAdd = { ...message };
+            delete messageToAdd.tokenLength;
+            delete messageToAdd.roleTokens;
+            delete messageToAdd.contentTokens;
+            // Keep originalIndex for sorting later
+            
+            let contentTokensUsed = 0;
+            
+            // Handle extreme constraints (zero or negative token availability)
+            if (maxContentTokens <= 0) {
+                // For extreme constraints, just add truncation marker or empty content
+                if (typeof message.content === 'string') {
+                    messageToAdd.content = truncationMarker;
+                    contentTokensUsed = truncationMarkerTokenLength;
+                } else if (Array.isArray(message.content)) {
+                    messageToAdd.content = [{ type: 'text', text: truncationMarker }];
+                    contentTokensUsed = truncationMarkerTokenLength;
+                }
+                
+                const totalTokensUsed = message.roleTokens + contentTokensUsed + messageOverhead;
+                return { message: messageToAdd, tokensUsed: totalTokensUsed };
+            }
+            
+            // Truncate text content
+            if (typeof message.content === 'string') {
+                // Leave room for truncation marker if needed
+                const contentSpace = Math.max(0, maxContentTokens);
+                messageToAdd.content = truncateTextContent(message.content, contentSpace);
+                contentTokensUsed = this.safeGetEncodedLength(messageToAdd.content);
+            } 
+            // Handle multimodal content
+            else if (Array.isArray(message.content)) {
+                const result = truncateMultimodalContent(message.content, maxContentTokens);
+                messageToAdd.content = result.content;
+                contentTokensUsed = result.tokensUsed;
+                
+                // Skip message if no content after truncation
+                if (result.content.length === 0) {
+                    messageToAdd.content = [{ type: 'text', text: truncationMarker }];
+                    contentTokensUsed = truncationMarkerTokenLength;
+                }
+            }
+            
+            const totalTokensUsed = message.roleTokens + contentTokensUsed + messageOverhead;
+            return { message: messageToAdd, tokensUsed: totalTokensUsed };
+        };
 
-                    index++;
+        // If no messages, return empty array
+        if (!messages || messages.length === 0) return [];
+
+        // If there's no target token length, get it from the model
+        if (!targetTokenLength) {
+            targetTokenLength = this.getModelMaxPromptTokens();
+        }
+        
+        // First check if all messages already fit within the target length
+        const initialTokenCount = this.countMessagesTokens(messages);
+        if (initialTokenCount <= targetTokenLength && maxMessageTokenLength === Infinity) {
+            return messages;
+        }
+
+        // Calculate safety margin
+        const safetyMarginPercent = targetTokenLength > 1000 ? 0.05 : 0.02; // 5% or 2% for small targets
+        const safetyMarginMinimum = Math.min(20, Math.floor(targetTokenLength * 0.01)); // At most 1% for minimum
+        const safetyMargin = Math.max(safetyMarginMinimum, Math.round(targetTokenLength * safetyMarginPercent));
+        
+        // Adjust targetTokenLength to account for overheads and safety margin
+        const effectiveTargetLength = Math.max(0, targetTokenLength - conversationOverhead - safetyMargin);
+
+        // Calculate token lengths for each message and track original index
+        const messagesWithTokens = messages.map((message, index) => {
+            // Count tokens for the role/author
+            const roleTokens = this.safeGetEncodedLength(message.role || message.author || "");
+
+            // Count tokens for content
+            const tokenLength = this.countMessagesTokens([message]);
+            
+            return {
+                ...message,
+                roleTokens: roleTokens,
+                contentTokens: tokenLength - roleTokens - messageOverhead,
+                tokenLength: tokenLength,
+                originalIndex: index // Keep track of original position
+            };
+        });
+
+        // Sort messages by priority: last message, then system messages (newest first), then others (newest first)
+        const lastMessage = messagesWithTokens.length > 0 ? messagesWithTokens[messagesWithTokens.length - 1] : null;
+        const systemMessages = messagesWithTokens
+            .filter(m => (m.role === 'system' || m.author === 'system') && m !== lastMessage)
+            .reverse();
+        const otherMessages = messagesWithTokens
+            .filter(m => (m.role !== 'system' && m.author !== 'system') && m !== lastMessage)
+            .reverse();
+
+        // Build prioritized array
+        const prioritizedMessages = [];
+        if (lastMessage) prioritizedMessages.push(lastMessage);
+        prioritizedMessages.push(...systemMessages, ...otherMessages);
+
+        // Track used tokens and build result
+        let usedTokens = 0;
+        const result = [];
+
+        // Process messages in priority order
+        for (const message of prioritizedMessages) {
+            // Calculate how many tokens we have available
+            const remainingTokens = effectiveTargetLength - usedTokens;
+            
+            // If we have very few tokens left, skip this message
+            const minimumUsableTokens = 10; 
+            if (remainingTokens < minimumUsableTokens) break;
+            
+            const { message: truncatedMessage, tokensUsed } = truncateMessageContent(
+                message, 
+                remainingTokens, 
+                maxMessageTokenLength
+            );
+            
+            if (truncatedMessage) {
+                result.push(truncatedMessage);
+                usedTokens += tokensUsed;
+            }
+            
+            // If we're close to target token length, stop processing more messages
+            const cutoffThreshold = Math.min(20, Math.floor(effectiveTargetLength * 0.01));
+            if (effectiveTargetLength - usedTokens < cutoffThreshold) break;
+        }
+
+        // Handle edge case: No messages fit within the limit
+        if (result.length === 0 && prioritizedMessages.length > 0) {
+            // Force at least one message (highest priority) to fit
+            const highestPriorityMessage = prioritizedMessages[0];
+            const availableForContent = effectiveTargetLength - highestPriorityMessage.roleTokens - messageOverhead;
+            
+            if (availableForContent > truncationMarkerTokenLength) {
+                const { message: truncatedMessage } = truncateMessageContent(
+                    highestPriorityMessage,
+                    availableForContent,
+                    Infinity // No per-message limit in this case
+                );
+                
+                if (truncatedMessage) {
+                    result.push(truncatedMessage);
                 }
             }
         }
-    
-        // Return the modified messages array
-        return tokenLengths.map(({ message }) => message);
+        
+        // Before returning, verify we're under the limit and fix if needed
+        const finalTokenCount = this.countMessagesTokens(result);
+        if (finalTokenCount > targetTokenLength && result.length > 0) {
+            const lastResult = result[result.length - 1];
+            
+            // Aggressively truncate the last message more
+            if (typeof lastResult.content === 'string') {
+                const overage = finalTokenCount - targetTokenLength + safetyMargin/2;
+                const currentLength = this.safeGetEncodedLength(lastResult.content);
+                const newLength = Math.max(20, currentLength - overage);
+                
+                lastResult.content = getFirstNToken(lastResult.content, newLength - truncationMarkerTokenLength) + truncationMarker;
+            }
+            // For multimodal content, just remove all but the first text item
+            else if (Array.isArray(lastResult.content)) {
+                const firstTextIndex = lastResult.content.findIndex(item => item.type === 'text');
+                if (firstTextIndex >= 0) {
+                    const firstTextItem = lastResult.content[firstTextIndex];
+                    // Keep only this text item and truncate it
+                    const truncatedText = getFirstNToken(firstTextItem.text, 20) + truncationMarker;
+                    lastResult.content = [{ type: 'text', text: truncatedText }];
+                }
+            }
+        }
+        
+        // Sort by original index to restore original order
+        result.sort((a, b) => a.originalIndex - b.originalIndex);
+        
+        // Remove originalIndex property from result objects
+        return result.map(message => {
+            const { originalIndex, ...messageWithoutIndex } = message;
+            return messageWithoutIndex;
+        });
     }
     
     //convert a messages array to a simple chatML format
@@ -171,7 +353,16 @@ class ModelPlugin {
 
         const combinedParameters = mergeParameters(this.promptParameters, parameters);
         const modelPrompt = this.getModelPrompt(prompt, parameters);
-        const modelPromptText = modelPrompt.prompt ? HandleBars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+        let modelPromptText = '';
+        
+        try {
+            modelPromptText = modelPrompt.prompt ? HandleBars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
+        } catch (error) {
+            // If compilation fails, log the error and use the original prompt
+            logger.warn(`Handlebars compilation failed in getCompiledPrompt: ${error.message}. Using original text.`);
+            modelPromptText = modelPrompt.prompt || '';
+        }
+        
         const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
         const modelPromptMessagesML = this.messagesToChatML(modelPromptMessages);
 
@@ -184,6 +375,16 @@ class ModelPlugin {
 
     getModelMaxTokenLength() {
         return (this.promptParameters.maxTokenLength ?? this.model.maxTokenLength ?? DEFAULT_MAX_TOKENS);
+    }
+
+    getModelMaxPromptTokens() {
+        const hasMaxReturnTokens = this.promptParameters.maxReturnTokens !== undefined || this.model.maxReturnTokens !== undefined;
+        
+        const maxPromptTokens = hasMaxReturnTokens
+            ? this.getModelMaxTokenLength() - this.getModelMaxReturnTokens()
+            : Math.floor(this.getModelMaxTokenLength() * this.getPromptTokenRatio());
+        
+        return maxPromptTokens;
     }
 
     getModelMaxReturnTokens() {
@@ -211,11 +412,17 @@ class ModelPlugin {
         // First run handlebars compile on the pathway messages
         const compiledMessages = modelPrompt.messages.map((message) => {
             if (message.content && typeof message.content === 'string') {
-                const compileText = HandleBars.compile(message.content);
-                return {
-                    ...message,
-                    content: compileText({ ...combinedParameters, text }),
-                };
+                try {
+                    const compileText = HandleBars.compile(message.content);
+                    return {
+                        ...message,
+                        content: compileText({ ...combinedParameters, text }),
+                    };
+                } catch (error) {
+                    // If compilation fails, log the error and return the original content
+                    logger.warn(`Handlebars compilation failed: ${error.message}. Using original text.`);
+                    return message;
+                }
             } else {
                 return message;
             }
@@ -224,12 +431,18 @@ class ModelPlugin {
         // Next add in any parameters that are referenced by name in the array
         const expandedMessages = compiledMessages.flatMap((message) => {
             if (typeof message === 'string') {
-                const match = message.match(/{{(.+?)}}/);
-                const placeholder = match ? match[1] : null;
-                if (placeholder === null) {
+                try {
+                    const match = message.match(/{{(.+?)}}/);
+                    const placeholder = match ? match[1] : null;
+                    if (placeholder === null) {
+                        return message;
+                    } else {
+                        return combinedParameters[placeholder] || [];
+                    }
+                } catch (error) {
+                    // If there's an error processing the string, return it as is
+                    logger.warn(`Error processing message placeholder: ${error.message}. Using original text.`);
                     return message;
-                } else {
-                    return combinedParameters[placeholder] || [];
                 }
             } else {
                 return [message];
@@ -400,6 +613,48 @@ class ModelPlugin {
 
     getModelMaxImageSize() {
         return (this.promptParameters.maxImageSize ?? this.model.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE);
+    }
+
+    countMessagesTokens(messages) {
+        if (!messages || !Array.isArray(messages) || messages.length === 0) {
+            return 0;
+        }
+
+        let totalTokens = 0;
+
+        for (const message of messages) {
+            // Count tokens for role/author
+            const role = message.role || message.author || "";
+            if (role) {
+                totalTokens += this.safeGetEncodedLength(role);
+            }
+
+            // Count tokens for content
+            if (typeof message.content === 'string') {
+                totalTokens += this.safeGetEncodedLength(message.content);
+            } else if (Array.isArray(message.content)) {
+                // Handle multimodal content
+                for (const item of message.content) {
+                    // item can be a string or an object
+                    if (typeof item === 'string') {
+                        totalTokens += this.safeGetEncodedLength(item);
+                    } else if (item.type === 'text') {
+                        totalTokens += this.safeGetEncodedLength(item.text);
+                    } else if (item.type === 'image_url') {
+                        // Most models use ~85-130 tokens per image, but this varies by model
+                        totalTokens += 100;
+                    }
+                }
+            }
+
+            // Add per-message overhead (typically 3-4 tokens per message)
+            totalTokens += 4;
+        }
+
+        // Add conversation formatting overhead
+        totalTokens += 3;
+
+        return totalTokens;
     }
 
 }

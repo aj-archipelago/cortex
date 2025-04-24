@@ -83,43 +83,25 @@ class PathwayResolver {
             if (requestProgress.progress === 1 && this.rootRequestId) {
                 delete requestProgress.progress;
             }
-            publishRequestProgress(requestProgress);
+            publishRequestProgress({...requestProgress, info: this.tool || ''});
         }
 
         try {
             responseData = await this.executePathway(args);
         }
         catch (error) {
-            if (!args.async) {
-                publishRequestProgress({
-                    requestId: this.rootRequestId || this.requestId,
-                    progress: 1,
-                    data: '[DONE]',
-                });
-            } else {
-                publishRequestProgress({
-                    requestId: this.rootRequestId || this.requestId,
-                    progress: 1,
-                    data: error.message || error.toString(),
-                });
-            }
+            publishRequestProgress({
+                requestId: this.rootRequestId || this.requestId,
+                progress: 1,
+                data: '',
+                info: '',
+                error: error.message || error.toString()
+            });
+            return;
         }
 
-        // If the response is a string, it's a regular long running response
-        if (args.async || typeof responseData === 'string') {
-            const { completedCount=1, totalCount=1 } = requestState[this.requestId];
-            requestState[this.requestId].data = responseData;
-            
-            // some models don't support progress updates
-            if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
-                await publishNestedRequestProgress({
-                        requestId: this.rootRequestId || this.requestId,
-                        progress: Math.min(completedCount,totalCount) / totalCount,
-                        data: JSON.stringify(responseData),
-                });
-            }
-        // If the response is an object, it's a streaming response
-        } else {
+        // If the response is a stream, handle it as streaming response
+        if (responseData && typeof responseData.on === 'function') {
             try {
                 const incomingMessage = responseData;
                 let streamEnded = false;
@@ -184,10 +166,26 @@ class PathwayResolver {
                 publishRequestProgress({
                     requestId: this.requestId,
                     progress: 1,
-                    data: '[DONE]',
+                    data: '',
+                    info: '',
+                    error: 'Stream read failed'
                 });
             } else {
                 return;
+            }
+        } else {
+            const { completedCount = 1, totalCount = 1 } = requestState[this.requestId];
+            requestState[this.requestId].data = responseData;
+            
+            // some models don't support progress updates
+            if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
+                await publishNestedRequestProgress({
+                        requestId: this.rootRequestId || this.requestId,
+                        progress: Math.min(completedCount, totalCount) / totalCount,
+                        // Clients expect these to be strings
+                        data: JSON.stringify(responseData || ''),
+                        info: this.tool || ''
+                });
             }
         }
     }
@@ -197,7 +195,13 @@ class PathwayResolver {
             this.previousResult = mergeData.previousResult ? mergeData.previousResult : this.previousResult;
             this.warnings = [...this.warnings, ...(mergeData.warnings || [])];
             this.errors = [...this.errors, ...(mergeData.errors || [])];
-            this.tool = mergeData.tool || this.tool;
+            try {
+                const mergeDataTool = typeof mergeData.tool === 'string' ? JSON.parse(mergeData.tool) : mergeData.tool || {};
+                const thisTool = typeof this.tool === 'string' ? JSON.parse(this.tool) : this.tool || {};
+                this.tool = JSON.stringify({ ...thisTool, ...mergeDataTool });
+            } catch (error) {
+                logger.warn('Error merging pathway resolver tool objects: ' + error);
+            }
         }
     }
 
@@ -360,7 +364,7 @@ class PathwayResolver {
     getChunkMaxTokenLength() {
         // Skip expensive calculations if not using input chunking
         if (!this.useInputChunking) {
-            return this.modelExecutor.plugin.getModelMaxTokenLength();
+            return this.modelExecutor.plugin.getModelMaxPromptTokens();
         }
 
         // find the longest prompt
@@ -369,10 +373,7 @@ class PathwayResolver {
         // find out if any prompts use both text input and previous result
         const hasBothProperties = this.prompts.some(prompt => prompt.usesTextInput && prompt.usesPreviousResult);
         
-        // the token ratio is the ratio of the total prompt to the result text - both have to be included
-        // in computing the max token length
-        const promptRatio = this.modelExecutor.plugin.getPromptTokenRatio();
-        let chunkMaxTokenLength = promptRatio * this.modelExecutor.plugin.getModelMaxTokenLength() - maxPromptTokenLength - 1;
+        let chunkMaxTokenLength = this.modelExecutor.plugin.getModelMaxPromptTokens() - maxPromptTokenLength - 1;
         
         // if we have to deal with prompts that have both text input
         // and previous result, we need to split the maxChunkToken in half

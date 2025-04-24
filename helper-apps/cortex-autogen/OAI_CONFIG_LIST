@@ -1,6 +1,6 @@
 [
     {
-        "model": "o3-mini",
+        "model": "claude-3.7-sonnet",
         "price": [0,0]
     }
 ]

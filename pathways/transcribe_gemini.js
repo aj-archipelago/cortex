@@ -5,6 +5,42 @@ import { Prompt } from "../server/prompt.js";
 
 const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
 
+function isYoutubeUrl(url) {
+    try {
+        const urlObj = new URL(url);
+
+        // Check for standard youtube.com domains
+        if (
+            urlObj.hostname === "youtube.com" ||
+            urlObj.hostname === "www.youtube.com"
+        ) {
+            // For standard watch URLs, verify they have a video ID
+            if (urlObj.pathname === "/watch") {
+                return !!urlObj.searchParams.get("v");
+            }
+            // For embed URLs, verify they have a video ID in the path
+            if (urlObj.pathname.startsWith("/embed/")) {
+                return urlObj.pathname.length > 7; // '/embed/' is 7 chars
+            }
+            // For shorts URLs, verify they have a video ID in the path
+            if (urlObj.pathname.startsWith("/shorts/")) {
+                return urlObj.pathname.length > 8; // '/shorts/' is 8 chars
+            }
+            return false;
+        }
+
+        // Check for shortened youtu.be domain
+        if (urlObj.hostname === "youtu.be") {
+            // Verify there's a video ID in the path
+            return urlObj.pathname.length > 1; // '/' is 1 char
+        }
+
+        return false;
+    } catch (err) {
+        return false;
+    }
+}
+
 export default {
     prompt:
     [
@@ -12,7 +48,7 @@ export default {
             "{{messages}}",
         ]}),
     ],
-    model: 'gemini-flash-20-vision',
+    model: 'gemini-pro-25-vision',
     inputParameters: {
         file: ``,
         language: ``,
@@ -63,7 +99,10 @@ export default {
         sendProgress(true);
         intervalId = setInterval(() => sendProgress(true), 3000);
 
-        const { file, responseFormat, wordTimestamped, maxLineWidth } = args;
+        const { file, wordTimestamped, maxLineWidth } = args;
+
+        const responseFormat = args.responseFormat || 'text';
+
         if(!file) {
             throw new Error("Please provide a file to transcribe.");
         }
@@ -71,7 +110,7 @@ export default {
 
         //check if fils is a gcs file or youtube
         const isGcs = file.startsWith('gs://');
-        const isYoutube = file.match(/^(http(s)?:\/\/)?((w){3}.)?youtu(be|.be)?(\.com)?\/.+/);
+        const isYoutube = isYoutubeUrl(file);
 
         let chunks = [{
             url: file,
@@ -87,43 +126,41 @@ export default {
 
         sendProgress(true);
 
-        let respectLimitsPrompt = " ";
+        let respectLimitsPrompt = "";
         if (maxLineWidth) {
 
             const possiblePlacement = maxLineWidth <= 25
             ? "vertical" : maxLineWidth <= 35 ? "horizontal" : "";
 
-            respectLimitsPrompt += `The output lines must not exceed ${maxLineWidth} characters, so make sure your transcription lines and timestamps are perfectly aligned. `;
-
-            if(possiblePlacement){
-                respectLimitsPrompt+= `This limit a must as user will be using the output for ${possiblePlacement} display.`
-            }
+            respectLimitsPrompt += `  These subtitles will be shown in a ${possiblePlacement} formatted video player.  Each subtitle line should not exceed ${maxLineWidth} characters to fit the player.`;
         }
 
-        const transcriptionLevel = wordTimestamped ? "word" : "phrase";
+        function getMessages(file) {
+            
+            // Base system content that's always included
+            let systemContent = `Instructions:
+You are a transcription assistant. Your job is to transcribe the audio/video content accurately.
 
-        function getMessages(file, format) {
+IMPORTANT: Only provide the transcription in your response - no explanations, comments, or additional text.
 
-            const responseFormat = format!== 'text' ? 'VTT' : 'text';
+Format your response in ${responseFormat} format.`;
 
-            const messages = [
-                {"role": "system", "content": `Instructions:\nYou are an AI entity with expertise of transcription. Your response only contains the transcription, no comments or additonal stuff. 
-                
-Your output must be in the format asked, and must be strictly following the formats and parseble by auto parsers. 
+            // Only include timestamp instructions if we're not using plain text format
+            if (responseFormat !== 'text') {
+                systemContent += `
 
-Word-level transcriptions must be per word timestamped, and phrase-level transcriptions are per phrase.
+CRITICAL TIMESTAMP INSTRUCTIONS:
+- Timestamps MUST match the actual timing in the media
+- For each new segment, look at the media time directly
+- Start times should precisely match when spoken words begin
+- Consecutive segments should have matching end/start times (no gaps or overlaps)`;
+            }
 
-Each transcription timestamp must precisely match the corresponding audio/video segment.
-Each timestamp must correspond to actual spoken content.
-End time cannot exceed total media duration. Especially when transcribing word-level double check your timestamps, never exceed the total duration. 
+            systemContent += `
 
-You must follow 1, 2, 3, ... numbering for each transcription segment without any missing numbers.
-Never put newlines or spaces in the middle of a timestamp.
-Never put multiple lines for a single timestamp.
+Examples:
 
-Example responses:
-
-- If asked SRT format, e.g.:
+SRT format:
 1
 00:00:00,498 --> 00:00:02,827
 Hello World!
@@ -132,21 +169,24 @@ Hello World!
 00:00:02,827 --> 00:00:06,383
 Being AI is fun!
 
-- If asked VTT format, e.g.:
+VTT format:
 WEBVTT
 
 1
 00:00:00.000 --> 00:00:02.944
-Hello World2!
+Hello World!
 
 2
-00:00:05.344 --> 00:00:08.809
-Being AI is also great!
+00:00:02.944 --> 00:00:08.809
+Being AI is great!
 
-- If asked text format, e.g.:
-Hello World!!! Being AI is being great yet again!
+Text format:
+Hello World! Being AI is great!`;
 
-Word-level output e.g.:
+            if (wordTimestamped) {
+                systemContent += `
+
+For word-level transcription, timestamp each word:
 
 WEBVTT
 
@@ -155,17 +195,32 @@ WEBVTT
 Hello
 
 2
-00:00:01.964 --> 00:00:02.383
+00:00:01.944 --> 00:00:02.383
 World!
+`;
+            }
 
+            // Only include anti-drift procedure and timestamp reminders for non-text formats
+            if (responseFormat !== 'text') {
+                systemContent += `
 
-You must follow spacing, punctuation, and timestamps as shown in the examples otherwise your response will not be accepted.
-Never output multiple lines for a single timestamp.
-Even a single newline or space can cause the response to be rejected. You must follow the format strictly. You must place newlines and timestamps exactly as shown in the examples.
+ANTI-DRIFT PROCEDURE:
+1. For EVERY new segment, check the actual media time directly
+2. After every 5 segments, verify your timestamps against the video/audio
+3. Never calculate timestamps based on previous segments
+4. Always match the end time of one segment with the start time of the next
 
-    `},
+REMEMBER:
+- Transcription accuracy is your primary goal
+- Timestamp accuracy is equally important
+- Timestamp drift is the most common error - actively prevent it
+- When in doubt, check the media time directly`;
+            }
+
+            const messages = [
+                {"role": "system", "content": systemContent},
                 {"role": "user", "content": [
-                    `{ type: 'text', text: 'Transcribe the media ${transcriptionLevel}-level in ${responseFormat} format.${respectLimitsPrompt}' }`,
+                    `{ type: 'text', text: 'Transcribe this file in ${responseFormat} format.${respectLimitsPrompt} Output only the transcription, no other text or comments or formatting.' }`,
                     JSON.stringify({
                         type: 'image_url',
                         url: file,
@@ -215,7 +270,7 @@ Even a single newline or space can cause the response to be rejected. You must f
         
         const result = await processChunksParallel(chunks, args);
         
-        if (['srt','vtt'].includes(responseFormat) || wordTimestamped) { // align subtitles for formats
+        if (['srt','vtt'].includes(responseFormat.toLowerCase()) || wordTimestamped) { // align subtitles for formats
             const offsets = chunks.map((chunk, index) => chunk?.offset || index * OFFSET_CHUNK);
             return alignSubtitles(result, responseFormat, offsets);
         }

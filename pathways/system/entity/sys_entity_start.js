@@ -2,10 +2,10 @@
 // Beginning of the rag workflow for Jarvis
 import { callPathway, say } from '../../../lib/pathwayTools.js';
 import logger from  '../../../lib/logger.js';
-import { chatArgsHasImageUrl } from  '../../../lib/util.js';
+import { chatArgsHasImageUrl, removeOldImageAndFileContent } from  '../../../lib/util.js';
 import { QueueServiceClient } from '@azure/storage-queue';
 import { config } from '../../../config.js';
-import { addToolCalls, addToolResults } from './memory/shared/sys_memory_helpers.js';
+import { insertToolCallAndResults } from './memory/shared/sys_memory_helpers.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
@@ -87,54 +87,49 @@ export default {
             args.model = pathwayResolver.modelName;
         }
 
-        // Stuff the memory context into the chat history
-        const chatHistoryBeforeMemory = [...args.chatHistory];
+        // remove old image and file content
+        const visionContentPresent = chatArgsHasImageUrl(args);
+        visionContentPresent && (args.chatHistory = removeOldImageAndFileContent(args.chatHistory));
 
-        const memoryContext = await callPathway('sys_read_memory', { ...args, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
-        if (memoryContext) {
-            const { toolCallId } = addToolCalls(args.chatHistory, "search memory for relevant information", "memory_lookup");
-            addToolResults(args.chatHistory, memoryContext, toolCallId);
+        // truncate the chat history
+        const truncatedChatHistory = pathwayResolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
+
+        // Add the memory context to the chat history if applicable
+        if (args.chatHistory.length > 1) {
+            const memoryContext = await callPathway('sys_read_memory', { ...args, chatHistory: truncatedChatHistory, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, pathwayResolver);
+            if (memoryContext) {
+                insertToolCallAndResults(args.chatHistory, "search memory for relevant information", "memory_lookup", memoryContext);
+            }
         }
-        
+      
+        // If we're using voice, get a quick response to say
         let ackResponse = null;
         if (args.voiceResponse) {
-            ackResponse = await callPathway('sys_generator_ack', { ...args, stream: false });
+            ackResponse = await callPathway('sys_generator_ack', { ...args, chatHistory: truncatedChatHistory, stream: false });
             if (ackResponse && ackResponse !== "none") {
                 await say(pathwayResolver.requestId, ackResponse, 100);
                 args.chatHistory.push({ role: 'assistant', content: ackResponse });
             }
         }
 
-        const fetchChatResponse = async (args, pathwayResolver) => {
-            const [chatResponse, chatTitleResponse] = await Promise.all([
-                callPathway('sys_generator_quick', {...args, model: styleModel}, pathwayResolver),
-                callPathway('chat_title', { ...args, chatHistory: chatHistoryBeforeMemory, stream: false}),
-            ]);
-
-            title = chatTitleResponse;
-
-            return chatResponse;
-        };
-
-        // start fetching the default response - we may need it later
+        // start fetching responses in parallel if not streaming
         let fetchChatResponsePromise;
         if (!args.stream) {
-            fetchChatResponsePromise = fetchChatResponse({ ...args, ackResponse }, pathwayResolver);
+            fetchChatResponsePromise = callPathway('sys_generator_quick', {...args, model: styleModel, ackResponse}, pathwayResolver);
         }
-
-        const visionContentPresent = chatArgsHasImageUrl(args);
+        const fetchTitleResponsePromise = callPathway('chat_title', {...args, chatHistory: truncatedChatHistory, stream: false});
 
         try {
             // Get tool routing response
             const toolRequiredResponse = await callPathway('sys_router_tool', { 
                 ...args,
-                chatHistory: chatHistoryBeforeMemory.slice(-4),
+                chatHistory: truncatedChatHistory.slice(-4),
                 stream: false
             });
 
             // Asynchronously manage memory for this context
             if (args.aiMemorySelfModify) {
-                callPathway('sys_memory_manager', {  ...args, chatHistory: chatHistoryBeforeMemory, stream: false })    
+                callPathway('sys_memory_manager', {  ...args, chatHistory: truncatedChatHistory, stream: false })    
                 .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
             }
 
@@ -223,9 +218,20 @@ export default {
                 }
             }
 
+            title = await fetchTitleResponsePromise;
+
+            pathwayResolver.tool = JSON.stringify({ 
+                hideFromModel: (!args.stream && toolCallbackName) ? true : false, 
+                toolCallbackName, 
+                title,
+                search: toolCallbackName === 'sys_generator_results' ? true : false,
+                coding: toolCallbackName === 'coding' ? true : false,
+                codeRequestId,
+                toolCallbackId
+            });
+
             if (toolCallbackMessage) {
                 if (args.skipCallbackMessage) {
-                    pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
                     return await callPathway('sys_entity_continue', { ...args, stream: false, model: styleModel, generatorPathway: toolCallbackName }, pathwayResolver);
                 }
 
@@ -233,32 +239,22 @@ export default {
                     if (!ackResponse) {
                         await say(pathwayResolver.requestId, toolCallbackMessage || "One moment please.", 10, args.voiceResponse ? true : false);
                     }
-                    pathwayResolver.tool = JSON.stringify({ hideFromModel: false, search: false, title });  
-                    await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver);
-                    return "";
+                    await callPathway('sys_entity_continue', { ...args, stream: true, generatorPathway: toolCallbackName }, pathwayResolver); 
+                    return;
                 }
                 
-                pathwayResolver.tool = JSON.stringify({ 
-                    hideFromModel: toolCallbackName ? true : false, 
-                    toolCallbackName, 
-                    title,
-                    search: toolCallbackName === 'sys_generator_results' ? true : false,
-                    coding: toolCallbackName === 'coding' ? true : false,
-                    codeRequestId,
-                    toolCallbackId
-                });
                 return toolCallbackMessage || "One moment please.";
             }
 
-            const chatResponse = await (fetchChatResponsePromise || fetchChatResponse({ ...args, ackResponse }, pathwayResolver));
+            const chatResponse = await (fetchChatResponsePromise || callPathway('sys_generator_quick', {...args, model: styleModel, ackResponse}, pathwayResolver));
             pathwayResolver.tool = JSON.stringify({ search: false, title });
-            return args.stream ? "" : chatResponse;
+            return args.stream ? null : chatResponse;
 
         } catch (e) {
             pathwayResolver.logError(e);
-            const chatResponse = await (fetchChatResponsePromise || fetchChatResponse({ ...args, ackResponse }, pathwayResolver));
+            const chatResponse = await (fetchChatResponsePromise || callPathway('sys_generator_quick', {...args, model: styleModel, ackResponse}, pathwayResolver));
             pathwayResolver.tool = JSON.stringify({ search: false, title });
-            return args.stream ? "" : chatResponse;
+            return args.stream ? null : chatResponse;
         }
     }
 };
