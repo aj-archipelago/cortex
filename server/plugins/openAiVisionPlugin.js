@@ -50,7 +50,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                             if (url && await this.validateImageUrl(url)) {
                                 return {type: parsedItem.type, image_url: {url}};
                             }
-                            return { type: 'text', text: 'Image skipped: unsupported format' };
+                            return { type: 'text', text: item };
                         }
                         
                         return parsedItem;
@@ -131,6 +131,10 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         // Add tools support if provided in parameters
         if (parameters.tools) {
             requestParameters.tools = parameters.tools;
+        }
+
+        if (parameters.tool_choice) {
+            requestParameters.tool_choice = parameters.tool_choice;
         }
 
         const modelMaxReturnTokens = this.getModelMaxReturnTokens();

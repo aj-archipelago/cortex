@@ -290,6 +290,24 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       });
     }
 
+    if (parameters.tool_choice) {
+      // Convert OpenAI tool_choice format to Claude format
+      if (typeof parameters.tool_choice === 'string') {
+        // Handle string values: auto, required, none
+        if (parameters.tool_choice === 'required') {
+          requestParameters.tool_choice = 'any'; // OpenAI's 'required' maps to Claude's 'any'
+        } else {
+          requestParameters.tool_choice = parameters.tool_choice; // 'auto' and 'none' are the same in both
+        }
+      } else if (parameters.tool_choice.type === "function") {
+        // Handle function-specific tool choice
+        requestParameters.tool_choice = {
+          type: "tool",
+          name: parameters.tool_choice.function.name
+        };
+      }
+    }
+
     // If there are function calls in messages, generate tools block
     if (modifiedMessages?.some(msg => 
       Array.isArray(msg.content) && msg.content.some(item => item.type === 'tool_use')
