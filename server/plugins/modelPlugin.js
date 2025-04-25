@@ -565,11 +565,12 @@ class ModelPlugin {
             return parsedData;
         } catch (error) {
             // Log the error and continue
-            logger.error(`Error in executeRequest for ${this.pathwayName}: ${error.message || error}`);
+            const errorMessage = `${error?.response?.data?.message || error?.response?.data?.error?.message || error?.message || error}`;
+            logger.error(`Error in executeRequest for ${this.pathwayName}: ${errorMessage}`);
             if (error.data) {
                 logger.error(`Additional error data: ${JSON.stringify(error.data)}`);
             }
-            throw new Error(`Execution failed for ${this.pathwayName}: ${error.message || error}`);
+            throw new Error(`Execution failed for ${this.pathwayName}: ${errorMessage}`);
         }
     }
 
