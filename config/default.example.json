@@ -133,26 +133,6 @@
             "maxReturnTokens": 4096,
             "supportsStreaming": true
         },
-        "palm-text": {
-            "type": "PALM-COMPLETION",
-            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/text-bison@001:predict",
-            "headers": {
-                "Content-Type": "application/json"
-            },
-            "requestsPerSecond": 10,
-            "maxTokenLength": 2048,
-            "maxReturnTokens": 1024
-        },
-        "palm-chat": {
-            "type": "PALM-CHAT",
-            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/chat-bison@001:predict",
-            "headers": {
-                "Content-Type": "application/json"
-            },
-            "requestsPerSecond": 10,
-            "maxTokenLength": 2048,
-            "maxReturnTokens": 1024   
-        },
         "local-llama13B": {
             "type": "LOCAL-CPP-MODEL",
             "executablePath": "../llm/llama.cpp/main",

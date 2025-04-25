@@ -7,9 +7,6 @@ import AzureTranslatePlugin from './plugins/azureTranslatePlugin.js';
 import OpenAIWhisperPlugin from './plugins/openAiWhisperPlugin.js';
 import OpenAIChatExtensionPlugin from './plugins/openAiChatExtensionPlugin.js';
 import LocalModelPlugin from './plugins/localModelPlugin.js';
-import PalmChatPlugin from './plugins/palmChatPlugin.js';
-import PalmCompletionPlugin from './plugins/palmCompletionPlugin.js';
-import PalmCodeCompletionPlugin from './plugins/palmCodeCompletionPlugin.js';
 import CohereGeneratePlugin from './plugins/cohereGeneratePlugin.js';
 import CohereSummarizePlugin from './plugins/cohereSummarizePlugin.js';
 import AzureCognitivePlugin from './plugins/azureCognitivePlugin.js';
@@ -69,15 +66,6 @@ class ModelExecutor {
                 break;
             case 'LOCAL-CPP-MODEL':
                 plugin = new LocalModelPlugin(pathway, model);
-                break;
-            case 'PALM-CHAT':
-                plugin = new PalmChatPlugin(pathway, model);
-                break;
-            case 'PALM-COMPLETION':
-                plugin = new PalmCompletionPlugin(pathway, model);
-                break;
-            case 'PALM-CODE-COMPLETION':
-                plugin = new PalmCodeCompletionPlugin(pathway, model);
                 break;
             case 'COHERE-GENERATE':
                 plugin = new CohereGeneratePlugin(pathway, model);
