@@ -115,13 +115,32 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
     const { content } = data;
 
-    // if the response is an array, return the text property of the first item
-    // if the type property is 'text'
-    if (content && Array.isArray(content) && content[0].type === "text") {
-      return content[0].text;
-    } else {
-      return data;
+    // Handle tool use responses from Claude
+    if (content && Array.isArray(content)) {
+      const toolUses = content.filter(item => item.type === "tool_use");
+      if (toolUses.length > 0) {
+        return {
+          role: "assistant",
+          content: "",
+          tool_calls: toolUses.map(toolUse => ({
+            id: toolUse.id,
+            type: "function",
+            function: {
+              name: toolUse.name,
+              arguments: JSON.stringify(toolUse.input)
+            }
+          }))
+        };
+      }
+
+      // Handle regular text responses
+      const textContent = content.find(item => item.type === "text");
+      if (textContent) {
+        return textContent.text;
+      }
     }
+
+    return data;
   }
 
   // This code converts messages to the format required by the Claude Vertex API
@@ -277,11 +296,18 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     )) {
       const toolsMap = new Map();
       
-      // Collect all unique tool uses from messages
+      // First add any existing tools from parameters to the map
+      if (requestParameters.tools) {
+        requestParameters.tools.forEach(tool => {
+          toolsMap.set(tool.name, tool);
+        });
+      }
+      
+      // Collect all unique tool uses from messages, only adding if not already present
       modifiedMessages.forEach(msg => {
         if (Array.isArray(msg.content)) {
           msg.content.forEach(item => {
-            if (item.type === 'tool_use') {
+            if (item.type === 'tool_use' && !toolsMap.has(item.name)) {
               toolsMap.set(item.name, {
                 name: item.name,
                 description: `Tool for ${item.name}`,
@@ -302,11 +328,8 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
         }
       });
       
-      if (requestParameters.tools) {
-        requestParameters.tools.push(...Array.from(toolsMap.values()));
-      } else {
-        requestParameters.tools = Array.from(toolsMap.values());
-      }
+      // Update the tools array with the combined unique tools
+      requestParameters.tools = Array.from(toolsMap.values());
     }
 
     requestParameters.max_tokens = this.getModelMaxReturnTokens();
@@ -361,11 +384,17 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     if (stream) {
       logger.info(`[response received as an SSE stream]`);
     } else {
-      const responseText = this.parseResponse(responseData);
-      const { length, units } = this.getLength(responseText);
-      logger.info(`[response received containing ${length} ${units}]`);
-      logger.verbose(`${responseText}`);
-    }
+      const parsedResponse = this.parseResponse(responseData);
+      
+      if (typeof parsedResponse === 'string') {
+          const { length, units } = this.getLength(parsedResponse);
+          logger.info(`[response received containing ${length} ${units}]`);
+          logger.verbose(`${this.shortenContent(parsedResponse)}`);
+      } else {
+          logger.info(`[response received containing object]`);
+          logger.verbose(`${JSON.stringify(parsedResponse)}`);
+      }
+  }
 
     prompt &&
       prompt.debugInfo &&

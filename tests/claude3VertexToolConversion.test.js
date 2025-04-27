@@ -409,3 +409,81 @@ test('Combining existing tools block with generated tools', async (t) => {
     t.is(result.tools.length, 2, 'Should have 2 tools');
     t.deepEqual(result.tools.map(t => t.name).sort(), ['get_weather', 'memory_lookup']);
 });
+
+// Test preventing duplicate tool definitions
+test('Prevent duplicate tool definitions', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    
+    const parameters = {
+        tools: [
+            {
+                type: 'function',
+                function: {
+                    name: 'memory_lookup',
+                    description: 'Look up information in memory',
+                    parameters: {
+                        type: 'object',
+                        properties: {
+                            query: {
+                                type: 'string',
+                                description: 'The search query'
+                            }
+                        },
+                        required: ['query']
+                    }
+                }
+            }
+        ]
+    };
+
+    const messages = [
+        {
+            role: 'system',
+            content: 'You are a helpful assistant'
+        },
+        {
+            role: 'user',
+            content: 'What\'s in my memory?'
+        },
+        {
+            role: 'assistant',
+            content: [
+                {
+                    type: 'tool_use',
+                    id: 'tool_1',
+                    name: 'memory_lookup',
+                    input: { query: 'search memory' }
+                }
+            ]
+        }
+    ];
+
+    // Set up the mock prompt with messages
+    prompt.messages = messages;
+
+    const cortexRequest = { messages };
+    const result = await plugin.getRequestParameters('test', parameters, prompt, cortexRequest);
+    
+    // Check that we only have one memory_lookup tool definition
+    t.truthy(result.tools, 'Tools should be defined');
+    t.is(result.tools.length, 1, 'Should have exactly 1 tool');
+    t.is(result.tools[0].name, 'memory_lookup', 'Tool should be memory_lookup');
+    t.is(result.tools[0].description, 'Look up information in memory', 'Should preserve original tool description');
+    
+    // Verify the tool_use call is still properly converted
+    t.truthy(result.messages, 'Messages should be defined');
+    t.is(result.messages.length, 1, 'Should have 1 message after conversion');
+    
+    // Check the converted message
+    const message = result.messages[0];
+    t.is(message.role, 'assistant', 'Message should be from assistant');
+    t.truthy(message.content, 'Message should have content');
+    t.is(message.content.length, 1, 'Message should have one content item');
+    t.deepEqual(message.content[0], {
+        type: 'tool_use',
+        id: 'tool_1',
+        name: 'memory_lookup',
+        input: { query: 'search memory' }
+    });
+});

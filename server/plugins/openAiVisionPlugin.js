@@ -20,9 +20,23 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
     async tryParseMessages(messages) {
         return await Promise.all(messages.map(async message => {
             try {
+                // Handle tool-related message types
                 if (message.role === "tool") {
-                    return message;
+                    return {
+                        role: message.role,
+                        content: message.content,
+                        tool_call_id: message.tool_call_id
+                    };
                 }
+
+                if (message.role === "assistant" && message.tool_calls) {
+                    return {
+                        role: message.role,
+                        content: message.content,
+                        tool_calls: message.tool_calls
+                    };
+                }
+
                 if (Array.isArray(message.content)) {
                     message.content = await Promise.all(message.content.map(async item => {
                         const parsedItem = safeJsonParse(item);
@@ -90,14 +104,19 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             logger.info(`[request sent containing ${length} ${units}]`);
             logger.verbose(`${this.shortenContent(content)}`);
         }
-    
         if (stream) {
             logger.info(`[response received as an SSE stream]`);
         } else {
-            const responseText = this.parseResponse(responseData);
-            const { length, units } = this.getLength(responseText);
-            logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${this.shortenContent(responseText)}`);
+            const parsedResponse = this.parseResponse(responseData);
+            
+            if (typeof parsedResponse === 'string') {
+                const { length, units } = this.getLength(parsedResponse);
+                logger.info(`[response received containing ${length} ${units}]`);
+                logger.verbose(`${this.shortenContent(parsedResponse)}`);
+            } else {
+                logger.info(`[response received containing object]`);
+                logger.verbose(`${JSON.stringify(parsedResponse)}`);
+            }
         }
 
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
@@ -108,6 +127,11 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         const requestParameters = super.getRequestParameters(text, parameters, prompt);
 
         requestParameters.messages = await this.tryParseMessages(requestParameters.messages);
+
+        // Add tools support if provided in parameters
+        if (parameters.tools) {
+            requestParameters.tools = parameters.tools;
+        }
 
         const modelMaxReturnTokens = this.getModelMaxReturnTokens();
         const maxTokensPrompt = this.promptParameters.max_tokens;
@@ -136,6 +160,34 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         cortexRequest.stream = stream;
 
         return this.executeRequest(cortexRequest);
+    }
+
+    // Override parseResponse to handle tool calls
+    parseResponse(data) {
+        if (!data) return "";
+        const { choices } = data;
+        if (!choices || !choices.length) {
+            return data;
+        }
+
+        // if we got a choices array back with more than one choice, return the whole array
+        if (choices.length > 1) {
+            return choices;
+        }
+
+        const choice = choices[0];
+        const message = choice.message;
+
+        // Handle tool calls in the response
+        if (message.tool_calls) {
+            return {
+                role: message.role,
+                content: message.content || "",
+                tool_calls: message.tool_calls
+            };
+        }
+
+        return message.content || "";
     }
 
 }

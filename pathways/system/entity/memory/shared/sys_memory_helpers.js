@@ -132,7 +132,7 @@ const addToolCalls = (chatHistory, toolArgs, toolName, toolCallId = getUniqueId(
 const addToolResults = (chatHistory, result, toolCallId) => {
     const toolResult = {
         "role": "tool",
-        "content": result,
+        "content": typeof result === 'string' ? result : JSON.stringify(result),
         "tool_call_id": toolCallId
     };
     chatHistory.push(toolResult);
