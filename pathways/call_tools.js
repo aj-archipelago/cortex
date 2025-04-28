@@ -222,9 +222,9 @@ export default {
         // set the style model if applicable
         const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
         const styleModel = aiStyle === "Anthropic" ? AI_STYLE_ANTHROPIC : AI_STYLE_OPENAI;
- 
+        
         const promptMessages = [
-            {"role": "system", "content": `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n{{renderTemplate AI_DATETIME}}`},
+            {"role": "system", "content": `{{renderTemplate AI_MEMORY}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_TOOLS}}\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_MEMORY_DIRECTIVES}}\n{{renderTemplate AI_DATETIME}}`},
             "{{chatHistory}}",
         ];
 

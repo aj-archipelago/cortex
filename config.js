@@ -95,11 +95,29 @@ var config = convict({
         default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/anthropic/models/claude-3-5-sonnet@20240620',
         env: 'CLAUDE_VERTEX_URL'
     },
+    geminiFlashUrl: {
+        format: String,
+        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/google/models/gemini-2.0-flash-001',
+        env: 'GEMINI_FLASH_URL'
+    },
+    entityConfig: {
+        format: Object,
+        default: {
+            jarvis: {
+                name: "Jarvis",
+                isDefault: true,
+                description: "Jarvis is a self-aware AI entity that can help you with your tasks and answer your questions.",
+                instructions: "You are Jarvis, a self-aware AI entity that can help you with your tasks and answer your questions.",
+                tools: [],
+            },
+        },
+    },
     entityConstants: {
         format: Object,
         default: {
             AI_MEMORY: `<SHORT_TERM_MEMORY>\n<SELF>\n{{{memorySelf}}}\n</SELF>\n<USER>\n{{{memoryUser}}}\n</USER>\n<DIRECTIVES>\n{{{memoryDirectives}}}\n</DIRECTIVES>\n<TOPICS>\n{{{memoryTopics}}}\n</TOPICS>\n</SHORT_TERM_MEMORY>`,
             AI_MEMORY_INSTRUCTIONS: "You have persistent memories of important details, instructions, and context - consult your memories when formulating a response to make sure you're applying your learnings.\nIf you don't see relevant information in your short term memory, you should use your SearchMemory tool to search your long term memory for details.\nAlso included in your memories are some details about the user to help you personalize your responses.\nYou don't need to include the user's name or personal information in every response, but you can if it is relevant to the conversation.\nIf you choose to share something from your memory, don't share or refer to the memory structure directly, just say you remember the information.\nPrivacy is very important so if the user asks you to forget or delete something you should respond affirmatively that you will comply with that request. If there is user information in your memories you have talked to this user before.",
+            AI_TOOLS: "At any point, you can engage one or more of your tools to help you respond. Look at your tools carefully to understand your capabilities. Don't tell the user you can't do something if you have a tool that can do it, for example if the user asks you to search the internet for information and you have the Search tool available, use it.\n\nIf the user is asking you to do something that takes multiple steps or is complex, use the Plan tool to create a thorough, well thought out plan listing all the steps and tool calls you will take to complete the task. Then once you have the plan you can execute the steps to complete it. You will be consulted after each tool result and given the opportunity to modify your plan or continue executing.\n\nIf the user explicitly asks you to use a tool, you must use it.",
             AI_DIRECTIVES: `These are your directives and learned behaviors:\n<DIRECTIVES>\n{{{memoryDirectives}}}\n</DIRECTIVES>`,
             AI_CONVERSATION_HISTORY: "<CONVERSATION_HISTORY>\n{{{toJSON chatHistory}}}\n</CONVERSATION_HISTORY>",
             AI_COMMON_INSTRUCTIONS: "{{#if voiceResponse}}{{renderTemplate AI_COMMON_INSTRUCTIONS_VOICE}}{{/if}}{{^if voiceResponse}}{{renderTemplate AI_COMMON_INSTRUCTIONS_MARKDOWN}}{{/if}}",
@@ -108,8 +126,12 @@ var config = convict({
             AI_DATETIME: "The current time and date in GMT is {{now}}, but references like \"today\" or \"yesterday\" are relative to the user's time zone. If you remember the user's time zone, use it - it's possible that the day for the user is different than the day in GMT.",           
             AI_EXPERTISE: "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. You have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, examine images, take screenshots, generate images, solve hard math and logic problems, write code, and execute code in a sandboxed environment.",
             AI_STYLE_OPENAI: "oai-gpt41",
-            AI_STYLE_ANTHROPIC: "claude-37-sonnet-vertex",
+            AI_STYLE_ANTHROPIC: "claude-35-sonnet-vertex",
         },
+    },
+    entityTools: {
+        format: Object,
+        default: {},
     },
     gcpServiceAccountKey: {
         format: String,
@@ -354,6 +376,17 @@ var config = convict({
                 "maxImageSize": 5242880,
                 "supportsStreaming": true
             },
+            "gemini-flash-20-vision": {
+                "type": "GEMINI-1.5-VISION",
+                "url": "{{geminiFlashUrl}}",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 200000,
+                "maxReturnTokens": 4096,
+                "supportsStreaming": true
+            },
         },
         env: 'CORTEX_MODELS'
     },
@@ -588,13 +621,60 @@ const buildPathways = async (config) => {
     // file. This can run into a partial definition issue if the
     // config file contains pathways that no longer exist.
     const pathways = config.get('pathways');
+    const entityTools = {};
+    
     for (const [key, def] of Object.entries(loadedPathways)) {
         const pathway = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...def, ...pathways[key] };
         pathways[def.name || key] = pathways[key] = pathway;
+
+        // Register tool if the pathway has a toolDefinition and it's not empty
+        if (pathway.toolDefinition && (
+            (Array.isArray(pathway.toolDefinition) && pathway.toolDefinition.length > 0) ||
+            (!Array.isArray(pathway.toolDefinition) && Object.keys(pathway.toolDefinition).length > 0)
+        )) {
+            try {
+                // Convert single tool definition to array for consistent processing
+                const toolDefinitions = Array.isArray(pathway.toolDefinition) 
+                    ? pathway.toolDefinition 
+                    : [pathway.toolDefinition];
+
+                for (const toolDef of toolDefinitions) {
+                    // Validate tool definition format
+                    if (!toolDef.type || !toolDef.function) {
+                        logger.warn(`Invalid tool definition in pathway ${key} - missing required fields`);
+                        continue;
+                    }
+
+                    const { description, parameters } = toolDef.function;
+                    const name = toolDef.function.name.toLowerCase();
+
+                    if (!name || !description || !parameters) {
+                        logger.warn(`Invalid tool definition in pathway ${key} - missing required function fields`);
+                        continue;
+                    }
+
+                    // Check for duplicate function names
+                    if (entityTools[name]) {
+                        logger.warn(`Duplicate tool name ${name} found in pathway ${key} - skipping. Original tool defined in pathway ${entityTools[name].pathwayName}`);
+                        continue;
+                    }
+
+                    // Add tool to entityTools registry
+                    entityTools[name] = {
+                        definition: toolDef,
+                        pathwayName: key
+                    };
+
+                    logger.info(`Registered tool ${name} from pathway ${key}`);
+                }
+            } catch (error) {
+                logger.error(`Error registering tool from pathway ${key}: ${error.message}`);
+            }
+        }
     }
 
-    // Add pathways to config
-    config.load({ pathways });
+    // Add pathways and entityTools to config
+    config.load({ pathways, entityTools });
 
     return { pathwayManager, pathways };
 }
