@@ -31,6 +31,8 @@ import AzureVideoTranslatePlugin from './plugins/azureVideoTranslatePlugin.js';
 import OllamaChatPlugin from './plugins/ollamaChatPlugin.js';
 import OllamaCompletionPlugin from './plugins/ollamaCompletionPlugin.js';
 import ApptekTranslatePlugin from './plugins/apptekTranslatePlugin.js';
+import GoogleTranslatePlugin from './plugins/googleTranslatePlugin.js';
+import GroqChatPlugin from './plugins/groqChatPlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -124,8 +126,18 @@ class ModelExecutor {
                 break;
             case 'OLLAMA-COMPLETION':
                 plugin = new OllamaCompletionPlugin(pathway, model);
+                break;
             case 'APPTEK-TRANSLATE':
                 plugin = new ApptekTranslatePlugin(pathway, model);
+                break;
+            case 'GOOGLE-TRANSLATE':
+                plugin = new GoogleTranslatePlugin(pathway, model);
+                break;
+            case 'GROQ-TRANSLATE':
+                plugin = new GroqChatPlugin(pathway, model);
+                break;
+            case 'GROQ-CHAT':
+                plugin = new GroqChatPlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);

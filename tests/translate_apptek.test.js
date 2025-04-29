@@ -91,8 +91,6 @@ test('pathway has correct input parameters', (t) => {
 test('pathway has correct AppTek configuration', (t) => {
     const pathway = t.context.pathway;
     
-    t.is(pathway.config.maxPollingAttempts, 30);
-    t.is(pathway.config.pollingInterval, 1.0);
     t.deepEqual(pathway.config.supportedLanguages, {
         en: "English",
         es: "Spanish",

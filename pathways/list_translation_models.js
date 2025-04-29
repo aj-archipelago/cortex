@@ -44,6 +44,16 @@ export default {
                 name: 'GPT-3.5 Turbo Translator',
                 description: 'Fast translation using GPT-3.5 Turbo',
                 supportedLanguages: 'All languages supported'
+            },
+            'translate_google': {
+                name: 'Google Translator',
+                description: 'Google Cloud Translation service',
+                supportedLanguages: 'Over 100 languages supported'
+            },
+            'translate_groq': {
+                name: 'Groq Llama Translator',
+                description: 'High-performance translation using Groq Llama models',
+                supportedLanguages: 'All major languages supported'
             }
         };
 

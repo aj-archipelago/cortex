@@ -139,6 +139,139 @@ app.all('/api/MogrtHandler', async (req, res) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/glossary/list:
+ *   get:
+ *     summary: List all glossaries
+ *     responses:
+ *       200:
+ *         description: List of glossaries
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 glossaries:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
+ *
+ * /api/glossary/{langPair}:
+ *   post:
+ *     summary: Create a new glossary
+ *     parameters:
+ *       - in: path
+ *         name: langPair
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Language pair (e.g. en-es)
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         description: Name of the glossary
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               source_lang_code:
+ *                 type: string
+ *               target_lang_code:
+ *                 type: string
+ *               entries:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     source:
+ *                       type: string
+ *                     target:
+ *                       type: string
+ *               name:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Glossary created
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
+ *
+ * /api/glossary/{id}:
+ *   delete:
+ *     summary: Delete a glossary by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The glossary ID
+ *     responses:
+ *       200:
+ *         description: Glossary deleted
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Glossary not found
+ *       500:
+ *         description: Server error
+ *
+ * /api/glossary/edit/{id}:
+ *   post:
+ *     summary: Edit a glossary by ID (delete and recreate)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The glossary ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               source_lang_code:
+ *                 type: string
+ *               target_lang_code:
+ *                 type: string
+ *               entries:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     source:
+ *                       type: string
+ *                     target:
+ *                       type: string
+ *               name:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Glossary edited
+ *       400:
+ *         description: Invalid input
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Glossary not found
+ *       500:
+ *         description: Server error
+ */
 // New endpoint for Glossary handling
 app.all('/api/glossary/*', async (req, res) => {
     const context = { req, res, log: console.log };
