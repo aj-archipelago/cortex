@@ -170,11 +170,8 @@
     "enableRestEndpoints": false,
     "subscriptionKeepAlive": 10000,
     "enabledTranslationModels": [
-        "translate",
-        "translate_azure",
         "translate_apptek",
-        "translate_gpt4",
-        "translate_gpt4_turbo",
-        "translate_turbo"
+        "translate_groq"
+
     ]
 }
