@@ -315,21 +315,6 @@ var config = convict({
                 },
                 "requestsPerSecond": 10
             },
-            "groq-llama3": {
-                "type": "GROQ-TRANSLATE",
-                "url": "https://api.groq.com/openai/v1/chat/completions",
-                "headers": {
-                    "Authorization": "Bearer {{GROQ_API_KEY}}",
-                    "Content-Type": "application/json"
-                },
-                "params": {
-                    "model": "meta-llama/llama-4-scout-17b-16e-instruct"
-                },
-                "requestsPerSecond": 10,
-                "maxTokenLength": 65536,
-                "maxReturnTokens": 4096,
-                "supportsStreaming": true
-            },
             "groq-chat": {
                 "type": "GROQ-CHAT",
                 "url": "https://api.groq.com/openai/v1/chat/completions",
