@@ -244,31 +244,147 @@ app.all('/api/MogrtHandler', async (req, res) => {
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - source_lang_code
+ *               - target_lang_code
+ *               - entries
  *             properties:
  *               source_lang_code:
  *                 type: string
+ *                 example: en
  *               target_lang_code:
  *                 type: string
+ *                 example: es
+ *               name:
+ *                 type: string
+ *                 example: My Glossary
  *               entries:
  *                 type: array
  *                 items:
  *                   type: object
+ *                   required:
+ *                     - source_text
+ *                     - target_text
  *                   properties:
- *                     source:
+ *                     source_text:
  *                       type: string
- *                     target:
+ *                       example: hello
+ *                     target_text:
  *                       type: string
- *               name:
- *                 type: string
+ *                       example: hola
  *     responses:
  *       200:
  *         description: Glossary edited
  *       400:
- *         description: Invalid input
- *       401:
- *         description: Unauthorized
+ *         description: Bad request
  *       404:
  *         description: Glossary not found
+ *       500:
+ *         description: Server error
+ * 
+ * /api/glossary/{langPair}/versions/{glossaryId}:
+ *   get:
+ *     summary: Get all versions of a glossary
+ *     parameters:
+ *       - in: path
+ *         name: langPair
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The language pair in format 'xx-xx' (e.g., 'en-es')
+ *       - in: path
+ *         name: glossaryId
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The glossary ID
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         description: Optional name of the glossary
+ *     responses:
+ *       200:
+ *         description: List of glossary versions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 versions:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       versionId:
+ *                         type: string
+ *                         description: S3 version ID
+ *                       glossaryId:
+ *                         type: string
+ *                         description: Glossary ID
+ *                       lastModified:
+ *                         type: string
+ *                         format: date-time
+ *                         description: Version creation timestamp
+ *                       isLatest:
+ *                         type: boolean
+ *                         description: Whether this is the latest version
+ *                       metadata:
+ *                         type: object
+ *                         description: Additional metadata
+ *       500:
+ *         description: Server error
+ * 
+ * /api/glossary/{langPair}/version/{glossaryId}/{versionId}:
+ *   get:
+ *     summary: Get a specific version of a glossary
+ *     parameters:
+ *       - in: path
+ *         name: langPair
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The language pair in format 'xx-xx' (e.g., 'en-es')
+ *       - in: path
+ *         name: glossaryId
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The glossary ID
+ *       - in: path
+ *         name: versionId
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The S3 version ID
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         description: Optional name of the glossary
+ *     responses:
+ *       200:
+ *         description: Glossary version details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 versionId:
+ *                   type: string
+ *                   description: S3 version ID
+ *                 glossaryId:
+ *                   type: string
+ *                   description: Glossary ID
+ *                 lastModified:
+ *                   type: string
+ *                   format: date-time
+ *                   description: Version creation timestamp
+ *                 metadata:
+ *                   type: object
+ *                   description: Additional metadata
+ *       404:
+ *         description: Version not found
  *       500:
  *         description: Server error
  */
@@ -286,5 +402,5 @@ app.all('/api/glossary/*', async (req, res) => {
 });
 
 app.listen(port, () => {
-    console.log(`MOGRT Handler running on port ${port}`);
+    console.log(`MOGRT Handler running on port ${port} => http://localhost:${port}`);
 });

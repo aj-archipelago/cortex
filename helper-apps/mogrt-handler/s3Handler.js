@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectVersionsCommand, GetObjectAttributesCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'stream';
 
@@ -256,6 +256,149 @@ export async function saveManifest(manifest) {
         console.log('Added to master manifest');
     } catch (error) {
         console.error('Error saving manifest:', error);
+        throw error;
+    }
+}
+
+/**
+ * Saves a glossary ID to S3 with versioning
+ * @param {string} glossaryId - The glossary ID to save
+ * @param {string} langPair - The language pair for the glossary (e.g., 'en-es')
+ * @param {string} name - Optional name for the glossary
+ * @returns {Promise<{key: string, location: string, versionId: string}>}
+ */
+export async function saveGlossaryId(glossaryId, langPair, name = '') {
+    if (!glossaryId) {
+        throw new Error('Glossary ID is required');
+    }
+    if (!langPair) {
+        throw new Error('Language pair is required');
+    }
+
+    const key = `glossaries/${langPair}/${glossaryId}.txt`;
+    const metadata = {
+        'glossary-id': glossaryId,
+        'language-pair': langPair
+    };
+    
+    if (name) {
+        metadata['glossary-name'] = name;
+    }
+
+    const uploadParams = {
+        Bucket: BUCKET_NAME,
+        Key: key,
+        Body: glossaryId,
+        ContentType: 'text/plain',
+        Metadata: metadata
+    };
+
+    try {
+        console.log(`💾 Saving glossary ID ${glossaryId} to S3: ${key}`);
+        const response = await getS3Client().send(new PutObjectCommand(uploadParams));
+        console.log(`✅ Glossary ID saved with version: ${response.VersionId}`);
+        
+        return {
+            key,
+            location: `s3://${BUCKET_NAME}/${key}`,
+            versionId: response.VersionId
+        };
+    } catch (error) {
+        console.error(`❌ Error saving glossary ID to S3:`, error);
+        throw error;
+    }
+}
+
+/**
+ * Gets all versions of a glossary
+ * @param {string} glossaryId - The ID of the glossary to get versions for
+ * @param {string} langPair - The language pair for the glossary
+ * @param {string} name - Optional name of the glossary
+ * @returns {Promise<Array>} - Array of glossary versions with metadata
+ */
+export async function getGlossaryVersions(glossaryId, langPair, name = '') {
+    const keyPrefix = `glossaries/${langPair}/`;
+    const key = `${keyPrefix}${glossaryId}.txt`;
+    
+    try {
+        console.log(`🔍 Getting versions for glossary ${glossaryId} from S3...`);
+        const response = await getS3Client().send(new ListObjectVersionsCommand({
+            Bucket: BUCKET_NAME,
+            Prefix: key
+        }));
+        
+        console.log(`📥 Retrieved ${response.Versions?.length || 0} versions`);
+        
+        if (!response.Versions || response.Versions.length === 0) {
+            return [];
+        }
+        
+        // Map versions to a more user-friendly format
+        const versions = await Promise.all(response.Versions.map(async (version) => {
+            try {
+                // Get the object to retrieve the actual glossary ID content
+                const objectResponse = await getS3Client().send(new GetObjectCommand({
+                    Bucket: BUCKET_NAME,
+                    Key: version.Key,
+                    VersionId: version.VersionId
+                }));
+                
+                const glossaryId = await objectResponse.Body.transformToString();
+                
+                return {
+                    versionId: version.VersionId,
+                    glossaryId: glossaryId,
+                    lastModified: version.LastModified,
+                    isLatest: version.IsLatest,
+                    metadata: objectResponse.Metadata || {}
+                };
+            } catch (error) {
+                console.error(`❌ Error retrieving version ${version.VersionId}:`, error);
+                return {
+                    versionId: version.VersionId,
+                    lastModified: version.LastModified,
+                    isLatest: version.IsLatest,
+                    error: 'Failed to retrieve version details'
+                };
+            }
+        }));
+        
+        return versions;
+    } catch (error) {
+        console.error(`❌ Error getting glossary versions:`, error);
+        throw error;
+    }
+}
+
+/**
+ * Gets a specific version of a glossary
+ * @param {string} glossaryId - The glossary ID
+ * @param {string} langPair - The language pair
+ * @param {string} versionId - The specific version ID to retrieve
+ * @param {string} name - Optional name of the glossary
+ * @returns {Promise<Object>} - The glossary version details
+ */
+export async function getGlossaryVersion(glossaryId, langPair, versionId, name = '') {
+    const key = `glossaries/${langPair}/${glossaryId}.txt`;
+    
+    try {
+        console.log(`🔍 Getting version ${versionId} for glossary ${glossaryId}...`);
+        const response = await getS3Client().send(new GetObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: key,
+            VersionId: versionId
+        }));
+        
+        const content = await response.Body.transformToString();
+        
+        return {
+            versionId: versionId,
+            glossaryId: content,
+            lastModified: response.LastModified,
+            metadata: response.Metadata || {}
+        };
+    } catch (error) {
+        console.error(`❌ Error getting glossary version ${versionId}:`, error);
         throw error;
     }
 }

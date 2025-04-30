@@ -1,7 +1,28 @@
-import swaggerJsdoc from 'swagger-jsdoc';
+import yaml from 'js-yaml';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const options = {
-  definition: {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let swaggerSpec;
+
+try {
+  // Load the YAML file
+  const swaggerYaml = fs.readFileSync(path.join(__dirname, 'swagger.yaml'), 'utf8');
+  
+  // Parse YAML to JavaScript object
+  swaggerSpec = yaml.load(swaggerYaml);
+  
+  // Update server URL from environment variable if present
+  if (process.env.BASE_URL) {
+    swaggerSpec.servers[0].url = process.env.BASE_URL;
+  }
+} catch (error) {
+  console.error('Error loading swagger.yaml:', error);
+  // Provide a fallback minimal swagger spec
+  swaggerSpec = {
     openapi: '3.0.0',
     info: {
       title: 'MOGRT Handler API',
@@ -14,11 +35,8 @@ const options = {
         description: 'Development server',
       },
     ],
-  },
-  // Path patterns to API route files
-  apis: ['./routes/*.js', './index.js', './*.js'],
-};
-
-const swaggerSpec = swaggerJsdoc(options);
+    paths: {},
+  };
+}
 
 export default swaggerSpec;
