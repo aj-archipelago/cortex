@@ -34,26 +34,183 @@ export default {
         model: 'oai-gpt41'
     },
     timeout: 600,
+
+    toolCallback: async (args, message, resolver) => {
+        const { tool_calls } = message;
+        const pathwayResolver = resolver;
+        const { entityTools, entityToolsOpenAiFormat } = args;
+        
+        // Make a deep copy of the initial chat history
+        const initialMessages = JSON.parse(JSON.stringify(args.chatHistory || []));
+
+        if (tool_calls) {
+            // Execute tool calls in parallel but with isolated message histories
+            const toolResults = await Promise.all(tool_calls.map(async (toolCall) => {
+                try {
+                    if (!toolCall?.function?.arguments) {
+                        throw new Error('Invalid tool call structure: missing function arguments');
+                    }
+
+                    const toolArgs = JSON.parse(toolCall.function.arguments);
+                    const toolFunction = toolCall.function.name.toLowerCase();
+                    
+                    // Create an isolated copy of messages for this tool
+                    const toolMessages = JSON.parse(JSON.stringify(initialMessages));
+                    
+                    // Get the tool definition to check for icon
+                    const toolDefinition = entityTools[toolFunction]?.definition;
+                    const toolIcon = toolDefinition?.icon || '🛠️';
+                    
+                    // Report status to the user
+                    const toolUserMessage = toolArgs.userMessage || `Executing tool: ${toolCall.function.name} - ${JSON.stringify(toolArgs)}`;
+                    const messageWithIcon = toolIcon ? `${toolIcon}&nbsp;&nbsp;${toolUserMessage}` : toolUserMessage;
+                    await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `${messageWithIcon}\n\n`, 1000, false);
+
+                    if (toolArgs.detailedInstructions) {
+                        toolMessages.push({role: "user", content: toolArgs.detailedInstructions});
+                    }
+
+                    // Add the tool call to the isolated message history
+                    toolMessages.push({
+                        role: "assistant",
+                        content: "",
+                        tool_calls: [{
+                            id: toolCall.id,
+                            type: "function",
+                            function: {
+                                name: toolCall.function.name,
+                                arguments: JSON.stringify(toolArgs)
+                            }
+                        }]
+                    });
+
+                    const toolResult = await callTool(toolFunction, {
+                        ...args,
+                        ...toolArgs,
+                        toolFunction,
+                        chatHistory: toolMessages,
+                        stream: false
+                    }, entityTools, pathwayResolver);
+
+                    // Add the tool result to the isolated message history
+                    let toolResultContent = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
+                    if (pathwayResolver.tool && typeof pathwayResolver.tool === 'string') {
+                        try {
+                            let parsedTool = JSON.parse(pathwayResolver.tool);
+                            if (parsedTool.citations) {
+                                toolResultContent += '\n\ncd_source citation array: ' + JSON.stringify(parsedTool.citations);
+                            }
+                        } catch (error) {
+                            logger.error(`Error parsing tool result: ${error.message}`);
+                        }
+                    }
+
+                    toolMessages.push({
+                        role: "tool",
+                        tool_call_id: toolCall.id,
+                        name: toolCall.function.name,
+                        content: toolResultContent
+                    });
+
+                    return { 
+                        success: true, 
+                        result: toolResult,
+                        toolCall,
+                        toolArgs,
+                        toolFunction,
+                        messages: toolMessages
+                    };
+                } catch (error) {
+                    logger.error(`Error executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
+                    
+                    // Create error message history
+                    const errorMessages = JSON.parse(JSON.stringify(initialMessages));
+                    errorMessages.push({
+                        role: "assistant",
+                        content: "",
+                        tool_calls: [{
+                            id: toolCall.id,
+                            type: "function",
+                            function: {
+                                name: toolCall.function.name,
+                                arguments: JSON.stringify(toolCall.function.arguments)
+                            }
+                        }]
+                    });
+                    errorMessages.push({
+                        role: "tool",
+                        tool_call_id: toolCall.id,
+                        name: toolCall.function.name,
+                        content: `Error: ${error.message}`
+                    });
+
+                    return { 
+                        success: false, 
+                        error: error.message,
+                        toolCall,
+                        toolArgs: toolCall?.function?.arguments ? JSON.parse(toolCall.function.arguments) : {},
+                        toolFunction: toolCall?.function?.name?.toLowerCase() || 'unknown',
+                        messages: errorMessages
+                    };
+                }
+            }));
+
+            // Merge all message histories in order
+            let finalMessages = JSON.parse(JSON.stringify(initialMessages));
+            for (const result of toolResults) {
+                try {
+                    if (!result?.messages) {
+                        logger.error('Invalid tool result structure, skipping message history update');
+                        continue;
+                    }
+
+                    // Add only the new messages from this tool's history
+                    const newMessages = result.messages.slice(initialMessages.length);
+                    finalMessages.push(...newMessages);
+                } catch (error) {
+                    logger.error(`Error merging message history for tool result: ${error.message}`);
+                }
+            }
+
+            // Check if any tool calls failed
+            const failedTools = toolResults.filter(result => !result.success);
+            if (failedTools.length > 0) {
+                logger.warn(`Some tool calls failed: ${failedTools.map(t => t.error).join(', ')}`);
+            }
+
+            args.chatHistory = finalMessages;
+
+            await pathwayResolver.promptAndParse({
+                ...args,
+                tools: entityToolsOpenAiFormat,
+                tool_choice: "auto",
+                stream: true
+            });
+        }
+    },
   
     executePathway: async ({args, runAllPrompts, resolver}) => {
         let pathwayResolver = resolver;
 
-        // add the entity constants to the args
+        // Load input parameters and information into args
+        const { entityId, voiceResponse, aiMemorySelfModify } = pathwayResolver.pathway.inputParameters;
+        const entityConfig = loadEntityConfig(entityId);
+        const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
+        
         args = {
             ...args,
-            ...config.get('entityConstants')
+            ...config.get('entityConstants'),
+            entityId,
+            entityTools,
+            entityToolsOpenAiFormat,
+            voiceResponse,
+            aiMemorySelfModify
         };
 
-        const { maxAgentSteps, voiceResponse, entityId } = pathwayResolver.pathway.inputParameters;
-        args.maxAgentSteps = maxAgentSteps;
-        args.voiceResponse = voiceResponse;
-       
-        // Load entity configuration and get tools
-        const entityConfig = loadEntityConfig(entityId);
-        const { tools, openAiTools } = getToolsForEntity(entityId, entityConfig);
+        pathwayResolver.args = {...args};
 
         const promptMessages = [
-            {"role": "system", "content": `{{renderTemplate AI_MEMORY}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_TOOLS}}\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_MEMORY_DIRECTIVES}}\n{{renderTemplate AI_DATETIME}}`},
+            {"role": "system", "content": `{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY_DIRECTIVES}}\n\n{{renderTemplate AI_DATETIME}}`},
             "{{chatHistory}}",
         ];
 
@@ -63,7 +220,7 @@ export default {
 
         // if the model has been overridden, make sure to use it
         if (pathwayResolver.modelName) {
-            args.model = pathwayResolver.modelName;
+            pathwayResolver.args.model = pathwayResolver.modelName;
         }
 
         // set the style model if applicable
@@ -104,125 +261,26 @@ export default {
         }
 
         try {
-            // Loop until we get a final response
-            let finalResponse = null;
-            // Make a deep copy of the chat history to avoid mutations on the original
             let currentMessages = JSON.parse(JSON.stringify(args.chatHistory));
 
-            while (!finalResponse) {
-                const response = await runAllPrompts({
-                    ...args,
-                    chatHistory: JSON.parse(JSON.stringify(currentMessages)),
-                    tools: openAiTools,
-                    tool_choice: "auto",
-                    stream: false
-                });
+            // Run the initial prompt with streaming
+            const response = await runAllPrompts({
+                ...args,
+                chatHistory: currentMessages,
+                tools: entityToolsOpenAiFormat,
+                tool_choice: "auto",
+                stream: true
+            });
 
-                // If response is a string, treat it as the final response
-                if (typeof response === 'string') {
-                    finalResponse = response;
-                    break;
-                }
-
-                // Check if the model made any tool calls
-                const toolCalls = response.tool_calls || [];
-                
-                if (toolCalls.length > 0) {
-                    // Execute all tool calls in parallel
-                    const toolResults = await Promise.all(toolCalls.map(async (toolCall) => {
-                        try {
-                            const toolArgs = JSON.parse(toolCall.function.arguments);
-                            const toolFunction = toolCall.function.name.toLowerCase();
-                            
-                            // Report status to the user
-                            await say(resolver.requestId, `Executing tool: ${toolCall.function.name} - ${JSON.stringify(toolArgs)}\n\n`, 1000, args.voiceResponse);
-
-                            let toolMessages = [...currentMessages];
-                            let toolResult = null;
-
-                            if (toolArgs.detailedInstructions) {
-                                toolMessages.push({role: "user", content: toolArgs.detailedInstructions});
-                            }
-
-                            toolResult = await callTool(toolFunction, {
-                                ...args,
-                                ...toolArgs,
-                                chatHistory: toolMessages,
-                                stream: false
-                            }, tools, pathwayResolver);
-
-                            // Add the tool call to the chat history
-                            currentMessages.push({
-                                role: "assistant",
-                                content: "",
-                                tool_calls: [{
-                                    id: toolCall.id,
-                                    type: "function",
-                                    function: {
-                                        name: toolCall.function.name,
-                                        arguments: JSON.stringify(toolArgs)
-                                    }
-                                }]
-                            });
-
-                            let toolResultContent = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
-                            if (pathwayResolver.tool && typeof pathwayResolver.tool === 'string') {
-                                try {
-                                    let parsedTool = JSON.parse(pathwayResolver.tool);
-                                    if (parsedTool.citations) {
-                                        toolResultContent += '\n\ncd_source citation array: ' + JSON.stringify(parsedTool.citations);
-                                    }
-                                } catch (error) {
-                                    logger.error(`Error parsing tool result: ${error.message}`);
-                                }
-                            }
-
-                            // Add the tool result to the chat history
-                            currentMessages.push({
-                                role: "tool",
-                                tool_call_id: toolCall.id,
-                                name: toolCall.function.name,
-                                content: toolResultContent
-                            });
-
-                            return { success: true, result: toolResult };
-                        } catch (error) {
-                            logger.error(`Error executing tool ${toolCall.function.name}: ${error.message}`);
-                            
-                            // Add the error to the chat history
-                            currentMessages.push({
-                                role: "tool",
-                                tool_call_id: toolCall.id,
-                                name: toolCall.function.name,
-                                content: `Error: ${error.message}`
-                            });
-
-                            return { success: false, error: error.message };
-                        }
-                    }));
-
-                    // Check if any tool calls failed
-                    const failedTools = toolResults.filter(result => !result.success);
-                    if (failedTools.length > 0) {
-                        logger.warn(`Some tool calls failed: ${failedTools.map(t => t.error).join(', ')}`);
-                    }
-                } else {
-                    // No tool calls, this is the final response
-                    finalResponse = response.content;
-                }
-            }
-
-            // Update the chat history with the final messages
-            args.chatHistory = currentMessages.filter(msg => msg.role !== "tool");
 
             // Return the final response
-            return finalResponse;
+            return response;
 
         } catch (e) {
             resolver.logError(e);
-            const chatResponse = await callPathway('sys_generator_quick', {...args, model: styleModel}, resolver);
+            const chatResponse = await callPathway('sys_generator_quick', {...args, model: styleModel, stream: false}, resolver);
             resolver.tool = JSON.stringify({ search: false, title: args.title });
-            return args.stream ? null : chatResponse;
+            return chatResponse;
         }
     }
 }; 

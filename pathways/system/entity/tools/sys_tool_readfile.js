@@ -24,6 +24,7 @@ export default {
     timeout: 600,
     toolDefinition: [{
         type: "function",
+        icon: "📄",
         function: {
             name: "PDF",
             description: "Use specifically for analyzing and answering questions about PDF file content.",
@@ -33,14 +34,19 @@ export default {
                     detailedInstructions: {
                         type: "string",
                         description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
+                    },
+                    userMessage: {
+                        type: "string",
+                        description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["detailedInstructions"]
+                required: ["detailedInstructions", "userMessage"]
             }
         }
     },
     {
         type: "function",
+        icon: "📝",
         function: {
             name: "Text",
             description: "Use specifically for analyzing and answering questions about text files.",
@@ -50,14 +56,19 @@ export default {
                     detailedInstructions: {
                         type: "string",
                         description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
-                    }
+                        },
+                    userMessage: {
+                        type: "string",
+                        description: "A user-friendly message that describes what you're doing with this tool"
+                        }
                 },
-                required: ["detailedInstructions"]
+                required: ["detailedInstructions", "userMessage"]
             }
         }
     },  
     {
         type: "function",
+        icon: "🖼️",
         function: {
             name: "Vision",
             description: "Use specifically for analyzing and answering questions about image files (jpg, gif, bmp, png, etc).",
@@ -67,14 +78,19 @@ export default {
                     detailedInstructions: {
                         type: "string",
                         description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
+                    },
+                    userMessage: {
+                        type: "string",
+                        description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["detailedInstructions"]
+                required: ["detailedInstructions", "userMessage"]
             }
         }
     },
     {
         type: "function",
+        icon: "🎥",
         function: {
             name: "Video",
             description: "Use specifically for analyzing and answering questions about video or audio file content. You MUST use this tool to look at video or audio files.",
@@ -84,9 +100,13 @@ export default {
                     detailedInstructions: {
                         type: "string",
                         description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
+                    },
+                    userMessage: {
+                        type: "string",
+                        description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["detailedInstructions"]
+                required: ["detailedInstructions", "userMessage"]
             }
         }
     }],

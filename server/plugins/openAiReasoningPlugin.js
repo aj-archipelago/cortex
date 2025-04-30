@@ -3,15 +3,17 @@ import OpenAIChatPlugin from './openAiChatPlugin.js';
 class OpenAIReasoningPlugin extends OpenAIChatPlugin {
     
     tryParseMessages(messages) {
+        const parsedMessages = super.tryParseMessages(messages);
+
         let newMessages = [];
 
-        for (const message of messages) {
+        for (const message of parsedMessages) {
             if (message.role === 'user' || message.role === 'assistant') {
                 newMessages.push({
                     role: message.role,
                     content: this.parseContent(message.content)
                 });
-            }else if(message.role === 'system') {
+            } else if (message.role === 'system') {
                 // System messages to developer: https://platform.openai.com/docs/guides/text-generation#messages-and-roles
                 newMessages.push({
                     role: "developer",
@@ -20,8 +22,8 @@ class OpenAIReasoningPlugin extends OpenAIChatPlugin {
             }
         }
 
-        messages.length = 0;
-        messages.push(...newMessages);
+        // Replace the contents of the original array with the new messages
+        messages.splice(0, messages.length, ...newMessages);
     }
 
     parseContent(content) {

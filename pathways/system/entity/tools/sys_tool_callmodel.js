@@ -21,6 +21,7 @@ export default {
     
     toolDefinition:     {
         type: "function",
+        icon: "🤖",
         function: {
             name: "CallModel",
             description: "Use when you need to call an AI model to get a response. This is typically used to perform some sort of LLM analysis (translate, summarize, ask questions about content, etc.), but can literally do anything you need. You can use this to call any model you have access to and perform any task.",
@@ -38,9 +39,13 @@ export default {
                     model: {
                         type: "string",
                         description: "The model to use. You currently have the following models available to call: oai-gpt4o, oai-gpt41, oai-o3, oai-o3-mini, claude-35-sonnet-vertex, gemini-flash-20-vision, gemini-pro-25-vision."
+                    },
+                    userMessage: {
+                        type: "string",
+                        description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["systemPrompt", "userPrompt", "model"]
+                required: ["systemPrompt", "userPrompt", "model", "userMessage"]
             }
         }
     },

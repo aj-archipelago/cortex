@@ -73,18 +73,17 @@ class PathwayResolver {
         this.pathwayPrompt = pathway.prompt;
     }
 
+    publishNestedRequestProgress(requestProgress) {
+        if (requestProgress.progress === 1 && this.rootRequestId) {
+            delete requestProgress.progress;
+        }
+        publishRequestProgress({...requestProgress, info: this.tool || ''});
+    }
+
     // This code handles async and streaming responses for either long-running
     // tasks or streaming model responses
     async asyncResolve(args) {
-        let streamErrorOccurred = false;
         let responseData = null;
-
-        const publishNestedRequestProgress = (requestProgress) => {
-            if (requestProgress.progress === 1 && this.rootRequestId) {
-                delete requestProgress.progress;
-            }
-            publishRequestProgress({...requestProgress, info: this.tool || ''});
-        }
 
         try {
             responseData = await this.executePathway(args);
@@ -102,84 +101,14 @@ class PathwayResolver {
 
         // If the response is a stream, handle it as streaming response
         if (responseData && typeof responseData.on === 'function') {
-            try {
-                const incomingMessage = responseData;
-                let streamEnded = false;
-
-                const onParse = (event) => {
-                    let requestProgress = {
-                        requestId: this.rootRequestId || this.requestId
-                    };
-
-                    logger.debug(`Received event: ${event.type}`);
-
-                    if (event.type === 'event') {
-                        logger.debug('Received event!')
-                        logger.debug(`id: ${event.id || '<none>'}`)
-                        logger.debug(`name: ${event.name || '<none>'}`)
-                        logger.debug(`data: ${event.data}`)
-                    } else if (event.type === 'reconnect-interval') {
-                        logger.debug(`We should set reconnect interval to ${event.value} milliseconds`)
-                    }
-
-                    try {
-                        requestProgress = this.modelExecutor.plugin.processStreamEvent(event, requestProgress);
-                    } catch (error) {
-                        streamErrorOccurred = true;
-                        logger.error(`Stream error: ${error.message}`);
-                        incomingMessage.off('data', processStream);
-                        return;
-                    }
-
-                    try {
-                        if (!streamEnded && requestProgress.data) {
-                            publishNestedRequestProgress(requestProgress);
-                            streamEnded = requestProgress.progress === 1;
-                        }
-                    } catch (error) {
-                        logger.error(`Could not publish the stream message: "${event.data}", ${error}`);
-                    }
-
-                }
-                
-                const sseParser = createParser(onParse);
-
-                const processStream = (data) => {
-                    //logger.warn(`RECEIVED DATA: ${JSON.stringify(data.toString())}`);
-                    sseParser.feed(data.toString());
-                }
-
-                if (incomingMessage) {
-                    await new Promise((resolve, reject) => {
-                        incomingMessage.on('data', processStream);
-                        incomingMessage.on('end', resolve);
-                        incomingMessage.on('error', reject);
-                    });
-                }
-
-            } catch (error) {
-                logger.error(`Could not subscribe to stream: ${error}`);
-            }
-
-            if (streamErrorOccurred) {
-                logger.error(`Stream read failed. Finishing stream...`);
-                publishRequestProgress({
-                    requestId: this.requestId,
-                    progress: 1,
-                    data: '',
-                    info: '',
-                    error: 'Stream read failed'
-                });
-            } else {
-                return;
-            }
+            await this.handleStream(responseData);
         } else {
             const { completedCount = 1, totalCount = 1 } = requestState[this.requestId];
             requestState[this.requestId].data = responseData;
             
             // some models don't support progress updates
             if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
-                await publishNestedRequestProgress({
+                this.publishNestedRequestProgress({
                         requestId: this.rootRequestId || this.requestId,
                         progress: Math.min(completedCount, totalCount) / totalCount,
                         // Clients expect these to be strings
@@ -205,6 +134,84 @@ class PathwayResolver {
         }
     }
 
+    async handleStream(response) {
+        let streamErrorOccurred = false;
+
+        if (response && typeof response.on === 'function') {
+            try {
+                const incomingMessage = response;
+                let streamEnded = false;
+
+            const onParse = (event) => {
+                let requestProgress = {
+                    requestId: this.rootRequestId || this.requestId
+                };
+
+                logger.debug(`Received event: ${event.type}`);
+
+                if (event.type === 'event') {
+                    logger.debug('Received event!')
+                    logger.debug(`id: ${event.id || '<none>'}`)
+                    logger.debug(`name: ${event.name || '<none>'}`)
+                    logger.debug(`data: ${event.data}`)
+                } else if (event.type === 'reconnect-interval') {
+                    logger.debug(`We should set reconnect interval to ${event.value} milliseconds`)
+                }
+
+                try {
+                    requestProgress = this.modelExecutor.plugin.processStreamEvent(event, requestProgress);
+                } catch (error) {
+                    streamErrorOccurred = true;
+                    logger.error(`Stream error: ${error.message}`);
+                    incomingMessage.off('data', processStream);
+                    return;
+                }
+
+                try {
+                    if (!streamEnded && requestProgress.data) {
+                        this.publishNestedRequestProgress(requestProgress);
+                        streamEnded = requestProgress.progress === 1;
+                    }
+                } catch (error) {
+                    logger.error(`Could not publish the stream message: "${event.data}", ${error}`);
+                }
+
+            }
+            
+            const sseParser = createParser(onParse);
+
+            const processStream = (data) => {
+                //logger.warn(`RECEIVED DATA: ${JSON.stringify(data.toString())}`);
+                sseParser.feed(data.toString());
+            }
+
+            if (incomingMessage) {
+                await new Promise((resolve, reject) => {
+                    incomingMessage.on('data', processStream);
+                    incomingMessage.on('end', resolve);
+                    incomingMessage.on('error', reject);
+                });
+            }
+
+        } catch (error) {
+            logger.error(`Could not subscribe to stream: ${error}`);
+        }
+
+        if (streamErrorOccurred) {
+            logger.error(`Stream read failed. Finishing stream...`);
+            publishRequestProgress({
+                requestId: this.requestId,
+                progress: 1,
+                data: '',
+                info: '',
+                error: 'Stream read failed'
+            });
+        } else {
+                return;
+            }
+        }
+    }
+
     async resolve(args) {
         // Either we're dealing with an async request, stream, or regular request
         if (args.async || args.stream) {
@@ -212,7 +219,7 @@ class PathwayResolver {
                 requestState[this.requestId] = {}
             }
             this.rootRequestId = args.rootRequestId ?? null;
-            requestState[this.requestId] = { ...requestState[this.requestId], args, resolver: this.asyncResolve.bind(this) };
+            requestState[this.requestId] = { ...requestState[this.requestId], args, resolver: this.asyncResolve.bind(this), pathwayResolver: this };
             return this.requestId;
         }
         else {
@@ -295,6 +302,12 @@ class PathwayResolver {
             data = await this.processRequest(args);
             if (!data) {
                 break;
+            }
+
+            // if data is a stream, handle it
+            if (data && typeof data.on === 'function') {
+                await this.handleStream(data);
+                return data;
             }
 
             // Handle tool calls in the response

@@ -4,46 +4,6 @@ import { config } from '../../../../../config.js';
 import logger from '../../../../../lib/logger.js';
 
 export const CUSTOM_TOOLS = {
-    plan: {
-        definition: {
-            type: "function",
-            function: {
-                name: "Plan",
-                description: "Use specifically to create a thorough, well thought out plan to accomplish a task. You should always use this tool when you're planning to do something complex or something that might require multiple steps.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        detailedInstructions: {
-                            type: "string",
-                            description: "Detailed instructions about what you need the tool to do"
-                        }
-                    },
-                    required: ["detailedInstructions"]
-                }
-            }
-        },
-        pathwayName: "sys_generator_reasoning"
-    },
-    document: {
-        definition: {
-            type: "function",
-            function: {
-                name: "Document",
-                description: "Access user's personal document index. Use for user-specific uploaded information.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        detailedInstructions: {
-                            type: "string",
-                            description: "Detailed instructions about what you need the tool to do"
-                        }
-                    },
-                    required: ["detailedInstructions"]
-                }
-            }
-        },
-        pathwayName: "sys_generator_results"
-    },
     code: {
         definition: {
             type: "function",
@@ -56,9 +16,13 @@ export const CUSTOM_TOOLS = {
                         detailedInstructions: {
                             type: "string",
                             description: "Detailed instructions about what you need the tool to do"
+                        },
+                        userMessage: {
+                            type: "string",
+                            description: "A user-friendly message that describes what you're doing with this tool"
                         }
                     },
-                    required: ["detailedInstructions"]
+                    required: ["detailedInstructions", "userMessage"]
                 }
             }
         },
@@ -76,52 +40,36 @@ export const CUSTOM_TOOLS = {
                         detailedInstructions: {
                             type: "string",
                             description: "Detailed instructions about what you need the tool to do"
+                        },
+                        userMessage: {
+                            type: "string",
+                            description: "A user-friendly message that describes what you're doing with this tool"
                         }
                     },
-                    required: ["detailedInstructions"]
+                    required: ["detailedInstructions", "userMessage"]
                 }
             }
         },
         pathwayName: "sys_entity_code_execution"
-    },
-    reason: {
-        definition: {
-            type: "function",
-            function: {
-                name: "Reason",
-                description: "Employ for reasoning, scientific analysis, evaluating evidence, strategic planning, problem-solving, logic puzzles, mathematical calculations, or any questions that require careful thought or complex choices.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        detailedInstructions: {
-                            type: "string",
-                            description: "Detailed instructions about what you need the tool to do"
-                        }
-                    },
-                    required: ["detailedInstructions"]
-                }
-            }
-        },
-        pathwayName: "sys_generator_reasoning"
     }
 };
 
 // Helper function to get tools for a specific entity
-export const getToolsForEntity = (entityId) => {
+export const getToolsForEntity = (entityConfig) => {
     // Get system tools from config
     const systemTools = config.get('entityTools') || {};
     
     // Merge system tools with custom tools (custom tools override system tools)
     const allTools = { ...systemTools, ...CUSTOM_TOOLS };
-
-    // Get entity config from config
-    const entityConfig = config.get('entityConfig');
     
     // If no tools specified or empty array, return all tools
     if (!entityConfig?.tools || entityConfig.tools.length === 0) {
         return {
-            tools: allTools,
-            openAiTools: Object.values(allTools).map(tool => tool.definition)
+            entityTools: allTools,
+            entityToolsOpenAiFormat: Object.values(allTools).map(tool => {
+                const { icon, ...definitionWithoutIcon } = tool.definition;
+                return definitionWithoutIcon;
+            })
         };
     }
 
@@ -136,8 +84,11 @@ export const getToolsForEntity = (entityId) => {
     );
 
     return {
-        tools: filteredTools,
-        openAiTools: Object.values(filteredTools).map(tool => tool.definition)
+        entityTools: filteredTools,
+        entityToolsOpenAiFormat: Object.values(filteredTools).map(tool => {
+            const { icon, ...definitionWithoutIcon } = tool.definition;
+            return definitionWithoutIcon;
+        })
     };
 };
 
@@ -150,9 +101,12 @@ export const loadEntityConfig = (entityId) => {
             return null;
         }
 
+        // Handle both array and object formats
+        const configArray = Array.isArray(entityConfig) ? entityConfig : Object.values(entityConfig);
+
         // If entityId is provided, look for that specific entity
         if (entityId) {
-            const entity = entityConfig.find(e => e.id === entityId);
+            const entity = configArray.find(e => e.id === entityId);
             if (entity) {
                 return entity;
             }
@@ -160,14 +114,14 @@ export const loadEntityConfig = (entityId) => {
         }
 
         // If no entityId or entity not found, look for default entity
-        const defaultEntity = entityConfig.find(e => e.isDefault === true);
+        const defaultEntity = configArray.find(e => e.isDefault === true);
         if (defaultEntity) {
             return defaultEntity;
         }
 
         // If no default entity found, return the first entity
-        if (entityConfig.length > 0) {
-            return entityConfig[0];
+        if (configArray.length > 0) {
+            return configArray[0];
         }
 
         return null;

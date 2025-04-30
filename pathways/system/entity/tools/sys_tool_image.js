@@ -12,6 +12,7 @@ export default {
     timeout: 300,
     toolDefinition: {
         type: "function",
+        icon: "🎨",
         function: {
             name: "Image",
             description: "Use when asked to create, generate, or revise visual content. Any time the user asks you for a picture, a selfie, artwork, a drawing or if you want to illustrate something for the user, you can use this tool to generate any sort of image from cartoon to photo realistic.",
@@ -25,9 +26,13 @@ export default {
                     renderText: {
                         type: "boolean",
                         description: "Set to true if the image should be optimized to show correct text. This is useful when the user asks for a picture of something that includes specific text as it invokes a different image generation model that is optimized for including text."
+                    },
+                    userMessage: {
+                        type: "string",
+                        description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["detailedInstructions", "renderText"]
+                required: ["detailedInstructions", "renderText", "userMessage"]
             }
         }
     },

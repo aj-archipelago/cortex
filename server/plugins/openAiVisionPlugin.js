@@ -1,5 +1,6 @@
 import OpenAIChatPlugin from './openAiChatPlugin.js';
 import logger from '../../lib/logger.js';
+import { requestState } from '../requestState.js';
 
 function safeJsonParse(content) {
     try {
@@ -15,6 +16,8 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
     constructor(pathway, model) {
         super(pathway, model);
         this.isMultiModal = true;
+        this.pathwayToolCallback = pathway.toolCallback;
+        this.toolCallsBuffer = [];
     }
     
     async tryParseMessages(messages) {
@@ -192,6 +195,85 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         }
 
         return message.content || "";
+    }
+
+    processStreamEvent(event, requestProgress) {
+        // check for end of stream or in-stream errors
+        if (event.data.trim() === '[DONE]') {
+            requestProgress.progress = 1;
+            // Clear the buffer when stream is done
+            this.toolCallsBuffer = [];
+        } else {
+            let parsedMessage;
+            try {
+                parsedMessage = JSON.parse(event.data);
+                requestProgress.data = event.data;
+            } catch (error) {
+                throw new Error(`Could not parse stream data: ${error}`);
+            }
+
+            // error can be in different places in the message
+            const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
+            if (streamError) {
+                throw new Error(streamError);
+            }
+
+            // Handle tool calls in streaming response
+            const delta = parsedMessage?.choices?.[0]?.delta;
+            if (delta?.tool_calls) {
+                // Accumulate tool call deltas into the buffer
+                delta.tool_calls.forEach((toolCall) => {
+                    const index = toolCall.index;
+                    if (!this.toolCallsBuffer[index]) {
+                        this.toolCallsBuffer[index] = {
+                            id: toolCall.id || '',
+                            type: toolCall.type || 'function',
+                            function: {
+                                name: toolCall.function?.name || '',
+                                arguments: toolCall.function?.arguments || ''
+                            }
+                        };
+                    } else {
+                        if (toolCall.function?.name) {
+                            this.toolCallsBuffer[index].function.name += toolCall.function.name;
+                        }
+                        if (toolCall.function?.arguments) {
+                            this.toolCallsBuffer[index].function.arguments += toolCall.function.arguments;
+                        }
+                    }
+                });
+            }
+
+            // finish reason can be in different places in the message
+            const finishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
+            if (finishReason) {
+                switch (finishReason.toLowerCase()) {
+                    case 'tool_calls':
+                        // Process complete tool calls when we get the finish reason
+                        if (this.pathwayToolCallback && this.toolCallsBuffer.length > 0) {
+                            const toolMessage = {
+                                role: 'assistant',
+                                content: delta?.content || '',
+                                tool_calls: this.toolCallsBuffer,
+                            };
+                            const pathwayResolver = requestState[this.requestId]?.pathwayResolver;
+                            this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
+                        }
+                        // Don't set progress to 1 for tool calls to keep stream open
+                        break;
+                    case 'safety':
+                        const safetyRatings = JSON.stringify(parsedMessage?.candidates?.[0]?.safetyRatings) || '';
+                        logger.warn(`Request ${this.requestId} was blocked by the safety filter. ${safetyRatings}`);
+                        requestProgress.data = `\n\nResponse blocked by safety filter: ${safetyRatings}`;
+                        requestProgress.progress = 1;
+                        break;
+                    default:
+                        requestProgress.progress = 1;
+                        break;
+                }
+            }
+        }
+        return requestProgress;
     }
 
 }

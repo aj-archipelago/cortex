@@ -9,6 +9,7 @@ export default {
     timeout: 300,
     toolDefinition: { 
         type: "function",
+        icon: "🌐",
         function: {
             name: "InternetSearch",
             description: "This tool allows you to use the Bing search api to search the internet and more. Use this for current events, news, fact-checking, and information requiring citation.",
@@ -30,9 +31,13 @@ export default {
                     safeSearch: {
                         type: "string",
                         description: "Filter adult content. Can be 'Off', 'Moderate' (default), or 'Strict'"
+                    },
+                    userMessage: {
+                        type: "string",
+                        description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["q"]
+                required: ["q", "userMessage"]
             }
         }
     },
@@ -123,6 +128,7 @@ export default {
                 })));
             }
 
+            resolver.tool = JSON.stringify({ toolUsed: "Search" });
             return JSON.stringify({ _type: "SearchResponse", value: results });
         } catch (e) {
             logger.error(`Error in Bing search: ${e}`);

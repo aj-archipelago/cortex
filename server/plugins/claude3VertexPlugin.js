@@ -295,9 +295,11 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       if (typeof parameters.tool_choice === 'string') {
         // Handle string values: auto, required, none
         if (parameters.tool_choice === 'required') {
-          requestParameters.tool_choice = 'any'; // OpenAI's 'required' maps to Claude's 'any'
-        } else {
-          requestParameters.tool_choice = parameters.tool_choice; // 'auto' and 'none' are the same in both
+          requestParameters.tool_choice = { type: 'any' }; // OpenAI's 'required' maps to Claude's 'any'
+        } else if (parameters.tool_choice === 'auto') {
+          requestParameters.tool_choice = { type: 'auto' };
+        } else if (parameters.tool_choice === 'none') {
+          requestParameters.tool_choice = { type: 'none' };
         }
       } else if (parameters.tool_choice.type === "function") {
         // Handle function-specific tool choice
