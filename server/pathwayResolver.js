@@ -73,18 +73,17 @@ class PathwayResolver {
         this.pathwayPrompt = pathway.prompt;
     }
 
+    publishNestedRequestProgress(requestProgress) {
+        if (requestProgress.progress === 1 && this.rootRequestId) {
+            delete requestProgress.progress;
+        }
+        publishRequestProgress({...requestProgress, info: this.tool || ''});
+    }
+
     // This code handles async and streaming responses for either long-running
     // tasks or streaming model responses
     async asyncResolve(args) {
-        let streamErrorOccurred = false;
         let responseData = null;
-
-        const publishNestedRequestProgress = (requestProgress) => {
-            if (requestProgress.progress === 1 && this.rootRequestId) {
-                delete requestProgress.progress;
-            }
-            publishRequestProgress({...requestProgress, info: this.tool || ''});
-        }
 
         try {
             responseData = await this.executePathway(args);
@@ -102,8 +101,45 @@ class PathwayResolver {
 
         // If the response is a stream, handle it as streaming response
         if (responseData && typeof responseData.on === 'function') {
+            await this.handleStream(responseData);
+        } else {
+            const { completedCount = 1, totalCount = 1 } = requestState[this.requestId];
+            requestState[this.requestId].data = responseData;
+            
+            // some models don't support progress updates
+            if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
+                this.publishNestedRequestProgress({
+                        requestId: this.rootRequestId || this.requestId,
+                        progress: Math.min(completedCount, totalCount) / totalCount,
+                        // Clients expect these to be strings
+                        data: JSON.stringify(responseData || ''),
+                        info: this.tool || ''
+                });
+            }
+        }
+    }
+
+    mergeResults(mergeData) {
+        if (mergeData) {
+            this.previousResult = mergeData.previousResult ? mergeData.previousResult : this.previousResult;
+            this.warnings = [...this.warnings, ...(mergeData.warnings || [])];
+            this.errors = [...this.errors, ...(mergeData.errors || [])];
             try {
-                const incomingMessage = responseData;
+                const mergeDataTool = typeof mergeData.tool === 'string' ? JSON.parse(mergeData.tool) : mergeData.tool || {};
+                const thisTool = typeof this.tool === 'string' ? JSON.parse(this.tool) : this.tool || {};
+                this.tool = JSON.stringify({ ...thisTool, ...mergeDataTool });
+            } catch (error) {
+                logger.warn('Error merging pathway resolver tool objects: ' + error);
+            }
+        }
+    }
+
+    async handleStream(response) {
+        let streamErrorOccurred = false;
+
+        if (response && typeof response.on === 'function') {
+            try {
+                const incomingMessage = response;
                 let streamEnded = false;
 
                 const onParse = (event) => {
@@ -133,7 +169,7 @@ class PathwayResolver {
 
                     try {
                         if (!streamEnded && requestProgress.data) {
-                            publishNestedRequestProgress(requestProgress);
+                            this.publishNestedRequestProgress(requestProgress);
                             streamEnded = requestProgress.progress === 1;
                         }
                     } catch (error) {
@@ -173,35 +209,6 @@ class PathwayResolver {
             } else {
                 return;
             }
-        } else {
-            const { completedCount = 1, totalCount = 1 } = requestState[this.requestId];
-            requestState[this.requestId].data = responseData;
-            
-            // some models don't support progress updates
-            if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
-                await publishNestedRequestProgress({
-                        requestId: this.rootRequestId || this.requestId,
-                        progress: Math.min(completedCount, totalCount) / totalCount,
-                        // Clients expect these to be strings
-                        data: JSON.stringify(responseData || ''),
-                        info: this.tool || ''
-                });
-            }
-        }
-    }
-
-    mergeResults(mergeData) {
-        if (mergeData) {
-            this.previousResult = mergeData.previousResult ? mergeData.previousResult : this.previousResult;
-            this.warnings = [...this.warnings, ...(mergeData.warnings || [])];
-            this.errors = [...this.errors, ...(mergeData.errors || [])];
-            try {
-                const mergeDataTool = typeof mergeData.tool === 'string' ? JSON.parse(mergeData.tool) : mergeData.tool || {};
-                const thisTool = typeof this.tool === 'string' ? JSON.parse(this.tool) : this.tool || {};
-                this.tool = JSON.stringify({ ...thisTool, ...mergeDataTool });
-            } catch (error) {
-                logger.warn('Error merging pathway resolver tool objects: ' + error);
-            }
         }
     }
 
@@ -212,7 +219,7 @@ class PathwayResolver {
                 requestState[this.requestId] = {}
             }
             this.rootRequestId = args.rootRequestId ?? null;
-            requestState[this.requestId] = { ...requestState[this.requestId], args, resolver: this.asyncResolve.bind(this) };
+            requestState[this.requestId] = { ...requestState[this.requestId], args, resolver: this.asyncResolve.bind(this), pathwayResolver: this };
             return this.requestId;
         }
         else {
@@ -297,18 +304,9 @@ class PathwayResolver {
                 break;
             }
 
-            // Handle tool calls in the response
-            if (data.tool_calls) {
-                // Parse existing tool calls if they exist
-                const existingTool = typeof this.tool === 'string' ? JSON.parse(this.tool) : this.tool || {};
-                const existingToolCalls = existingTool.tool_calls || [];
-                
-                // Append new tool calls to existing ones
-                this.tool = JSON.stringify({
-                    ...existingTool,
-                    tool_calls: [...existingToolCalls, ...data.tool_calls]
-                });
-
+            // if data is a stream, handle it
+            if (data && typeof data.on === 'function') {
+                await this.handleStream(data);
                 return data;
             }
 

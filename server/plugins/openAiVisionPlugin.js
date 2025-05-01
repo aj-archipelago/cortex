@@ -1,5 +1,6 @@
 import OpenAIChatPlugin from './openAiChatPlugin.js';
 import logger from '../../lib/logger.js';
+import { requestState } from '../requestState.js';
 
 function safeJsonParse(content) {
     try {
@@ -15,6 +16,9 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
     constructor(pathway, model) {
         super(pathway, model);
         this.isMultiModal = true;
+        this.pathwayToolCallback = pathway.toolCallback;
+        this.toolCallsBuffer = [];
+        this.contentBuffer = ''; // Initialize content buffer
     }
     
     async tryParseMessages(messages) {
@@ -50,7 +54,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                             if (url && await this.validateImageUrl(url)) {
                                 return {type: parsedItem.type, image_url: {url}};
                             }
-                            return { type: 'text', text: 'Image skipped: unsupported format' };
+                            return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
                         }
                         
                         return parsedItem;
@@ -133,6 +137,10 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             requestParameters.tools = parameters.tools;
         }
 
+        if (parameters.tool_choice) {
+            requestParameters.tool_choice = parameters.tool_choice;
+        }
+
         const modelMaxReturnTokens = this.getModelMaxReturnTokens();
         const maxTokensPrompt = this.promptParameters.max_tokens;
         const maxTokensModel = this.getModelMaxTokenLength() * (1 - this.getPromptTokenRatio());
@@ -188,6 +196,131 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         }
 
         return message.content || "";
+    }
+
+    processStreamEvent(event, requestProgress) {
+        // check for end of stream or in-stream errors
+        if (event.data.trim() === '[DONE]') {
+            requestProgress.progress = 1;
+            // Clear buffers when stream is done
+            this.toolCallsBuffer = [];
+            this.contentBuffer = ''; // Clear content buffer
+        } else {
+            let parsedMessage;
+            try {
+                parsedMessage = JSON.parse(event.data);
+                requestProgress.data = event.data;
+            } catch (error) {
+                // Clear buffers on error
+                this.toolCallsBuffer = [];
+                this.contentBuffer = '';
+                throw new Error(`Could not parse stream data: ${error}`);
+            }
+
+            // error can be in different places in the message
+            const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
+            if (streamError) {
+                // Clear buffers on error
+                this.toolCallsBuffer = [];
+                this.contentBuffer = '';
+                throw new Error(streamError);
+            }
+
+            const delta = parsedMessage?.choices?.[0]?.delta;
+
+            // Accumulate content
+            if (delta?.content) {
+                this.contentBuffer += delta.content;
+            }
+
+            // Handle tool calls in streaming response
+            if (delta?.tool_calls) {
+                // Accumulate tool call deltas into the buffer
+                delta.tool_calls.forEach((toolCall) => {
+                    const index = toolCall.index;
+                    if (!this.toolCallsBuffer[index]) {
+                        this.toolCallsBuffer[index] = {
+                            id: toolCall.id || '',
+                            type: toolCall.type || 'function',
+                            function: {
+                                name: toolCall.function?.name || '',
+                                arguments: toolCall.function?.arguments || ''
+                            }
+                        };
+                    } else {
+                        if (toolCall.function?.name) {
+                            this.toolCallsBuffer[index].function.name += toolCall.function.name;
+                        }
+                        if (toolCall.function?.arguments) {
+                            this.toolCallsBuffer[index].function.arguments += toolCall.function.arguments;
+                        }
+                    }
+                });
+            }
+
+            // finish reason can be in different places in the message
+            const finishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
+            if (finishReason) {
+                const pathwayResolver = requestState[this.requestId]?.pathwayResolver; // Get resolver
+
+                switch (finishReason.toLowerCase()) {
+                    case 'tool_calls':
+                        // Process complete tool calls when we get the finish reason
+                        if (this.pathwayToolCallback && this.toolCallsBuffer.length > 0) {
+                            const toolMessage = {
+                                role: 'assistant',
+                                content: delta?.content || '', 
+                                tool_calls: this.toolCallsBuffer,
+                            };
+                            this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
+                        }
+                        // Don't set progress to 1 for tool calls to keep stream open
+                        // Clear tool buffer after processing, but keep content buffer
+                        this.toolCallsBuffer = []; 
+                        break;
+                    case 'safety':
+                        const safetyRatings = JSON.stringify(parsedMessage?.candidates?.[0]?.safetyRatings) || '';
+                        logger.warn(`Request ${this.requestId} was blocked by the safety filter. ${safetyRatings}`);
+                        requestProgress.data = `\n\nResponse blocked by safety filter: ${safetyRatings}`;
+                        requestProgress.progress = 1;
+                        // Clear buffers on finish
+                        this.toolCallsBuffer = [];
+                        this.contentBuffer = '';
+                        break;
+                    default: // Includes 'stop' and other normal finish reasons
+                        // Look to see if we need to add citations to the response
+                        if (pathwayResolver && this.contentBuffer) {
+                            const regex = /:cd_source\[(.*?)\]/g;
+                            let match;
+                            const foundIds = [];
+                            while ((match = regex.exec(this.contentBuffer)) !== null) {
+                                // Ensure the capture group exists and is not empty
+                                if (match[1] && match[1].trim()) { 
+                                    foundIds.push(match[1].trim());
+                                }
+                            }
+
+                            if (foundIds.length > 0) {
+                                const {searchResults, tool} = pathwayResolver;
+                                logger.info(`Found referenced searchResultIds: ${foundIds.join(', ')}`);
+
+                                if (searchResults) {
+                                    const toolObj = typeof tool === 'string' ? JSON.parse(tool) : (tool || {});
+                                    toolObj.citations = searchResults
+                                        .filter(result => foundIds.includes(result.searchResultId));
+                                    pathwayResolver.tool = JSON.stringify(toolObj);
+                                }
+                            }
+                        }
+                        requestProgress.progress = 1;
+                        // Clear buffers on finish
+                        this.toolCallsBuffer = [];
+                        this.contentBuffer = '';
+                        break;
+                }
+            }
+        }
+        return requestProgress;
     }
 
 }

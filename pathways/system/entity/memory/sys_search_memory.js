@@ -13,7 +13,7 @@ export default {
                     },
                     {
                         "role": "user", 
-                        "content": "<MEMORY>\n{{{sectionMemory}}}\n</MEMORY>\n<CONVERSATION>\n{{{toJSON chatHistory}}}\n</CONVERSATION>\nAnalyze the current contents of this section of your memory and the conversation and return any information relevant for you to use in your response."
+                        "content": "<MEMORY>\n{{{sectionMemory}}}\n</MEMORY>\n<CONVERSATION>\n{{{toJSON chatHistory}}}\n</CONVERSATION>\nAnalyze the current contents of this section of your memory and the conversation and return any information relevant for you to use in your response. Accuracy is critical. You must never make up or hallucinate information - if you don't see it in the memory, you must return 'No relevant information found.'"
                     },
                 ]
             }),
@@ -26,7 +26,7 @@ export default {
         section: "memoryAll",
         updateContext: false
     },
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41-mini',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 300,

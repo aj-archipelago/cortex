@@ -13,7 +13,7 @@ export default {
         contextId: ``,
     },
     max_tokens: 1024,
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,

@@ -209,7 +209,7 @@ test('Unsupported mime type conversion', async (t) => {
 
     t.is(modifiedMessages[0].content.length, 2);
     t.is(modifiedMessages[0].content[0].text, 'Can you analyze this PDF?');
-    t.is(modifiedMessages[0].content[1].text, 'Image skipped: unsupported format');
+    t.true(modifiedMessages[0].content[1].text.includes('image_url'));
 });
 
 // Test pathological cases

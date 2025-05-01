@@ -34,5 +34,7 @@ export default {
     json: false,
     // Manage the token length of the input for the model
     manageTokenLength: true,
+    // Use this pathway as a tool for LLM calls
+    toolDefinition: {},
 };
 

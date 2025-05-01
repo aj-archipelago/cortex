@@ -10,7 +10,7 @@ export default {
         aiName: "Jarvis",
         language: "English",
     },
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41-mini',
     useInputChunking: false,
     enableDuplicateRequests: false,
     executePathway: async ({args, resolver}) => {
