@@ -36,6 +36,10 @@ export default {
     timeout: 600,
 
     toolCallback: async (args, message, resolver) => {
+        if (!args || !message || !resolver) {
+            return;
+        }
+
         const { tool_calls } = message;
         const pathwayResolver = resolver;
         const { entityTools, entityToolsOpenAiFormat } = args;
@@ -170,11 +174,10 @@ export default {
 
             args.chatHistory = finalMessages;
 
-            await pathwayResolver.promptAndParse({
+            return await pathwayResolver.promptAndParse({
                 ...args,
                 tools: entityToolsOpenAiFormat,
                 tool_choice: "auto",
-                stream: true
             });
         }
     },
@@ -183,7 +186,7 @@ export default {
         let pathwayResolver = resolver;
 
         // Load input parameters and information into args
-        const { entityId, voiceResponse, aiMemorySelfModify } = { ...pathwayResolver.pathway.inputParameters, ...args };
+        const { entityId, voiceResponse, aiMemorySelfModify, stream } = { ...pathwayResolver.pathway.inputParameters, ...args };
         
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
@@ -267,14 +270,17 @@ export default {
             let currentMessages = JSON.parse(JSON.stringify(args.chatHistory));
 
             // Run the initial prompt with streaming
-            const response = await runAllPrompts({
+            let response = await runAllPrompts({
                 ...args,
                 chatHistory: currentMessages,
                 tools: entityToolsOpenAiFormat,
-                tool_choice: "auto",
-                stream: true
+                tool_choice: "auto"
             });
 
+            let toolCallback = pathwayResolver.pathway.toolCallback;
+            while (response?.tool_calls) {
+                response = await toolCallback(args, response, resolver);
+            }
 
             // Return the final response
             return response;
