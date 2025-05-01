@@ -170,8 +170,8 @@ export default {
                         supportedLanguages: 'Over 100 languages supported'
                     },
                     'translate_groq': {
-                        name: 'Groq Llama Translator',
-                        description: 'High-performance translation using Groq Llama models',
+                        name: 'Groq Llama 4 Scout Translator',
+                        description: 'High-performance translation using Groq Llama 4 Scout models',
                         supportedLanguages: 'All major languages supported'
                     }
                 };

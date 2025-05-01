@@ -172,6 +172,5 @@
     "enabledTranslationModels": [
         "translate_apptek",
         "translate_groq"
-
     ]
 }
