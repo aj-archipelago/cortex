@@ -266,7 +266,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                 switch (finishReason.toLowerCase()) {
                     case 'tool_calls':
                         // Process complete tool calls when we get the finish reason
-                        if (this.pathwayToolCallback && this.toolCallsBuffer.length > 0) {
+                        if (this.pathwayToolCallback && this.toolCallsBuffer.length > 0 && pathwayResolver) {
                             const toolMessage = {
                                 role: 'assistant',
                                 content: delta?.content || '', 
