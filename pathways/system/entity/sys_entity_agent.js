@@ -183,7 +183,8 @@ export default {
         let pathwayResolver = resolver;
 
         // Load input parameters and information into args
-        const { entityId, voiceResponse, aiMemorySelfModify } = pathwayResolver.pathway.inputParameters;
+        const { entityId, voiceResponse, aiMemorySelfModify } = { ...pathwayResolver.pathway.inputParameters, ...args };
+        
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
         const { useMemory: entityUseMemory = true, name: entityName, instructions: entityInstructions } = entityConfig;

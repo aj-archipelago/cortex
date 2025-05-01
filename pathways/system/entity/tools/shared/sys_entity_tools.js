@@ -71,6 +71,8 @@ export const getToolsForEntity = (entityConfig) => {
 // Load entity configurations
 export const loadEntityConfig = (entityId) => {
     try {
+        entityId = entityId.toLowerCase();
+        
         const entityConfig = config.get('entityConfig');
         if (!entityConfig) {
             logger.warn('No entity config found in config');
