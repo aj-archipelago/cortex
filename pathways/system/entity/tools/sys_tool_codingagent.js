@@ -65,7 +65,7 @@ export default {
                         description: "Keywords for Azure Cognitive Search to help the coding agent find relevant code snippets"
                     }
                 },
-                required: ["codingTask", "codingMessage", "codingTaskKeywords"]
+                required: ["codingTask", "userMessage", "codingTaskKeywords"]
             }
         }
     }],
