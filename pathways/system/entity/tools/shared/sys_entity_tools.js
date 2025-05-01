@@ -111,3 +111,40 @@ export const loadEntityConfig = (entityId) => {
         return null;
     }
 };
+
+/**
+ * Fetches the list of available entities with their descriptions and active tools
+ * @returns {Array} Array of objects containing entity information and their active tools
+ */
+export const getAvailableEntities = () => {
+    try {
+        const entityConfig = config.get('entityConfig');
+        if (!entityConfig) {
+            logger.warn('No entity config found in config');
+            return [];
+        }
+
+        // Handle both array and object formats
+        const configArray = Array.isArray(entityConfig) ? entityConfig : Object.entries(entityConfig).map(([id, config]) => ({
+            id,
+            ...config
+        }));
+
+        return configArray.map(entity => {
+            const { entityTools } = getToolsForEntity(entity);
+            return {
+                id: entity.id,
+                name: entity.name || entity.id,
+                description: entity.description || '',
+                isDefault: entity.isDefault || false,
+                activeTools: Object.keys(entityTools).map(toolName => ({
+                    name: toolName,
+                    description: entityTools[toolName].definition?.function?.description || ''
+                }))
+            };
+        });
+    } catch (error) {
+        logger.error(`Error fetching available entities: ${error.message}`);
+        return [];
+    }
+};

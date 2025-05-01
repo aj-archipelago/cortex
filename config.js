@@ -511,7 +511,7 @@ if (config.get('entityConfig') && defaultEntityConfig) {
     // Turn off defaults from original default list
     for (const [key, entity] of Object.entries(mergedEntities)) {
         if (defaultEntityConfig[key] && entity.isDefault) {
-            entity.isDefault = false;
+            delete mergedEntities[key];
         }
     }
     
