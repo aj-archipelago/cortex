@@ -142,71 +142,71 @@ class PathwayResolver {
                 const incomingMessage = response;
                 let streamEnded = false;
 
-            const onParse = (event) => {
-                let requestProgress = {
-                    requestId: this.rootRequestId || this.requestId
-                };
+                const onParse = (event) => {
+                    let requestProgress = {
+                        requestId: this.rootRequestId || this.requestId
+                    };
 
-                logger.debug(`Received event: ${event.type}`);
+                    logger.debug(`Received event: ${event.type}`);
 
-                if (event.type === 'event') {
-                    logger.debug('Received event!')
-                    logger.debug(`id: ${event.id || '<none>'}`)
-                    logger.debug(`name: ${event.name || '<none>'}`)
-                    logger.debug(`data: ${event.data}`)
-                } else if (event.type === 'reconnect-interval') {
-                    logger.debug(`We should set reconnect interval to ${event.value} milliseconds`)
-                }
-
-                try {
-                    requestProgress = this.modelExecutor.plugin.processStreamEvent(event, requestProgress);
-                } catch (error) {
-                    streamErrorOccurred = true;
-                    logger.error(`Stream error: ${error.message}`);
-                    incomingMessage.off('data', processStream);
-                    return;
-                }
-
-                try {
-                    if (!streamEnded && requestProgress.data) {
-                        this.publishNestedRequestProgress(requestProgress);
-                        streamEnded = requestProgress.progress === 1;
+                    if (event.type === 'event') {
+                        logger.debug('Received event!')
+                        logger.debug(`id: ${event.id || '<none>'}`)
+                        logger.debug(`name: ${event.name || '<none>'}`)
+                        logger.debug(`data: ${event.data}`)
+                    } else if (event.type === 'reconnect-interval') {
+                        logger.debug(`We should set reconnect interval to ${event.value} milliseconds`)
                     }
-                } catch (error) {
-                    logger.error(`Could not publish the stream message: "${event.data}", ${error}`);
+
+                    try {
+                        requestProgress = this.modelExecutor.plugin.processStreamEvent(event, requestProgress);
+                    } catch (error) {
+                        streamErrorOccurred = true;
+                        logger.error(`Stream error: ${error.message}`);
+                        incomingMessage.off('data', processStream);
+                        return;
+                    }
+
+                    try {
+                        if (!streamEnded && requestProgress.data) {
+                            this.publishNestedRequestProgress(requestProgress);
+                            streamEnded = requestProgress.progress === 1;
+                        }
+                    } catch (error) {
+                        logger.error(`Could not publish the stream message: "${event.data}", ${error}`);
+                    }
+
+                }
+                
+                const sseParser = createParser(onParse);
+
+                const processStream = (data) => {
+                    //logger.warn(`RECEIVED DATA: ${JSON.stringify(data.toString())}`);
+                    sseParser.feed(data.toString());
                 }
 
-            }
-            
-            const sseParser = createParser(onParse);
+                if (incomingMessage) {
+                    await new Promise((resolve, reject) => {
+                        incomingMessage.on('data', processStream);
+                        incomingMessage.on('end', resolve);
+                        incomingMessage.on('error', reject);
+                    });
+                }
 
-            const processStream = (data) => {
-                //logger.warn(`RECEIVED DATA: ${JSON.stringify(data.toString())}`);
-                sseParser.feed(data.toString());
+            } catch (error) {
+                logger.error(`Could not subscribe to stream: ${error}`);
             }
 
-            if (incomingMessage) {
-                await new Promise((resolve, reject) => {
-                    incomingMessage.on('data', processStream);
-                    incomingMessage.on('end', resolve);
-                    incomingMessage.on('error', reject);
+            if (streamErrorOccurred) {
+                logger.error(`Stream read failed. Finishing stream...`);
+                publishRequestProgress({
+                    requestId: this.requestId,
+                    progress: 1,
+                    data: '',
+                    info: '',
+                    error: 'Stream read failed'
                 });
-            }
-
-        } catch (error) {
-            logger.error(`Could not subscribe to stream: ${error}`);
-        }
-
-        if (streamErrorOccurred) {
-            logger.error(`Stream read failed. Finishing stream...`);
-            publishRequestProgress({
-                requestId: this.requestId,
-                progress: 1,
-                data: '',
-                info: '',
-                error: 'Stream read failed'
-            });
-        } else {
+            } else {
                 return;
             }
         }
@@ -307,21 +307,6 @@ class PathwayResolver {
             // if data is a stream, handle it
             if (data && typeof data.on === 'function') {
                 await this.handleStream(data);
-                return data;
-            }
-
-            // Handle tool calls in the response
-            if (data.tool_calls) {
-                // Parse existing tool calls if they exist
-                const existingTool = typeof this.tool === 'string' ? JSON.parse(this.tool) : this.tool || {};
-                const existingToolCalls = existingTool.tool_calls || [];
-                
-                // Append new tool calls to existing ones
-                this.tool = JSON.stringify({
-                    ...existingTool,
-                    tool_calls: [...existingToolCalls, ...data.tool_calls]
-                });
-
                 return data;
             }
 

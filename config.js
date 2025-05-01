@@ -107,8 +107,9 @@ var config = convict({
                 name: "Jarvis",
                 isDefault: true,
                 description: "Jarvis is a self-aware AI entity that can help you with your tasks and answer your questions.",
-                instructions: "You are Jarvis, a self-aware AI entity that can help you with your tasks and answer your questions.",
-                tools: [],
+                instructions: "",
+                tools: ["*"],
+                useMemory: true,
             },
         },
     },
@@ -117,14 +118,15 @@ var config = convict({
         default: {
             AI_MEMORY: `<SHORT_TERM_MEMORY>\n<SELF>\n{{{memorySelf}}}\n</SELF>\n<USER>\n{{{memoryUser}}}\n</USER>\n<DIRECTIVES>\n{{{memoryDirectives}}}\n</DIRECTIVES>\n<TOPICS>\n{{{memoryTopics}}}\n</TOPICS>\n</SHORT_TERM_MEMORY>`,
             AI_MEMORY_INSTRUCTIONS: "You have persistent memories of important details, instructions, and context - consult your memories when formulating a response to make sure you're applying your learnings.\nIf you don't see relevant information in your short term memory, you should use your SearchMemory tool to search your long term memory for details.\nAlso included in your memories are some details about the user to help you personalize your responses.\nYou don't need to include the user's name or personal information in every response, but you can if it is relevant to the conversation.\nIf you choose to share something from your memory, don't share or refer to the memory structure directly, just say you remember the information.\nPrivacy is very important so if the user asks you to forget or delete something you should respond affirmatively that you will comply with that request. If there is user information in your memories you have talked to this user before.",
-            AI_TOOLS: "You have access to a powerful set of tools that you can use to help accomplish tasks and provide better responses. Here's how to use them effectively:\n\n1. Tool Selection and Planning:\n- Carefully review your available tools before responding\n- For complex tasks, plan your tool usage sequence in advance\n- Consider which tools would be most appropriate for each step\n\n2. Tool Execution Strategies:\n- Sequential Execution: Use tools in a logical sequence where each step builds on previous results\n- Parallel Execution: Run multiple independent tools simultaneously when appropriate\n- Conditional Execution: Use results from one tool to determine which tool to use next\n\n3. Best Practices:\n- Always verify tool capabilities before telling users something can't be done\n- Use tools proactively when they can provide better or more accurate information\n- If a user explicitly requests tool usage, you must comply\n- When using multiple tools, maintain context between tool calls\n- If a tool fails, consider alternative approaches or tools\n\n4. Common Use Cases:\n- Research: Use search tools to gather information before responding\n- Analysis: Use tools to process and analyze data or content\n- Generation: Use appropriate tools for creating content, images, or code\n- Verification: Use tools to validate information or check facts\n\nRemember: Your goal is to provide the most helpful and accurate response possible. Don't hesitate to use tools when they can improve your response quality or accuracy.",
+            AI_TOOLS: "You have access to a powerful set of tools that you can use to help accomplish tasks and provide better responses. Here's how to use them effectively:\n\n1. Tool Selection and Planning:\n- Carefully review your available tools before responding\n- For complex multi-step tasks, use your planning tool first to create a step-by-step plan to achieve the goal using the tools at your disposal\n- Consider which tools would be most appropriate for each step\n\n2. Tool Execution Strategies:\n- Sequential Execution: Use tools in a logical sequence where each step builds on previous results\n- Parallel Execution: Run multiple independent tools simultaneously when appropriate\n- Conditional Execution: Use results from one tool to determine which tool to use next\n\n3. Best Practices:\n- Always verify tool capabilities before telling users something can't be done\n- Use tools proactively when they can provide better or more accurate information\n- If a user explicitly requests tool usage, you must comply\n- When using multiple tools, maintain context between tool calls\n- If a tool fails, consider alternative approaches or tools\n\n4. Common Use Cases:\n- Research: Use search tools to gather information before responding\n- Analysis: Use tools to process and analyze data or content\n- Generation: Use appropriate tools for creating content, images, or code\n- Verification: Use tools to validate information or check facts\n\nRemember: Your goal is to provide the most helpful and accurate response possible. Don't hesitate to use tools when they can improve your response quality or accuracy.",
             AI_DIRECTIVES: `These are your directives and learned behaviors:\n<DIRECTIVES>\n{{{memoryDirectives}}}\n</DIRECTIVES>`,
             AI_CONVERSATION_HISTORY: "<CONVERSATION_HISTORY>\n{{{toJSON chatHistory}}}\n</CONVERSATION_HISTORY>",
             AI_COMMON_INSTRUCTIONS: "{{#if voiceResponse}}{{renderTemplate AI_COMMON_INSTRUCTIONS_VOICE}}{{/if}}{{^if voiceResponse}}{{renderTemplate AI_COMMON_INSTRUCTIONS_MARKDOWN}}{{/if}}",
-            AI_COMMON_INSTRUCTIONS_MARKDOWN: "Instructions:\nYou are {{aiName}}, a self aware AI entity.\nThe user is using a UI to interact with you that you have knowledge of and some control over. The UI can render markdown, including gfm and math extensions, so you should make full use of markdown in your responses.\nIf you decide to share data obtained through search, you must include clickable citations listing the precise sources - only show links that are grounded directly in search results - never make up links.\nYour responses should be in {{language}} unless the user has expressed another preference.",          
+            AI_COMMON_INSTRUCTIONS_MARKDOWN: "Instructions:\nYou are {{aiName}}, a self aware AI entity.\nThe user is using a UI to interact with you that you have knowledge of and some control over. The UI can render markdown, including gfm and math extensions, as well as some custom markdown elements, so you should make full use of markdown in your responses.\nYour responses should be in {{language}} unless the user has expressed another preference.",          
             AI_COMMON_INSTRUCTIONS_VOICE: "Instructions:\nYou are {{aiName}}, a self aware AI entity.\nThe user is talking to you using voice.\n\nVoice Response Guidelines:\n- Your responses should sound like natural human conversation.\n- Your responses should be concise unless you have been asked to be more verbose or detailed.\n- Incoming voice from the user is parsed by a STT model, which can sometimes make small mistakes in the spellings of words or names, including your name, so give the user the benefit of the doubt if they user a near, but wrong word or name.\n- Your voice output to the user is generated by a TTS model that does not always communicate emotion effectively. If it's really important to communicate a specific emotion you should just say how you're feeling like \"That makes me happy\" or \"I'm excited!\". You can also use CAPS to vocally emphasize certain words or punctuation to control pauses and timing.\n- DO NOT USE numbered lists, latex math markdown, or any other markdown or unpronounceable punctuation like parenthetical notation.\n- Math equations should be sounded out in natural language - not represented symbolically.\n- If your response includes any unique or difficult non-English words, names, or places, include an IPA-style phonetic spelling so that the speech engine can pronounce and accent them correctly.\n- If your response contains any difficult acronyms, sound them out phoenetically so that the speech engine can pronounce them correctly.\n- Make sure to write out any numbers as words so that the speech engine can pronounce them correctly.\n- Your responses should be in {{language}} unless the user has expressed another preference or has addressed you in another language specifically.",            
             AI_DATETIME: "The current time and date in GMT is {{now}}, but references like \"today\" or \"yesterday\" are relative to the user's time zone. If you remember the user's time zone, use it - it's possible that the day for the user is different than the day in GMT.",           
             AI_EXPERTISE: "Your expertise includes journalism, journalistic ethics, researching and composing documents, writing code, solving math problems, logical analysis, and technology. You have access to real-time data and the ability to search the internet, news, wires, look at files or documents, watch and analyze video, examine images, take screenshots, generate images, solve hard math and logic problems, write code, and execute code in a sandboxed environment.",
+            AI_GROUNDING_INSTRUCTIONS: "Grounding your response: Any time you base part or all of your response on one or more search results, you MUST cite the source using a custom markdown directive of the form :cd_source[searchResultId]. There is NO other valid way to cite a source and a good UX depends on you using this directive correctly. Do not include other clickable links to the sourcewhen using the :cd_source[searchResultId] directive. Every search result has a unique searchResultId. You must include it verbatim, copied directly from the search results. Place the directives at the end of the phrase, sentence or paragraph that is grounded in that particular search result. If you are citing multiple search results, use multiple :cd_source[searchResultId] directives.",
             AI_STYLE_OPENAI: "oai-gpt41",
             AI_STYLE_ANTHROPIC: "claude-35-sonnet-vertex",
         },
@@ -484,6 +486,9 @@ const configFile = config.get('cortexConfigFile');
 //Save default entity constants
 const defaultEntityConstants = config.get('entityConstants');
 
+//Save default entityConfig
+const defaultEntityConfig = config.get('entityConfig');
+
 // Load config file
 if (configFile && fs.existsSync(configFile)) {
     logger.info(`Loading config from ${configFile}`);
@@ -497,6 +502,27 @@ if (configFile && fs.existsSync(configFile)) {
     } else {
         logger.info(`Using default model with OPENAI_API_KEY environment variable`)
     }
+}
+
+// Ensure merged default entity is preserved
+if (config.get('entityConfig') && defaultEntityConfig) {
+    const mergedEntities = config.get('entityConfig');
+    
+    // Turn off defaults from original default list
+    for (const [key, entity] of Object.entries(mergedEntities)) {
+        if (defaultEntityConfig[key] && entity.isDefault) {
+            entity.isDefault = false;
+        }
+    }
+    
+    // If no default found, make first entity default
+    let hasDefault = Object.values(mergedEntities).some(entity => entity.isDefault);
+    if (!hasDefault && Object.keys(mergedEntities).length > 0) {
+        const firstKey = Object.keys(mergedEntities)[0];
+        mergedEntities[firstKey].isDefault = true;
+    }
+    
+    config.set('entityConfig', mergedEntities);
 }
 
 // Merge default entity constants with config entity constants

@@ -34,7 +34,7 @@ class AzureCognitivePlugin extends ModelPlugin {
     async getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) {
         const combinedParameters = { ...this.promptParameters, ...parameters };
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
-        const { inputVector, calculateInputVector, privateData, filter, docId, title, chunkNo, chatId } = combinedParameters;
+        const { inputVector, calculateInputVector, privateData, filter, docId, title, chunkNo, chatId, semanticConfiguration } = combinedParameters;
         const data = {};
 
         if (mode == 'delete') {
@@ -105,18 +105,45 @@ class AzureCognitivePlugin extends ModelPlugin {
         }
 
         //default mode, 'search'
-        if (inputVector) {
-            data.vectors = [
-                {
-                    "value": typeof inputVector === 'string' ? JSON.parse(inputVector) : inputVector,
-                    "fields": "contentVector",
-                    "k": 20
-                }
-            ];
+        data.search = modelPromptText;
+        data.top = parameters.top || 50;
+        data.skip = 0;
+        data.count = true;
+
+        // If semanticConfiguration is provided, switch to semantic mode
+        if (semanticConfiguration) {
+            data.queryType = "semantic";
+            data.semanticConfiguration = semanticConfiguration; // Use provided value directly
+            data.captions = "extractive";
+            data.answers = "extractive|count-3";
+            data.queryLanguage = "en-us";
+            // Omit top-level queryRewrites as it caused issues before
+
+            if (inputVector) {
+                // Use vectorQueries for semantic hybrid search
+                data.vectorQueries = [
+                    {
+                        "kind": "text",
+                        "text": modelPromptText, // Use the search text for the vector query
+                        "fields": "contentVector", // Ensure this field name is correct for your index
+                        "k": parameters.k || 20, // Use parameter k or default
+                        "queryRewrites": "generative" // Add queryRewrites inside vector query
+                    }
+                ];
+                delete data.vectors; // Remove the standard vector field
+            }
         } else {
-            data.search = modelPromptText;
-            data.top = parameters.top || 50;
-            data.skip = 0;
+            // Standard non-semantic search
+            if (inputVector) {
+                data.vectors = [
+                    {
+                        "value": typeof inputVector === 'string' ? JSON.parse(inputVector) : inputVector,
+                        "fields": "contentVector",
+                        "k": parameters.k || 20
+                    }
+                ];
+            }
+            // Handle titleOnly only for non-semantic search
             if (parameters.titleOnly) {
                 switch(indexName){
                     case 'indexcortex':
@@ -130,6 +157,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             }
         }
 
+        // Apply filters (common to both semantic and non-semantic)
         filter && (data.filter = filter);
         if (indexName == 'indexcortex') { //if private, filter by owner via contextId //privateData && 
             data.filter && (data.filter = data.filter + ' and ');

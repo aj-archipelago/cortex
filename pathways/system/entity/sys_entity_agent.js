@@ -94,16 +94,6 @@ export default {
 
                     // Add the tool result to the isolated message history
                     let toolResultContent = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
-                    if (pathwayResolver.tool && typeof pathwayResolver.tool === 'string') {
-                        try {
-                            let parsedTool = JSON.parse(pathwayResolver.tool);
-                            if (parsedTool.citations) {
-                                toolResultContent += '\n\ncd_source citation array: ' + JSON.stringify(parsedTool.citations);
-                            }
-                        } catch (error) {
-                            logger.error(`Error parsing tool result: ${error.message}`);
-                        }
-                    }
 
                     toolMessages.push({
                         role: "tool",
@@ -196,6 +186,11 @@ export default {
         const { entityId, voiceResponse, aiMemorySelfModify } = pathwayResolver.pathway.inputParameters;
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
+        const { useMemory: entityUseMemory = true, name: entityName, instructions: entityInstructions } = entityConfig;
+
+        if (entityId && entityName) {
+            args.aiName = entityName;
+        }
         
         args = {
             ...args,
@@ -203,14 +198,21 @@ export default {
             entityId,
             entityTools,
             entityToolsOpenAiFormat,
+            entityUseMemory,
+            entityInstructions,
             voiceResponse,
             aiMemorySelfModify
         };
 
         pathwayResolver.args = {...args};
 
+        const memoryTemplates = entityUseMemory ? 
+            `{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n` : '';
+
+        const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_EXPERTISE}}\n\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n`;
+
         const promptMessages = [
-            {"role": "system", "content": `{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY_DIRECTIVES}}\n\n{{renderTemplate AI_DATETIME}}`},
+            {"role": "system", "content": `${memoryTemplates}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n{{renderTemplate AI_DATETIME}}`},
             "{{chatHistory}}",
         ];
 
@@ -247,7 +249,7 @@ export default {
         const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
 
         // Add the memory context to the chat history if applicable
-        if (truncatedChatHistory.length > 1) {
+        if (truncatedChatHistory.length > 1 && entityUseMemory) {
             const memoryContext = await callPathway('sys_read_memory', { ...args, chatHistory: truncatedChatHistory, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, resolver);
             if (memoryContext) {
                 insertToolCallAndResults(args.chatHistory, "Load general memory context information", "LoadMemoryContext", memoryContext);
@@ -255,7 +257,7 @@ export default {
         }
         
         // Asynchronously manage memory for this context
-        if (args.aiMemorySelfModify) {
+        if (args.aiMemorySelfModify && entityUseMemory) {
             callPathway('sys_memory_manager', {  ...args, chatHistory: truncatedChatHistory, stream: false })    
             .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
         }

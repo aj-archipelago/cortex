@@ -3,6 +3,7 @@
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import logger from '../../../../lib/logger.js';
 import { config } from '../../../../config.js';
+import { getSearchResultId } from '../../../../lib/util.js';
 
 export default {
     prompt: [],
@@ -62,6 +63,7 @@ export default {
             // Process web pages
             if (parsedResponse.webPages && parsedResponse.webPages.value) {
                 results.push(...parsedResponse.webPages.value.map(({ name, url, snippet }) => ({
+                    searchResultId: getSearchResultId(),
                     title: name,
                     url,
                     content: snippet
@@ -71,6 +73,7 @@ export default {
             // Process computation results
             if (parsedResponse.computation) {
                 results.push({
+                    searchResultId: getSearchResultId(),
                     title: "Computation Result",
                     content: `Expression: ${parsedResponse.computation.expression}, Value: ${parsedResponse.computation.value}`
                 });
@@ -79,6 +82,7 @@ export default {
             // Process entities
             if (parsedResponse.entities && parsedResponse.entities.value) {
                 results.push(...parsedResponse.entities.value.map(entity => ({
+                    searchResultId: getSearchResultId(),
                     title: entity.name,
                     content: entity.description,
                     url: entity.webSearchUrl
@@ -88,6 +92,7 @@ export default {
             // Process news
             if (parsedResponse.news && parsedResponse.news.value) {
                 results.push(...parsedResponse.news.value.map(news => ({
+                    searchResultId: getSearchResultId(),
                     title: news.name,
                     content: news.description,
                     url: news.url
@@ -97,6 +102,7 @@ export default {
             // Process videos
             if (parsedResponse.videos && parsedResponse.videos.value) {
                 results.push(...parsedResponse.videos.value.map(video => ({
+                    searchResultId: getSearchResultId(),
                     title: video.name,
                     content: video.description,
                     url: video.contentUrl
@@ -106,6 +112,7 @@ export default {
             // Process places
             if (parsedResponse.places && parsedResponse.places.value) {
                 results.push(...parsedResponse.places.value.map(place => ({
+                    searchResultId: getSearchResultId(),
                     title: place.name,
                     content: `Address: ${place.address.addressLocality}, ${place.address.addressRegion}, ${place.address.addressCountry}`,
                     url: place.webSearchUrl
@@ -115,6 +122,7 @@ export default {
             // Process time zone
             if (parsedResponse.timeZone) {
                 results.push({
+                    searchResultId: getSearchResultId(),
                     title: "Time Zone Information",
                     content: parsedResponse.timeZone.primaryResponse || parsedResponse.timeZone.description
                 });
@@ -123,6 +131,7 @@ export default {
             // Process translations
             if (parsedResponse.translations && parsedResponse.translations.value) {
                 results.push(...parsedResponse.translations.value.map(translation => ({
+                    searchResultId: getSearchResultId(),
                     title: "Translation",
                     content: `Original (${translation.inLanguage}): ${translation.originalText}, Translated (${translation.translatedLanguageName}): ${translation.translatedText}`
                 })));

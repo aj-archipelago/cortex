@@ -18,6 +18,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         this.isMultiModal = true;
         this.pathwayToolCallback = pathway.toolCallback;
         this.toolCallsBuffer = [];
+        this.contentBuffer = ''; // Initialize content buffer
     }
     
     async tryParseMessages(messages) {
@@ -53,7 +54,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                             if (url && await this.validateImageUrl(url)) {
                                 return {type: parsedItem.type, image_url: {url}};
                             }
-                            return { type: 'text', text: item };
+                            return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
                         }
                         
                         return parsedItem;
@@ -201,25 +202,38 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         // check for end of stream or in-stream errors
         if (event.data.trim() === '[DONE]') {
             requestProgress.progress = 1;
-            // Clear the buffer when stream is done
+            // Clear buffers when stream is done
             this.toolCallsBuffer = [];
+            this.contentBuffer = ''; // Clear content buffer
         } else {
             let parsedMessage;
             try {
                 parsedMessage = JSON.parse(event.data);
                 requestProgress.data = event.data;
             } catch (error) {
+                // Clear buffers on error
+                this.toolCallsBuffer = [];
+                this.contentBuffer = '';
                 throw new Error(`Could not parse stream data: ${error}`);
             }
 
             // error can be in different places in the message
             const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
             if (streamError) {
+                // Clear buffers on error
+                this.toolCallsBuffer = [];
+                this.contentBuffer = '';
                 throw new Error(streamError);
             }
 
-            // Handle tool calls in streaming response
             const delta = parsedMessage?.choices?.[0]?.delta;
+
+            // Accumulate content
+            if (delta?.content) {
+                this.contentBuffer += delta.content;
+            }
+
+            // Handle tool calls in streaming response
             if (delta?.tool_calls) {
                 // Accumulate tool call deltas into the buffer
                 delta.tool_calls.forEach((toolCall) => {
@@ -247,28 +261,61 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             // finish reason can be in different places in the message
             const finishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
             if (finishReason) {
+                const pathwayResolver = requestState[this.requestId]?.pathwayResolver; // Get resolver
+
                 switch (finishReason.toLowerCase()) {
                     case 'tool_calls':
                         // Process complete tool calls when we get the finish reason
                         if (this.pathwayToolCallback && this.toolCallsBuffer.length > 0) {
                             const toolMessage = {
                                 role: 'assistant',
-                                content: delta?.content || '',
+                                content: delta?.content || '', 
                                 tool_calls: this.toolCallsBuffer,
                             };
-                            const pathwayResolver = requestState[this.requestId]?.pathwayResolver;
                             this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
                         }
                         // Don't set progress to 1 for tool calls to keep stream open
+                        // Clear tool buffer after processing, but keep content buffer
+                        this.toolCallsBuffer = []; 
                         break;
                     case 'safety':
                         const safetyRatings = JSON.stringify(parsedMessage?.candidates?.[0]?.safetyRatings) || '';
                         logger.warn(`Request ${this.requestId} was blocked by the safety filter. ${safetyRatings}`);
                         requestProgress.data = `\n\nResponse blocked by safety filter: ${safetyRatings}`;
                         requestProgress.progress = 1;
+                        // Clear buffers on finish
+                        this.toolCallsBuffer = [];
+                        this.contentBuffer = '';
                         break;
-                    default:
+                    default: // Includes 'stop' and other normal finish reasons
+                        // Look to see if we need to add citations to the response
+                        if (pathwayResolver && this.contentBuffer) {
+                            const regex = /:cd_source\[(.*?)\]/g;
+                            let match;
+                            const foundIds = [];
+                            while ((match = regex.exec(this.contentBuffer)) !== null) {
+                                // Ensure the capture group exists and is not empty
+                                if (match[1] && match[1].trim()) { 
+                                    foundIds.push(match[1].trim());
+                                }
+                            }
+
+                            if (foundIds.length > 0) {
+                                const {searchResults, tool} = pathwayResolver;
+                                logger.info(`Found referenced searchResultIds: ${foundIds.join(', ')}`);
+
+                                if (searchResults) {
+                                    const toolObj = typeof tool === 'string' ? JSON.parse(tool) : (tool || {});
+                                    toolObj.citations = searchResults
+                                        .filter(result => foundIds.includes(result.searchResultId));
+                                    pathwayResolver.tool = JSON.stringify(toolObj);
+                                }
+                            }
+                        }
                         requestProgress.progress = 1;
+                        // Clear buffers on finish
+                        this.toolCallsBuffer = [];
+                        this.contentBuffer = '';
                         break;
                 }
             }

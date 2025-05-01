@@ -3,78 +3,54 @@
 import { config } from '../../../../../config.js';
 import logger from '../../../../../lib/logger.js';
 
-export const CUSTOM_TOOLS = {
-    code: {
-        definition: {
-            type: "function",
-            function: {
-                name: "Code",
-                description: "Engage for any programming-related tasks, including creating, modifying, reviewing, or explaining code.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        detailedInstructions: {
-                            type: "string",
-                            description: "Detailed instructions about what you need the tool to do"
-                        },
-                        userMessage: {
-                            type: "string",
-                            description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                    },
-                    required: ["detailedInstructions", "userMessage"]
-                }
-            }
-        },
-        pathwayName: "sys_generator_expert"
-    },
-    codeExecution: {
-        definition: {
-            type: "function",
-            function: {
-                name: "CodeExecution",
-                description: "Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        detailedInstructions: {
-                            type: "string",
-                            description: "Detailed instructions about what you need the tool to do"
-                        },
-                        userMessage: {
-                            type: "string",
-                            description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                    },
-                    required: ["detailedInstructions", "userMessage"]
-                }
-            }
-        },
-        pathwayName: "sys_entity_code_execution"
-    }
-};
+export const CUSTOM_TOOLS = {};
 
 // Helper function to get tools for a specific entity
 export const getToolsForEntity = (entityConfig) => {
     // Get system tools from config
     const systemTools = config.get('entityTools') || {};
     
-    // Merge system tools with custom tools (custom tools override system tools)
-    const allTools = { ...systemTools, ...CUSTOM_TOOLS };
+    // Convert all tool names to lowercase in system tools
+    const normalizedSystemTools = Object.fromEntries(
+        Object.entries(systemTools).map(([key, value]) => [key.toLowerCase(), value])
+    );
     
-    // If no tools specified or empty array, return all tools
-    if (!entityConfig?.tools || entityConfig.tools.length === 0) {
+    // Convert custom tools to lowercase if they exist
+    const normalizedCustomTools = entityConfig?.customTools ? 
+        Object.fromEntries(
+            Object.entries(entityConfig.customTools).map(([key, value]) => [key.toLowerCase(), value])
+        ) : {};
+    
+    // Convert CUSTOM_TOOLS to lowercase
+    const normalizedCUSTOM_TOOLS = Object.fromEntries(
+        Object.entries(CUSTOM_TOOLS).map(([key, value]) => [key.toLowerCase(), value])
+    );
+    
+    // Merge system tools with custom tools (custom tools override system tools)
+    const allTools = { ...normalizedSystemTools, ...normalizedCustomTools, ...normalizedCUSTOM_TOOLS };
+    
+    // If no tools property specified or array contains *, return all tools
+    if (!entityConfig?.tools || entityConfig.tools.includes('*')) {
         return {
             entityTools: allTools,
             entityToolsOpenAiFormat: Object.values(allTools).map(tool => {
-                const { icon, ...definitionWithoutIcon } = tool.definition;
-                return definitionWithoutIcon;
+                const { icon, pathwayParams, ...definitionWithoutExtras } = tool.definition;
+                return definitionWithoutExtras;
             })
         };
     }
 
     // Get the list of tool names for this entity and convert to lowercase for case-insensitive comparison
     const entityToolNames = entityConfig.tools.map(name => name.toLowerCase());
+    
+    // Add custom tools to the list of allowed tools if they exist
+    if (entityConfig.customTools) {
+        Object.keys(entityConfig.customTools).forEach(toolName => {
+            if (!entityToolNames.includes(toolName.toLowerCase())) {
+                entityToolNames.push(toolName.toLowerCase());
+            }
+        });
+    }
     
     // Filter the tools to only include those specified for this entity
     const filteredTools = Object.fromEntries(
@@ -86,8 +62,8 @@ export const getToolsForEntity = (entityConfig) => {
     return {
         entityTools: filteredTools,
         entityToolsOpenAiFormat: Object.values(filteredTools).map(tool => {
-            const { icon, ...definitionWithoutIcon } = tool.definition;
-            return definitionWithoutIcon;
+            const { icon, pathwayParams, ...definitionWithoutExtras } = tool.definition;
+            return definitionWithoutExtras;
         })
     };
 };
@@ -102,7 +78,10 @@ export const loadEntityConfig = (entityId) => {
         }
 
         // Handle both array and object formats
-        const configArray = Array.isArray(entityConfig) ? entityConfig : Object.values(entityConfig);
+        const configArray = Array.isArray(entityConfig) ? entityConfig : Object.entries(entityConfig).map(([id, config]) => ({
+            id,
+            ...config
+        }));
 
         // If entityId is provided, look for that specific entity
         if (entityId) {

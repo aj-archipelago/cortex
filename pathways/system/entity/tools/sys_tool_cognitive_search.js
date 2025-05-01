@@ -3,6 +3,7 @@
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import { Prompt } from '../../../../server/prompt.js';
 import logger from '../../../../lib/logger.js';
+import { getSearchResultId } from '../../../../lib/util.js';
 
 export default {
     prompt: [],
@@ -14,8 +15,7 @@ export default {
         top: 50,
         titleOnly: false,
         stream: false,
-        indexName: '', // Required: 'indexcortex', 'indexucmsaja', 'indexucmsaje', or 'indexwires'
-        dataSources: [""] // Optional: filter which data sources to search
+        indexName: ''
     },
     timeout: 300,
     toolDefinition: [
@@ -158,7 +158,7 @@ export default {
     ],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { text, filter, top, titleOnly, stream, dataSources } = args;
+        const { text, filter, top, titleOnly, stream, dataSources, indexName, semanticConfiguration } = args;
 
         // Map tool names to index names
         const toolToIndex = {
@@ -168,27 +168,18 @@ export default {
             'searchwires': 'indexwires'
         };
 
-        // Get the tool name from the function call
-        const toolName = args.toolFunction;
-        if (!toolName || !toolToIndex[toolName.toLowerCase()]) {
-            throw new Error(`Invalid tool name: ${toolName}. Must be one of: ${Object.keys(toolToIndex).join(', ')}`);
-        }
-
-        const indexName = toolToIndex[toolName];
-
-        // Map index names to data source types
-        const indexToSource = {
-            'indexcortex': 'mydata',
-            'indexucmsaja': 'aja',
-            'indexucmsaje': 'aje',
-            'indexwires': 'wires'
+        // Helper function to remove vector fields from search results
+        const removeVectorFields = (result) => {
+            const { text_vector, image_vector, ...cleanResult } = result;
+            return cleanResult;
         };
 
-        // Check if this data source is allowed
-        const allowAllSources = !dataSources?.length || (dataSources.length === 1 && dataSources[0] === "");
-        const sourceType = indexToSource[indexName];
-        if (!allowAllSources && !dataSources.includes(sourceType)) {
-            return JSON.stringify({ _type: "SearchResponse", value: [] });
+        // Get the tool name from the function call
+        const toolName = args.toolFunction;
+        const toolIndexName = indexName || toolToIndex[toolName];
+
+        if (!toolName || !toolIndexName) {
+            throw new Error(`Invalid tool name: ${toolName}. Search not allowed.`);
         }
 
         try {
@@ -199,12 +190,39 @@ export default {
                 filter,
                 top: top || 50,
                 titleOnly: titleOnly || false,
-                indexName,
+                indexName: toolIndexName,
+                semanticConfiguration,
                 stream: stream || false
             });
 
             const parsedResponse = JSON.parse(response);
-            return JSON.stringify({ _type: "SearchResponse", value: parsedResponse.value || [] });
+
+            const combinedResults = [];
+
+            if (parsedResponse.value && Array.isArray(parsedResponse.value)) {
+                // Filter out vector fields from each result before adding to combinedResults
+                combinedResults.push(...parsedResponse.value.map(result => ({
+                    ...removeVectorFields(result),
+                    searchResultId: getSearchResultId()
+                })));
+            }
+            // Extract semantic answers
+            const answers = parsedResponse["@search.answers"];
+            if (answers && Array.isArray(answers)) {
+                const formattedAnswers = answers.map(ans => ({
+                    // Create a pseudo-document structure for answers
+                    searchResultId: getSearchResultId(),
+                    title: "", // no title for answers
+                    content: ans.text || "", // Use text as content
+                    key: ans.key, // Keep the key if needed later
+                    score: ans.score, // Keep score
+                    source_type: 'answer' // Add a type identifier
+                    // url: null - Answers don't have URLs
+                }));
+                combinedResults.push(...formattedAnswers);
+            }
+
+            return JSON.stringify({ _type: "SearchResponse", value: combinedResults });
         } catch (e) {
             logger.error(`Error in cognitive search for index ${indexName}: ${e}`);
             throw e;
