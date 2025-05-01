@@ -3,11 +3,9 @@ import OpenAIChatPlugin from './openAiChatPlugin.js';
 class OpenAIReasoningPlugin extends OpenAIChatPlugin {
     
     tryParseMessages(messages) {
-        const parsedMessages = super.tryParseMessages(messages);
-
         let newMessages = [];
 
-        for (const message of parsedMessages) {
+        for (const message of messages) {
             if (message.role === 'user' || message.role === 'assistant') {
                 newMessages.push({
                     role: message.role,
