@@ -187,7 +187,7 @@ export default {
         
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-        const { useMemory: entityUseMemory = true, name: entityName, instructions: entityInstructions } = entityConfig;
+        const { useMemory: entityUseMemory = true, name: entityName, instructions: entityInstructions } = entityConfig || {};
 
         if (entityId && entityName) {
             args.aiName = entityName;

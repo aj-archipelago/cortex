@@ -505,7 +505,8 @@ if (configFile && fs.existsSync(configFile)) {
 }
 
 // Ensure merged default entity is preserved
-if (config.get('entityConfig') && defaultEntityConfig) {
+if (config.get('entityConfig') && defaultEntityConfig && 
+   (Object.keys(config.get('entityConfig')).length > Object.keys(defaultEntityConfig).length)) {
     const mergedEntities = config.get('entityConfig');
     
     // Turn off defaults from original default list
