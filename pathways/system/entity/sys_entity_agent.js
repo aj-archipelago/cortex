@@ -252,8 +252,6 @@ export default {
         // truncate the chat history in case there is really long content
         const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
 
-        const fetchTitleResponsePromise = callPathway('chat_title', {...args, chatHistory: truncatedChatHistory, stream: false});
-
         // Add the memory context to the chat history if applicable
         if (truncatedChatHistory.length > 1 && entityUseMemory) {
             const memoryContext = await callPathway('sys_read_memory', { ...args, chatHistory: truncatedChatHistory, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, resolver);
@@ -270,9 +268,6 @@ export default {
 
         try {
             let currentMessages = JSON.parse(JSON.stringify(args.chatHistory));
-
-            const title = await fetchTitleResponsePromise;
-            pathwayResolver.tool = JSON.stringify({ title });
 
             let response = await runAllPrompts({
                 ...args,
