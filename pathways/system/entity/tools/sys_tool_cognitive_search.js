@@ -199,6 +199,24 @@ export default {
 
             const combinedResults = [];
 
+            // Add OData context and count information if present
+            if (parsedResponse["@odata.context"]) {
+                combinedResults.push({
+                    searchResultId: getSearchResultId(),
+                    key: "@odata.context",
+                    content: parsedResponse["@odata.context"],
+                    source_type: 'metadata'
+                });
+            }
+            if (parsedResponse["@odata.count"]) {
+                combinedResults.push({
+                    searchResultId: getSearchResultId(),
+                    key: "@odata.count",
+                    content: parsedResponse["@odata.count"].toString(),
+                    source_type: 'metadata'
+                });
+            }
+
             if (parsedResponse.value && Array.isArray(parsedResponse.value)) {
                 // Filter out vector fields from each result before adding to combinedResults
                 combinedResults.push(...parsedResponse.value.map(result => ({

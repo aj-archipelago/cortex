@@ -7,7 +7,7 @@ import { PathwayResponseParser } from './pathwayResponseParser.js';
 import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
-import { callPathway } from '../lib/pathwayTools.js';
+import { callPathway, addCitationsToResolver } from '../lib/pathwayTools.js';
 import { publishRequestProgress } from '../lib/redisSubscription.js';
 import logger from '../lib/logger.js';
 // eslint-disable-next-line import/no-extraneous-dependencies
@@ -321,6 +321,8 @@ class PathwayResolver {
         if (data !== null) {
             await saveChangedMemory();
         }
+
+        addCitationsToResolver(this, data);
 
         return data;
     }
