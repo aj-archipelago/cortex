@@ -252,6 +252,8 @@ export default {
         // truncate the chat history in case there is really long content
         const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
 
+        const fetchTitleResponsePromise = callPathway('chat_title', {...args, chatHistory: truncatedChatHistory, stream: false});
+
         // Add the memory context to the chat history if applicable
         if (truncatedChatHistory.length > 1 && entityUseMemory) {
             const memoryContext = await callPathway('sys_read_memory', { ...args, chatHistory: truncatedChatHistory, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, resolver);
@@ -269,7 +271,9 @@ export default {
         try {
             let currentMessages = JSON.parse(JSON.stringify(args.chatHistory));
 
-            // Run the initial prompt with streaming
+            const title = await fetchTitleResponsePromise;
+            pathwayResolver.tool = JSON.stringify({ title });
+
             let response = await runAllPrompts({
                 ...args,
                 chatHistory: currentMessages,
@@ -279,16 +283,14 @@ export default {
 
             let toolCallback = pathwayResolver.pathway.toolCallback;
             while (response?.tool_calls) {
-                response = await toolCallback(args, response, resolver);
+                response = await toolCallback(args, response, pathwayResolver);
             }
 
-            // Return the final response
             return response;
 
         } catch (e) {
-            resolver.logError(e);
-            const chatResponse = await callPathway('sys_generator_quick', {...args, model: styleModel, stream: false}, resolver);
-            resolver.tool = JSON.stringify({ search: false, title: args.title });
+            pathwayResolver.logError(e);
+            const chatResponse = await callPathway('sys_generator_quick', {...args, model: styleModel, stream: false}, pathwayResolver);
             return chatResponse;
         }
     }

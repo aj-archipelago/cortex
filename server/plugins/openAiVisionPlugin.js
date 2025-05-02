@@ -1,7 +1,7 @@
 import OpenAIChatPlugin from './openAiChatPlugin.js';
 import logger from '../../lib/logger.js';
 import { requestState } from '../requestState.js';
-
+import { addCitationsToResolver } from '../../lib/pathwayTools.js';
 function safeJsonParse(content) {
     try {
         const parsedContent = JSON.parse(content);
@@ -289,29 +289,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                         break;
                     default: // Includes 'stop' and other normal finish reasons
                         // Look to see if we need to add citations to the response
-                        if (pathwayResolver && this.contentBuffer) {
-                            const regex = /:cd_source\[(.*?)\]/g;
-                            let match;
-                            const foundIds = [];
-                            while ((match = regex.exec(this.contentBuffer)) !== null) {
-                                // Ensure the capture group exists and is not empty
-                                if (match[1] && match[1].trim()) { 
-                                    foundIds.push(match[1].trim());
-                                }
-                            }
-
-                            if (foundIds.length > 0) {
-                                const {searchResults, tool} = pathwayResolver;
-                                logger.info(`Found referenced searchResultIds: ${foundIds.join(', ')}`);
-
-                                if (searchResults) {
-                                    const toolObj = typeof tool === 'string' ? JSON.parse(tool) : (tool || {});
-                                    toolObj.citations = searchResults
-                                        .filter(result => foundIds.includes(result.searchResultId));
-                                    pathwayResolver.tool = JSON.stringify(toolObj);
-                                }
-                            }
-                        }
+                        addCitationsToResolver(pathwayResolver, this.contentBuffer);
                         requestProgress.progress = 1;
                         // Clear buffers on finish
                         this.toolCallsBuffer = [];

@@ -19,7 +19,7 @@ export default {
         title: '',
         text: '',
     },
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41-nano',
     useInputChunking: false,
     temperature: 0,
     enableDuplicateRequests: false
