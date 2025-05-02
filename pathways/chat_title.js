@@ -16,6 +16,7 @@ export default {
         }),
     ],
     inputParameters: {
+        chatHistory: [{role: '', content: []}],
         title: '',
         text: '',
     },
