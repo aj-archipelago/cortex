@@ -16,11 +16,7 @@ export default {
         privateData: false,    
         chatHistory: [{role: '', content: []}],
         contextId: ``,
-        indexName: ``,
-        semanticConfiguration: ``,
-        roleInformation: ``,    
-        calculateEmbeddings: false,
-        dataSources: ["mydata", "aja", "aje", "wires", "bing"],
+        chatId: ``,
         language: "English",
         aiName: "Jarvis",
         aiMemorySelfModify: true,
@@ -186,7 +182,7 @@ export default {
         let pathwayResolver = resolver;
 
         // Load input parameters and information into args
-        const { entityId, voiceResponse, aiMemorySelfModify, stream } = { ...pathwayResolver.pathway.inputParameters, ...args };
+        const { entityId, voiceResponse, aiMemorySelfModify, chatId } = { ...pathwayResolver.pathway.inputParameters, ...args };
         
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
@@ -205,7 +201,8 @@ export default {
             entityUseMemory,
             entityInstructions,
             voiceResponse,
-            aiMemorySelfModify
+            aiMemorySelfModify,
+            chatId
         };
 
         pathwayResolver.args = {...args};

@@ -158,7 +158,7 @@ export default {
     ],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { text, filter, top, titleOnly, stream, dataSources, indexName, semanticConfiguration } = args;
+        const { text, filter, top, titleOnly, stream, chatId, indexName, semanticConfiguration } = args;
 
         // Map tool names to index names
         const toolToIndex = {
@@ -192,7 +192,8 @@ export default {
                 titleOnly: titleOnly || false,
                 indexName: toolIndexName,
                 semanticConfiguration,
-                stream: stream || false
+                stream: stream || false,
+                chatId
             });
 
             const parsedResponse = JSON.parse(response);
