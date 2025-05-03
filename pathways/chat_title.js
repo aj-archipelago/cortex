@@ -20,7 +20,7 @@ export default {
         title: '',
         text: '',
     },
-    model: 'oai-gpt41-nano',
+    model: 'oai-gpt41-mini',
     useInputChunking: false,
     temperature: 0,
     enableDuplicateRequests: false
