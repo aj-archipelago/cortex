@@ -7,9 +7,10 @@ class OpenAIReasoningVisionPlugin extends OpenAIVisionPlugin {
 
         let newMessages = [];
 
+        // System messages to developer: https://platform.openai.com/docs/guides/text-generation#messages-and-roles
         newMessages = parsedMessages.map(message => ({
-            role: message.role === 'system' ? 'developer' : message.role,
-            content: message.content
+            ...message,
+            role: message.role === 'system' ? 'developer' : message.role
         })).filter(message => ['user', 'assistant', 'developer', 'tool'].includes(message.role));
 
         return newMessages;

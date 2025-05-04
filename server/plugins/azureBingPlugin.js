@@ -75,7 +75,7 @@ class AzureBingPlugin extends ModelPlugin {
     
     // Override the logging function to display the request and response
     logRequestData(data, responseData, prompt) {
-        this.logAIRequestFinished();
+        //this.logAIRequestFinished();
     
         logger.verbose(`${this.parseResponse(responseData)}`);
     

@@ -25,40 +25,33 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         return await Promise.all(messages.map(async message => {
             try {
                 // Handle tool-related message types
-                if (message.role === "tool") {
+                if (message.role === "tool" || (message.role === "assistant" && message.tool_calls)) {
                     return {
-                        role: message.role,
-                        content: message.content,
-                        tool_call_id: message.tool_call_id
-                    };
-                }
-
-                if (message.role === "assistant" && message.tool_calls) {
-                    return {
-                        role: message.role,
-                        content: message.content,
-                        tool_calls: message.tool_calls
+                        ...message
                     };
                 }
 
                 if (Array.isArray(message.content)) {
-                    message.content = await Promise.all(message.content.map(async item => {
-                        const parsedItem = safeJsonParse(item);
+                    return {
+                        ...message,
+                        content: await Promise.all(message.content.map(async item => {
+                            const parsedItem = safeJsonParse(item);
 
-                        if (typeof parsedItem === 'string') {
-                            return { type: 'text', text: parsedItem };
-                        }
-
-                        if (typeof parsedItem === 'object' && parsedItem !== null && parsedItem.type === 'image_url') {
-                            const url = parsedItem.url || parsedItem.image_url?.url;
-                            if (url && await this.validateImageUrl(url)) {
-                                return {type: parsedItem.type, image_url: {url}};
+                            if (typeof parsedItem === 'string') {
+                                return { type: 'text', text: parsedItem };
                             }
-                            return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
-                        }
-                        
-                        return parsedItem;
-                    }));
+
+                            if (typeof parsedItem === 'object' && parsedItem !== null && parsedItem.type === 'image_url') {
+                                const url = parsedItem.url || parsedItem.image_url?.url;
+                                if (url && await this.validateImageUrl(url)) {
+                                    return {type: parsedItem.type, image_url: {url}};
+                                }
+                                return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
+                            }
+                            
+                            return parsedItem;
+                        }))
+                    };
                 }
             } catch (e) {
                 return message;

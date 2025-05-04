@@ -34,7 +34,7 @@ export default {
                     },
                     userPrompt: {
                         type: "string",
-                        description: "The complete prompt to send as a user message to the model instructing the model to perform the task you need."
+                        description: "The complete prompt to send as a user message to the model instructing the model to perform the task you need. Keep in mind this model does not share your context, conversation history, tool call results, or memories - so include all relevant information in the user prompt."
                     },
                     model: {
                         type: "string",

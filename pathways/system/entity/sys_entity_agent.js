@@ -66,10 +66,15 @@ export default {
                     const messageWithIcon = toolIcon ? `${toolIcon}&nbsp;&nbsp;${toolUserMessage}` : toolUserMessage;
                     await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `${messageWithIcon}\n\n`, 1000, false);
 
-                    if (toolArgs.detailedInstructions) {
-                        toolMessages.push({role: "user", content: toolArgs.detailedInstructions});
-                    }
+                    const toolResult = await callTool(toolFunction, {
+                        ...args,
+                        ...toolArgs,
+                        toolFunction,
+                        chatHistory: toolMessages,
+                        stream: false
+                    }, entityTools, pathwayResolver);
 
+                    // Tool calls and results need to be paired together in the message history
                     // Add the tool call to the isolated message history
                     toolMessages.push({
                         role: "assistant",
@@ -83,14 +88,6 @@ export default {
                             }
                         }]
                     });
-
-                    const toolResult = await callTool(toolFunction, {
-                        ...args,
-                        ...toolArgs,
-                        toolFunction,
-                        chatHistory: toolMessages,
-                        stream: false
-                    }, entityTools, pathwayResolver);
 
                     // Add the tool result to the isolated message history
                     let toolResultContent = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);

@@ -42,7 +42,7 @@ export default {
 
         try {   
             let model = "replicate-flux-11-pro";
-            let prompt = args.detailedInstructions;
+            let prompt = args.detailedInstructions || "";
             let numberResults = args.numberResults || 1;
             let negativePrompt = args.negativePrompt || "";
 

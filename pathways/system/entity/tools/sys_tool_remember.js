@@ -53,6 +53,9 @@ export default {
     }],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
+        if (args.detailedInstructions) {
+            args.chatHistory.push({role: "user", content: args.detailedInstructions});
+        }
         resolver.tool = JSON.stringify({ toolUsed: "memory" });
         return await callPathway('sys_search_memory', { ...args, stream: false, section: 'memoryAll', updateContext: true });
     }
