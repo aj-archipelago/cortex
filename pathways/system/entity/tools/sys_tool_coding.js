@@ -8,7 +8,7 @@ export default {
         [
             new Prompt({ messages: [
                 {"role": "system", "content": `You are the part of an AI entity named {{aiName}} that provides advanced coding and programming capabilities. You excel at writing, reviewing, and explaining code across various programming languages. You can help with code generation, debugging, optimization, and best practices. Think carefully about the latest request and provide a detailed, well thought out, carefully reviewed response.\n{{renderTemplate AI_DATETIME}}`},
-                "{{chatHistory}}",
+                "{{chatHistory}}"
             ]}),
         ],
     inputParameters: {
@@ -46,6 +46,9 @@ export default {
     }],
     
     executePathway: async ({args, runAllPrompts, resolver}) => {
+        if (args.detailedInstructions) {
+            args.chatHistory.push({role: "user", content: args.detailedInstructions});
+        }
         let result = await runAllPrompts({ ...args, stream: false });        
         resolver.tool = JSON.stringify({ toolUsed: "coding" });          
         return result;

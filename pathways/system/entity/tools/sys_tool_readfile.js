@@ -112,6 +112,9 @@ export default {
     }],
     
     executePathway: async ({args, runAllPrompts, resolver}) => {
+        if (args.detailedInstructions) {
+            args.chatHistory.push({role: "user", content: args.detailedInstructions});
+        }
         const result = await runAllPrompts({ ...args });
         resolver.tool = JSON.stringify({ toolUsed: "vision" });
         return result;

@@ -6,6 +6,7 @@ import { getAvailableEntities } from './tools/shared/sys_entity_tools.js';
 export default {
     prompt: [],
     inputParameters: {},
+    model: 'oai-gpt41-mini',
     executePathway: async ({ args }) => {
         try {
             const entities = getAvailableEntities();

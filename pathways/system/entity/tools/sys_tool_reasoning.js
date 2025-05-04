@@ -49,7 +49,7 @@ export default {
         icon: "🧠",
         function: {
             name: "Reason",
-            description: "Employ for advancedreasoning, scientific analysis, evaluating evidence, strategic planning, problem-solving, logic puzzles, mathematical calculations, or any questions that require careful thought or complex choices.",
+            description: "Employ for advanced reasoning, scientific analysis, evaluating evidence, strategic planning, problem-solving, logic puzzles, mathematical calculations, or any questions that require careful thought or complex choices.",
             parameters: {
                 type: "object",
                 properties: {
@@ -68,6 +68,9 @@ export default {
     }],
     
     executePathway: async ({args, runAllPrompts, resolver}) => {
+        if (args.detailedInstructions) {
+            args.chatHistory.push({role: "user", content: args.detailedInstructions});
+        }
         let result = await runAllPrompts({ ...args, stream: false });        
         resolver.tool = JSON.stringify({ toolUsed: "reasoning" });          
         return result;

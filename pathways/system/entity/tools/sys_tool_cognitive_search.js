@@ -24,7 +24,7 @@ export default {
             icon: "📂",
             function: {
                 name: "SearchPersonal",
-                description: "Search through the user's personal documents and uploaded files. Use this for finding information in user-provided content.",
+                description: "Search through the user's index of personal documents and indexed uploaded files. Use this for finding information in user-provided content or if the user refers to a file or a document that you don't see elsewhere in your context.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -55,9 +55,9 @@ export default {
         },
         {
             type: "function",
+            icon: "📰",
             function: {
                 name: "SearchAJA",
-                icon: "📰",
                 description: "Search through Al Jazeera Arabic news articles. Use this for finding Arabic news content.",
                 parameters: {
                     type: "object",

@@ -48,13 +48,13 @@ export default {
         icon: "🤖",
         function: {
             name: "CodeExecution",
-            description: "Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks.",
+            description: "Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks - examples include data analysis, file manipulation, or other tasks that require code execution.",
             parameters: {
                 type: "object",
                 properties: {
                     codingTask: {
                         type: "string",
-                        description: "Detailed task description for the coding agent. Include all necessary information as this is the only message the coding agent receives. Let the agent decide how to solve it without making assumptions about its capabilities."
+                        description: "Detailed task description for the coding agent. Include all necessary information as this is the only message the coding agent receives. Let the agent decide how to solve it without making assumptions about its capabilities. IMPORTANT: The coding agent does not share your context, so you must provide it with all the information in this message. If you are asking it to operate on files or other data from your context, you must provide the fully-qualified URL to each of the files you want it to use. Also make sure you explicitly instruct the agent to use those files."
                     },
                     userMessage: {
                         type: "string",
