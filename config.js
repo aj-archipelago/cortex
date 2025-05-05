@@ -478,6 +478,11 @@ var config = convict({
         default: null,
         env: 'NEURALSPACE_API_KEY'
     },
+    browserServiceUrl: {
+        format: String,
+        default: null,
+        env: 'CORTEX_BROWSER_URL'
+    }
 });
 
 // Read in environment variables and set up service configuration
