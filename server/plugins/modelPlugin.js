@@ -565,7 +565,10 @@ class ModelPlugin {
             return parsedData;
         } catch (error) {
             // Log the error and continue
-            const errorMessage = `${error?.response?.data?.message || error?.response?.data?.error?.message || error?.message || error}`;
+            const errorMessage = error?.response?.data?.message
+                                 ?? error?.response?.data?.error?.message
+                                 ?? error?.message
+                                 ?? String(error); // Fallback to string representation
             logger.error(`Error in executeRequest for ${this.pathwayName}: ${errorMessage}`);
             if (error.data) {
                 logger.error(`Additional error data: ${JSON.stringify(error.data)}`);

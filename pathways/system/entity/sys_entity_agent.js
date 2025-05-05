@@ -27,6 +27,7 @@ export default {
         codeRequestId: ``,
         skipCallbackMessage: false,
         entityId: ``,
+        researchMode: false, 
         model: 'oai-gpt41'
     },
     timeout: 600,
@@ -179,7 +180,7 @@ export default {
         let pathwayResolver = resolver;
 
         // Load input parameters and information into args
-        const { entityId, voiceResponse, aiMemorySelfModify, chatId } = { ...pathwayResolver.pathway.inputParameters, ...args };
+        const { entityId, voiceResponse, aiMemorySelfModify, chatId, researchMode } = { ...pathwayResolver.pathway.inputParameters, ...args };
         
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
@@ -199,10 +200,13 @@ export default {
             entityInstructions,
             voiceResponse,
             aiMemorySelfModify,
-            chatId
+            chatId,
+            researchMode
         };
 
         pathwayResolver.args = {...args};
+
+        const promptPrefix = researchMode ? 'Formatting re-enabled\n' : '';
 
         const memoryTemplates = entityUseMemory ? 
             `{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n` : '';
@@ -210,18 +214,13 @@ export default {
         const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_EXPERTISE}}\n\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n`;
 
         const promptMessages = [
-            {"role": "system", "content": `${memoryTemplates}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n{{renderTemplate AI_DATETIME}}`},
+            {"role": "system", "content": `${promptPrefix}${memoryTemplates}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n{{renderTemplate AI_DATETIME}}`},
             "{{chatHistory}}",
         ];
 
         pathwayResolver.pathwayPrompt = [
             new Prompt({ messages: promptMessages }),
         ];
-
-        // if the model has been overridden, make sure to use it
-        if (pathwayResolver.modelName) {
-            pathwayResolver.args.model = pathwayResolver.modelName;
-        }
 
         // set the style model if applicable
         const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
