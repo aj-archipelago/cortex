@@ -41,12 +41,15 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                                 return { type: 'text', text: parsedItem };
                             }
 
-                            if (typeof parsedItem === 'object' && parsedItem !== null && parsedItem.type === 'image_url') {
-                                const url = parsedItem.url || parsedItem.image_url?.url;
-                                if (url && await this.validateImageUrl(url)) {
-                                    return {type: parsedItem.type, image_url: {url}};
+                            if (typeof parsedItem === 'object' && parsedItem !== null) {
+                                // Handle both 'image' and 'image_url' types
+                                if (parsedItem.type === 'image' || parsedItem.type === 'image_url') {
+                                    const url = parsedItem.image_url?.url || parsedItem.url;
+                                    if (url && await this.validateImageUrl(url)) {
+                                        return { type: 'image_url', image_url: { url } };
+                                    }
+                                    return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
                                 }
-                                return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
                             }
                             
                             return parsedItem;
