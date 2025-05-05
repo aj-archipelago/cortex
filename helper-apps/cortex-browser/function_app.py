@@ -16,51 +16,53 @@ def scrape_and_screenshot(url: str, should_screenshot: bool = True) -> dict:
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
-            context = browser.new_context()
-            page = context.new_page()
-            page.goto(url, wait_until='load', timeout=60000) # Increased timeout
+            try:
+                context = browser.new_context()
+                page = context.new_page()
+                page.goto(url, wait_until='load', timeout=60000) # Increased timeout
 
-            # --- Attempt to reject cookies ---
-            # Add more selectors here if needed for different sites
-            reject_selectors = [
-                "button:has-text('Reject All')",
-                "button:has-text('Decline')",
-                "button:has-text('Only necessary')",
-                "button:has-text('Tümünü Reddet')", # From your example
-                "button:has-text('Reject')",
-                "[aria-label*='Reject']", # Common aria labels
-                "[id*='reject']",
-                "[class*='reject']",
-                # Add more specific selectors based on common banner frameworks if known
-            ]
+                # --- Attempt to reject cookies ---
+                # Add more selectors here if needed for different sites
+                reject_selectors = [
+                    "button:has-text('Reject All')",
+                    "button:has-text('Decline')",
+                    "button:has-text('Only necessary')",
+                    "button:has-text('Tümünü Reddet')", # From your example
+                    "button:has-text('Reject')",
+                    "[aria-label*='Reject']", # Common aria labels
+                    "[id*='reject']",
+                    "[class*='reject']",
+                    # Add more specific selectors based on common banner frameworks if known
+                ]
 
-            cookie_banner_found = False
-            for selector in reject_selectors:
-                try:
-                    # Wait briefly for the banner element to appear
-                    reject_button = page.locator(selector).first
-                    if reject_button.is_visible(timeout=2000): # Wait up to 2 seconds
-                        logging.info(f"Found potential cookie reject button with selector: {selector}")
-                        reject_button.click(timeout=5000) # Click with a timeout
-                        logging.info("Clicked cookie reject button.")
-                        # Wait a tiny bit for the banner to disappear/page to settle
-                        page.wait_for_timeout(500)
-                        cookie_banner_found = True
-                        break # Stop searching once one is clicked
-                except Exception as e:
-                    # Ignore timeout errors if the element doesn't appear or other exceptions
-                    # logging.debug(f"Cookie reject selector '{selector}' not found or failed: {e}")
-                    pass # Try the next selector
+                cookie_banner_found = False
+                for selector in reject_selectors:
+                    try:
+                        # Wait briefly for the banner element to appear
+                        reject_button = page.locator(selector).first
+                        if reject_button.is_visible(timeout=2000): # Wait up to 2 seconds
+                            logging.info(f"Found potential cookie reject button with selector: {selector}")
+                            reject_button.click(timeout=5000) # Click with a timeout
+                            logging.info("Clicked cookie reject button.")
+                            # Wait a tiny bit for the banner to disappear/page to settle
+                            page.wait_for_timeout(500)
+                            cookie_banner_found = True
+                            break # Stop searching once one is clicked
+                    except Exception as e:
+                        # Ignore timeout errors if the element doesn't appear or other exceptions
+                        # logging.debug(f"Cookie reject selector '{selector}' not found or failed: {e}")
+                        pass # Try the next selector
 
-            if not cookie_banner_found:
-                 logging.info("No common cookie reject button found or clicked.")
-            # ---------------------------------
+                if not cookie_banner_found:
+                     logging.info("No common cookie reject button found or clicked.")
+                # ---------------------------------
 
-            html_content = page.content()
-            # Take FULL page screenshot before closing
-            if should_screenshot:
-                screenshot_bytes = page.screenshot(full_page=True) # Added full_page=True
-            browser.close()
+                html_content = page.content()
+                # Take FULL page screenshot before closing
+                if should_screenshot:
+                    screenshot_bytes = page.screenshot(full_page=True) # Added full_page=True
+            finally:
+                browser.close()
     except Exception as e:
         logging.error(f"Playwright error accessing {url}: {e}")
         return {"url": url, "error": f"Playwright error: {e}"}
