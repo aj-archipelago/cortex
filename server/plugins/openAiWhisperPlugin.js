@@ -90,6 +90,9 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 sendProgress(true, true);
                 try {
                     res = await this.executeRequest(cortexRequest);
+                    if (!res) {
+                        throw new Error('Received null or empty response');
+                    }
                     if(res?.statusCode && res?.statusCode >= 400){
                         throw new Error(res?.message || 'An error occurred.');
                     }
@@ -107,6 +110,10 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
             if(!wordTimestamped && !responseFormat){ 
                 //if no response format, convert to text
+                if (!res) {
+                    logger.warn("Received null or empty response from timestamped API when expecting SRT/VTT format. Returning empty string.");
+                    return ""; 
+                }
                 return convertSrtToText(res);
             }
             return res;
