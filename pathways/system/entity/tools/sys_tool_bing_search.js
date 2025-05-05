@@ -55,7 +55,14 @@ export default {
             // Call the Bing search pathway
             const response = await callPathway('bing', { 
                 ...args
-            });
+            }, resolver);
+
+            if (resolver.errors && resolver.errors.length > 0) {
+                const errorMessages = Array.isArray(resolver.errors) 
+                    ? resolver.errors.map(err => err.message || err)
+                    : [resolver.errors.message || resolver.errors];
+                return JSON.stringify({ _type: "SearchError", value: errorMessages });
+            }
 
             const parsedResponse = JSON.parse(response);
             const results = [];

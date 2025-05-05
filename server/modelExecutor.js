@@ -1,5 +1,6 @@
 // ModelExecutor.js
 import CortexRequest from '../lib/cortexRequest.js';
+import logger from '../lib/logger.js';
 
 import OpenAIChatPlugin from './plugins/openAiChatPlugin.js';
 import OpenAICompletionPlugin from './plugins/openAiCompletionPlugin.js';
@@ -125,7 +126,14 @@ class ModelExecutor {
 
     async execute(text, parameters, prompt, pathwayResolver) {
         const cortexRequest = new CortexRequest({ pathwayResolver });
-        return await this.plugin.execute(text, parameters, prompt, cortexRequest);
+        try {
+            return await this.plugin.execute(text, parameters, prompt, cortexRequest);
+        } catch (error) {
+            logger.error(`Error executing model plugin for pathway ${pathwayResolver?.pathway?.name}: ${error.message}`);
+            logger.debug(error.stack);
+            pathwayResolver.errors.push(error.message);
+            return null;
+        }
     }
 }
 
