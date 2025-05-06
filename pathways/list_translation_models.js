@@ -67,7 +67,7 @@ async function checkServiceHealth(serviceId) {
         
         // Set a timeout to fail health check if it takes too long
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error(`Health check timeout for ${serviceId}`)), 3000);
+            setTimeout(() => reject(new Error(`Health check timeout for ${serviceId}`)), 10000);
         });
         
         // Race between actual health check and timeout
