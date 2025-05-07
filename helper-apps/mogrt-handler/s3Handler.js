@@ -176,6 +176,38 @@ async function addToMasterManifest(entry) {
 }
 
 /**
+ * Removes an entry from the master manifest by ID
+ * @param {string} id - The ID of the entry to remove
+ * @returns {Promise<boolean>} - True if item was found and removed, false if not found
+ */
+export async function removeFromMasterManifest(id) {
+    try {
+        console.log(`🔍 Looking for MOGRT with ID ${id} to remove`);
+        const masterManifest = await getMasterManifest();
+        console.log('📊 Current master manifest entries:', masterManifest.length);
+        
+        // Check if entry exists
+        const initialLength = masterManifest.length;
+        const filteredManifest = masterManifest.filter(item => item.id !== id);
+        
+        if (filteredManifest.length === initialLength) {
+            console.log(`❓ MOGRT with ID ${id} not found in manifest`);
+            return false;
+        }
+        
+        console.log(`🗑️ Removing entry with ID: ${id}`);
+        console.log('💾 Saving updated master manifest...');
+        await updateMasterManifest(filteredManifest);
+        console.log('✅ Master manifest successfully updated');
+        console.log('📊 New total entries:', filteredManifest.length);
+        return true;
+    } catch (error) {
+        console.error(`❌ Error removing MOGRT with ID ${id}:`, error);
+        throw error;
+    }
+}
+
+/**
  * Uploads a file to S3
  * @param {string} key - key (location) of the file in S3
  * @param {Buffer|Readable} fileData - File data to upload

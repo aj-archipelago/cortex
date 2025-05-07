@@ -1,4 +1,4 @@
-import { uploadToS3, getManifest, saveManifest } from './s3Handler.js';
+import { uploadToS3, getManifest, saveManifest, removeFromMasterManifest } from './s3Handler.js';
 import Busboy from 'busboy';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -20,6 +20,7 @@ const validateFiles = (files) => {
 async function MogrtHandler(context, req) {
     const { method } = req;
     const { manifestId } = req.query;
+    const id = req.params?.id;
 
     try {
         // GET request to fetch manifest
@@ -32,6 +33,43 @@ async function MogrtHandler(context, req) {
             return;
         }
 
+        // DELETE request to remove MOGRT item
+        if (method === 'DELETE' && id) {
+            console.log(`Attempting to delete MOGRT with ID: ${id} from manifest: ${manifestId || 'master'}`);
+            try {
+                // Use the new removeFromMasterManifest function
+                const removed = await removeFromMasterManifest(id);
+                
+                // If the item was not found
+                if (!removed) {
+                    console.log(`MOGRT with ID ${id} not found in manifest`);
+                    context.res = {
+                        status: 404,
+                        body: { error: `MOGRT with ID ${id} not found` }
+                    };
+                    return;
+                }
+                
+                console.log(`Successfully deleted MOGRT with ID: ${id}`);
+                
+                context.res = {
+                    status: 200,
+                    body: {
+                        success: true,
+                        message: `MOGRT with ID ${id} successfully deleted`
+                    }
+                };
+                return;
+            } catch (error) {
+                console.error(`Error deleting MOGRT with ID ${id}:`, error);
+                context.res = {
+                    status: 500,
+                    body: { error: `Failed to delete MOGRT: ${error.message}` }
+                };
+                return;
+            }
+        }
+        
         // POST request to upload files
         if (method === 'POST') {
             const files = [];

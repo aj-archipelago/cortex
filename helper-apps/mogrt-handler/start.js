@@ -139,6 +139,26 @@ app.all('/api/MogrtHandler', async (req, res) => {
     }
 });
 
+// Endpoint for MOGRT operations with ID (DELETE)
+app.all('/api/MogrtHandler/:id', async (req, res) => {
+    const context = { 
+        req, 
+        res, 
+        log: console.log 
+    };
+
+    try {
+        // Set params to make the ID available in the handler
+        req.params = req.params || {};
+        await MogrtHandler(context, req);
+        res.status(context.res.status || 200).send(context.res.body);
+    } catch (error) {
+        const status = error.status || 500;
+        const message = error.message || 'Internal server error';
+        res.status(status).send({ error: message });
+    }
+});
+
 /**
  * @swagger
  * /api/glossary/list:
