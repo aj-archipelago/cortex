@@ -91,7 +91,7 @@ export default {
                     });
 
                     // Add the tool result to the isolated message history
-                    let toolResultContent = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult);
+                    const toolResultContent = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult?.result || toolResult);
 
                     toolMessages.push({
                         role: "tool",
@@ -99,6 +99,25 @@ export default {
                         name: toolCall.function.name,
                         content: toolResultContent
                     });
+
+                    // Add the screenshots using OpenAI image format
+                    if (toolResult?.toolImages && toolResult.toolImages.length > 0) {
+                        toolMessages.push({
+                            role: "user",
+                            content: [
+                                {
+                                    type: "text",
+                                    text: "The tool with id " + toolCall.id + " has also supplied you with these images."
+                                },
+                                ...toolResult.toolImages.map(toolImage => ({
+                                    type: "image_url",
+                                    image_url: {
+                                        url: `data:image/png;base64,${toolImage}`
+                                    }
+                                }))
+                            ]
+                        });
+                    }
 
                     return { 
                         success: true, 
