@@ -9,20 +9,16 @@ export default {
     timeout: 300,
     toolDefinition: { 
         type: "function",
-        icon: "🌍",
+        icon: "🌎",
         function: {
-            name: "WebPageContent",
-            description: "This tool allows you to fetch and extract the text content and a screenshot if requested from any webpage. Use this when you need to analyze or understand the content of a specific webpage.",
+            name: "WebPageContentJina",
+            description: "This tool allows you to fetch and extract the text content from any webpage using the Jina API. This is a great fallback for web page content if you don't get a good enough response from your other browser tool.",
             parameters: {
                 type: "object",
                 properties: {
                     url: {
                         type: "string",
                         description: "The complete URL of the webpage to fetch and analyze"
-                    },
-                    takeScreenshot: {
-                        type: "boolean",
-                        description: "Whether to include a screenshot of the webpage in the response - slower, but can be helpful for digging deeper if the text content is not enough to answer the question"
                     },
                     userMessage: {
                         type: "string",
@@ -36,30 +32,33 @@ export default {
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
         // Check if browser service URL is available
-        const browserServiceUrl = config.get('browserServiceUrl');
-        if (!browserServiceUrl) {
-            throw new Error("Browser service is not available - missing CORTEX_BROWSER_URL configuration");
+        const jinaApiKey = config.get('jinaApiKey');
+        if (!jinaApiKey) {
+            throw new Error("Jina API key is not available - missing JINA_API_KEY configuration");
         }
 
         try {
-            // Construct the full URL for the browser service
-            const scrapeUrl = `${browserServiceUrl}/api/scrape?url=${encodeURIComponent(args.url)}`;
-            
-            // Call the browser service
-            const response = await fetch(scrapeUrl);
+            const scrapeUrl = `https://r.jina.ai/${encodeURIComponent(args.url)}`;
+            const token = `Bearer ${jinaApiKey}`;
+
+            const response = await fetch(scrapeUrl, {
+            headers: {
+                'Authorization': token
+            }
+            });
+
             if (!response.ok) {
                 throw new Error(`Browser service returned error: ${response.status} ${response.statusText}`);
             }
 
-            const data = await response.json();
+            const data = await response.text();
             
             // Create a result object with the scraped content
             const result = {
                 searchResultId: getSearchResultId(),
                 title: "Webpage Content",
-                url: data.url,
-                content: data.text,
-                screenshot: args.takeScreenshot ? data.screenshot_base64 : undefined
+                url: args.url,
+                content: data
             };
 
             resolver.tool = JSON.stringify({ toolUsed: "WebPageContent" });

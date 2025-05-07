@@ -549,8 +549,20 @@ class ModelPlugin {
             cortexRequest.cache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
             this.logRequestStart();
 
-            const { data: responseData, duration: requestDuration } = await executeRequest(cortexRequest);
+            const response = await executeRequest(cortexRequest);
             
+            // Add null check and default values for response
+            if (!response) {
+                throw new Error('Request failed - no response received');
+            }
+
+            const { data: responseData, duration: requestDuration } = response;
+            
+            // Validate response data
+            if (!responseData) {
+                throw new Error('Request failed - no data in response');
+            }
+
             const errorData = Array.isArray(responseData) ? responseData[0] : responseData;
             if (errorData && errorData.error) {
                 const newError = new Error(errorData.error.message);
@@ -558,21 +570,32 @@ class ModelPlugin {
                 throw newError;
             }
         
-            this.logAIRequestFinished(requestDuration);
+            this.logAIRequestFinished(requestDuration || 0);
             const parsedData = this.parseResponse(responseData);
             this.logRequestData(data, parsedData, prompt);
 
             return parsedData;
         } catch (error) {
-            // Log the error and continue
+            // Enhanced error logging
             const errorMessage = error?.response?.data?.message
                                  ?? error?.response?.data?.error?.message
                                  ?? error?.message
-                                 ?? String(error); // Fallback to string representation
+                                 ?? String(error);
+            
+            // Log the full error details for debugging
             logger.error(`Error in executeRequest for ${this.pathwayName}: ${errorMessage}`);
+            if (error.response) {
+                logger.error(`Response status: ${error.response.status}`);
+                logger.error(`Response headers: ${JSON.stringify(error.response.headers)}`);
+            }
             if (error.data) {
                 logger.error(`Additional error data: ${JSON.stringify(error.data)}`);
             }
+            if (error.stack) {
+                logger.error(`Error stack: ${error.stack}`);
+            }
+
+            // Throw a more informative error
             throw new Error(`Execution failed for ${this.pathwayName}: ${errorMessage}`);
         }
     }
