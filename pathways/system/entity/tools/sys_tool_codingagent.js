@@ -48,13 +48,17 @@ export default {
         icon: "🤖",
         function: {
             name: "CodeExecution",
-            description: "Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks - examples include data analysis, file manipulation, or other tasks that require code execution.",
+            description: "Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks - examples include data analysis, file manipulation, or other tasks that require code execution. This will start a background task and return - you will not receive the response immediately.",
             parameters: {
                 type: "object",
                 properties: {
                     codingTask: {
                         type: "string",
-                        description: "Detailed task description for the coding agent. Include all necessary information as this is the only message the coding agent receives. Let the agent decide how to solve it without making assumptions about its capabilities. IMPORTANT: The coding agent does not share your context, so you must provide it with all the information in this message. If you are asking it to operate on files or other data from your context, you must provide the fully-qualified URL to each of the files you want it to use. Also make sure you explicitly instruct the agent to use those files."
+                        description: "Detailed task description for the coding agent. Include all necessary information as this is the only message the coding agent receives. Let the agent decide how to solve it without making assumptions about its capabilities. IMPORTANT: The coding agent does not share your context, so you must provide it with all the information in this message."
+                    },
+                    inputFiles: {
+                        type: "string",
+                        description: "A list of input files that the coding agent must use to complete the task. Each file should be the fully-qualified URL to the file. Omit this parameter if no input files are needed."
                     },
                     userMessage: {
                         type: "string",
@@ -72,12 +76,18 @@ export default {
     
     executePathway: async ({args, resolver}) => {
         try {
-            const { codingTask, userMessage, codingTaskKeywords } = args;
+            const { codingTask, userMessage, inputFiles, codingTaskKeywords } = args;
             const { contextId } = args;
+
+            let taskSuffix = "";
+            if (inputFiles) {
+                taskSuffix = `You must use the following files as input to complete the task: ${inputFiles}.`
+            }
+
 
             // Send the task to the queue
             const codeRequestId = await sendMessageToQueue({ 
-                message: codingTask, 
+                message: `${codingTask}\n\n${taskSuffix}`, 
                 contextId, 
                 keywords: codingTaskKeywords 
             });
