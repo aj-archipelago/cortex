@@ -77,7 +77,7 @@ class PathwayResolver {
         if (requestProgress.progress === 1 && this.rootRequestId) {
             delete requestProgress.progress;
         }
-        publishRequestProgress({...requestProgress, info: this.tool || ''});
+        publishRequestProgress({...requestProgress, info: this.tool || '', error: this.errors.join(', ')});
     }
 
     // This code handles async and streaming responses for either long-running

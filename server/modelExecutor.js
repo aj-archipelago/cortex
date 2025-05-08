@@ -131,7 +131,7 @@ class ModelExecutor {
         } catch (error) {
             logger.error(`Error executing model plugin for pathway ${pathwayResolver?.pathway?.name}: ${error.message}`);
             logger.debug(error.stack);
-            pathwayResolver.errors.push(error.message);
+            pathwayResolver.logError(error.message);
             return null;
         }
     }
