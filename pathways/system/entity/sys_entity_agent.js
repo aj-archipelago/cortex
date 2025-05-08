@@ -9,6 +9,7 @@ import { Prompt } from '../../../server/prompt.js';
 import { getToolsForEntity, loadEntityConfig } from './tools/shared/sys_entity_tools.js';
 
 export default {
+    emulateOpenAIChatModel: 'cortex-agent',
     useInputChunking: false,
     enableDuplicateRequests: false,
     useSingleTokenStream: false,
@@ -204,10 +205,6 @@ export default {
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
         const { useMemory: entityUseMemory = true, name: entityName, instructions: entityInstructions } = entityConfig || {};
-
-        if (entityId && entityName) {
-            args.aiName = entityName;
-        }
         
         args = {
             ...args,
@@ -228,12 +225,12 @@ export default {
         const promptPrefix = researchMode ? 'Formatting re-enabled\n' : '';
 
         const memoryTemplates = entityUseMemory ? 
-            `{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n` : '';
+            `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_CONTEXT}}\n\n` : '';
 
-        const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_EXPERTISE}}\n\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n`;
+        const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n`;
 
         const promptMessages = [
-            {"role": "system", "content": `${promptPrefix}${memoryTemplates}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n{{renderTemplate AI_DATETIME}}`},
+            {"role": "system", "content": `${promptPrefix}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n${memoryTemplates}{{renderTemplate AI_DATETIME}}`},
             "{{chatHistory}}",
         ];
 
@@ -263,15 +260,7 @@ export default {
 
         // truncate the chat history in case there is really long content
         const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
-
-        // Add the memory context to the chat history if applicable
-        if (truncatedChatHistory.length > 1 && entityUseMemory) {
-            const memoryContext = await callPathway('sys_read_memory', { ...args, chatHistory: truncatedChatHistory, section: 'memoryContext', priority: 0, recentHours: 0, stream: false }, resolver);
-            if (memoryContext) {
-                insertToolCallAndResults(args.chatHistory, "Load general memory context information", "LoadMemoryContext", memoryContext);
-            }
-        }
-        
+      
         // Asynchronously manage memory for this context
         if (args.aiMemorySelfModify && entityUseMemory) {
             callPathway('sys_memory_manager', {  ...args, chatHistory: truncatedChatHistory, stream: false })    

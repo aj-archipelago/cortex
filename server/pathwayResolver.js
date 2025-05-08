@@ -501,7 +501,8 @@ class PathwayResolver {
                 memorySelf: this.memorySelf,
                 memoryDirectives: this.memoryDirectives,
                 memoryTopics: this.memoryTopics,
-                memoryUser: this.memoryUser 
+                memoryUser: this.memoryUser,
+                memoryContext: this.memoryContext
             }, prompt, this);
         } else {
             result = text;

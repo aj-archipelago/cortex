@@ -28,28 +28,6 @@ export default {
                 required: ["detailedInstructions", "userMessage"]
             }
         }
-    },
-    {
-        type: "function",
-        icon: "🧩",
-        function: {
-            name: "LoadMemoryContext",
-            description: "This tool quickly preloads the memory context for this turn of the conversation.  It's typically automatically used by the system, but you can use it if you need to.",
-            parameters: {
-                type: "object",
-                properties: {
-                    detailedInstructions: {
-                        type: "string",
-                        description: "Detailed instructions about what you need the tool to do"
-                    },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                    }
-                },
-                required: ["detailedInstructions", "userMessage"]
-            }
-        }
     }],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
