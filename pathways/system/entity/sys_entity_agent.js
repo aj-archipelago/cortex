@@ -1,10 +1,11 @@
 // sys_entity_agent.js
 // Agentic extension of the entity system that uses OpenAI's tool calling API
+const MAX_TOOL_CALLS = 50;
+
 import { callPathway, callTool, say } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
 import { chatArgsHasImageUrl, removeOldImageAndFileContent } from '../../../lib/util.js';
-import { insertToolCallAndResults } from './memory/shared/sys_memory_helpers.js';
 import { Prompt } from '../../../server/prompt.js';
 import { getToolsForEntity, loadEntityConfig } from './tools/shared/sys_entity_tools.js';
 
@@ -41,152 +42,172 @@ export default {
         const { tool_calls } = message;
         const pathwayResolver = resolver;
         const { entityTools, entityToolsOpenAiFormat } = args;
+
+        pathwayResolver.toolCallCount = (pathwayResolver.toolCallCount || 0);
         
-        // Make a deep copy of the initial chat history
-        const initialMessages = JSON.parse(JSON.stringify(args.chatHistory || []));
+        const preToolCallMessages = JSON.parse(JSON.stringify(args.chatHistory || []));
+        const finalMessages = JSON.parse(JSON.stringify(preToolCallMessages));
 
         if (tool_calls) {
-            // Execute tool calls in parallel but with isolated message histories
-            const toolResults = await Promise.all(tool_calls.map(async (toolCall) => {
-                try {
-                    if (!toolCall?.function?.arguments) {
-                        throw new Error('Invalid tool call structure: missing function arguments');
-                    }
+            if (pathwayResolver.toolCallCount < MAX_TOOL_CALLS) {
+                // Execute tool calls in parallel but with isolated message histories
+                const toolResults = await Promise.all(tool_calls.map(async (toolCall) => {
+                    try {
+                        if (!toolCall?.function?.arguments) {
+                            throw new Error('Invalid tool call structure: missing function arguments');
+                        }
 
-                    const toolArgs = JSON.parse(toolCall.function.arguments);
-                    const toolFunction = toolCall.function.name.toLowerCase();
-                    
-                    // Create an isolated copy of messages for this tool
-                    const toolMessages = JSON.parse(JSON.stringify(initialMessages));
-                    
-                    // Get the tool definition to check for icon
-                    const toolDefinition = entityTools[toolFunction]?.definition;
-                    const toolIcon = toolDefinition?.icon || '🛠️';
-                    
-                    // Report status to the user
-                    const toolUserMessage = toolArgs.userMessage || `Executing tool: ${toolCall.function.name} - ${JSON.stringify(toolArgs)}`;
-                    const messageWithIcon = toolIcon ? `${toolIcon}&nbsp;&nbsp;${toolUserMessage}` : toolUserMessage;
-                    await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `${messageWithIcon}\n\n`, 1000, false);
+                        const toolArgs = JSON.parse(toolCall.function.arguments);
+                        const toolFunction = toolCall.function.name.toLowerCase();
+                        
+                        // Create an isolated copy of messages for this tool
+                        const toolMessages = JSON.parse(JSON.stringify(preToolCallMessages));
+                        
+                        // Get the tool definition to check for icon
+                        const toolDefinition = entityTools[toolFunction]?.definition;
+                        const toolIcon = toolDefinition?.icon || '🛠️';
+                        
+                        // Report status to the user
+                        const toolUserMessage = toolArgs.userMessage || `Executing tool: ${toolCall.function.name} - ${JSON.stringify(toolArgs)}`;
+                        const messageWithIcon = toolIcon ? `${toolIcon}&nbsp;&nbsp;${toolUserMessage}` : toolUserMessage;
+                        await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `${messageWithIcon}\n\n`, 1000, false);
 
-                    const toolResult = await callTool(toolFunction, {
-                        ...args,
-                        ...toolArgs,
-                        toolFunction,
-                        chatHistory: toolMessages,
-                        stream: false
-                    }, entityTools, pathwayResolver);
+                        const toolResult = await callTool(toolFunction, {
+                            ...args,
+                            ...toolArgs,
+                            toolFunction,
+                            chatHistory: toolMessages,
+                            stream: false
+                        }, entityTools, pathwayResolver);
 
-                    // Tool calls and results need to be paired together in the message history
-                    // Add the tool call to the isolated message history
-                    toolMessages.push({
-                        role: "assistant",
-                        content: "",
-                        tool_calls: [{
-                            id: toolCall.id,
-                            type: "function",
-                            function: {
-                                name: toolCall.function.name,
-                                arguments: JSON.stringify(toolArgs)
-                            }
-                        }]
-                    });
-
-                    // Add the tool result to the isolated message history
-                    const toolResultContent = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult?.result || toolResult);
-
-                    toolMessages.push({
-                        role: "tool",
-                        tool_call_id: toolCall.id,
-                        name: toolCall.function.name,
-                        content: toolResultContent
-                    });
-
-                    // Add the screenshots using OpenAI image format
-                    if (toolResult?.toolImages && toolResult.toolImages.length > 0) {
+                        // Tool calls and results need to be paired together in the message history
+                        // Add the tool call to the isolated message history
                         toolMessages.push({
-                            role: "user",
-                            content: [
-                                {
-                                    type: "text",
-                                    text: "The tool with id " + toolCall.id + " has also supplied you with these images."
-                                },
-                                ...toolResult.toolImages.map(toolImage => ({
-                                    type: "image_url",
-                                    image_url: {
-                                        url: `data:image/png;base64,${toolImage}`
-                                    }
-                                }))
-                            ]
+                            role: "assistant",
+                            content: "",
+                            tool_calls: [{
+                                id: toolCall.id,
+                                type: "function",
+                                function: {
+                                    name: toolCall.function.name,
+                                    arguments: JSON.stringify(toolArgs)
+                                }
+                            }]
                         });
+
+                        // Add the tool result to the isolated message history
+                        const toolResultContent = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult?.result || toolResult);
+
+                        toolMessages.push({
+                            role: "tool",
+                            tool_call_id: toolCall.id,
+                            name: toolCall.function.name,
+                            content: toolResultContent
+                        });
+
+                        // Add the screenshots using OpenAI image format
+                        if (toolResult?.toolImages && toolResult.toolImages.length > 0) {
+                            toolMessages.push({
+                                role: "user",
+                                content: [
+                                    {
+                                        type: "text",
+                                        text: "The tool with id " + toolCall.id + " has also supplied you with these images."
+                                    },
+                                    ...toolResult.toolImages.map(toolImage => ({
+                                        type: "image_url",
+                                        image_url: {
+                                            url: `data:image/png;base64,${toolImage}`
+                                        }
+                                    }))
+                                ]
+                            });
+                        }
+
+                        return { 
+                            success: true, 
+                            result: toolResult,
+                            toolCall,
+                            toolArgs,
+                            toolFunction,
+                            messages: toolMessages
+                        };
+                    } catch (error) {
+                        logger.error(`Error executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
+                        
+                        // Create error message history
+                        const errorMessages = JSON.parse(JSON.stringify(preToolCallMessages));
+                        errorMessages.push({
+                            role: "assistant",
+                            content: "",
+                            tool_calls: [{
+                                id: toolCall.id,
+                                type: "function",
+                                function: {
+                                    name: toolCall.function.name,
+                                    arguments: JSON.stringify(toolCall.function.arguments)
+                                }
+                            }]
+                        });
+                        errorMessages.push({
+                            role: "tool",
+                            tool_call_id: toolCall.id,
+                            name: toolCall.function.name,
+                            content: `Error: ${error.message}`
+                        });
+
+                        return { 
+                            success: false, 
+                            error: error.message,
+                            toolCall,
+                            toolArgs: toolCall?.function?.arguments ? JSON.parse(toolCall.function.arguments) : {},
+                            toolFunction: toolCall?.function?.name?.toLowerCase() || 'unknown',
+                            messages: errorMessages
+                        };
                     }
+                }));
 
-                    return { 
-                        success: true, 
-                        result: toolResult,
-                        toolCall,
-                        toolArgs,
-                        toolFunction,
-                        messages: toolMessages
-                    };
-                } catch (error) {
-                    logger.error(`Error executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
-                    
-                    // Create error message history
-                    const errorMessages = JSON.parse(JSON.stringify(initialMessages));
-                    errorMessages.push({
-                        role: "assistant",
-                        content: "",
-                        tool_calls: [{
-                            id: toolCall.id,
-                            type: "function",
-                            function: {
-                                name: toolCall.function.name,
-                                arguments: JSON.stringify(toolCall.function.arguments)
-                            }
-                        }]
-                    });
-                    errorMessages.push({
-                        role: "tool",
-                        tool_call_id: toolCall.id,
-                        name: toolCall.function.name,
-                        content: `Error: ${error.message}`
-                    });
+                // Merge all message histories in order
+                for (const result of toolResults) {
+                    try {
+                        if (!result?.messages) {
+                            logger.error('Invalid tool result structure, skipping message history update');
+                            continue;
+                        }
 
-                    return { 
-                        success: false, 
-                        error: error.message,
-                        toolCall,
-                        toolArgs: toolCall?.function?.arguments ? JSON.parse(toolCall.function.arguments) : {},
-                        toolFunction: toolCall?.function?.name?.toLowerCase() || 'unknown',
-                        messages: errorMessages
-                    };
-                }
-            }));
-
-            // Merge all message histories in order
-            let finalMessages = JSON.parse(JSON.stringify(initialMessages));
-            for (const result of toolResults) {
-                try {
-                    if (!result?.messages) {
-                        logger.error('Invalid tool result structure, skipping message history update');
-                        continue;
+                        // Add only the new messages from this tool's history
+                        const newMessages = result.messages.slice(preToolCallMessages.length);
+                        finalMessages.push(...newMessages);
+                    } catch (error) {
+                        logger.error(`Error merging message history for tool result: ${error.message}`);
                     }
-
-                    // Add only the new messages from this tool's history
-                    const newMessages = result.messages.slice(initialMessages.length);
-                    finalMessages.push(...newMessages);
-                } catch (error) {
-                    logger.error(`Error merging message history for tool result: ${error.message}`);
                 }
-            }
 
-            // Check if any tool calls failed
-            const failedTools = toolResults.filter(result => !result.success);
-            if (failedTools.length > 0) {
-                logger.warn(`Some tool calls failed: ${failedTools.map(t => t.error).join(', ')}`);
+                // Check if any tool calls failed
+                const failedTools = toolResults.filter(result => !result.success);
+                if (failedTools.length > 0) {
+                    logger.warn(`Some tool calls failed: ${failedTools.map(t => t.error).join(', ')}`);
+                }
+
+                pathwayResolver.toolCallCount = (pathwayResolver.toolCallCount || 0) + toolResults.length;
+
+            } else {
+                finalMessages.push({
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: "This agent has reached the maximum number of tool calls - no more tool calls will be executed."
+                        }
+                    ]
+                });
+                
             }
 
             args.chatHistory = finalMessages;
+
+            // clear any accumulated pathwayResolver errors from the tools
+            pathwayResolver.errors = [];
 
             return await pathwayResolver.promptAndParse({
                 ...args,

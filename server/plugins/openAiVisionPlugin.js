@@ -84,7 +84,14 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                 const { length, units } = this.getLength(content);
                 const displayContent = this.shortenContent(content);
 
-                logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${displayContent}"`);
+                let logMessage = `message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${displayContent}"`;
+                
+                // Add tool calls to log if they exist
+                if (message.role === 'assistant' && message.tool_calls) {
+                    logMessage += `, tool_calls: ${JSON.stringify(message.tool_calls)}`;
+                }
+                
+                logger.verbose(logMessage);
                 totalLength += length;
                 totalUnits = units;
             });

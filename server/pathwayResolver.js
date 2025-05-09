@@ -89,12 +89,24 @@ class PathwayResolver {
             responseData = await this.executePathway(args);
         }
         catch (error) {
+            this.errors.push(error.message || error.toString());
             publishRequestProgress({
                 requestId: this.rootRequestId || this.requestId,
                 progress: 1,
                 data: '',
                 info: '',
-                error: error.message || error.toString()
+                error: this.errors.join(', ')
+            });
+            return;
+        }
+
+        if (!responseData) {
+            publishRequestProgress({
+                requestId: this.rootRequestId || this.requestId,
+                progress: 1,
+                data: '',
+                info: '',
+                error: this.errors.join(', ')
             });
             return;
         }
@@ -113,7 +125,8 @@ class PathwayResolver {
                         progress: Math.min(completedCount, totalCount) / totalCount,
                         // Clients expect these to be strings
                         data: JSON.stringify(responseData || ''),
-                        info: this.tool || ''
+                        info: this.tool || '',
+                        error: this.errors.join(', ') || ''
                 });
             }
         }
