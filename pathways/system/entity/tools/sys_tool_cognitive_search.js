@@ -24,7 +24,7 @@ export default {
             icon: "📂",
             function: {
                 name: "SearchPersonal",
-                description: "Search through the user's index of personal documents and indexed uploaded files. Use this for finding information in user-provided content or if the user refers to a file or a document that you don't see elsewhere in your context.",
+                description: "Search through the user's index of personal documents and indexed uploaded files and retrieve the content of the files. Use this tool if the user refers to a file or a document that you don't see uploaded elsewhere in your context. Some file types (e.g. Word documents, Excel documents, very large files, etc.) cannot be attached to a message and will be chunked and indexed and stored in the personal index.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -58,7 +58,7 @@ export default {
             icon: "📰",
             function: {
                 name: "SearchAJA",
-                description: "Search through Al Jazeera Arabic news articles. Use this for finding Arabic news content.",
+                description: "Search Al Jazeera Arabic news articles. Use this for finding Arabic news content including the latest news and articles.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -92,7 +92,7 @@ export default {
             icon: "📰",
             function: {
                 name: "SearchAJE",
-                description: "Search through Al Jazeera English news articles. Use this for finding English news content.",
+                description: "Search Al Jazeera English news articles. Use this for finding English news content including the latest news and articles.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -126,7 +126,7 @@ export default {
             icon: "⚡️",
             function: {
                 name: "SearchWires",
-                description: "Search through news wires from all sources. Use this for finding the latest news and articles.",
+                description: "Search through news wires from Reuters, AFP, AP, and other news agencies. Use this for finding the latest news and articles from the wires.",
                 parameters: {
                     type: "object",
                     properties: {

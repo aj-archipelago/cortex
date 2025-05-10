@@ -22,6 +22,8 @@ export default {
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,
+    // Tool disabled for now
+    /*
     toolDefinition: [{
         type: "function",
         icon: "💻",
@@ -44,6 +46,7 @@ export default {
             }
         }
     }],
+    */
     
     executePathway: async ({args, runAllPrompts, resolver}) => {
         if (args.detailedInstructions) {

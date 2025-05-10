@@ -209,6 +209,9 @@ export default {
             // clear any accumulated pathwayResolver errors from the tools
             pathwayResolver.errors = [];
 
+            // Add a line break to avoid running output together
+            await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `\n`, 1000, false, false);
+
             return await pathwayResolver.promptAndParse({
                 ...args,
                 tools: entityToolsOpenAiFormat,
