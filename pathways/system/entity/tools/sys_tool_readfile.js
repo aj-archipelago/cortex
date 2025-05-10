@@ -27,7 +27,7 @@ export default {
         icon: "📄",
         function: {
             name: "PDF",
-            description: "Use specifically for analyzing and answering questions about PDF file content.",
+            description: "Use specifically for analyzing and answering questions about PDF file content. Do not use this tool for analyzing and answering questions about other file types.",
             parameters: {
                 type: "object",
                 properties: {
@@ -49,7 +49,7 @@ export default {
         icon: "📝",
         function: {
             name: "Text",
-            description: "Use specifically for analyzing and answering questions about text files.",
+            description: "Use specifically for analyzing and answering questions about text and csv files.",
             parameters: {
                 type: "object",
                 properties: {
