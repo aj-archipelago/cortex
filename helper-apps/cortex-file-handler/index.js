@@ -1,24 +1,56 @@
-import { downloadFile, splitMediaFile } from './fileChunker.js';
-import { saveFileToBlob, deleteBlob, deleteGCS, uploadBlob, cleanup, cleanupGCS, gcsUrlExists, ensureGCSUpload, gcs, AZURE_STORAGE_CONTAINER_NAME, uploadChunkToGCS } from './blobHandler.js';
-import { cleanupRedisFileStoreMap, getFileStoreMap, publishRequestProgress, removeFromFileStoreMap, setFileStoreMap } from './redis.js';
-import { ensureEncoded, ensureFileExtension, urlExists } from './helper.js';
-import { moveFileToPublicFolder, deleteFolder, cleanupLocal } from './localFileHandler.js';
-import { documentToText, easyChunker } from './docHelper.js';
-import { DOC_EXTENSIONS } from './constants.js';
-import path from 'path';
-import os from 'os';
-import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { v4 as uuidv4 } from 'uuid';
+
+import {
+    saveFileToBlob,
+    deleteBlob,
+    deleteGCS,
+    uploadBlob,
+    cleanup,
+    cleanupGCS,
+    gcsUrlExists,
+    ensureGCSUpload,
+    gcs,
+    AZURE_STORAGE_CONTAINER_NAME,
+    uploadChunkToGCS,
+} from './blobHandler.js';
+import { DOC_EXTENSIONS, CONVERTED_EXTENSIONS } from './constants.js';
+import { convertDocument, documentToText, easyChunker } from './docHelper.js';
+import { downloadFile, splitMediaFile } from './fileChunker.js';
+import { ensureEncoded, ensureFileExtension, urlExists } from './helper.js';
+import {
+    moveFileToPublicFolder,
+    deleteFolder,
+    cleanupLocal,
+} from './localFileHandler.js';
+import {
+    cleanupRedisFileStoreMap,
+    getFileStoreMap,
+    publishRequestProgress,
+    removeFromFileStoreMap,
+    setFileStoreMap,
+} from './redis.js';
 
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
-const useGCS = process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 || process.env.GCP_SERVICE_ACCOUNT_KEY ? true : false;
+const useGCS =
+  process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
+  process.env.GCP_SERVICE_ACCOUNT_KEY
+      ? true
+      : false;
 
-console.log(`Storage configuration - ${useAzure ? 'Azure' : 'Local'} Storage${useGCS ? ' and Google Cloud Storage' : ''}`);
+console.log(
+    `Storage configuration - ${useAzure ? 'Azure' : 'Local'} Storage${useGCS ? ' and Google Cloud Storage' : ''}`,
+);
 
 let isCleanupRunning = false;
 async function cleanupInactive(context) {
     try {
-        if (isCleanupRunning) { return; } //no need to cleanup every call
+        if (isCleanupRunning) {
+            return;
+        } //no need to cleanup every call
         isCleanupRunning = true;
         const cleaned = await cleanupRedisFileStoreMap();
 
@@ -26,24 +58,24 @@ async function cleanupInactive(context) {
         const cleanedLocal = [];
         const cleanedGCS = [];
 
-        for(const key in cleaned){
+        for (const key in cleaned) {
             const item = cleaned[key];
-            const {url,gcs} = item;
-            if(url){
-                if(url.includes('.blob.core.windows.net/')){ 
+            const { url, gcs } = item;
+            if (url) {
+                if (url.includes('.blob.core.windows.net/')) {
                     cleanedAzure.push(url);
-                }else if(url.startsWith('gs://')){
+                } else if (url.startsWith('gs://')) {
                     cleanedGCS.push(url);
-                }else{
+                } else {
                     cleanedLocal.push(url);
                 }
             }
 
-            if(item && item.gcs){
+            if (item && item.gcs) {
                 cleanedGCS.push(gcs);
             }
         }
-        
+
         try {
             if (cleanedAzure && cleanedAzure.length > 0) {
                 await cleanup(context, cleanedAzure);
@@ -56,36 +88,56 @@ async function cleanupInactive(context) {
             if (cleanedLocal && cleanedLocal.length > 0) {
                 await cleanupLocal(cleanedLocal);
             }
-        }catch(err){
+        } catch (err) {
             console.log('Error occurred during local cleanup:', err);
         }
 
-        try{
-            if(cleanedGCS && cleanedGCS.length > 0){
+        try {
+            if (cleanedGCS && cleanedGCS.length > 0) {
                 await cleanupGCS(cleanedGCS);
             }
-        }catch(err){
+        } catch (err) {
             console.log('Error occurred during GCS cleanup:', err);
         }
-         
     } catch (error) {
         console.log('Error occurred during cleanup:', error);
-    } finally{
+    } finally {
         isCleanupRunning = false;
     }
 }
 
 async function CortexFileHandler(context, req) {
-    const { uri, requestId, save, hash, checkHash, clearHash, fetch, load, restore } = req.body?.params || req.query;
-    const operation = save ? 'save' : 
-                     checkHash ? 'checkHash' : 
-                     clearHash ? 'clearHash' : 
-                     fetch || load || restore ? 'remoteFile' : 
-                     req.method.toLowerCase() === 'delete' || req.query.operation === 'delete' ? 'delete' :
-                     uri ? (DOC_EXTENSIONS.some(ext => uri.toLowerCase().endsWith(ext)) ? 'document_processing' : 'media_chunking') : 
-                     'upload';
-    
-    context.log(`Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ''}${uri ? `uri: ${uri}, ` : ''}${hash ? `hash: ${hash}, ` : ''}operation: ${operation}`);
+    const {
+        uri,
+        requestId,
+        save,
+        hash,
+        checkHash,
+        clearHash,
+        fetch,
+        load,
+        restore,
+    } = req.body?.params || req.query;
+    const operation = save
+        ? 'save'
+        : checkHash
+            ? 'checkHash'
+            : clearHash
+                ? 'clearHash'
+                : fetch || load || restore
+                    ? 'remoteFile'
+                    : req.method.toLowerCase() === 'delete' ||
+              req.query.operation === 'delete'
+                        ? 'delete'
+                        : uri
+                            ? DOC_EXTENSIONS.some((ext) => uri.toLowerCase().endsWith(ext))
+                                ? 'document_processing'
+                                : 'media_chunking'
+                            : 'upload';
+
+    context.log(
+        `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ''}${uri ? `uri: ${uri}, ` : ''}${hash ? `hash: ${hash}, ` : ''}operation: ${operation}`,
+    );
 
     cleanupInactive(context); //trigger & no need to wait for it
 
@@ -95,46 +147,48 @@ async function CortexFileHandler(context, req) {
         if (!deleteRequestId) {
             context.res = {
                 status: 400,
-                body: "Please pass a requestId on the query string"
+                body: 'Please pass a requestId on the query string',
             };
             return;
         }
-        
+
         // Delete from Azure/Local storage
-        const azureResult = useAzure ? await deleteBlob(deleteRequestId) : await deleteFolder(deleteRequestId);
+        const azureResult = useAzure
+            ? await deleteBlob(deleteRequestId)
+            : await deleteFolder(deleteRequestId);
         const gcsResult = [];
         if (gcs) {
-            gcsResult.push(...await deleteGCS(deleteRequestId));
+            gcsResult.push(...(await deleteGCS(deleteRequestId)));
         }
-        
+
         context.res = {
             status: 200,
-            body: { body: [...azureResult, ...gcsResult] }
+            body: { body: [...azureResult, ...gcsResult] },
         };
         return;
     }
 
     const remoteUrl = fetch || restore || load;
-    if (req.method.toLowerCase() === `get` && remoteUrl) {
+    if (req.method.toLowerCase() === 'get' && remoteUrl) {
         context.log(`Remote file: ${remoteUrl}`);
-        let filename;  // Declare filename outside try block
+        let filename; // Declare filename outside try block
         try {
             // Validate URL format and accessibility
             const urlCheck = await urlExists(remoteUrl);
             if (!urlCheck.valid) {
                 context.res = {
                     status: 400,
-                    body: 'Invalid or inaccessible URL'
+                    body: 'Invalid or inaccessible URL',
                 };
                 return;
             }
 
             // Check if file already exists (using hash as the key)
-            let exists = await getFileStoreMap(remoteUrl);
-            if(exists){
+            const exists = await getFileStoreMap(remoteUrl);
+            if (exists) {
                 context.res = {
                     status: 200,
-                    body: exists
+                    body: exists,
                 };
                 //update redis timestamp with current time
                 await setFileStoreMap(remoteUrl, exists);
@@ -143,28 +197,38 @@ async function CortexFileHandler(context, req) {
 
             // Download the file first
             const urlObj = new URL(remoteUrl);
-            let originalFileName = path.basename(urlObj.pathname);
+            let originalFileName = decodeURIComponent(path.basename(urlObj.pathname));
             if (!originalFileName || originalFileName === '') {
                 originalFileName = urlObj.hostname;
             }
-            
+
             // Ensure the filename has the correct extension based on content type
-            originalFileName = ensureFileExtension(originalFileName, urlCheck.contentType);
+            originalFileName = ensureFileExtension(
+                originalFileName,
+                urlCheck.contentType,
+            );
 
             const maxLength = 200; // Set the maximum length for the filename
             let truncatedFileName = originalFileName;
             if (originalFileName.length > maxLength) {
                 const extension = path.extname(originalFileName);
                 const basename = path.basename(originalFileName, extension);
-                truncatedFileName = basename.substring(0, maxLength - extension.length) + extension;
+                truncatedFileName =
+          basename.substring(0, maxLength - extension.length) + extension;
             }
 
             // Use the original-truncated file name when saving the downloaded file
             filename = path.join(os.tmpdir(), truncatedFileName);
             await downloadFile(remoteUrl, filename);
-            
+
             // Now upload the downloaded file
-            const res = await uploadBlob(context, null, !useAzure, filename, remoteUrl);
+            const res = await uploadBlob(
+                context,
+                null,
+                !useAzure,
+                filename,
+                remoteUrl,
+            );
 
             //Update Redis (using hash as the key)
             await setFileStoreMap(remoteUrl, res);
@@ -175,10 +239,10 @@ async function CortexFileHandler(context, req) {
                 body: res,
             };
         } catch (error) {
-            context.log("Error processing remote file request:", error);
+            context.log('Error processing remote file request:', error);
             context.res = {
                 status: 500,
-                body: `Error processing file: ${error.message}`
+                body: `Error processing file: ${error.message}`,
             };
         } finally {
             // Cleanup temp file if it exists
@@ -187,88 +251,95 @@ async function CortexFileHandler(context, req) {
                     fs.unlinkSync(filename);
                 }
             } catch (err) {
-                context.log("Error cleaning up temp file:", err);
+                context.log('Error cleaning up temp file:', err);
             }
         }
         return;
     }
 
-    if(hash && clearHash){
+    if (hash && clearHash) {
         try {
             const hashValue = await getFileStoreMap(hash);
             if (hashValue) {
                 await removeFromFileStoreMap(hash);
                 context.res = {
                     status: 200,
-                    body: `Hash ${hash} removed`
+                    body: `Hash ${hash} removed`,
                 };
             } else {
                 context.res = {
                     status: 404,
-                    body: `Hash ${hash} not found`
+                    body: `Hash ${hash} not found`,
                 };
             }
         } catch (error) {
             context.res = {
                 status: 500,
-                body: `Error occurred during hash cleanup: ${error}`
+                body: `Error occurred during hash cleanup: ${error}`,
             };
             console.log('Error occurred during hash cleanup:', error);
         }
         return;
     }
 
-    if(hash && checkHash){ //check if hash exists
+    if (hash && checkHash) {
+    //check if hash exists
         let hashResult = await getFileStoreMap(hash);
 
-        if(hashResult){
+        if (hashResult) {
             context.log(`File exists in map: ${hash}`);
-            
+
+            // Log the URL retrieved from Redis before checking existence
+            context.log(`Checking existence of URL from Redis: ${hashResult?.url}`);
+
+            // Detect double-encoding in the blob name
+            if (hashResult.url) {
+                const urlPath = hashResult.url.split('?')[0];
+                const blobName = urlPath.substring(urlPath.lastIndexOf('/') + 1);
+                if (/%25[0-9A-Fa-f]{2}/.test(blobName)) {
+                    context.log(
+                        `Double-encoded blob detected for hash ${hash}. Invalidating cache entry.`,
+                    );
+                    await removeFromFileStoreMap(hash);
+                    context.res = {
+                        status: 404,
+                        body: `Hash ${hash} is double-encoded and has been invalidated. Please re-upload.`,
+                    };
+                    return;
+                }
+            }
             // Check primary storage (Azure/Local) first
             const primaryExists = await urlExists(hashResult?.url);
             const gcsExists = gcs ? await gcsUrlExists(hashResult?.gcs) : false;
 
             // If neither storage has the file, remove from map and return not found
             if (!primaryExists.valid && !gcsExists) {
-                context.log(`File not found in any storage. Removing from map: ${hash}`);
+                context.log(
+                    `File not found in any storage. Removing from map: ${hash}`,
+                );
                 await removeFromFileStoreMap(hash);
                 context.res = {
                     status: 404,
-                    body: `Hash ${hash} not found in storage`
+                    body: `Hash ${hash} not found in storage`,
                 };
                 return;
             }
 
-            // If primary is missing but GCS exists, restore from GCS
-            if (!primaryExists.valid && gcsExists) {
-                context.log(`Primary storage file missing, restoring from GCS: ${hash}`);
-                try {
-                    const res = await CortexFileHandler(context, {
-                        method: 'GET',
-                        body: { params: { fetch: hashResult.gcs } }
-                    });
-                    if (res?.body?.url) {
-                        hashResult.url = res.body.url;
-                    }
-                } catch (error) {
-                    console.error('Error restoring from GCS:', error);
-                }
-            }
             // If GCS is missing but primary exists, restore to GCS
             else if (primaryExists.valid && gcs && !gcsExists) {
                 context.log(`GCS file missing, restoring from primary: ${hash}`);
-                const { gcs: _, ...fileInfo } = hashResult; // eslint-disable-line no-unused-vars
+                const { gcs: _, ...fileInfo } = hashResult;
                 hashResult = await ensureGCSUpload(context, fileInfo);
             }
 
             // Final check to ensure we have at least one valid storage location
             const finalPrimaryCheck = await urlExists(hashResult?.url);
-            if (!finalPrimaryCheck.valid && !await gcsUrlExists(hashResult?.gcs)) {
+            if (!finalPrimaryCheck.valid && !(await gcsUrlExists(hashResult?.gcs))) {
                 context.log(`Failed to restore file. Removing from map: ${hash}`);
                 await removeFromFileStoreMap(hash);
                 context.res = {
                     status: 404,
-                    body: `Hash ${hash} not found and restoration failed`
+                    body: `Hash ${hash} not found and restoration failed`,
                 };
                 return;
             }
@@ -278,30 +349,30 @@ async function CortexFileHandler(context, req) {
 
             context.res = {
                 status: 200,
-                body: hashResult
+                body: hashResult,
             };
             return;
         }
 
         context.res = {
             status: 404,
-            body: `Hash ${hash} not found`
+            body: `Hash ${hash} not found`,
         };
         return;
     }
 
-    if (req.method.toLowerCase() === `post`) {
+    if (req.method.toLowerCase() === 'post') {
         await uploadBlob(context, req, !useAzure, null, hash);
-        if(hash && context?.res?.body){ 
+        if (hash && context?.res?.body) {
             await setFileStoreMap(hash, context.res.body);
         }
-        return
+        return;
     }
 
     if (!uri || !requestId) {
         context.res = {
             status: 400,
-            body: "Please pass a uri and requestId on the query string or in the request body"
+            body: 'Please pass a uri and requestId on the query string or in the request body',
         };
         return;
     }
@@ -310,72 +381,150 @@ async function CortexFileHandler(context, req) {
     let completedCount = 0;
     let numberOfChunks;
 
-    let file = ensureEncoded(uri); // encode url to handle special characters
+    const file = ensureEncoded(uri); // encode url to handle special characters
 
     const result = [];
 
     const sendProgress = async (data = null) => {
         completedCount++;
         const progress = completedCount / totalCount;
-        await publishRequestProgress({ requestId, progress, completedCount, totalCount, numberOfChunks, data });
-    }
+        await publishRequestProgress({
+            requestId,
+            progress,
+            completedCount,
+            totalCount,
+            numberOfChunks,
+            data,
+        });
+    };
 
     try {
-        // Parse URL and get pathname without query parameters for extension check
+    // Parse URL and get pathname without query parameters for extension check
         const urlObj = new URL(uri);
         const pathWithoutQuery = urlObj.pathname;
-        
-        if (DOC_EXTENSIONS.some(ext => pathWithoutQuery.toLowerCase().endsWith(ext))) {
+
+        if (
+            DOC_EXTENSIONS.some((ext) => pathWithoutQuery.toLowerCase().endsWith(ext))
+        ) {
             const extension = path.extname(pathWithoutQuery).toLowerCase();
             const tempDir = path.join(os.tmpdir(), `${uuidv4()}`);
             fs.mkdirSync(tempDir);
             const downloadedFile = path.join(tempDir, `${uuidv4()}${extension}`);
             await downloadFile(uri, downloadedFile);
-            const text = await documentToText(downloadedFile);
-            let tmpPath;
 
             try {
                 if (save) {
-                    const fileName = `${uuidv4()}.txt`; // generate unique file name
-                    const filePath = path.join(tempDir, fileName);
-                    tmpPath = filePath;
-                    fs.writeFileSync(filePath, text); // write text to file
-            
-                    // save file to the cloud or local file system
-                    const saveResult = useAzure ? await saveFileToBlob(filePath, requestId) : await moveFileToPublicFolder(filePath, requestId);
-                    result.push(saveResult);
+                    let filePath;
+                    let fileName;
+                    const saveResults = [];
 
+                    // First save the original file
+                    const originalFileName = `${uuidv4()}_${encodeURIComponent(path.basename(downloadedFile))}`;
+                    const originalFilePath = path.join(tempDir, originalFileName);
+                    await fs.copyFile(downloadedFile, originalFilePath);
+                    const originalSaveResult = useAzure
+                        ? await saveFileToBlob(originalFilePath, requestId)
+                        : await moveFileToPublicFolder(originalFilePath, requestId);
+                    saveResults.push(originalSaveResult);
+
+                    // If it's a convertible document type, also save the converted version
+                    if (CONVERTED_EXTENSIONS.includes(extension)) {
+                        // Get format from query params or default to txt
+                        const format = req.query.format || 'txt';
+
+                        try {
+                            // For XLS/XLSX files, convert to CSV
+                            if (extension === '.xlsx' || extension === '.xls') {
+                                const conversion = await convertDocument(downloadedFile);
+                                if (conversion.converted) {
+                                    fileName = conversion.convertedName;
+                                    filePath = conversion.convertedPath;
+                                } else {
+                                    context.log('Excel file conversion not needed or failed');
+                                }
+                            } else {
+                                // Convert document to text in the requested format
+                                context.log(`Converting document to ${format} format...`);
+                                const conversion = await convertDocument(
+                                    downloadedFile,
+                                    originalSaveResult.url,
+                                );
+                                if (conversion.converted) {
+                                    fileName = conversion.convertedName;
+                                    filePath = conversion.convertedPath;
+                                    context.log('Document converted successfully');
+                                } else {
+                                    context.log('Document conversion not needed or failed');
+                                }
+                            }
+
+                            // save converted file to the cloud or local file system
+                            if (filePath) {
+                                context.log(
+                                    `Saving converted file to ${useAzure ? 'Azure' : 'local'} storage...`,
+                                );
+                                const convertedSaveResult = useAzure
+                                    ? await saveFileToBlob(filePath, requestId)
+                                    : await moveFileToPublicFolder(filePath, requestId);
+                                context.log('Converted file saved successfully');
+                                saveResults.push(convertedSaveResult);
+                            }
+                        } catch (conversionError) {
+                            context.log('Error during document conversion:', conversionError);
+                            // Add a warning to the result that conversion failed
+                            result.push({
+                                warning: `Failed to convert document: ${conversionError.message}`,
+                                originalFile: originalSaveResult,
+                            });
+                        }
+                    }
+
+                    result.push(...saveResults);
                 } else {
+                    const format = req.query.format || 'txt';
+                    const text = await documentToText(downloadedFile, format);
                     result.push(...easyChunker(text));
                 }
-            } catch(err) {
-                console.log(`Error saving file ${uri} with request id ${requestId}:`, err);
+            } catch (err) {
+                console.log(
+                    `Error saving file ${uri} with request id ${requestId}:`,
+                    err,
+                );
+                throw err; // Re-throw to handle in outer catch
             } finally {
                 try {
                     // delete temporary files
-                    tmpPath && fs.unlinkSync(tmpPath);
-                    downloadedFile && fs.unlinkSync(downloadedFile);
-                    console.log(`Cleaned temp files ${tmpPath}, ${downloadedFile}`);
-                } catch(err) {
-                    console.log(`Error cleaning temp files ${tmpPath}, ${downloadedFile}:`, err);
+                    if (downloadedFile && fs.existsSync(downloadedFile)) {
+                        fs.unlinkSync(downloadedFile);
+                        console.log(`Cleaned temp file ${downloadedFile}`);
+                    }
+                } catch (err) {
+                    console.log(`Error cleaning temp file ${downloadedFile}:`, err);
                 }
-                
+
                 try {
                     //delete uploaded prev nontext file
                     //check cleanup for uploaded files url
-                    const regex = new RegExp(`${AZURE_STORAGE_CONTAINER_NAME}/([a-z0-9-]+)`);
+                    const regex = new RegExp(
+                        `${AZURE_STORAGE_CONTAINER_NAME}/([a-z0-9-]+)`,
+                    );
                     const match = uri.match(regex);
                     if (match && match[1]) {
                         const extractedValue = match[1];
-                        useAzure ? await deleteBlob(extractedValue) : await deleteFolder(extractedValue);
-                        console.log(`Cleaned temp file ${uri} with request id ${extractedValue}`);
+                        useAzure
+                            ? await deleteBlob(extractedValue)
+                            : await deleteFolder(extractedValue);
+                        console.log(
+                            `Cleaned temp file ${uri} with request id ${extractedValue}`,
+                        );
                     }
-                } catch(err) {
+                } catch (err) {
                     console.log(`Error cleaning temp file ${uri}:`, err);
                 }
             }
         } else {
-            const { chunkPromises, chunkOffsets, uniqueOutputPath } = await splitMediaFile(file);
+            const { chunkPromises, chunkOffsets, uniqueOutputPath } =
+        await splitMediaFile(file);
 
             numberOfChunks = chunkPromises.length; // for progress reporting
             totalCount += chunkPromises.length * 4; // 4 steps for each chunk (download and upload)
@@ -393,19 +542,21 @@ async function CortexFileHandler(context, req) {
                 const chunkPath = chunks[index];
                 let blobName;
                 let gcsUrl;
-                
+
                 if (useAzure) {
                     blobName = await saveFileToBlob(chunkPath, requestId);
                 } else {
                     blobName = await moveFileToPublicFolder(chunkPath, requestId);
                 }
-                
+
                 // If GCS is configured, save to GCS
                 gcsUrl = await uploadChunkToGCS(chunkPath, requestId);
-                
+
                 const chunkOffset = chunkOffsets[index];
                 result.push({ uri: blobName, offset: chunkOffset, gcs: gcsUrl });
-                console.log(`Saved chunk as: ${blobName}${gcsUrl ? ` and ${gcsUrl}` : ''}`);
+                console.log(
+                    `Saved chunk as: ${blobName}${gcsUrl ? ` and ${gcsUrl}` : ''}`,
+                );
                 await sendProgress();
             }
 
@@ -420,20 +571,25 @@ async function CortexFileHandler(context, req) {
             }
         }
     } catch (error) {
-        console.error("An error occurred:", error);
+        console.error('An error occurred:', error);
         context.res = {
             status: 500,
-            body: error.message || error
+            body: error.message || error,
         };
         return;
     }
 
-    console.log('result:', result.map(item =>
-        typeof item === 'object' ? JSON.stringify(item, null, 2) : item
-    ).join('\n'));
-    
+    console.log(
+        'result:',
+        result
+            .map((item) =>
+                typeof item === 'object' ? JSON.stringify(item, null, 2) : item,
+            )
+            .join('\n'),
+    );
+
     context.res = {
-        body: result
+        body: result,
     };
 }
 

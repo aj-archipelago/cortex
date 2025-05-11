@@ -20,7 +20,7 @@ echo "Starting test environment..."
 # Start Azurite if not running
 if ! nc -z localhost 10000; then
     echo "Starting Azurite..."
-    azurite --silent --location .azurite --debug .azurite/debug.log &
+    azurite --silent --skipApiVersionCheck --location .azurite --debug .azurite/debug.log &
     AZURITE_PID=$!
     # Wait for Azurite to be ready
     until nc -z localhost 10000; do

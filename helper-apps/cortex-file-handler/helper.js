@@ -1,8 +1,9 @@
 import fs from 'fs';
-import { ACCEPTED_MIME_TYPES, isAcceptedMimeType } from './constants.js';
-import path from 'path';
 import http from 'http';
 import https from 'https';
+import path from 'path';
+
+import { ACCEPTED_MIME_TYPES, isAcceptedMimeType } from './constants.js';
 
 export async function deleteTempPath(path) {
     try {
@@ -20,7 +21,9 @@ export async function deleteTempPath(path) {
             console.log(`Temporary file ${path} deleted successfully.`);
         } else if (stats.isDirectory()) {
             fs.rmSync(path, { recursive: true });
-            console.log(`Temporary folder ${path} and its contents deleted successfully.`);
+            console.log(
+                `Temporary folder ${path} and its contents deleted successfully.`,
+            );
         }
     } catch (err) {
         console.error('Error occurred while deleting the temporary path:', err);
@@ -38,7 +41,7 @@ export function getExtensionForMimeType(mimeType) {
 // Ensure a filename has the correct extension based on its mime type
 export function ensureFileExtension(filename, mimeType) {
     if (!mimeType) return filename;
-    
+
     const extension = getExtensionForMimeType(mimeType);
     if (!extension) return filename;
 
@@ -49,12 +52,12 @@ export function ensureFileExtension(filename, mimeType) {
 
     // Get the current extension if any
     const currentExt = path.extname(filename);
-    
+
     // If there's no current extension, just append the new one
     if (!currentExt) {
         return `${filename}${extension}`;
     }
-    
+
     // Replace the current extension with the new one
     return filename.slice(0, -currentExt.length) + extension;
 }
@@ -69,39 +72,45 @@ export function ensureEncoded(url) {
 }
 
 export async function urlExists(url) {
-    if(!url) return false;
-    
+    if (!url) return false;
+
     try {
-        // Basic URL validation
+    // Basic URL validation
         const urlObj = new URL(url);
         if (!['http:', 'https:'].includes(urlObj.protocol)) {
             throw new Error('Invalid protocol - only HTTP and HTTPS are supported');
         }
 
         const httpModule = urlObj.protocol === 'https:' ? https : http;
-        
+
         return new Promise((resolve) => {
-            const request = httpModule.request(url, { method: 'HEAD' }, function(response) {
-                if (response.statusCode >= 200 && response.statusCode < 400) {
-                    const contentType = response.headers['content-type'];
-                    const cleanContentType = contentType ? contentType.split(';')[0].trim() : '';
-                    // Check if the content type is one we accept
-                    if (cleanContentType && isAcceptedMimeType(cleanContentType)) {
-                        resolve({ valid: true, contentType: cleanContentType });
+            const request = httpModule.request(
+                url,
+                { method: 'HEAD' },
+                function (response) {
+                    if (response.statusCode >= 200 && response.statusCode < 400) {
+                        const contentType = response.headers['content-type'];
+                        const cleanContentType = contentType
+                            ? contentType.split(';')[0].trim()
+                            : '';
+                        // Check if the content type is one we accept
+                        if (cleanContentType && isAcceptedMimeType(cleanContentType)) {
+                            resolve({ valid: true, contentType: cleanContentType });
+                        } else {
+                            console.log(`Unsupported content type: ${contentType}`);
+                            resolve({ valid: false });
+                        }
                     } else {
-                        console.log(`Unsupported content type: ${contentType}`);
                         resolve({ valid: false });
                     }
-                } else {
-                    resolve({ valid: false });
-                }
-            });
-            
-            request.on('error', function(err) {
+                },
+            );
+
+            request.on('error', function (err) {
                 console.error('URL validation error:', err.message);
                 resolve({ valid: false });
             });
-            
+
             request.end();
         });
     } catch (error) {

@@ -1,5 +1,5 @@
 import redis from 'ioredis';
-const connectionString = process.env["REDIS_CONNECTION_STRING"];
+const connectionString = process.env['REDIS_CONNECTION_STRING'];
 const client = redis.createClient(connectionString);
 // client.connect();
 
@@ -30,7 +30,7 @@ const publishRequestProgress = async (data) => {
 // Function to get all key value pairs in "FileStoreMap" hash map
 const getAllFileStoreMap = async () => {
     try {
-        const allKeyValuePairs = await client.hgetall("FileStoreMap");
+        const allKeyValuePairs = await client.hgetall('FileStoreMap');
         // Parse each JSON value in the returned object
         for (const key in allKeyValuePairs) {
             try {
@@ -43,7 +43,9 @@ const getAllFileStoreMap = async () => {
         }
         return allKeyValuePairs;
     } catch (error) {
-        console.error(`Error getting all key-value pairs from FileStoreMap: ${error}`);
+        console.error(
+            `Error getting all key-value pairs from FileStoreMap: ${error}`,
+        );
         return {}; // Return null or any default value indicating an error occurred
     }
 };
@@ -52,7 +54,7 @@ const getAllFileStoreMap = async () => {
 const setFileStoreMap = async (key, value) => {
     try {
         value.timestamp = new Date().toISOString();
-        await client.hset("FileStoreMap", key, JSON.stringify(value));
+        await client.hset('FileStoreMap', key, JSON.stringify(value));
     } catch (error) {
         console.error(`Error setting key in FileStoreMap: ${error}`);
     }
@@ -60,7 +62,7 @@ const setFileStoreMap = async (key, value) => {
 
 const getFileStoreMap = async (key) => {
     try {
-        const value = await client.hget("FileStoreMap", key);
+        const value = await client.hget('FileStoreMap', key);
         if (value) {
             try {
                 // parse the value back to an object before returning
@@ -80,9 +82,9 @@ const getFileStoreMap = async (key) => {
 // Function to remove key from "FileStoreMap" hash map
 const removeFromFileStoreMap = async (key) => {
     try {
-        // hdel returns the number of keys that were removed.
-        // If the key does not exist, 0 is returned.
-        const result = await client.hdel("FileStoreMap", key);
+    // hdel returns the number of keys that were removed.
+    // If the key does not exist, 0 is returned.
+        const result = await client.hdel('FileStoreMap', key);
         if (result === 0) {
             console.log(`The key ${key} does not exist`);
         } else {
@@ -93,31 +95,35 @@ const removeFromFileStoreMap = async (key) => {
     }
 };
 
-const cleanupRedisFileStoreMap = async (nDays=1) => {
-    let cleaned = [];
+const cleanupRedisFileStoreMap = async (nDays = 1) => {
+    const cleaned = [];
     try {
         const map = await getAllFileStoreMap();
         const nDaysAgo = new Date(Date.now() - nDays * 24 * 60 * 60 * 1000);
 
-        for(const key in map){
+        for (const key in map) {
             const value = map[key];
             const timestamp = value?.timestamp ? new Date(value.timestamp) : null;
-            if(!timestamp || timestamp.getTime() < nDaysAgo.getTime()){
+            if (!timestamp || timestamp.getTime() < nDaysAgo.getTime()) {
                 // Remove the key from the "FileStoreMap" hash map
                 await removeFromFileStoreMap(key);
                 console.log(`Removed key ${key} from FileStoreMap`);
-                cleaned.push(Object.assign({hash:key}, value));
+                cleaned.push(Object.assign({ hash: key }, value));
             }
         }
     } catch (error) {
         console.error(`Error cleaning FileStoreMap: ${error}`);
     } finally {
-        // Cleanup code if needed
+    // Cleanup code if needed
     }
     return cleaned;
 };
 
-
 export {
-    publishRequestProgress, connectClient, setFileStoreMap, getFileStoreMap, removeFromFileStoreMap, cleanupRedisFileStoreMap
+    publishRequestProgress,
+    connectClient,
+    setFileStoreMap,
+    getFileStoreMap,
+    removeFromFileStoreMap,
+    cleanupRedisFileStoreMap,
 };
