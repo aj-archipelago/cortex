@@ -162,7 +162,7 @@ export default {
 
         // Map tool names to index names
         const toolToIndex = {
-            'searchpersonal': 'indexcortex',
+            'searchpersonalindex': 'indexcortex',
             'searchaja': 'indexucmsaja',
             'searchaje': 'indexucmsaje',
             'searchwires': 'indexwires'
