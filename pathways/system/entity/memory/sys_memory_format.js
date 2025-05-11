@@ -21,7 +21,7 @@ export default {
         chatHistory: [{role: '', content: []}],
         aiName: "Jarvis",
     },
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41',
     useInputChunking: true,
     inputChunkSize: 1000,
     useParallelChunkProcessing: true,

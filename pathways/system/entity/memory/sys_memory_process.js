@@ -67,7 +67,7 @@ Each modification object should look like:
         section: "",
         maxIterations: 5
     },
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41',
     useInputChunking: false,
     enableDuplicateRequests: false,
     json: true,

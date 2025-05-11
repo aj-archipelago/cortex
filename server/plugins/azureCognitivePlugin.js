@@ -168,6 +168,11 @@ class AzureCognitivePlugin extends ModelPlugin {
             }
         }
 
+        // Add date-based ordering if there's a date filter
+        if (data.filter && data.filter.includes('date')) {
+            data.orderby = 'date desc';
+        }
+
         return { data };
     }
 

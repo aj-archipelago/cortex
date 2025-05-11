@@ -12,29 +12,7 @@ export default {
         icon: "🧩",
         function: {
             name: "SearchMemory",
-            description: "Use this tool to search your memory and remember information or details that may not be present in your short term or contextual memory. You should always use this tool before you answer questions about remembered information. It's critical that you never fabricate memories.",
-            parameters: {
-                type: "object",
-                properties: {
-                    detailedInstructions: {
-                        type: "string",
-                        description: "Detailed description of what you want to see if you remember"
-                    },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                    }
-                },
-                required: ["detailedInstructions", "userMessage"]
-            }
-        }
-    },
-    {
-        type: "function",
-        icon: "🧩",
-        function: {
-            name: "Remember",
-            description: "When the user asks you if you remember something, you must use this tool before you answer. It's critical that you never fabricate memories.",
+            description: "Use this tool to search your memory and retrieve information or details stored in your memory. Use any time the user asks you about something personal or asks you to remember something.",
             parameters: {
                 type: "object",
                 properties: {

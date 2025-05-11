@@ -24,7 +24,7 @@ export default {
         icon: "🤖",
         function: {
             name: "CallModel",
-            description: "Use when you need to call an AI model to get a response. This is typically used to perform some sort of LLM analysis (translate, summarize, ask questions about content, etc.), but can literally do anything you need. You can use this to call any model you have access to and perform any task.",
+            description: "Use when you need to call an AI model to get a response. This is typically used to perform some sort of custom LLM analysis (translate, summarize, ask questions about content, etc.), but can literally do anything you need. You can use this to call any model you have access to and perform any task.",
             parameters: {
                 type: "object",
                 properties: {

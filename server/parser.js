@@ -16,7 +16,7 @@ const parseNumberedList = (str) => {
 async function parseNumberedObjectList(text, format) {
     const parsedList = await callPathway('sys_parse_numbered_object_list', { text, format });
     try {
-        return JSON.parse(parsedList) || [];
+        return JSON.parse(parsedList).list || [];
     } catch (error) {
         logger.warn(`Failed to parse numbered object list: ${error.message}`);
         return [];

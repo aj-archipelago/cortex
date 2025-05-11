@@ -48,7 +48,7 @@ export default {
         icon: "🤖",
         function: {
             name: "CodeExecution",
-            description: "Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks - examples include data analysis, file manipulation, or other tasks that require code execution. This will start a background task and return - you will not receive the response immediately.",
+            description: "This tool allows you to engage an agent to write and execute code to perform a task on your behalf. Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks - examples include data analysis, file manipulation, or other tasks that require code execution. With this tool you can also access internal databases and query them directly. This will start a background task and return - you will not receive the response immediately.",
             parameters: {
                 type: "object",
                 properties: {

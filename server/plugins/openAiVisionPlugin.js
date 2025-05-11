@@ -152,9 +152,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
 
         requestParameters.max_tokens = maxTokens ? Math.min(maxTokens, modelMaxReturnTokens) : modelMaxReturnTokens;
 
-        if (this.promptParameters.json) {
-            //requestParameters.response_format = { type: "json_object", }
-        }
+        requestParameters.response_format = this.promptParameters.responseFormat;
 
         return requestParameters;
     }

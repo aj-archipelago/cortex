@@ -26,7 +26,7 @@ export default {
         type: "function",
         icon: "🗺️",
         function: {
-            name: "Plan",
+            name: "PlanMultiStepTask",
             description: "Use specifically to create a thorough, well thought out, step by step plan to accomplish a task. You should always use this tool when you're planning to do something complex or something that might require multiple steps.",
             parameters: {
                 type: "object",
@@ -48,7 +48,7 @@ export default {
         type: "function",
         icon: "🧠",
         function: {
-            name: "Reason",
+            name: "ApplyAdvancedReasoning",
             description: "Employ for advanced reasoning, scientific analysis, evaluating evidence, strategic planning, problem-solving, logic puzzles, mathematical calculations, or any questions that require careful thought or complex choices.",
             parameters: {
                 type: "object",

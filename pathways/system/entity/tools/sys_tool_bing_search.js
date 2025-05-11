@@ -12,14 +12,14 @@ export default {
         type: "function",
         icon: "🌐",
         function: {
-            name: "InternetSearch",
+            name: "SearchInternet",
             description: "This tool allows you to use the Bing search api to search the internet and more. Use this for current events, news, fact-checking, and information requiring citation.",
             parameters: {
                 type: "object",
                 properties: {
                     q: {
                         type: "string",
-                        description: "The complete query to pass to Azure Bing search. You can use advanced search operators in your query: + to require terms, \" \" for exact phrases, () for grouping, AND/& for requiring all terms, NOT/- to exclude terms, OR/| for either term. For example: '+(exact phrase) AND term1 -term2'"
+                        description: "The complete query to pass to Azure Bing search using Bing's search syntax."
                     },
                     freshness: {
                         type: "string",

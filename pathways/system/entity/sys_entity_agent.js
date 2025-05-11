@@ -229,6 +229,27 @@ export default {
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
         const { useMemory: entityUseMemory = true, name: entityName, instructions: entityInstructions } = entityConfig || {};
+
+        // Initialize chat history if needed
+        if (!args.chatHistory || args.chatHistory.length === 0) {
+            args.chatHistory = [];
+        }
+
+        // Kick off the memory lookup required pathway in parallel - this takes like 500ms so we want to start it early
+        let memoryLookupRequiredPromise = null;
+        if (entityUseMemory) {
+            const chatHistoryLastTurn = args.chatHistory.slice(-2);
+            const chatHistorySizeOk = (JSON.stringify(chatHistoryLastTurn).length < 5000);
+            if (chatHistorySizeOk) {
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Memory lookup timeout')), 800)
+                );
+                memoryLookupRequiredPromise = Promise.race([
+                    callPathway('sys_memory_lookup_required', { ...args, chatHistory: chatHistoryLastTurn, stream: false }),
+                    timeoutPromise
+                ]);
+            }
+        }
         
         args = {
             ...args,
@@ -249,12 +270,12 @@ export default {
         const promptPrefix = researchMode ? 'Formatting re-enabled\n' : '';
 
         const memoryTemplates = entityUseMemory ? 
-            `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_CONTEXT}}\n\n` : '';
+            `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n{{renderTemplate AI_MEMORY_CONTEXT}}\n` : '';
 
         const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n`;
 
         const promptMessages = [
-            {"role": "system", "content": `${promptPrefix}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n${memoryTemplates}{{renderTemplate AI_DATETIME}}`},
+            {"role": "system", "content": `${promptPrefix}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_SEARCH_RULES}}\n\n{{renderTemplate AI_SEARCH_SYNTAX}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n${memoryTemplates}{{renderTemplate AI_DATETIME}}`},
             "{{chatHistory}}",
         ];
 
@@ -265,11 +286,6 @@ export default {
         // set the style model if applicable
         const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
         const styleModel = aiStyle === "Anthropic" ? AI_STYLE_ANTHROPIC : AI_STYLE_OPENAI;
-
-        // Initialize chat history if needed
-        if (!args.chatHistory || args.chatHistory.length === 0) {
-            args.chatHistory = [];
-        }
 
         // Limit the chat history to 20 messages to speed up processing
         if (args.messages && args.messages.length > 0) {
@@ -291,6 +307,16 @@ export default {
             .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
         }
 
+        let memoryLookupRequired = false;
+
+        try {
+            memoryLookupRequired = JSON.parse(await memoryLookupRequiredPromise)?.memoryRequired;
+        } catch (error) {
+            logger.warn(`Failed to test memory lookup requirement: ${error.message}`);
+            // If we hit the timeout or any other error, we'll proceed without memory lookup
+            memoryLookupRequired = false;
+        }
+
         try {
             let currentMessages = JSON.parse(JSON.stringify(args.chatHistory));
 
@@ -298,7 +324,7 @@ export default {
                 ...args,
                 chatHistory: currentMessages,
                 tools: entityToolsOpenAiFormat,
-                tool_choice: "auto"
+                tool_choice: memoryLookupRequired ? "required" : "auto"
             });
 
             let toolCallback = pathwayResolver.pathway.toolCallback;
