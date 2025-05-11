@@ -1,6 +1,7 @@
 import { callPathway } from '../../../../../lib/pathwayTools.js';
 import { encode } from '../../../../../lib/encodeCache.js';
 import { getUniqueId } from '../../../../../lib/util.js';
+import logger from '../../../../../lib/logger.js';
 
 const normalizeMemoryFormat = async (args, content) => {
     if (!content) return '';
@@ -33,7 +34,7 @@ const normalizeMemoryFormat = async (args, content) => {
                 formattedContent = [...validLines, ...formattedBlock.split('\n')];
             }
         } catch (error) {
-            console.warn('Error formatting invalid memory lines:', error);
+            logger.warn('Error formatting invalid memory lines:', error);
         }
     }
 
@@ -150,18 +151,20 @@ const insertToolCallAndResults = (chatHistory, toolArgs, toolName, result = null
 const modifyText = (text, modifications) => {
     let modifiedText = text || '';
   
-    modifications.forEach(mod => {
+    modifications.forEach((mod, index) => {
+        logger.debug(`Processing modification ${index + 1}: ${JSON.stringify(mod)}`);
+        
         // Skip invalid modifications
         if (!mod.type) {
-            console.warn('Modification missing type');
+            logger.warn('Modification missing type');
             return;
         }
         if ((mod.type === 'delete' || mod.type === 'change') && !mod.pattern) {
-            console.warn(`${mod.type} modification missing pattern`);
+            logger.warn(`${mod.type} modification missing pattern`);
             return;
         }
         if ((mod.type === 'add' || mod.type === 'change') && !mod.newtext) {
-            console.warn(`${mod.type} modification missing newtext`);
+            logger.warn(`${mod.type} modification missing newtext`);
             return;
         }
 
@@ -171,8 +174,9 @@ const modifyText = (text, modifications) => {
         switch (mod.type) {
             case 'add':
                 const priority = mod.priority || '3';
-                modifiedText = modifiedText + (modifiedText ? '\n' : '') + 
-                    `${priority}|${timestamp}|${mod.newtext}`;
+                const newLine = `${priority}|${timestamp}|${mod.newtext}`;
+                logger.debug(`Adding new line: ${newLine}`);
+                modifiedText = modifiedText + (modifiedText ? '\n' : '') + newLine;
                 break;
             case 'change':
                 // Split into lines
@@ -197,10 +201,12 @@ const modifyText = (text, modifications) => {
                                     // Replace $1, $2, etc with capture group values
                                     newContent = mod.newtext.replace(/\$(\d+)/g, (_, n) => match[n] || '');
                                 }
-                                return `${newPriority}|${timestamp}|${newContent}`;
+                                const newLine = `${newPriority}|${timestamp}|${newContent}`;
+                                logger.debug(`Changing line: ${line} to ${newLine}`);
+                                return newLine;
                             }
                         } catch (e) {
-                            console.warn(`Invalid regex pattern: ${mod.pattern}`);
+                            logger.warn(`Invalid regex pattern: ${mod.pattern}`);
                         }
                     }
                     return line;
@@ -208,6 +214,7 @@ const modifyText = (text, modifications) => {
                 break;
             case 'delete':
                 // Split into lines, filter out matching lines, and rejoin
+                const beforeDelete = modifiedText;
                 modifiedText = modifiedText
                     .split('\n')
                     .filter(line => {
@@ -216,17 +223,24 @@ const modifyText = (text, modifications) => {
                         if (!content) return true;
                         try {
                             const regex = new RegExp(mod.pattern, 'i');
-                            return !regex.test(content.trim());
+                            const shouldKeep = !regex.test(content.trim());
+                            if (!shouldKeep) {
+                                logger.debug(`Deleting line: ${line}`);
+                            }
+                            return shouldKeep;
                         } catch (e) {
-                            console.warn(`Invalid regex pattern: ${mod.pattern}`);
+                            logger.warn(`Invalid regex pattern: ${mod.pattern}`);
                             return true;
                         }
                     })
                     .filter(line => line.trim())
                     .join('\n');
+                if (beforeDelete !== modifiedText) {
+                    logger.debug(`Text after deletion: ${modifiedText}`);
+                }
                 break;
             default:
-                console.warn(`Unknown modification type: ${mod.type}`);
+                logger.warn(`Unknown modification type: ${mod.type}`);
         }
     });
   

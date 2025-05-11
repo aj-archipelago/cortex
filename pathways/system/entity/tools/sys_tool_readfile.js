@@ -26,8 +26,8 @@ export default {
         type: "function",
         icon: "📄",
         function: {
-            name: "PDF",
-            description: "Use specifically for analyzing and answering questions about PDF file content. Do not use this tool for analyzing and answering questions about other file types.",
+            name: "AnalyzePDF",
+            description: "Use specifically for reading, analyzing, and answering questions about PDF file content. Do not use this tool for analyzing and answering questions about other file types.",
             parameters: {
                 type: "object",
                 properties: {
@@ -48,8 +48,8 @@ export default {
         type: "function",
         icon: "📝",
         function: {
-            name: "Text",
-            description: "Use specifically for analyzing and answering questions about text and csv files.",
+            name: "AnalyzeText",
+            description: "Use specifically for reading, analyzing, and answering questions about text and csv files.",
             parameters: {
                 type: "object",
                 properties: {
@@ -70,8 +70,8 @@ export default {
         type: "function",
         icon: "🖼️",
         function: {
-            name: "Vision",
-            description: "Use specifically for analyzing and answering questions about image files (jpg, gif, bmp, png, etc).",
+            name: "AnalyzeImage",
+            description: "Use specifically for reading, analyzing, and answering questions about image files (jpg, gif, bmp, png, etc). This cannot be used for creating or transforming images.",
             parameters: {
                 type: "object",
                 properties: {
@@ -92,8 +92,8 @@ export default {
         type: "function",
         icon: "🎥",
         function: {
-            name: "Video",
-            description: "Use specifically for analyzing and answering questions about video or audio file content. You MUST use this tool to look at video or audio files.",
+            name: "AnalyzeVideo",
+            description: "Use specifically for reading, analyzing, and answering questions about video or audio file content. You MUST use this tool to look at video or audio files.",
             parameters: {
                 type: "object",
                 properties: {

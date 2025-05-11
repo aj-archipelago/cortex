@@ -11,7 +11,7 @@ export default {
         type: "function",
         icon: "🌍",
         function: {
-            name: "WebPageContent",
+            name: "FetchWebPageContent",
             description: "This tool allows you to fetch and extract the text content and a screenshot if requested from any webpage. Use this when you need to analyze or understand the content of a specific webpage.",
             parameters: {
                 type: "object",

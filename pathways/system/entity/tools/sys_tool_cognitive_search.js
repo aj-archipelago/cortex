@@ -23,14 +23,14 @@ export default {
             type: "function",
             icon: "📂",
             function: {
-                name: "SearchPersonal",
+                name: "SearchPersonalIndex",
                 description: "Search through the user's index of personal documents and indexed uploaded files and retrieve the content of the files. Use this tool if the user refers to a file or a document that you don't see uploaded elsewhere in your context. Some file types (e.g. Word documents, Excel documents, very large files, etc.) cannot be attached to a message and will be chunked and indexed and stored in the personal index.",
                 parameters: {
                     type: "object",
                     properties: {
                         text: {
                             type: "string",
-                            description: "The search query to find relevant content in personal documents. Can be a specific phrase or '*' for all documents."
+                            description: "The search query to find relevant content in personal documents. Can be a specific phrase or '*' for all documents, or a query formatted with AI Search syntax."
                         },
                         filter: {
                             type: "string",
@@ -42,7 +42,7 @@ export default {
                         },
                         titleOnly: {
                             type: "boolean",
-                            description: "If true, only return document titles without content"
+                            description: "If true, only return document titles without content - faster and great for counting results"
                         },
                         userMessage: {
                             type: "string",
@@ -58,13 +58,13 @@ export default {
             icon: "📰",
             function: {
                 name: "SearchAJA",
-                description: "Search Al Jazeera Arabic news articles. Use this for finding Arabic news content including the latest news and articles.",
+                description: "Search Al Jazeera Arabic news articles. Use this for finding Arabic news content including the latest news and articles. Make sure to include a date filter when looking for recent articles.",
                 parameters: {
                     type: "object",
                     properties: {
                         text: {
                             type: "string",
-                            description: "The search query in Arabic to find relevant news articles. Can be a specific phrase or '*' for all articles."
+                            description: "The search query in Arabic to find relevant news articles. Can be a specific phrase or '*' for all articles, or a query formatted with AI Search syntax."
                         },
                         filter: {
                             type: "string",
@@ -76,7 +76,7 @@ export default {
                         },
                         titleOnly: {
                             type: "boolean",
-                            description: "If true, only return article titles without content"
+                            description: "If true, only return article titles without content - faster and great for counting results"
                         },
                         userMessage: {
                             type: "string",
@@ -92,13 +92,13 @@ export default {
             icon: "📰",
             function: {
                 name: "SearchAJE",
-                description: "Search Al Jazeera English news articles. Use this for finding English news content including the latest news and articles.",
+                description: "Search Al Jazeera English news articles. Use this for finding English news content including the latest news and articles. Make sure to include a date filter when looking for recent articles.",
                 parameters: {
                     type: "object",
                     properties: {
                         text: {
                             type: "string",
-                            description: "The search query in English to find relevant news articles. Can be a specific phrase or '*' for all articles."
+                            description: "The search query in English to find relevant news articles. Can be a specific phrase or '*' for all articles, or a query formatted with AI Search syntax."
                         },
                         filter: {
                             type: "string",
@@ -110,7 +110,7 @@ export default {
                         },
                         titleOnly: {
                             type: "boolean",
-                            description: "If true, only return article titles without content"
+                            description: "If true, only return article titles without content - faster and great for counting results"
                         },
                         userMessage: {
                             type: "string",
@@ -126,13 +126,13 @@ export default {
             icon: "⚡️",
             function: {
                 name: "SearchWires",
-                description: "Search through news wires from Reuters, AFP, AP, and other news agencies. Use this for finding the latest news and articles from the wires.",
+                description: "Search news wires from Reuters, AFP, AP, and other news agencies. Use this for finding the latest news and articles from the wires. Make sure to include a date filter when looking for recent articles.",
                 parameters: {
                     type: "object",
                     properties: {
                         text: {
                             type: "string",
-                            description: "The search query to find relevant news wires. Can be a specific phrase or '*' for all wires."
+                            description: "The search query to find relevant news wires. Can be a specific phrase or '*' for all wires, or a query formatted with AI Search syntax."
                         },
                         filter: {
                             type: "string",
@@ -144,7 +144,7 @@ export default {
                         },
                         titleOnly: {
                             type: "boolean",
-                            description: "If true, only return wire titles without content"
+                            description: "If true, only return wire titles without content - faster and great for counting results"
                         },
                         userMessage: {
                             type: "string",

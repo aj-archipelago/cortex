@@ -16,7 +16,7 @@ export default {
         aiName: "Jarvis",
         language: "English",
     },
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41',
     useInputChunking: false,
     json: true,
     ...config.get('entityConstants')

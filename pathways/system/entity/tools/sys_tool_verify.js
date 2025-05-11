@@ -27,7 +27,7 @@ export default {
         type: "function",
         icon: "🔍",
         function: {
-            name: "Verify",
+            name: "VerifyResponse",
             description: "Critically evaluate a response and provide verification questions and follow-up actions. You should call this tool and execute the steps provided in the resulting verification plan before presenting a final response to the user to ensure it is accurate, complete, and consistent with the user's request.",
             parameters: {
                 type: "object",
