@@ -310,7 +310,11 @@ export default {
         let memoryLookupRequired = false;
 
         try {
-            memoryLookupRequired = JSON.parse(await memoryLookupRequiredPromise)?.memoryRequired;
+            if (memoryLookupRequiredPromise) {
+                memoryLookupRequired = JSON.parse(await memoryLookupRequiredPromise)?.memoryRequired;
+            } else {
+                memoryLookupRequired = false;
+            }
         } catch (error) {
             logger.warn(`Failed to test memory lookup requirement: ${error.message}`);
             // If we hit the timeout or any other error, we'll proceed without memory lookup
