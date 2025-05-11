@@ -270,7 +270,7 @@ export default {
         const promptPrefix = researchMode ? 'Formatting re-enabled\n' : '';
 
         const memoryTemplates = entityUseMemory ? 
-            `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n{{renderTemplate AI_MEMORY_CONTEXT}}\n` : '';
+            `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_CONTEXT}}\n\n` : '';
 
         const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n`;
 
