@@ -177,6 +177,39 @@ export default async function GlossaryHandler(context, req) {
             return;
         }
         
+        // Get glossary by ID
+        if (method === 'GET' && url.match(/\/api\/glossary\/([^/]+)$/))
+        {
+            const glossaryId = url.match(/\/api\/glossary\/([^/]+)$/)[1];
+            console.log(`📖 Fetching glossary with ID: ${glossaryId}`);
+            
+            try {
+                const resp = await fetch(`${APPTEK_BASE_URL}/${glossaryId}`, {
+                    method: 'GET',
+                    headers: { 'accept': 'application/json', 'x-token': token }
+                });
+                
+                console.log(`📤 Get glossary request sent, response status: ${resp.status}`);
+                
+                const data = await resp.json().catch(() => {
+                    console.log(`⚠️ No JSON in response, using empty object`);
+                    return {};
+                });
+                
+                if (resp.status === 200) {
+                    console.log(`✅ Successfully retrieved glossary ${glossaryId}`);
+                } else {
+                    console.error(`❌ Failed to retrieve glossary ${glossaryId}, status: ${resp.status}`, data);
+                }
+                
+                context.res = { status: resp.status, body: data };
+            } catch (error) {
+                console.error(`❌ Error retrieving glossary: ${error.message}`);
+                context.res = { status: 500, body: { error: `Error retrieving glossary: ${error.message}` } };
+            }
+            return;
+        }
+        
         context.res = { status: 404, body: { error: 'Not found' } };
     } catch (error) {
         context.res = { status: 500, body: { error: error.message } };

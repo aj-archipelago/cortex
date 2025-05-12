@@ -196,6 +196,46 @@ paths:
           description: Server error
           
   /api/glossary/{id}:
+    get:
+      tags:
+        - Glossary Management
+      summary: Get a glossary by ID
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The glossary ID
+      responses:
+        '200':
+          description: Glossary details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  glossary_id:
+                    type: string
+                  name:
+                    type: string
+                  source_lang_code:
+                    type: string
+                  target_lang_code:
+                    type: string
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source_text:
+                          type: string
+                        target_text:
+                          type: string
+        '404':
+          description: Glossary not found
+        '500':
+          description: Server error
     delete:
       tags:
         - Glossary Management
