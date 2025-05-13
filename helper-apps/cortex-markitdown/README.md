@@ -6,7 +6,7 @@ This Azure Function App provides an HTTP endpoint to convert various file format
 
 *   **Trigger**: HTTP (GET, POST)
 *   **Route**: `/api/convert` (or as configured by your Azure Function host settings)
-*   **Authentication**: Anonymous (can be changed in `function.json`)
+*   **Authentication**: Function (requires a function key for access)
 
 ### Input
 
