@@ -28,7 +28,8 @@ class ApptekTranslatePlugin extends ModelPlugin {
             data: modelPromptText,
             params: {
                 from: combinedParameters.from || 'auto',
-                to: combinedParameters.to
+                to: combinedParameters.to,
+                glossaryId: combinedParameters.glossaryId || 'none'
             }
         };
     }
@@ -54,6 +55,16 @@ class ApptekTranslatePlugin extends ModelPlugin {
             'Accept': 'application/json',
             'Content-Type': 'text/plain'
         };
+        
+        // Add glossary_id parameter if it's provided and not 'none'
+        if (requestParameters.params.glossaryId && requestParameters.params.glossaryId !== 'none') {
+            // Add glossary_id as a query parameter
+            const url = new URL(cortexRequest.url);
+            url.searchParams.append('glossary_id', requestParameters.params.glossaryId);
+            cortexRequest.url = url.toString();
+            
+            logger.verbose(`Using glossary ID: ${requestParameters.params.glossaryId}`);
+        }
 
         return this.executeRequest(cortexRequest);
     }
