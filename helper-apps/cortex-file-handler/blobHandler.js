@@ -107,6 +107,44 @@ async function gcsUrlExists(url, defaultReturn = false) {
     }
 }
 
+/**
+ * Downloads a file from Google Cloud Storage to a local file
+ * @param {string} gcsUrl - The GCS URL in format gs://bucket-name/file-path
+ * @param {string} destinationPath - The local path where the file should be saved
+ * @returns {Promise<void>}
+ */
+async function downloadFromGCS(gcsUrl, destinationPath) {
+    if (!gcsUrl || !gcs) {
+        throw new Error('Invalid GCS URL or GCS client not initialized');
+    }
+
+    const urlParts = gcsUrl.replace('gs://', '').split('/');
+    const bucketName = urlParts[0];
+    const fileName = urlParts.slice(1).join('/');
+
+    if (process.env.STORAGE_EMULATOR_HOST) {
+        // Use axios to download from emulator
+        const response = await axios({
+            method: 'GET',
+            url: `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${bucketName}/o/${encodeURIComponent(fileName)}?alt=media`,
+            responseType: 'stream'
+        });
+        
+        // Write the response to file
+        const writer = fs.createWriteStream(destinationPath);
+        await new Promise((resolve, reject) => {
+            response.data.pipe(writer);
+            writer.on('finish', resolve);
+            writer.on('error', reject);
+        });
+    } else {
+        // Use GCS client for real GCS
+        const bucket = gcs.bucket(bucketName);
+        const file = bucket.file(fileName);
+        await file.download({ destination: destinationPath });
+    }
+}
+
 export const getBlobClient = async () => {
     const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
     const containerName = AZURE_STORAGE_CONTAINER_NAME;
@@ -776,4 +814,5 @@ export {
     ensureGCSUpload,
     gcs,
     uploadChunkToGCS,
+    downloadFromGCS,
 };

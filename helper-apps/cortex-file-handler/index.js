@@ -16,6 +16,7 @@ import {
     gcs,
     AZURE_STORAGE_CONTAINER_NAME,
     uploadChunkToGCS,
+    downloadFromGCS,
 } from './blobHandler.js';
 import { DOC_EXTENSIONS, CONVERTED_EXTENSIONS } from './constants.js';
 import { convertDocument, documentToText, easyChunker } from './docHelper.js';
@@ -330,6 +331,46 @@ async function CortexFileHandler(context, req) {
                 context.log(`GCS file missing, restoring from primary: ${hash}`);
                 const { gcs: _, ...fileInfo } = hashResult;
                 hashResult = await ensureGCSUpload(context, fileInfo);
+            }
+
+            // If primary is missing but GCS exists, restore from GCS
+            if (!primaryExists.valid && gcsExists) {
+                context.log(`Primary storage file missing, restoring from GCS: ${hash}`);
+                try {
+                    // Create a temporary file to store the downloaded content
+                    const tempDir = path.join(os.tmpdir(), `${uuidv4()}`);
+                    fs.mkdirSync(tempDir);
+                    const downloadedFile = path.join(tempDir, path.basename(hashResult.gcs));
+
+                    // Download from GCS using the new function
+                    await downloadFromGCS(hashResult.gcs, downloadedFile);
+
+                    // Upload to primary storage
+                    const res = await uploadBlob(
+                        context,
+                        null,
+                        !useAzure,
+                        downloadedFile,
+                        hash
+                    );
+
+                    // Update the hash result with the new primary storage URL
+                    hashResult.url = res.url;
+
+                    // Clean up temp file
+                    try {
+                        if (downloadedFile && fs.existsSync(downloadedFile)) {
+                            fs.unlinkSync(downloadedFile);
+                        }
+                        if (tempDir && fs.existsSync(tempDir)) {
+                            fs.rmSync(tempDir, { recursive: true });
+                        }
+                    } catch (err) {
+                        console.log('Error cleaning up temp files:', err);
+                    }
+                } catch (error) {
+                    console.error('Error restoring from GCS:', error);
+                }
             }
 
             // Final check to ensure we have at least one valid storage location
