@@ -175,7 +175,7 @@ test('test primary storage restoration from GCS backup', async (t) => {
         const hash = 'test_primary_restore';
         const modifiedResult = {
             ...initialResult,
-            url: initialResult.url.replace('.blob.core.windows.net', '.invalid.url'),
+            url: initialResult.url.replace('test.txt', 'invalid.txt'),
         };
 
         // Set up Redis state with the bad URL

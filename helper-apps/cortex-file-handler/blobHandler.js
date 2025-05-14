@@ -67,6 +67,11 @@ export const AZURE_STORAGE_CONTAINER_NAME =
   process.env.AZURE_STORAGE_CONTAINER_NAME || 'whispertempfiles';
 export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || 'cortextempfiles';
 
+function isEncoded(str) {
+    // Checks for any percent-encoded sequence
+    return /%[0-9A-Fa-f]{2}/.test(str);
+}
+
 async function gcsUrlExists(url, defaultReturn = false) {
     try {
         if (!url || !gcs) {
@@ -128,7 +133,12 @@ export const getBlobClient = async () => {
 async function saveFileToBlob(chunkPath, requestId) {
     const { containerClient } = await getBlobClient();
     // Use the filename with a UUID as the blob name
-    const blobName = `${requestId}/${uuidv4()}_${encodeURIComponent(path.basename(chunkPath))}`;
+    let baseName = path.basename(chunkPath);
+    // Only encode if not already encoded
+    if (!isEncoded(baseName)) {
+        baseName = encodeURIComponent(baseName);
+    }
+    const blobName = `${requestId}/${uuidv4()}_${baseName}`;
     const sasToken = generateSASToken(containerClient, blobName);
 
     // Create a read stream for the chunk file
@@ -239,10 +249,12 @@ function uploadBlob(
                     busboy.on('field', (fieldname, value) => {
                         if (fieldname === 'requestId') {
                             requestId = value;
+                        } else if (fieldname === 'hash') {
+                            hash = value;
                         }
                     });
 
-                    busboy.on('file', async (fieldname, file, filename) => {
+                    busboy.on('file', async (fieldname, file, info) => {
                         if (errorOccurred) return;
                         hasFile = true;
 
@@ -253,7 +265,7 @@ function uploadBlob(
                                 body,
                                 saveToLocal,
                                 file,
-                                filename?.filename || filename,
+                                info.filename,
                                 resolve,
                                 hash,
                             );
@@ -339,17 +351,23 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
 async function saveToAzureStorage(context, encodedFilename, file) {
     const { containerClient } = await getBlobClient();
     const contentType = mime.lookup(encodedFilename);
+    
+    // Decode the filename if it's already encoded to prevent double-encoding
+    let blobName = encodedFilename;
+    if (isEncoded(blobName)) {
+        blobName = decodeURIComponent(blobName);
+    }
+    
     const options = {
         blobHTTPHeaders: contentType ? { blobContentType: contentType } : {},
-        maxConcurrency: 20, // Increase concurrency for faster uploads
-        blockSize: 4 * 1024 * 1024, // 4MB blocks for better performance
+        maxConcurrency: 50,
+        blockSize: 8 * 1024 * 1024,
     };
 
-    const blockBlobClient = containerClient.getBlockBlobClient(encodedFilename);
-
-    context.log(`Uploading to Azure... ${encodedFilename}`);
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    context.log(`Uploading to Azure... ${blobName}`);
     await blockBlobClient.uploadStream(file, undefined, undefined, options);
-    const sasToken = generateSASToken(containerClient, encodedFilename);
+    const sasToken = generateSASToken(containerClient, blobName);
     return `${blockBlobClient.url}?${sasToken}`;
 }
 
@@ -358,17 +376,19 @@ async function uploadToGCS(context, file, encodedFilename) {
     const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
     const writeStream = gcsFile.createWriteStream({
         resumable: true,
-        validation: false, // Skip MD5 validation for better performance
+        validation: false,
         metadata: {
             contentType: mime.lookup(encodedFilename) || 'application/octet-stream',
         },
+        chunkSize: 8 * 1024 * 1024,
+        numRetries: 3,
+        retryDelay: 1000,
     });
-
     context.log(`Uploading to GCS... ${encodedFilename}`);
-
     await pipeline(file, writeStream);
-    const isEncoded = /%[0-9A-Fa-f]{2}/.test(encodedFilename);
-    const gcsUrl = `gs://${GCS_BUCKETNAME}/${isEncoded ? encodedFilename : encodeURIComponent(encodedFilename)}`;
+    // Only encode if not already encoded
+    const isAlreadyEncoded = isEncoded(encodedFilename);
+    const gcsUrl = `gs://${GCS_BUCKETNAME}/${isAlreadyEncoded ? encodedFilename : encodeURIComponent(encodedFilename)}`;
     return gcsUrl;
 }
 
@@ -413,43 +433,49 @@ async function uploadFile(
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-'));
         const tempOriginal = path.join(tempDir, filename);
 
-        // Use highWaterMark for better memory management
+        // Optimize initial write with larger buffer
         const writeStream = fs.createWriteStream(tempOriginal, {
-            highWaterMark: 64 * 1024,
-        }); // 64KB chunks
+            highWaterMark: 1024 * 1024, // 1MB chunks for initial write
+            autoClose: true,
+        });
+
+        // Use pipeline with error handling
         await pipeline(file, writeStream);
 
         uploadPath = tempOriginal;
         uploadName = `${requestId || uuidv4()}_${filename}`;
 
-        // Prepare streams for original file with optimized buffer sizes
-        const fileStream = fs.createReadStream(uploadPath, {
-            highWaterMark: 64 * 1024,
-        }); // 64KB chunks
-        const streams = [];
-        if (gcs) streams.push(new PassThrough({ highWaterMark: 64 * 1024 }));
-        streams.push(new PassThrough({ highWaterMark: 64 * 1024 }));
+        // Create optimized read streams with larger buffers for storage uploads
+        const createOptimizedReadStream = (path) => fs.createReadStream(path, {
+            highWaterMark: 1024 * 1024, // 1MB chunks for storage uploads
+            autoClose: true,
+        });
 
-        // Use pipeline for better error handling and backpressure
-        await Promise.all(streams.map((stream) => pipeline(fileStream, stream)));
-
-        // Upload original
+        // Upload original in parallel with optimized streams
         const storagePromises = [];
         const primaryPromise = saveToLocal
             ? saveToLocalStorage(
                 context,
                 requestId,
                 uploadName,
-                streams[streams.length - 1],
+                createOptimizedReadStream(uploadPath),
             )
-            : saveToAzureStorage(context, uploadName, streams[streams.length - 1]);
+            : saveToAzureStorage(
+                context,
+                uploadName,
+                createOptimizedReadStream(uploadPath),
+            );
         storagePromises.push(
             primaryPromise.then((url) => ({ url, type: 'primary' })),
         );
 
         if (gcs) {
             storagePromises.push(
-                saveToGoogleStorage(context, uploadName, streams[0]).then((gcsUrl) => ({
+                saveToGoogleStorage(
+                    context,
+                    uploadName,
+                    createOptimizedReadStream(uploadPath),
+                ).then((gcsUrl) => ({
                     gcs: gcsUrl,
                     type: 'gcs',
                 })),
@@ -470,34 +496,18 @@ async function uploadFile(
                     convertedName = conversion.convertedName;
                     converted = true;
 
-                    const convertedStreams = [];
-                    if (gcs)
-                        convertedStreams.push(
-                            new PassThrough({ highWaterMark: 64 * 1024 }),
-                        );
-                    convertedStreams.push(new PassThrough({ highWaterMark: 64 * 1024 }));
-                    const convertedFileStream = fs.createReadStream(convertedPath, {
-                        highWaterMark: 64 * 1024,
-                    });
-
-                    // Use pipeline for better error handling and backpressure
-                    await Promise.all(
-                        convertedStreams.map((stream) =>
-                            pipeline(convertedFileStream, stream),
-                        ),
-                    );
-
+                    // Upload converted file in parallel with optimized streams
                     const convertedPrimaryPromise = saveToLocal
                         ? saveToLocalStorage(
                             context,
                             requestId,
                             convertedName,
-                            convertedStreams[convertedStreams.length - 1],
+                            createOptimizedReadStream(convertedPath),
                         )
                         : saveToAzureStorage(
                             context,
                             convertedName,
-                            convertedStreams[convertedStreams.length - 1],
+                            createOptimizedReadStream(convertedPath),
                         );
                     convertedResults.push(
                         convertedPrimaryPromise.then((url) => ({
@@ -511,7 +521,7 @@ async function uploadFile(
                             saveToGoogleStorage(
                                 context,
                                 convertedName,
-                                convertedStreams[0],
+                                createOptimizedReadStream(convertedPath),
                             ).then((gcsUrl) => ({ convertedGcs: gcsUrl, type: 'gcs' })),
                         );
                     }
@@ -721,15 +731,16 @@ async function deleteGCS(blobName) {
 async function ensureGCSUpload(context, existingFile) {
     if (!existingFile.gcs && gcs) {
         context.log('GCS file was missing - uploading.');
-        const encodedFilename = path.basename(existingFile.url.split('?')[0]);
-
+        let encodedFilename = path.basename(existingFile.url.split('?')[0]);
+        if (!isEncoded(encodedFilename)) {
+            encodedFilename = encodeURIComponent(encodedFilename);
+        }
         // Download the file from Azure/local storage
         const response = await axios({
             method: 'get',
             url: existingFile.url,
             responseType: 'stream',
         });
-
         // Upload the file stream to GCS
         existingFile.gcs = await uploadToGCS(
             context,
@@ -743,8 +754,11 @@ async function ensureGCSUpload(context, existingFile) {
 // Helper function to upload a chunk to GCS
 async function uploadChunkToGCS(chunkPath, requestId) {
     if (!gcs) return null;
-
-    const gcsFileName = `${requestId}/${path.basename(chunkPath)}`;
+    let baseName = path.basename(chunkPath);
+    if (!isEncoded(baseName)) {
+        baseName = encodeURIComponent(baseName);
+    }
+    const gcsFileName = `${requestId}/${baseName}`;
     await gcs.bucket(GCS_BUCKETNAME).upload(chunkPath, {
         destination: gcsFileName,
     });
