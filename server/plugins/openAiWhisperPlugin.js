@@ -83,7 +83,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             };
             cortexRequest.initCallback = whisperInitCallback;
 
-            const MAX_RETRIES = 3;
+            const MAX_RETRIES = 5;
             let attempt = 0;
             let res = null;
             while(attempt < MAX_RETRIES){
@@ -99,8 +99,18 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                     break;
                 }
                 catch(err){
+                    // wait before retrying
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    if(err?.status === 429 || err?.message?.includes('429')){
+                        //sleep more for 429 errors
+                        logger.info(`Rate limit, sleeping some more before retrying...`);
+                        await new Promise(resolve => setTimeout(resolve, attempt*5000));
+                        attempt+=0.1 //429 errors are not counted as full failures
+                    }else{
+                        attempt++;
+                    }
                     logger.warn(`Error calling timestamped API: ${err}. Retrying ${attempt+1} of ${MAX_RETRIES}...`);
-                    attempt++;
                 }
             }
 
@@ -155,6 +165,8 @@ async function processURI(uri) {
     let result = null;
     let _promise = null;
     let errorOccurred = false;
+    let retries = 0;
+    const maxRetries = 3;
 
     const intervalId = setInterval(() => sendProgress(true), 3000);
 
@@ -167,14 +179,21 @@ async function processURI(uri) {
         _promise = processChunk;
     }
 
-    await _promise(uri).then((ts) => {
-        result = ts;
-    }).catch((err) => {
-        errorOccurred = err;
-    }).finally(() => {
-        clearInterval(intervalId);
-        sendProgress();
-    });
+    while (result === null && retries < maxRetries) {
+        if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        }
+        await _promise(uri).then((ts) => {
+            result = ts;
+        }).catch((err) => {
+            errorOccurred = err;
+        });
+        if (errorOccurred) break; // If an error occurs, break out of the retry loop
+        retries++;
+    }
+
+    clearInterval(intervalId);
+    sendProgress();
 
     if(errorOccurred) {
         throw errorOccurred;
