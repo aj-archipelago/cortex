@@ -1,23 +1,12 @@
 import basePathway from './basePathway.js';
-import Bottleneck from 'bottleneck/es5.js';
 import { callPathway } from '../lib/pathwayTools.js';
 import logger from "../lib/logger.js";
-
-// Create a circuit breaker using Bottleneck for the list_translation_models pathway
-const circuitBreaker = new Bottleneck({
-    maxConcurrent: 1,  // Allow only one execution at a time
-    minTime: 100,      // Minimum time between operations
-    reservoir: 50,     // Allow 50 operations per reservoirRefreshInterval
-    reservoirRefreshInterval: 60 * 1000, // Refresh every minute
-    penalty: 5000,     // Penalize failed jobs by adding 5s delay
-    maxRetries: 2      // Maximum number of retries for a job
-});
 
 // Create a store for service health status
 const serviceHealthStatus = new Map();
 
 // Function to check health of a translation service
-async function checkServiceHealth(serviceId) {
+async function checkServiceHealth(serviceId, timeout = 10000) {
     try {
         if (!serviceHealthStatus.has(serviceId)) {
             serviceHealthStatus.set(serviceId, { isHealthy: true, lastChecked: 0, failures: 0 });
@@ -67,7 +56,7 @@ async function checkServiceHealth(serviceId) {
         
         // Set a timeout to fail health check if it takes too long
         const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error(`Health check timeout for ${serviceId}`)), 10000);
+            setTimeout(() => reject(new Error(`Health check timeout for ${serviceId}`)), timeout);
         });
         
         // Race between actual health check and timeout
@@ -95,26 +84,6 @@ async function checkServiceHealth(serviceId) {
     }
 };
 
-// Add circuit breaker events for monitoring
-circuitBreaker.on('failed', (error, jobInfo) => {
-    logger.warn(`Circuit breaker: Job ${jobInfo.options.id} failed with error: ${error.message}`);
-});
-
-circuitBreaker.on('retry', (error, jobInfo) => {
-    logger.info(`Circuit breaker: Retrying job ${jobInfo.options.id} after failure: ${error.message}`);
-});
-
-circuitBreaker.on('dropped', (dropped) => {
-    logger.error(`Circuit breaker: Job was dropped because circuit is overwhelmed. Queue length: ${circuitBreaker.counts().QUEUED}`);
-});
-
-// Allow monitoring of the circuit state
-setInterval(() => {
-    const counts = circuitBreaker.counts();
-    if (counts.QUEUED > 5 || counts.RUNNING > 0) {
-        logger.debug(`Circuit breaker status: QUEUED=${counts.QUEUED}, RUNNING=${counts.RUNNING}, DONE=${counts.DONE}`);
-    }
-}, 30000); // Log status every 30 seconds if there's activity
 
 export default {
     ...basePathway,
@@ -124,16 +93,12 @@ export default {
     format: 'id name description supportedLanguages status', // defines the fields each model will have, added status field
 
     resolver: async (parent, args, contextValue, _info) => {
-        // Use the circuit breaker to protect this resolver
-        return circuitBreaker.schedule(
-            { id: 'list_translation_models' }, // Job identifier
-            async () => {
-                const { config } = contextValue;
-                const { _instance } = config;
-                const { enabledTranslationModels } = _instance;
+        const { config } = contextValue;
+        const { _instance } = config;
+        const { enabledTranslationModels } = _instance;
 
-                // Map of pathway names to their descriptions
-                const modelDescriptions = {
+        // Map of pathway names to their descriptions
+        const modelDescriptions = {
                     'translate': {
                         name: 'Default Translator',
                         description: 'Default translation service using GPT',
@@ -176,39 +141,33 @@ export default {
                     }
                 };
 
-                // Check health of each enabled model
-                const healthPromises = (enabledTranslationModels || [])
-                    .filter(modelId => modelDescriptions[modelId])
-                    .map(async modelId => {
-                        // Don't health check the default translator as it's our fallback
-                        const isHealthy = modelId === 'translate' ? true : await checkServiceHealth(modelId);
-                        return {
-                            modelId,
-                            isHealthy,
-                            metadata: modelDescriptions[modelId]
-                        };
-                    });
+        // Check health of each enabled model
+        const healthPromises = (enabledTranslationModels || [])
+            .filter(modelId => modelDescriptions[modelId])
+            .map(async modelId => {
+                // Don't health check the default translator as it's our fallback
+                const isHealthy = modelId === 'translate' ? true : await checkServiceHealth(modelId, 60000);
+                return {
+                    modelId,
+                    isHealthy,
+                    metadata: modelDescriptions[modelId]
+                };
+            });
 
-                // Wait for all health checks to complete
-                const healthResults = await Promise.all(healthPromises);
+        // Wait for all health checks to complete
+        const healthResults = await Promise.all(healthPromises);
                 
-                // Filter out unhealthy models and format the response
-                const availableModels = healthResults
-                    .filter(result => result.isHealthy)
-                    .map(result => ({
-                        id: result.modelId,
-                        ...result.metadata,
+        // Filter out unhealthy models and format the response
+        const availableModels = healthResults
+            .filter(result => result.isHealthy)
+            .map(result => ({
+                id: result.modelId,
+                ...result.metadata,
                         // Add health status as additional info
                         status: 'operational'
                     }));
 
-                return availableModels;
-            }
-        ).catch(error => {
-            logger.error(`Circuit breaker caught error in list_translation_models: ${error.message}`);
-
-            return [];
-        });
+        return availableModels;
     },
 
     // Minimal input parameters since this is just a listing endpoint
