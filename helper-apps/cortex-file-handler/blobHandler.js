@@ -317,25 +317,50 @@ function uploadBlob(
                         if (errorOccurred) return;
                         hasFile = true;
 
-                        try {
-                            const result = await uploadFile(
-                                context,
-                                requestId,
-                                body,
-                                saveToLocal,
-                                file,
-                                info.filename,
-                                resolve,
-                                hash,
-                            );
-                            resolve(result);
-                        } catch (error) {
-                            if (errorOccurred) return;
+                        // Validate file
+                        if (!info.filename || info.filename.trim() === '') {
                             errorOccurred = true;
-                            const err = new Error('Error processing file upload.');
-                            err.status = 500;
+                            const err = new Error('Invalid file: missing filename');
+                            err.status = 400;
                             reject(err);
+                            return;
                         }
+
+                        // Check if file is empty
+                        let fileSize = 0;
+                        file.on('data', (chunk) => {
+                            fileSize += chunk.length;
+                        });
+
+                        file.on('end', async () => {
+                            if (fileSize === 0) {
+                                errorOccurred = true;
+                                const err = new Error('Invalid file: file is empty');
+                                err.status = 400;
+                                reject(err);
+                                return;
+                            }
+
+                            try {
+                                const result = await uploadFile(
+                                    context,
+                                    requestId,
+                                    body,
+                                    saveToLocal,
+                                    file,
+                                    info.filename,
+                                    resolve,
+                                    hash,
+                                );
+                                resolve(result);
+                            } catch (error) {
+                                if (errorOccurred) return;
+                                errorOccurred = true;
+                                const err = new Error('Error processing file upload.');
+                                err.status = 500;
+                                reject(err);
+                            }
+                        });
                     });
 
                     busboy.on('error', (error) => {

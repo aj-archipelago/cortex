@@ -45,24 +45,6 @@ setInterval(async () => {
     }
 }, CLEANUP_INTERVAL_MS);
 
-// Create a progress tracking transform stream
-class ProgressTransform extends Transform {
-    constructor(options = {}) {
-        super(options);
-        this.bytesProcessed = 0;
-        this.totalBytes = options.totalBytes || 0;
-    }
-
-    _transform(chunk, encoding, callback) {
-        this.bytesProcessed += chunk.length;
-        if (this.totalBytes > 0) {
-            const progress = (this.bytesProcessed / this.totalBytes) * 100;
-            console.log(`Progress: ${progress.toFixed(2)}%`);
-        }
-        callback(null, chunk);
-    }
-}
-
 // Process a single chunk with streaming and progress tracking
 async function processChunk(inputPath, outputFileName, start, duration) {
     return new Promise((resolve, reject) => {
@@ -91,13 +73,9 @@ async function processChunk(inputPath, outputFileName, start, duration) {
                 resolve(outputFileName);
             });
 
-        // Create a progress tracking transform
-        const progressTransform = new ProgressTransform();
-
         // Use pipeline for better error handling and backpressure
         pipeline(
             command,
-            progressTransform,
             fs.createWriteStream(outputFileName, { highWaterMark: 4 * 1024 * 1024 }), // 4MB chunks
         ).catch(reject);
     });
@@ -151,15 +129,9 @@ async function downloadFile(url, outputPath) {
             });
         }
 
-        // Create a progress tracking transform
-        const progressTransform = new ProgressTransform({
-            totalBytes: parseInt(response.headers['content-length'] || '0', 10),
-        });
-
         // Use pipeline for better error handling and memory management
         await pipeline(
             response.data,
-            progressTransform,
             fs.createWriteStream(outputPath, { highWaterMark: 4 * 1024 * 1024 }), // 4MB chunks
         );
 

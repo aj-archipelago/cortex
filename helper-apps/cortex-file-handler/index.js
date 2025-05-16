@@ -447,9 +447,9 @@ async function CortexFileHandler(context, req) {
     }
 
     if (req.method.toLowerCase() === 'post') {
-        await uploadBlob(context, req, !useAzure, null, hash);
-        if (hash && context?.res?.body) {
-            await setFileStoreMap(hash, context.res.body);
+        const result = await uploadBlob(context, req, !useAzure, null, hash);
+        if (result?.hash && context?.res?.body) {
+            await setFileStoreMap(result.hash, context.res.body);
         }
         return;
     }
