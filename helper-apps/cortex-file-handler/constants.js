@@ -1,47 +1,41 @@
 export const DOC_EXTENSIONS = [
-    ".txt",
-    ".json",
-    ".csv",
-    ".md",
-    ".xml",
-    ".js",
-    ".html",
-    ".css",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx"
+    '.txt',
+    '.json',
+    '.csv',
+    '.md',
+    '.xml',
+    '.js',
+    '.html',
+    '.css',
+    '.doc',
+    '.docx',
+    '.xls',
+    '.xlsx',
 ];
 
 export const IMAGE_EXTENSIONS = [
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".webp",
-    ".heic",
-    ".heif",
-    ".pdf"
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+    '.heic',
+    '.heif',
+    '.pdf',
 ];
-  
+
 export const VIDEO_EXTENSIONS = [
-    ".mp4",
-    ".mpeg",
-    ".mov",
-    ".avi",
-    ".flv",
-    ".mpg",
-    ".webm",
-    ".wmv",
-    ".3gp"
+    '.mp4',
+    '.mpeg',
+    '.mov',
+    '.avi',
+    '.flv',
+    '.mpg',
+    '.webm',
+    '.wmv',
+    '.3gp',
 ];
-  
-export const AUDIO_EXTENSIONS = [
-    ".wav",
-    ".mp3",
-    ".aac",
-    ".ogg",
-    ".flac"
-];
+
+export const AUDIO_EXTENSIONS = ['.wav', '.mp3', '.aac', '.ogg', '.flac'];
 
 export const ACCEPTED_MIME_TYPES = {
     // Document types
@@ -53,24 +47,35 @@ export const ACCEPTED_MIME_TYPES = {
     'text/javascript': ['.js'],
     'text/html': ['.html'],
     'text/css': ['.css'],
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [
+        '.docx',
+    ],
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': [
+        '.xlsx',
+    ],
     'application/msword': ['.doc'],
     'application/vnd.ms-excel': ['.xls'],
     'application/vnd.ms-word.document.macroEnabled.12': ['.docm'],
     'application/vnd.ms-excel.sheet.macroEnabled.12': ['.xlsm'],
     'application/vnd.ms-word.template.macroEnabled.12': ['.dotm'],
     'application/vnd.ms-excel.template.macroEnabled.12': ['.xltm'],
-    
+
     // Image types
     'image/jpeg': ['.jpg', '.jpeg'],
     'image/png': ['.png'],
     'image/webp': ['.webp'],
     'image/heic': ['.heic'],
     'image/heif': ['.heif'],
-    'application/octet-stream': ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'],
+    'application/octet-stream': [
+        '.jpg',
+        '.jpeg',
+        '.png',
+        '.webp',
+        '.heic',
+        '.heif',
+    ],
     'application/pdf': ['.pdf'],
-    
+
     // Audio types
     'audio/wav': ['.wav'],
     'audio/mpeg': ['.mp3'],
@@ -81,7 +86,7 @@ export const ACCEPTED_MIME_TYPES = {
     'audio/x-m4a': ['.m4a'],
     'audio/mp3': ['.mp3'],
     'audio/mp4': ['.mp4'],
-    
+
     // Video types
     'video/mp4': ['.mp4'],
     'video/mpeg': ['.mpeg', '.mpg'],
@@ -108,8 +113,19 @@ export function getExtensionsForMimeType(mimeType) {
 
 // Helper function to check if an extension is accepted
 export function isAcceptedExtension(extension) {
-    return DOC_EXTENSIONS.includes(extension) || 
-           IMAGE_EXTENSIONS.includes(extension) || 
-           VIDEO_EXTENSIONS.includes(extension) || 
-           AUDIO_EXTENSIONS.includes(extension);
-} 
+    return (
+        DOC_EXTENSIONS.includes(extension) ||
+    IMAGE_EXTENSIONS.includes(extension) ||
+    VIDEO_EXTENSIONS.includes(extension) ||
+    AUDIO_EXTENSIONS.includes(extension)
+    );
+}
+
+export const CONVERTED_EXTENSIONS = [
+    '.doc',
+    '.docx',
+    '.xls',
+    '.xlsx',
+    '.ppt',
+    '.pptx',
+];

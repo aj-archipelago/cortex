@@ -49,7 +49,7 @@ export default {
         icon: "📝",
         function: {
             name: "AnalyzeText",
-            description: "Use specifically for reading, analyzing, and answering questions about text and csv files.",
+            description: "Use specifically for reading, analyzing, and answering questions about text files (including csv, json, html, etc.).",
             parameters: {
                 type: "object",
                 properties: {
@@ -65,7 +65,29 @@ export default {
                 required: ["detailedInstructions", "userMessage"]
             }
         }
-    },  
+    },
+    {
+        type: "function",
+        icon: "📝",
+        function: {
+            name: "AnalyzeMarkdown",
+            description: "Use specifically for reading, analyzing, and answering questions about markdown files.",
+            parameters: {
+                type: "object",
+                properties: {
+                    detailedInstructions: {
+                        type: "string",
+                        description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
+                        },
+                    userMessage: {
+                        type: "string",
+                        description: "A user-friendly message that describes what you're doing with this tool"
+                        }
+                },
+                required: ["detailedInstructions", "userMessage"]
+            }
+        }
+    },   
     {
         type: "function",
         icon: "🖼️",

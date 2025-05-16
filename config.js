@@ -88,7 +88,7 @@ var config = convict({
     },
     ollamaUrl: {
         format: String,
-        default: 'http://127.0.0.1:11434',
+        default: '',
         env: 'OLLAMA_URL'
     },
     claudeVertexUrl: {
