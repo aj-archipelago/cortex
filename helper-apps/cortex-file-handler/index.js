@@ -502,7 +502,7 @@ async function CortexFileHandler(context, req) {
                     const saveResults = [];
                     const originalFileName = `${uuidv4()}_${encodeURIComponent(path.basename(downloadedFile))}`;
                     const originalFilePath = path.join(tempDir, originalFileName);
-                    await fs.copyFile(downloadedFile, originalFilePath);
+                    await fs.promises.copyFile(downloadedFile, originalFilePath);
                     let fileUrl;
                     if (useAzure) {
                         const savedBlob = await saveFileToBlob(originalFilePath, requestId);
@@ -511,6 +511,7 @@ async function CortexFileHandler(context, req) {
                         fileUrl = await moveFileToPublicFolder(originalFilePath, requestId);
                     }
                     saveResults.push(fileUrl);
+                    result.push(fileUrl);
                 } else {
                     const text = await conversionService.convertFile(downloadedFile, uri, true);
                     result.push(...easyChunker(text));

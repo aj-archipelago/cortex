@@ -303,4 +303,49 @@ test.serial('should handle file deletion', async (t) => {
     } finally {
         fs.unlinkSync(filePath);
     }
+});
+
+// Save Option Test
+test.serial('should handle document upload with save option', async (t) => {
+    const fileContent = 'Sample DOCX content';
+    const filePath = await createTestFile(fileContent, 'docx');
+
+    const initialRequestId = uuidv4();
+    const saveRequestId = uuidv4();
+
+    let uploadedUrl;
+
+    try {
+        // First, upload the document so we have a publicly reachable URL
+        const uploadResponse = await uploadFile(filePath, initialRequestId);
+        t.is(uploadResponse.status, 200);
+        t.truthy(uploadResponse.data.url, 'Upload should return a URL');
+
+        uploadedUrl = uploadResponse.data.url;
+
+        // Now call the handler again with the save flag
+        const saveResponse = await axios.get(baseUrl, {
+            params: {
+                uri: uploadedUrl,
+                requestId: saveRequestId,
+                save: true,
+            },
+            validateStatus: (status) => true,
+        });
+
+        // The current implementation returns an empty array but should still be 200
+        t.is(saveResponse.status, 200, 'Save request should succeed');
+        t.true(Array.isArray(saveResponse.data), 'Response body should be an array');
+    } finally {
+        fs.unlinkSync(filePath);
+
+        // Cleanup the initially uploaded file
+        if (uploadedUrl) {
+            const identifier = new URL(uploadedUrl).pathname.split('/').pop().split('_')[0];
+            await axios.delete(`${baseUrl}?operation=delete&requestId=${identifier}`).catch(() => {});
+        }
+
+        // Cleanup files created by save request
+        await axios.delete(`${baseUrl}?operation=delete&requestId=${saveRequestId}`).catch(() => {});
+    }
 }); 
