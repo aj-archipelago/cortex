@@ -19,7 +19,7 @@ import {
     downloadFromGCS,
 } from './blobHandler.js';
 import { DOC_EXTENSIONS, CONVERTED_EXTENSIONS } from './constants.js';
-import { convertDocument, documentToText, easyChunker } from './docHelper.js';
+import { easyChunker } from './docHelper.js';
 import { downloadFile, splitMediaFile } from './fileChunker.js';
 import { ensureEncoded, ensureFileExtension, urlExists } from './helper.js';
 import {
@@ -34,6 +34,7 @@ import {
     removeFromFileStoreMap,
     setFileStoreMap,
 } from './redis.js';
+import { FileConversionService } from './services/FileConversionService.js';
 
 const useAzure = process.env.AZURE_STORAGE_CONNECTION_STRING ? true : false;
 const useGCS =
@@ -141,6 +142,9 @@ async function CortexFileHandler(context, req) {
     );
 
     cleanupInactive(context); //trigger & no need to wait for it
+
+    // Initialize conversion service
+    const conversionService = new FileConversionService(context, useAzure);
 
     // Clean up blob when request delete which means processing marked completed
     if (operation === 'delete') {
@@ -284,7 +288,6 @@ async function CortexFileHandler(context, req) {
     }
 
     if (hash && checkHash) {
-    //check if hash exists
         let hashResult = await getFileStoreMap(hash);
 
         if (hashResult) {
@@ -309,6 +312,7 @@ async function CortexFileHandler(context, req) {
                     return;
                 }
             }
+
             // Check primary storage (Azure/Local) first
             const primaryExists = await urlExists(hashResult?.url);
             const gcsExists = gcs ? await gcsUrlExists(hashResult?.gcs) : false;
@@ -373,6 +377,9 @@ async function CortexFileHandler(context, req) {
                 }
             }
 
+            // Ensure converted version exists if needed
+            hashResult = await conversionService.ensureConvertedVersion(hashResult, requestId);
+
             // Final check to ensure we have at least one valid storage location
             const finalPrimaryCheck = await urlExists(hashResult?.url);
             if (!finalPrimaryCheck.valid && !(await gcsUrlExists(hashResult?.gcs))) {
@@ -385,12 +392,49 @@ async function CortexFileHandler(context, req) {
                 return;
             }
 
+            // Create the response object
+            const response = {
+                message: `File '${hashResult.filename}' ${useAzure ? 'uploaded' : 'saved'} successfully.`,
+                filename: hashResult.filename,
+                url: hashResult.url,
+                gcs: hashResult.gcs,
+                hash: hashResult.hash,
+                timestamp: new Date().toISOString()
+            };
+
+            // Add converted info if it exists and has a valid URL
+            if (hashResult.converted?.url) {
+                context.log(`Adding converted info to final response`);
+                response.converted = {
+                    url: hashResult.converted.url,
+                    gcs: hashResult.converted.gcs
+                };
+            } else if (hashResult.converted?.gcs) {
+                // If we only have GCS URL, trigger conversion
+                context.log(`Only GCS URL exists for converted file, triggering conversion`);
+                const convertedResult = await conversionService.convertFile(
+                    await downloadFile(hashResult.url, path.join(os.tmpdir(), path.basename(hashResult.url))),
+                    hashResult.url
+                );
+                if (convertedResult.converted) {
+                    const convertedSaveResult = await conversionService._saveConvertedFile(convertedResult.convertedPath, requestId);
+                    response.converted = {
+                        url: convertedSaveResult.url,
+                        gcs: hashResult.converted.gcs
+                    };
+                    // Update the hash map with the new converted info
+                    await setFileStoreMap(`${hashResult.hash}_converted`, response.converted);
+                }
+            } else {
+                context.log(`No converted info to add to final response`);
+            }
+
             //update redis timestamp with current time
             await setFileStoreMap(hash, hashResult);
 
             context.res = {
                 status: 200,
-                body: hashResult,
+                body: response
             };
             return;
         }
@@ -455,75 +499,20 @@ async function CortexFileHandler(context, req) {
 
             try {
                 if (save) {
-                    let filePath;
-                    let fileName;
                     const saveResults = [];
-
-                    // First save the original file
                     const originalFileName = `${uuidv4()}_${encodeURIComponent(path.basename(downloadedFile))}`;
                     const originalFilePath = path.join(tempDir, originalFileName);
                     await fs.copyFile(downloadedFile, originalFilePath);
-                    const originalSaveResult = useAzure
-                        ? await saveFileToBlob(originalFilePath, requestId)
-                        : await moveFileToPublicFolder(originalFilePath, requestId);
-                    saveResults.push(originalSaveResult);
-
-                    // If it's a convertible document type, also save the converted version
-                    if (CONVERTED_EXTENSIONS.includes(extension)) {
-                        // Get format from query params or default to txt
-                        const format = req.query.format || 'txt';
-
-                        try {
-                            // For XLS/XLSX files, convert to CSV
-                            if (extension === '.xlsx' || extension === '.xls') {
-                                const conversion = await convertDocument(downloadedFile);
-                                if (conversion.converted) {
-                                    fileName = conversion.convertedName;
-                                    filePath = conversion.convertedPath;
-                                } else {
-                                    context.log('Excel file conversion not needed or failed');
-                                }
-                            } else {
-                                // Convert document to text in the requested format
-                                context.log(`Converting document to ${format} format...`);
-                                const conversion = await convertDocument(
-                                    downloadedFile,
-                                    originalSaveResult.url,
-                                );
-                                if (conversion.converted) {
-                                    fileName = conversion.convertedName;
-                                    filePath = conversion.convertedPath;
-                                    context.log('Document converted successfully');
-                                } else {
-                                    context.log('Document conversion not needed or failed');
-                                }
-                            }
-
-                            // save converted file to the cloud or local file system
-                            if (filePath) {
-                                context.log(
-                                    `Saving converted file to ${useAzure ? 'Azure' : 'local'} storage...`,
-                                );
-                                const convertedSaveResult = useAzure
-                                    ? await saveFileToBlob(filePath, requestId)
-                                    : await moveFileToPublicFolder(filePath, requestId);
-                                context.log('Converted file saved successfully');
-                                saveResults.push(convertedSaveResult);
-                            }
-                        } catch (conversionError) {
-                            context.log('Error during document conversion:', conversionError);
-                            // Add a warning to the result that conversion failed
-                            result.push({
-                                warning: `Failed to convert document: ${conversionError.message}`,
-                                originalFile: originalSaveResult,
-                            });
-                        }
+                    let fileUrl;
+                    if (useAzure) {
+                        const savedBlob = await saveFileToBlob(originalFilePath, requestId);
+                        fileUrl = savedBlob?.url;
+                    } else {
+                        fileUrl = await moveFileToPublicFolder(originalFilePath, requestId);
                     }
-
-                    result.push(...saveResults);
+                    saveResults.push(fileUrl);
                 } else {
-                    const format = req.query.format || 'txt';
-                    const text = await documentToText(downloadedFile, format);
+                    const text = await conversionService.convertFile(downloadedFile, uri, true);
                     result.push(...easyChunker(text));
                 }
             } catch (err) {
@@ -581,22 +570,23 @@ async function CortexFileHandler(context, req) {
             // sequential processing of chunks
             for (let index = 0; index < chunks.length; index++) {
                 const chunkPath = chunks[index];
-                let blobName;
-                let gcsUrl;
+                let chunkUrl;
+                let chunkGcsUrl;
 
                 if (useAzure) {
-                    blobName = await saveFileToBlob(chunkPath, requestId);
+                    const savedBlob = await saveFileToBlob(chunkPath, requestId);
+                    chunkUrl = savedBlob.url;
                 } else {
-                    blobName = await moveFileToPublicFolder(chunkPath, requestId);
+                    chunkUrl = await moveFileToPublicFolder(chunkPath, requestId);
                 }
 
                 // If GCS is configured, save to GCS
-                gcsUrl = await uploadChunkToGCS(chunkPath, requestId);
+                chunkGcsUrl = await uploadChunkToGCS(chunkPath, requestId);
 
                 const chunkOffset = chunkOffsets[index];
-                result.push({ uri: blobName, offset: chunkOffset, gcs: gcsUrl });
+                result.push({ uri: chunkUrl, offset: chunkOffset, gcs: chunkGcsUrl });
                 console.log(
-                    `Saved chunk as: ${blobName}${gcsUrl ? ` and ${gcsUrl}` : ''}`,
+                    `Saved chunk as: ${chunkUrl}${chunkGcsUrl ? ` and ${chunkGcsUrl}` : ''}`,
                 );
                 await sendProgress();
             }

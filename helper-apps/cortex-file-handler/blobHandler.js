@@ -16,13 +16,15 @@ import Busboy from 'busboy';
 import { v4 as uuidv4 } from 'uuid';
 const pipeline = promisify(_pipeline);
 
-import { convertDocument } from './docHelper.js';
 import { publicFolder, port, ipAddress } from './start.js';
+import { CONVERTED_EXTENSIONS } from './constants.js';
 
 // eslint-disable-next-line import/no-extraneous-dependencies
 import mime from 'mime-types';
 
 import os from 'os';
+
+import { FileConversionService } from './services/FileConversionService.js';
 
 function isBase64(str) {
     try {
@@ -72,13 +74,26 @@ function isEncoded(str) {
     return /%[0-9A-Fa-f]{2}/.test(str);
 }
 
+// Helper function to ensure GCS URLs are never encoded
+function ensureUnencodedGcsUrl(url) {
+    if (!url || !url.startsWith('gs://')) {
+        return url;
+    }
+    // Split into bucket and path parts
+    const [bucket, ...pathParts] = url.replace('gs://', '').split('/');
+    // Reconstruct URL with decoded path parts
+    return `gs://${bucket}/${pathParts.map(part => decodeURIComponent(part)).join('/')}`;
+}
+
 async function gcsUrlExists(url, defaultReturn = false) {
     try {
         if (!url || !gcs) {
             return defaultReturn; // Cannot check return
         }
 
-        const urlParts = url.replace('gs://', '').split('/');
+        // Ensure URL is not encoded
+        const unencodedUrl = ensureUnencodedGcsUrl(url);
+        const urlParts = unencodedUrl.replace('gs://', '').split('/');
         const bucketName = urlParts[0];
         const fileName = urlParts.slice(1).join('/');
 
@@ -172,13 +187,14 @@ async function saveFileToBlob(chunkPath, requestId) {
     const { containerClient } = await getBlobClient();
     // Use the filename with a UUID as the blob name
     let baseName = path.basename(chunkPath);
+    // Remove any query parameters from the filename
+    baseName = baseName.split('?')[0];
     // Only encode if not already encoded
     if (!isEncoded(baseName)) {
         baseName = encodeURIComponent(baseName);
     }
     const blobName = `${requestId}/${uuidv4()}_${baseName}`;
-    const sasToken = generateSASToken(containerClient, blobName);
-
+    
     // Create a read stream for the chunk file
     const fileStream = fs.createReadStream(chunkPath);
 
@@ -186,9 +202,14 @@ async function saveFileToBlob(chunkPath, requestId) {
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
     await blockBlobClient.uploadStream(fileStream);
 
-    // Return the full URI of the uploaded blob
-    const blobUrl = `${blockBlobClient.url}?${sasToken}`;
-    return blobUrl;
+    // Generate SAS token after successful upload
+    const sasToken = generateSASToken(containerClient, blobName);
+    
+    // Return an object with the URL property
+    return {
+        url: `${blockBlobClient.url}?${sasToken}`,
+        blobName: blobName
+    };
 }
 
 const generateSASToken = (
@@ -424,9 +445,8 @@ async function uploadToGCS(context, file, encodedFilename) {
     });
     context.log(`Uploading to GCS... ${encodedFilename}`);
     await pipeline(file, writeStream);
-    // Only encode if not already encoded
-    const isAlreadyEncoded = isEncoded(encodedFilename);
-    const gcsUrl = `gs://${GCS_BUCKETNAME}/${isAlreadyEncoded ? encodedFilename : encodeURIComponent(encodedFilename)}`;
+    // Never encode GCS URLs
+    const gcsUrl = `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
     return gcsUrl;
 }
 
@@ -460,16 +480,15 @@ async function uploadFile(
         }
 
         const ext = path.extname(filename).toLowerCase();
+        context.log(`Processing file with extension: ${ext}`);
         let uploadPath = null;
         let uploadName = null;
         let tempDir = null;
-        let convertedPath = null;
-        let convertedName = null;
-        let converted = false;
 
         // Create temp directory for file operations
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-'));
         const tempOriginal = path.join(tempDir, filename);
+        context.log(`Created temp directory: ${tempDir}`);
 
         // Optimize initial write with larger buffer
         const writeStream = fs.createWriteStream(tempOriginal, {
@@ -478,10 +497,13 @@ async function uploadFile(
         });
 
         // Use pipeline with error handling
+        context.log('Writing file to temp location...');
         await pipeline(file, writeStream);
+        context.log('File written to temp location successfully');
 
         uploadPath = tempOriginal;
         uploadName = `${requestId || uuidv4()}_${filename}`;
+        context.log(`Prepared upload name: ${uploadName}`);
 
         // Create optimized read streams with larger buffers for storage uploads
         const createOptimizedReadStream = (path) => fs.createReadStream(path, {
@@ -491,6 +513,7 @@ async function uploadFile(
 
         // Upload original in parallel with optimized streams
         const storagePromises = [];
+        context.log('Starting primary storage upload...');
         const primaryPromise = saveToLocal
             ? saveToLocalStorage(
                 context,
@@ -504,86 +527,38 @@ async function uploadFile(
                 createOptimizedReadStream(uploadPath),
             );
         storagePromises.push(
-            primaryPromise.then((url) => ({ url, type: 'primary' })),
+            primaryPromise.then((url) => {
+                context.log('Primary storage upload completed');
+                return { url, type: 'primary' };
+            }),
         );
 
         if (gcs) {
+            context.log('Starting GCS upload...');
             storagePromises.push(
                 saveToGoogleStorage(
                     context,
                     uploadName,
                     createOptimizedReadStream(uploadPath),
-                ).then((gcsUrl) => ({
-                    gcs: gcsUrl,
-                    type: 'gcs',
-                })),
+                ).then((gcsUrl) => {
+                    context.log('GCS upload completed');
+                    return {
+                        gcs: gcsUrl,
+                        type: 'gcs',
+                    };
+                }),
             );
         }
 
         // Wait for original uploads to complete
+        context.log('Waiting for all storage uploads to complete...');
         const results = await Promise.all(storagePromises);
-        const originalUrl = results.find((r) => r.type === 'primary')?.url;
-
-        // Handle conversion if needed
-        const convertedResults = [];
-        if (originalUrl) {
-            try {
-                const conversion = await convertDocument(uploadPath, originalUrl);
-                if (conversion.converted) {
-                    convertedPath = conversion.convertedPath;
-                    convertedName = conversion.convertedName;
-                    converted = true;
-
-                    // Upload converted file in parallel with optimized streams
-                    const convertedPrimaryPromise = saveToLocal
-                        ? saveToLocalStorage(
-                            context,
-                            requestId,
-                            convertedName,
-                            createOptimizedReadStream(convertedPath),
-                        )
-                        : saveToAzureStorage(
-                            context,
-                            convertedName,
-                            createOptimizedReadStream(convertedPath),
-                        );
-                    convertedResults.push(
-                        convertedPrimaryPromise.then((url) => ({
-                            convertedUrl: url,
-                            type: 'primary',
-                        })),
-                    );
-
-                    if (gcs) {
-                        convertedResults.push(
-                            saveToGoogleStorage(
-                                context,
-                                convertedName,
-                                createOptimizedReadStream(convertedPath),
-                            ).then((gcsUrl) => ({ convertedGcs: gcsUrl, type: 'gcs' })),
-                        );
-                    }
-                }
-            } catch (err) {
-                context.log('Error during document conversion:', err.message);
-            }
-        }
-
-        const convertedResultsResolved =
-      convertedResults.length > 0 ? await Promise.all(convertedResults) : [];
-
-        // Combine results
         const result = {
             message: `File '${uploadName}' ${saveToLocal ? 'saved to folder' : 'uploaded'} successfully.`,
             filename: uploadName,
             ...results.reduce((acc, result) => {
                 if (result.type === 'primary') acc.url = result.url;
-                if (result.type === 'gcs') acc.gcs = result.gcs;
-                return acc;
-            }, {}),
-            ...convertedResultsResolved.reduce((acc, result) => {
-                if (result.type === 'primary') acc.convertedUrl = result.convertedUrl;
-                if (result.type === 'gcs') acc.convertedGcs = result.convertedGcs;
+                if (result.type === 'gcs') acc.gcs = ensureUnencodedGcsUrl(result.gcs);
                 return acc;
             }, {}),
         };
@@ -592,18 +567,61 @@ async function uploadFile(
             result.hash = hash;
         }
 
+        // Initialize conversion service
+        const conversionService = new FileConversionService(context, !saveToLocal);
+
+        // Check if file needs conversion and handle it
+        if (conversionService.needsConversion(filename)) {
+            try {
+                context.log('Starting file conversion...');
+                // Convert the file
+                const conversion = await conversionService.convertFile(uploadPath, result.url);
+                context.log('File conversion completed:', conversion);
+                
+                if (conversion.converted) {
+                    context.log('Saving converted file...');
+                    // Save converted file
+                    const convertedSaveResult = await conversionService._saveConvertedFile(conversion.convertedPath, requestId);
+                    context.log('Converted file saved to primary storage');
+
+                    // If GCS is configured, also save to GCS
+                    let convertedGcsUrl;
+                    if (conversionService._isGCSConfigured()) {
+                        context.log('Saving converted file to GCS...');
+                        convertedGcsUrl = await conversionService._uploadChunkToGCS(conversion.convertedPath, requestId);
+                        context.log('Converted file saved to GCS');
+                    }
+
+                    // Add converted file info to result
+                    result.converted = {
+                        url: convertedSaveResult.url,
+                        gcs: convertedGcsUrl
+                    };
+                    context.log('Conversion process completed successfully');
+                }
+            } catch (error) {
+                console.error('Error converting file:', error);
+                context.log('Error during conversion:', error.message);
+                // Don't fail the upload if conversion fails
+            }
+        }
+
         context.res = {
             status: 200,
             body: result,
         };
 
         // Clean up temp files
+        context.log('Cleaning up temporary files...');
         if (tempDir) {
             fs.rmSync(tempDir, { recursive: true, force: true });
+            context.log('Temporary files cleaned up');
         }
 
+        context.log('Upload process completed successfully');
         resolve(result);
     } catch (error) {
+        context.log('Error in upload process:', error);
         if (body.url) {
             try {
                 await cleanup(context, [body.url]);
