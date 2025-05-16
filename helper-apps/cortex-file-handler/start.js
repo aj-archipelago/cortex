@@ -6,7 +6,25 @@ import cors from "cors";
 import { readFileSync } from "fs";
 
 import { publicIpv4 } from "public-ip";
-const ipAddress = await publicIpv4();
+
+// When running under tests we want all generated URLs to resolve to the
+// locally-running server, otherwise checks like HEAD requests inside the
+// handler will fail (because the external IP is not reachable from inside
+// the test runner).  Use the machine's public IP in normal operation, but
+// fall back to "localhost" when the environment variable NODE_ENV indicates
+// a test run.
+
+let ipAddress = "localhost";
+if (process.env.NODE_ENV !== "test") {
+  try {
+    ipAddress = await publicIpv4();
+  } catch (err) {
+    // In rare cases querying the public IP can fail (e.g. no network when
+    // running offline).  Keep the default of "localhost" in that case so we
+    // still generate valid URLs.
+    console.warn("Unable to determine public IPv4 address – defaulting to 'localhost'.", err);
+  }
+}
 
 const app = express();
 const port = process.env.PORT || 7071;

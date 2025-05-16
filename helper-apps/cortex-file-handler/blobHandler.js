@@ -328,8 +328,9 @@ function uploadBlob(
 
                         // Prepare for streaming to cloud destinations
                         const filename = info.filename;
-                        const uploadName = `${requestId || uuidv4()}_${filename}`;
-                        const azureStream = new PassThrough();
+                        const safeFilename = path.basename(filename); // Sanitize filename
+                        const uploadName = `${requestId || uuidv4()}_${safeFilename}`;
+                        const azureStream = !saveToLocal ? new PassThrough() : null;
                         const gcsStream = gcs ? new PassThrough() : null;
                         let diskWriteStream, tempDir, tempFilePath;
                         let diskWritePromise;
@@ -338,11 +339,34 @@ function uploadBlob(
 
                         // Start local disk write in parallel (non-blocking for response)
                         if (saveToLocal) {
-                            tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-'));
-                            tempFilePath = path.join(tempDir, filename);
-                            diskWriteStream = fs.createWriteStream(tempFilePath, {
-                                highWaterMark: 1024 * 1024,
-                                autoClose: true,
+                            try {
+                                tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-'));
+                            } catch (err) {
+                                console.error('Error creating tempDir:', err);
+                                errorOccurred = true;
+                                reject(err);
+                                return;
+                            }
+                            tempFilePath = path.join(tempDir, safeFilename);
+                            console.log('Temp dir:', tempDir, 'Original filename:', filename, 'Safe filename:', safeFilename, 'Temp file path:', tempFilePath);
+                            console.log('About to create write stream for:', tempFilePath);
+                            try {
+                                diskWriteStream = fs.createWriteStream(tempFilePath, {
+                                    highWaterMark: 1024 * 1024,
+                                    autoClose: true,
+                                });
+                                console.log('Write stream created successfully for:', tempFilePath);
+                            } catch (err) {
+                                console.error('Error creating write stream:', err, 'Temp dir exists:', fs.existsSync(tempDir));
+                                errorOccurred = true;
+                                reject(err);
+                                return;
+                            }
+                            diskWriteStream.on('error', (err) => {
+                                console.error('Disk write stream error:', err);
+                            });
+                            diskWriteStream.on('close', () => {
+                                console.log('Disk write stream closed for:', tempFilePath);
                             });
                             diskWritePromise = new Promise((res, rej) => {
                                 diskWriteStream.on('finish', res);
@@ -356,7 +380,7 @@ function uploadBlob(
                         // Pipe incoming file to all destinations
                         let receivedAnyData = false;
                         file.on('data', () => { receivedAnyData = true; });
-                        file.pipe(azureStream);
+                        if (azureStream) file.pipe(azureStream);
                         if (gcsStream) file.pipe(gcsStream);
                         if (diskWriteStream) file.pipe(diskWriteStream);
 
@@ -365,7 +389,7 @@ function uploadBlob(
                             if (!receivedAnyData) {
                                 errorOccurred = true;
                                 // Abort all streams
-                                azureStream.destroy();
+                                if (azureStream) azureStream.destroy();
                                 if (gcsStream) gcsStream.destroy();
                                 if (diskWriteStream) diskWriteStream.destroy();
                                 const err = new Error('Invalid file: file is empty');
@@ -375,20 +399,23 @@ function uploadBlob(
                         });
 
                         // Start cloud uploads immediately
-                        const azurePromise = saveToAzureStorage(context, uploadName, azureStream)
-                            .catch(async (err) => {
-                                cloudUploadError = err;
-                                // Fallback: try from disk if available
-                                if (diskWritePromise) {
-                                    await diskWritePromise;
-                                    const diskStream = fs.createReadStream(tempFilePath, {
-                                        highWaterMark: 1024 * 1024,
-                                        autoClose: true,
-                                    });
-                                    return saveToAzureStorage(context, uploadName, diskStream);
-                                }
-                                throw err;
-                            });
+                        let azurePromise;
+                        if (!saveToLocal) {
+                            azurePromise = saveToAzureStorage(context, uploadName, azureStream)
+                                .catch(async (err) => {
+                                    cloudUploadError = err;
+                                    // Fallback: try from disk if available
+                                    if (diskWritePromise) {
+                                        await diskWritePromise;
+                                        const diskStream = fs.createReadStream(tempFilePath, {
+                                            highWaterMark: 1024 * 1024,
+                                            autoClose: true,
+                                        });
+                                        return saveToAzureStorage(context, uploadName, diskStream);
+                                    }
+                                    throw err;
+                                });
+                        }
                         let gcsPromise;
                         if (gcsStream) {
                             gcsPromise = saveToGoogleStorage(context, uploadName, gcsStream)
@@ -409,7 +436,10 @@ function uploadBlob(
                         // Wait for cloud uploads to finish
                         try {
                             const results = await Promise.all([
-                                azurePromise.then((url) => ({ url, type: 'primary' })),
+                                azurePromise ? azurePromise.then((url) => ({ url, type: 'primary' })) : null,
+                                (!azurePromise && saveToLocal)
+                                    ? Promise.resolve({ url: null, type: 'primary-local' }) // placeholder for local, url handled later
+                                    : null,
                                 gcsPromise ? gcsPromise.then((gcs) => ({ gcs, type: 'gcs' })) : null,
                             ].filter(Boolean));
 
@@ -423,6 +453,28 @@ function uploadBlob(
                                 }, {}),
                             };
                             if (hash) result.hash = hash;
+
+                            // If saving locally, wait for disk write to finish and then move to public folder
+                            if (saveToLocal) {
+                                try {
+                                    if (diskWritePromise) {
+                                        await diskWritePromise; // ensure file fully written
+                                    }
+                                    const localUrl = await saveToLocalStorage(
+                                        context,
+                                        requestId,
+                                        uploadName,
+                                        fs.createReadStream(tempFilePath, {
+                                            highWaterMark: 1024 * 1024,
+                                            autoClose: true,
+                                        }),
+                                    );
+                                    result.url = localUrl;
+                                } catch (err) {
+                                    console.error('Error saving to local storage:', err);
+                                    throw err;
+                                }
+                            }
 
                             // Respond as soon as cloud uploads are done
                             context.res = { status: 200, body: result };
