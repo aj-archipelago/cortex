@@ -8,12 +8,6 @@ import logger from '../../lib/logger.js';
 import CortexRequest from '../../lib/cortexRequest.js';
 import { downloadFile, deleteTempPath, convertSrtToText, alignSubtitles, getMediaChunks, markCompletedForCleanUp  } from '../../lib/util.js';
 
-const WHISPER_TS_API_URL  = config.get('whisperTSApiUrl');
-if(WHISPER_TS_API_URL){
-    logger.info(`WHISPER API URL using ${WHISPER_TS_API_URL}`);
-}else{
-    logger.warn(`WHISPER API URL not set using default OpenAI API Whisper`);
-}
 
 const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
 
@@ -41,7 +35,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 const response_format = responseFormat || 'text';
 
                 const whisperInitCallback = (requestInstance) => {
-
                     const formData = new FormData();
                     formData.append('file', fs.createReadStream(chunk));
                     formData.append('model', requestInstance.params.model);
@@ -51,7 +44,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
                     requestInstance.data = formData;
                     requestInstance.addHeaders = { ...formData.getHeaders() };
-
                 };
 
                 cortexRequest.initCallback = whisperInitCallback;
@@ -64,7 +56,6 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         }
 
         const processTS = async (uri) => {
-
             const tsparams = { fileurl:uri };
             const { language } = parameters;
             if(language) tsparams.language = language;
@@ -75,37 +66,18 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             tsparams.word_timestamps = !wordTimestamped ? "False" : wordTimestamped;
 
             const cortexRequest = new CortexRequest({ pathwayResolver });
-            cortexRequest.url = WHISPER_TS_API_URL;
-            cortexRequest.data = tsparams;
             const whisperInitCallback = (requestInstance) => {
-                requestInstance.url = WHISPER_TS_API_URL;
                 requestInstance.data = tsparams;
             };
             cortexRequest.initCallback = whisperInitCallback;
 
-            const MAX_RETRIES = 3;
-            let attempt = 0;
-            let res = null;
-            while(attempt < MAX_RETRIES){
-                sendProgress(true, true);
-                try {
-                    res = await this.executeRequest(cortexRequest);
-                    if (!res) {
-                        throw new Error('Received null or empty response');
-                    }
-                    if(res?.statusCode && res?.statusCode >= 400){
-                        throw new Error(res?.message || 'An error occurred.');
-                    }
-                    break;
-                }
-                catch(err){
-                    logger.warn(`Error calling timestamped API: ${err}. Retrying ${attempt+1} of ${MAX_RETRIES}...`);
-                    attempt++;
-                }
+            sendProgress(true, true);
+            const res = await this.executeRequest(cortexRequest);
+            if (!res) {
+                throw new Error('Received null or empty response');
             }
-
-            if (res?.statusCode && res?.statusCode >= 400) {
-                throw new Error(res.message || 'An error occurred.');
+            if(res?.statusCode && res?.statusCode >= 400){
+                throw new Error(res?.message || 'An error occurred.');
             }
 
             if(!wordTimestamped && !responseFormat){ 
@@ -151,71 +123,71 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             });
         }
 
-async function processURI(uri) {
-    let result = null;
-    let _promise = null;
-    let errorOccurred = false;
+        const processURI = async (uri) => {
+            let result = null;
+            let _promise = null;
+            let errorOccurred = false;
 
-    const intervalId = setInterval(() => sendProgress(true), 3000);
+            const intervalId = setInterval(() => sendProgress(true), 3000);
 
-    //const useTS = WHISPER_TS_API_URL && (wordTimestamped || highlightWords); // use TS API only for word timestamped
-    const useTS = !!WHISPER_TS_API_URL; // use TS API always if URL is set
+            // use Timestamped API if model is oai-whisper-ts
+            const useTS = this.modelName === 'oai-whisper-ts';
 
-    if (useTS) {
-        _promise = processTS;
-    } else {
-        _promise = processChunk;
-    }
+            if (useTS) {
+                _promise = processTS;
+            } else {
+                _promise = processChunk;
+            }
 
-    await _promise(uri).then((ts) => {
-        result = ts;
-    }).catch((err) => {
-        errorOccurred = err;
-    }).finally(() => {
-        clearInterval(intervalId);
-        sendProgress();
-    });
+            await _promise(uri).then((ts) => {
+                result = ts;
+            }).catch((err) => {
+                errorOccurred = err;
+            }).finally(() => {
+                clearInterval(intervalId);
+                sendProgress();
+            });
 
-    if(errorOccurred) {
-        throw errorOccurred;
-    }
+            if(errorOccurred) {
+                throw errorOccurred;
+            }
 
-    return result;
-}
-
-let offsets = [];
-let uris = []
-
-try {
-    const mediaChunks = await getMediaChunks(file, requestId);
-    
-    if (!mediaChunks || !mediaChunks.length) {
-        throw new Error(`Error in getting chunks from media helper for file ${file}`);
-    }
-
-    uris = mediaChunks.map((chunk) => chunk?.uri || chunk);
-    offsets = mediaChunks.map((chunk, index) => chunk?.offset || index * OFFSET_CHUNK);
-
-    totalCount = mediaChunks.length + 1; // total number of chunks that will be processed
-
-    const batchSize = 4;
-    sendProgress();
-
-    for (let i = 0; i < uris.length; i += batchSize) {
-        const currentBatchURIs = uris.slice(i, i + batchSize);
-        const promisesToProcess = currentBatchURIs.map(uri => processURI(uri));
-        const results = await Promise.all(promisesToProcess); 
-          
-        for(const res of results) {
-            result.push(res);
+            return result;
         }
-    }
 
-} catch (error) {
-    const errMsg = `Transcribe error: ${error?.response?.data || error?.message || error}`;
-    logger.error(errMsg);
-    return errMsg;
-}
+        let offsets = [];
+        let uris = []
+
+        try {
+            const mediaChunks = await getMediaChunks(file, requestId);
+            
+            if (!mediaChunks || !mediaChunks.length) {
+                throw new Error(`Error in getting chunks from media helper for file ${file}`);
+            }
+
+            uris = mediaChunks.map((chunk) => chunk?.uri || chunk);
+            offsets = mediaChunks.map((chunk, index) => chunk?.offset || index * OFFSET_CHUNK);
+
+            totalCount = mediaChunks.length + 1; // total number of chunks that will be processed
+
+            const batchSize = 4;
+            sendProgress();
+
+            for (let i = 0; i < uris.length; i += batchSize) {
+                const currentBatchURIs = uris.slice(i, i + batchSize);
+                const promisesToProcess = currentBatchURIs.map(uri => processURI(uri));
+                const results = await Promise.all(promisesToProcess); 
+                
+                for(const res of results) {
+                    result.push(res);
+                }
+            }
+
+        } catch (error) {
+            const errMsg = `Transcribe error: ${error?.response?.data || error?.message || error}`;
+            logger.error(errMsg);
+            return errMsg;
+        }
         finally {
             try {
                 for (const chunk of chunks) {
