@@ -1,6 +1,6 @@
 {
   "name": "@aj-archipelago/cortex-file-handler",
-  "version": "1.0.18",
+  "version": "1.1.01",
   "description": "File handling service for Cortex - handles file uploads, media chunking, and document processing",
   "type": "module",
   "scripts": {
@@ -39,7 +39,7 @@
   },
   "ava": {
     "files": [
-      "tests/**/*",
+      "tests/**/*.test.js",
       "!tests/test-files/**/*",
       "!tests/test-docs/**/*",
       "!tests/mocks/**/*"

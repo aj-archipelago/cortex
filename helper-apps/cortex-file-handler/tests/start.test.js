@@ -12,6 +12,7 @@ import FormData from 'form-data';
 import { v4 as uuidv4 } from 'uuid';
 
 import { port, publicFolder, ipAddress } from '../start.js';
+import { cleanupHashAndFile, getFolderNameFromUrl } from './testUtils.helper.js';
 
 // Add these helper functions at the top after imports
 const baseUrl = `http://localhost:${port}/api/CortexFileHandler`;
@@ -61,18 +62,6 @@ async function cleanupUploadedFile(t, url) {
         timeout: 5000,
     });
     t.is(verifyResponse.status, 404, 'File should not exist after deletion');
-}
-
-// Helper function to get folder name from URL
-function getFolderNameFromUrl(url) {
-    const urlObj = new URL(url);
-    const parts = urlObj.pathname.split('/');
-    // For Azure URLs (contains 127.0.0.1:10000), folder name is at index 3
-    if (url.includes('127.0.0.1:10000')) {
-        return parts[3].split('_')[0];
-    }
-    // For local storage URLs, folder name is at index 2
-    return parts[2].split('_')[0];
 }
 
 // Helper function to upload files
@@ -492,51 +481,47 @@ test.serial('should handle successful file upload with hash', async (t) => {
     form.append('file', Buffer.from(testContent), 'test.txt');
     form.append('hash', testHash);
 
-    // Upload file with hash
-    const uploadResponse = await axios.post(
-        `http://localhost:${port}/api/CortexFileHandler`,
-        form,
-        {
-            headers: {
-                ...form.getHeaders(),
-                'Content-Type': 'multipart/form-data',
+    let uploadedUrl;
+    try {
+        // Upload file with hash
+        const uploadResponse = await axios.post(
+            `http://localhost:${port}/api/CortexFileHandler`,
+            form,
+            {
+                headers: {
+                    ...form.getHeaders(),
+                    'Content-Type': 'multipart/form-data',
+                },
+                validateStatus: (status) => true,
+                timeout: 5000,
             },
-            validateStatus: (status) => true,
-            timeout: 5000,
-        },
-    );
+        );
 
-    t.is(uploadResponse.status, 200, 'Upload should succeed');
-    t.truthy(uploadResponse.data.url, 'Response should contain file URL');
+        t.is(uploadResponse.status, 200, 'Upload should succeed');
+        t.truthy(uploadResponse.data.url, 'Response should contain file URL');
+        uploadedUrl = uploadResponse.data.url;
 
-    // Wait a bit for Redis to be updated
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+        // Wait a bit for Redis to be updated
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    // Verify hash exists and returns the file info
-    const hashCheckResponse = await axios.get(
-        `http://localhost:${port}/api/CortexFileHandler`,
-        {
-            params: {
-                hash: testHash,
-                checkHash: true,
+        // Verify hash exists and returns the file info
+        const hashCheckResponse = await axios.get(
+            `http://localhost:${port}/api/CortexFileHandler`,
+            {
+                params: {
+                    hash: testHash,
+                    checkHash: true,
+                },
+                validateStatus: (status) => true,
+                timeout: 5000,
             },
-            validateStatus: (status) => true,
-            timeout: 5000,
-        },
-    );
+        );
 
-    t.is(
-        hashCheckResponse.status,
-        404,
-        'Hash check should return 404 for new hash',
-    );
-    t.is(
-        hashCheckResponse.data,
-        `Hash ${testHash} not found`,
-        'Should indicate hash not found',
-    );
-
-    await cleanupUploadedFile(t, uploadResponse.data.url);
+        t.is(hashCheckResponse.status, 200, 'Hash check should return 200 for uploaded hash');
+        t.truthy(hashCheckResponse.data.url, 'Hash check should return file URL');
+    } finally {
+        await cleanupHashAndFile(testHash, uploadedUrl, baseUrl);
+    }
 });
 
 test.serial('should handle hash clearing', async (t) => {
@@ -565,7 +550,7 @@ test.serial('should handle hash clearing', async (t) => {
     // Wait a bit for Redis to be updated
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    // Clear the hash
+    // Clear the hash (should succeed)
     const clearResponse = await axios.get(
         `http://localhost:${port}/api/CortexFileHandler`,
         {
@@ -578,16 +563,23 @@ test.serial('should handle hash clearing', async (t) => {
         },
     );
 
-    t.is(
-        clearResponse.status,
-        404,
-        'Hash clearing should return 404 for new hash',
+    t.is(clearResponse.status, 200, 'Hash clearing should return 200 for existing hash');
+    t.is(clearResponse.data, `Hash ${testHash} removed`, 'Should indicate hash was removed');
+
+    // Second clear (should return 404)
+    const clearAgainResponse = await axios.get(
+        `http://localhost:${port}/api/CortexFileHandler`,
+        {
+            params: {
+                hash: testHash,
+                clearHash: true,
+            },
+            validateStatus: (status) => true,
+            timeout: 5000,
+        },
     );
-    t.is(
-        clearResponse.data,
-        `Hash ${testHash} not found`,
-        'Should indicate hash not found',
-    );
+    t.is(clearAgainResponse.status, 404, 'Hash clearing should return 404 for already removed hash');
+    t.is(clearAgainResponse.data, `Hash ${testHash} not found`, 'Should indicate hash not found');
 
     // Verify hash no longer exists
     const verifyResponse = await axios.get(
@@ -654,10 +646,8 @@ test.serial('should handle upload with empty file', async (t) => {
         },
     );
 
-    t.is(response.status, 200, 'Should accept empty file');
-    t.truthy(response.data.url, 'Should return URL for empty file');
-
-    await cleanupUploadedFile(t, response.data.url);
+    t.is(response.status, 400, 'Should reject empty file');
+    t.is(response.data, 'Invalid file: file is empty', 'Should return proper error message');
 });
 
 test.serial(
@@ -1186,55 +1176,51 @@ test.serial(
         form.append('file', Buffer.from('test content'), 'test.txt');
         form.append('hash', testHash);
 
-        // Upload file with hash through legacy endpoint
-        const uploadResponse = await axios.post(
-            `http://localhost:${port}/api/MediaFileChunker`,
-            form,
-            {
-                headers: {
-                    ...form.getHeaders(),
-                    'Content-Type': 'multipart/form-data',
+        let uploadedUrl;
+        try {
+            // Upload file with hash through legacy endpoint
+            const uploadResponse = await axios.post(
+                `http://localhost:${port}/api/MediaFileChunker`,
+                form,
+                {
+                    headers: {
+                        ...form.getHeaders(),
+                        'Content-Type': 'multipart/form-data',
+                    },
+                    validateStatus: (status) => true,
+                    timeout: 5000,
                 },
-                validateStatus: (status) => true,
-                timeout: 5000,
-            },
-        );
+            );
 
-        t.is(
-            uploadResponse.status,
-            200,
-            'Upload should succeed through legacy endpoint',
-        );
-        t.truthy(uploadResponse.data.url, 'Response should contain file URL');
+            t.is(
+                uploadResponse.status,
+                200,
+                'Upload should succeed through legacy endpoint',
+            );
+            t.truthy(uploadResponse.data.url, 'Response should contain file URL');
+            uploadedUrl = uploadResponse.data.url;
 
-        // Wait a bit for Redis to be updated
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+            // Wait a bit for Redis to be updated
+            await new Promise((resolve) => setTimeout(resolve, 1000));
 
-        // Check hash through legacy endpoint
-        const hashCheckResponse = await axios.get(
-            `http://localhost:${port}/api/MediaFileChunker`,
-            {
-                params: {
-                    hash: testHash,
-                    checkHash: true,
+            // Check hash through legacy endpoint
+            const hashCheckResponse = await axios.get(
+                `http://localhost:${port}/api/MediaFileChunker`,
+                {
+                    params: {
+                        hash: testHash,
+                        checkHash: true,
+                    },
+                    validateStatus: (status) => true,
+                    timeout: 5000,
                 },
-                validateStatus: (status) => true,
-                timeout: 5000,
-            },
-        );
+            );
 
-        t.is(
-            hashCheckResponse.status,
-            404,
-            'Hash check should return 404 for new hash',
-        );
-        t.is(
-            hashCheckResponse.data,
-            `Hash ${testHash} not found`,
-            'Should indicate hash not found',
-        );
-
-        await cleanupUploadedFile(t, uploadResponse.data.url);
+            t.is(hashCheckResponse.status, 200, 'Hash check should return 200 for uploaded hash');
+            t.truthy(hashCheckResponse.data.url, 'Hash check should return file URL');
+        } finally {
+            await cleanupHashAndFile(testHash, uploadedUrl, `http://localhost:${port}/api/MediaFileChunker`);
+        }
     },
 );
 

@@ -326,41 +326,116 @@ function uploadBlob(
                             return;
                         }
 
-                        // Check if file is empty
-                        let fileSize = 0;
-                        file.on('data', (chunk) => {
-                            fileSize += chunk.length;
-                        });
+                        // Prepare for streaming to cloud destinations
+                        const filename = info.filename;
+                        const uploadName = `${requestId || uuidv4()}_${filename}`;
+                        const azureStream = new PassThrough();
+                        const gcsStream = gcs ? new PassThrough() : null;
+                        let diskWriteStream, tempDir, tempFilePath;
+                        let diskWritePromise;
+                        let diskWriteError = null;
+                        let cloudUploadError = null;
 
+                        // Start local disk write in parallel (non-blocking for response)
+                        if (saveToLocal) {
+                            tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'upload-'));
+                            tempFilePath = path.join(tempDir, filename);
+                            diskWriteStream = fs.createWriteStream(tempFilePath, {
+                                highWaterMark: 1024 * 1024,
+                                autoClose: true,
+                            });
+                            diskWritePromise = new Promise((res, rej) => {
+                                diskWriteStream.on('finish', res);
+                                diskWriteStream.on('error', (err) => {
+                                    diskWriteError = err;
+                                    rej(err);
+                                });
+                            });
+                        }
+
+                        // Pipe incoming file to all destinations
+                        let receivedAnyData = false;
+                        file.on('data', () => { receivedAnyData = true; });
+                        file.pipe(azureStream);
+                        if (gcsStream) file.pipe(gcsStream);
+                        if (diskWriteStream) file.pipe(diskWriteStream);
+
+                        // Listen for end event to check for empty file
                         file.on('end', async () => {
-                            if (fileSize === 0) {
+                            if (!receivedAnyData) {
                                 errorOccurred = true;
+                                // Abort all streams
+                                azureStream.destroy();
+                                if (gcsStream) gcsStream.destroy();
+                                if (diskWriteStream) diskWriteStream.destroy();
                                 const err = new Error('Invalid file: file is empty');
                                 err.status = 400;
                                 reject(err);
-                                return;
-                            }
-
-                            try {
-                                const result = await uploadFile(
-                                    context,
-                                    requestId,
-                                    body,
-                                    saveToLocal,
-                                    file,
-                                    info.filename,
-                                    resolve,
-                                    hash,
-                                );
-                                resolve(result);
-                            } catch (error) {
-                                if (errorOccurred) return;
-                                errorOccurred = true;
-                                const err = new Error('Error processing file upload.');
-                                err.status = 500;
-                                reject(err);
                             }
                         });
+
+                        // Start cloud uploads immediately
+                        const azurePromise = saveToAzureStorage(context, uploadName, azureStream)
+                            .catch(async (err) => {
+                                cloudUploadError = err;
+                                // Fallback: try from disk if available
+                                if (diskWritePromise) {
+                                    await diskWritePromise;
+                                    const diskStream = fs.createReadStream(tempFilePath, {
+                                        highWaterMark: 1024 * 1024,
+                                        autoClose: true,
+                                    });
+                                    return saveToAzureStorage(context, uploadName, diskStream);
+                                }
+                                throw err;
+                            });
+                        let gcsPromise;
+                        if (gcsStream) {
+                            gcsPromise = saveToGoogleStorage(context, uploadName, gcsStream)
+                                .catch(async (err) => {
+                                    cloudUploadError = err;
+                                    if (diskWritePromise) {
+                                        await diskWritePromise;
+                                        const diskStream = fs.createReadStream(tempFilePath, {
+                                            highWaterMark: 1024 * 1024,
+                                            autoClose: true,
+                                        });
+                                        return saveToGoogleStorage(context, uploadName, diskStream);
+                                    }
+                                    throw err;
+                                });
+                        }
+
+                        // Wait for cloud uploads to finish
+                        try {
+                            const results = await Promise.all([
+                                azurePromise.then((url) => ({ url, type: 'primary' })),
+                                gcsPromise ? gcsPromise.then((gcs) => ({ gcs, type: 'gcs' })) : null,
+                            ].filter(Boolean));
+
+                            const result = {
+                                message: `File '${uploadName}' uploaded successfully.`,
+                                filename: uploadName,
+                                ...results.reduce((acc, result) => {
+                                    if (result.type === 'primary') acc.url = result.url;
+                                    if (result.type === 'gcs') acc.gcs = ensureUnencodedGcsUrl(result.gcs);
+                                    return acc;
+                                }, {}),
+                            };
+                            if (hash) result.hash = hash;
+
+                            // Respond as soon as cloud uploads are done
+                            context.res = { status: 200, body: result };
+                            resolve(result);
+                        } catch (err) {
+                            errorOccurred = true;
+                            reject(err);
+                        } finally {
+                            // Clean up temp file if written
+                            if (tempDir) {
+                                fs.rmSync(tempDir, { recursive: true, force: true });
+                            }
+                        }
                     });
 
                     busboy.on('error', (error) => {

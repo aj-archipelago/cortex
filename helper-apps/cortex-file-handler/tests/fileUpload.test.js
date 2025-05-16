@@ -7,6 +7,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import { port } from '../start.js';
 import { gcs } from '../blobHandler.js';
+import { cleanupHashAndFile } from './testUtils.helper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -67,6 +68,12 @@ async function verifyGCSFile(gcsUrl) {
     }
 }
 
+// Helper function to fetch file content from a URL
+async function fetchFileContent(url) {
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    return Buffer.from(response.data);
+}
+
 // Setup: Create test directory
 test.before(async (t) => {
     const testDir = path.join(__dirname, 'test-files');
@@ -81,7 +88,8 @@ test.after.always(async (t) => {
 
 // Basic File Upload Tests
 test.serial('should handle basic file upload', async (t) => {
-    const filePath = await createTestFile('test content', 'txt');
+    const fileContent = 'test content';
+    const filePath = await createTestFile(fileContent, 'txt');
     const requestId = uuidv4();
     
     try {
@@ -90,21 +98,31 @@ test.serial('should handle basic file upload', async (t) => {
         t.is(response.status, 200);
         t.truthy(response.data.url);
         t.truthy(response.data.filename);
+
+        // Verify file content matches
+        const uploadedContent = await fetchFileContent(response.data.url);
+        t.deepEqual(uploadedContent, Buffer.from(fileContent), 'Uploaded file content should match');
     } finally {
         fs.unlinkSync(filePath);
     }
 });
 
 test.serial('should handle file upload with hash', async (t) => {
-    const filePath = await createTestFile('test content', 'txt');
+    const fileContent = 'test content';
+    const filePath = await createTestFile(fileContent, 'txt');
     const requestId = uuidv4();
     const hash = 'test-hash-' + uuidv4();
-    
+    let uploadedUrl;
+    let convertedUrl;
     try {
         // First upload the file
         const response = await uploadFile(filePath, requestId, hash);
         t.is(response.status, 200);
         t.truthy(response.data.url);
+        uploadedUrl = response.data.url;
+        if (response.data.converted && response.data.converted.url) {
+            convertedUrl = response.data.converted.url;
+        }
         console.log('Upload hash response.data', response.data)
         
         // Wait for Redis operations to complete and verify storage
@@ -129,30 +147,42 @@ test.serial('should handle file upload with hash', async (t) => {
         t.is(checkResponse.status, 200);
         t.truthy(checkResponse.data.hash);
         
-        // Verify file exists
-        const fileResponse = await axios.get(response.data.url);
+        // Verify file exists and content matches
+        const fileResponse = await axios.get(response.data.url, { responseType: 'arraybuffer' });
         t.is(fileResponse.status, 200);
+        t.deepEqual(Buffer.from(fileResponse.data), Buffer.from(fileContent), 'Uploaded file content should match');
     } finally {
         fs.unlinkSync(filePath);
+        await cleanupHashAndFile(hash, uploadedUrl, baseUrl);
+        if (convertedUrl) {
+            await cleanupHashAndFile(`${hash}_converted`, convertedUrl, baseUrl);
+        }
     }
 });
 
 // Document Processing Tests
 test.serial('should handle PDF document upload and conversion', async (t) => {
     // Create a simple PDF file
-    const filePath = await createTestFile('%PDF-1.4\nTest PDF content', 'pdf');
+    const fileContent = '%PDF-1.4\nTest PDF content';
+    const filePath = await createTestFile(fileContent, 'pdf');
     const requestId = uuidv4();
     
     try {
         const response = await uploadFile(filePath, requestId);
         t.is(response.status, 200);
         t.truthy(response.data.url);
+
+        // Verify original PDF content matches
+        const uploadedContent = await fetchFileContent(response.data.url);
+        t.deepEqual(uploadedContent, Buffer.from(fileContent), 'Uploaded PDF content should match');
         
         // Check if converted version exists
         if (response.data.converted) {
             t.truthy(response.data.converted.url);
-            const convertedResponse = await axios.get(response.data.converted.url);
+            const convertedResponse = await axios.get(response.data.converted.url, { responseType: 'arraybuffer' });
             t.is(convertedResponse.status, 200);
+            // For conversion, just check non-empty
+            t.true(Buffer.from(convertedResponse.data).length > 0, 'Converted file should not be empty');
         }
     } finally {
         fs.unlinkSync(filePath);
@@ -162,7 +192,8 @@ test.serial('should handle PDF document upload and conversion', async (t) => {
 // Media Chunking Tests
 test.serial('should handle media file chunking', async (t) => {
     // Create a large test file to trigger chunking
-    const filePath = await createTestFile('x'.repeat(1024 * 1024), 'mp4');
+    const chunkContent = 'x'.repeat(1024 * 1024);
+    const filePath = await createTestFile(chunkContent, 'mp4');
     const requestId = uuidv4();
     
     try {
@@ -179,9 +210,12 @@ test.serial('should handle media file chunking', async (t) => {
                 t.truthy(chunk.uri);
                 t.truthy(chunk.offset);
                 
-                // Verify chunk exists
-                const chunkResponse = await axios.get(chunk.uri);
+                // Verify chunk exists and content matches
+                const chunkResponse = await axios.get(chunk.uri, { responseType: 'arraybuffer' });
                 t.is(chunkResponse.status, 200);
+                // Each chunk should be a slice of the original content
+                const expectedChunk = Buffer.from(chunkContent).slice(chunk.offset, chunk.offset + chunk.length || undefined);
+                t.deepEqual(Buffer.from(chunkResponse.data), expectedChunk, 'Chunk content should match original');
                 
                 // If GCS is configured, verify backup
                 if (isGCSConfigured() && chunk.gcs) {
@@ -192,8 +226,9 @@ test.serial('should handle media file chunking', async (t) => {
         } else {
             // Single file response
             t.truthy(response.data.url);
-            const fileResponse = await axios.get(response.data.url);
+            const fileResponse = await axios.get(response.data.url, { responseType: 'arraybuffer' });
             t.is(fileResponse.status, 200);
+            t.deepEqual(Buffer.from(fileResponse.data), Buffer.from(chunkContent), 'Uploaded file content should match');
         }
     } finally {
         fs.unlinkSync(filePath);
