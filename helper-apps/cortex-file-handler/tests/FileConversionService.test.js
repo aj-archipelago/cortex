@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import test from 'ava';
 import axios from 'axios';
 import XLSX from 'xlsx';
-import { FileConversionService } from '../services/FileConversionService.js';
+import { FileConversionService } from '../src/services/FileConversionService.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

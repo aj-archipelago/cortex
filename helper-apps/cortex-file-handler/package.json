@@ -3,9 +3,10 @@
   "version": "1.1.03",
   "description": "File handling service for Cortex - handles file uploads, media chunking, and document processing",
   "type": "module",
+  "main": "src/index.js",
   "scripts": {
-    "start": "node start.js",
-    "dev": "node -r dotenv/config start.js",
+    "start": "node src/start.js",
+    "dev": "node -r dotenv/config src/start.js",
     "test": "DOTENV_CONFIG_PATH=.env.test NODE_ENV=test node -r dotenv/config node_modules/ava/entrypoints/cli.mjs",
     "test:azure": "DOTENV_CONFIG_PATH=.env.test.azure NODE_ENV=test ./scripts/test-azure.sh",
     "test:watch": "DOTENV_CONFIG_PATH=.env.test NODE_ENV=test node -r dotenv/config node_modules/ava/entrypoints/cli.mjs --watch",

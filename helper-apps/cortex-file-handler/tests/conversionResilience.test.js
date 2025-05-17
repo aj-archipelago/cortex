@@ -5,11 +5,11 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import XLSX from 'xlsx';
 
-import { port } from '../start.js';
-import { gcs, GCS_BUCKETNAME } from '../blobHandler.js';
-import { getFileStoreMap, setFileStoreMap } from '../redis.js';
+import { port } from '../src/start.js';
+import { gcs, GCS_BUCKETNAME } from '../src/blobHandler.js';
+import { getFileStoreMap, setFileStoreMap } from '../src/redis.js';
 import { cleanupHashAndFile } from './testUtils.helper.js';
-import { gcsUrlExists } from '../blobHandler.js';
+import { gcsUrlExists } from '../src/blobHandler.js';
 
 const baseUrl = `http://localhost:${port}/api/CortexFileHandler`;
 

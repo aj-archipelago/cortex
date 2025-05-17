@@ -33,7 +33,7 @@ const publicFolder = join(dirname(fileURLToPath(import.meta.url)), "files");
 // Get version from package.json
 const packageJson = JSON.parse(
   readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), "package.json"),
+    join(dirname(fileURLToPath(import.meta.url)), "../package.json"),
     "utf8",
   ),
 );

@@ -942,47 +942,85 @@ async function cleanupGCS(urls = null) {
 }
 
 async function deleteGCS(blobName) {
-    if (!blobName) throw new Error('Missing blobName parameter');
-    if (!gcs) throw new Error('Google Cloud Storage is not initialized');
+    if (!blobName) {
+        console.log('[deleteGCS] No blobName provided, skipping GCS deletion');
+        return;
+    }
+
+    if (!gcs) {
+        console.log('[deleteGCS] GCS not initialized, skipping deletion');
+        return;
+    }
 
     try {
-        const bucket = gcs.bucket(GCS_BUCKETNAME);
-        const deletedFiles = [];
-
         if (process.env.STORAGE_EMULATOR_HOST) {
-            // For fake GCS server, use HTTP API directly
-            const response = await axios.get(
-                `http://localhost:4443/storage/v1/b/${GCS_BUCKETNAME}/o`,
-                { params: { prefix: blobName } },
-            );
-            if (response.data.items) {
-                for (const item of response.data.items) {
-                    await axios.delete(
-                        `http://localhost:4443/storage/v1/b/${GCS_BUCKETNAME}/o/${encodeURIComponent(item.name)}`,
-                        { validateStatus: (status) => status === 200 || status === 404 },
-                    );
-                    deletedFiles.push(item.name);
+            console.log(`[deleteGCS] Using emulator at ${process.env.STORAGE_EMULATOR_HOST}`);
+            console.log(`[deleteGCS] Attempting to delete files with prefix: ${blobName}`);
+
+            // List files first
+            const listUrl = `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${GCS_BUCKETNAME}/o?prefix=${blobName}`;
+            console.log(`[deleteGCS] Listing files with URL: ${listUrl}`);
+            
+            const listResponse = await axios.get(listUrl, {
+                validateStatus: (status) => true,
+            });
+            console.log(`[deleteGCS] List response status: ${listResponse.status}`);
+            console.log(`[deleteGCS] List response data: ${JSON.stringify(listResponse.data)}`);
+
+            if (listResponse.status === 200 && listResponse.data.items) {
+                console.log(`[deleteGCS] Found ${listResponse.data.items.length} items to delete`);
+                
+                // Delete each file
+                for (const item of listResponse.data.items) {
+                    const deleteUrl = `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${GCS_BUCKETNAME}/o/${encodeURIComponent(item.name)}`;
+                    console.log(`[deleteGCS] Deleting file: ${item.name}`);
+                    console.log(`[deleteGCS] Delete URL: ${deleteUrl}`);
+                    
+                    const deleteResponse = await axios.delete(deleteUrl, {
+                        validateStatus: (status) => true,
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+                    console.log(`[deleteGCS] Delete response status: ${deleteResponse.status}`);
+                    console.log(`[deleteGCS] Delete response data: ${JSON.stringify(deleteResponse.data)}`);
                 }
+                console.log('[deleteGCS] All files deleted successfully');
+            } else {
+                console.log('[deleteGCS] No files found to delete');
             }
         } else {
-            // For real GCS, use the SDK
+            console.log('[deleteGCS] Using real GCS');
+            const bucket = gcs.bucket(GCS_BUCKETNAME);
             const [files] = await bucket.getFiles({ prefix: blobName });
-            for (const file of files) {
-                await file.delete();
-                deletedFiles.push(file.name);
+            console.log(`[deleteGCS] Found ${files.length} files to delete`);
+            
+            if (files.length > 0) {
+                await Promise.all(files.map((file) => file.delete()));
+                console.log('[deleteGCS] All files deleted successfully');
+            } else {
+                console.log('[deleteGCS] No files found to delete');
             }
         }
-
-        if (deletedFiles.length > 0) {
-            console.log(`Cleaned GCS files: ${deletedFiles.join(', ')}`);
-        }
-        return deletedFiles;
     } catch (error) {
-        if (error.code !== 404) {
-            console.error(`Error in deleteGCS: ${error}`);
-            throw error;
+        // If we get a 404 error, it means the file is already gone, which is fine
+        if (error.response?.status === 404 || error.code === 404) {
+            console.log('[deleteGCS] File not found in GCS (404) - this is expected if file was already deleted');
+            return;
         }
-        return [];
+        console.error('[deleteGCS] Error during deletion:', error);
+        console.error('[deleteGCS] Error details:', {
+            message: error.message,
+            code: error.code,
+            errors: error.errors,
+            response: error.response ? {
+                status: error.response.status,
+                statusText: error.response.statusText,
+                data: error.response.data,
+                headers: error.response.headers,
+            } : null,
+        });
+        // Don't throw the error - we want to continue with cleanup even if GCS deletion fails
     }
 }
 

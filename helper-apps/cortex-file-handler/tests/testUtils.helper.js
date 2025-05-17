@@ -1,63 +1,58 @@
 import axios from 'axios';
 
 export async function cleanupHashAndFile(hash, uploadedUrl, baseUrl) {
-    if (uploadedUrl) {
-        try {
-            const fileUrl = new URL(uploadedUrl);
-            // Get the full path after the domain
-            const pathParts = fileUrl.pathname.split('/').filter(Boolean);
-            // The last part should be the filename
-            const filename = pathParts[pathParts.length - 1];
-            // Extract the identifier (first part before underscore)
-            const fileIdentifier = filename.split('_')[0];
-            
-            console.log('Cleaning up file:', {
-                url: uploadedUrl,
-                identifier: fileIdentifier
-            });
-            
-            const deleteUrl = `${baseUrl}?operation=delete&requestId=${fileIdentifier}`;
-            const deleteResponse = await axios.delete(deleteUrl, { 
-                validateStatus: () => true,
-                timeout: 5000 // Add timeout
-            });
-            
-            if (deleteResponse.status !== 200) {
-                console.error('Failed to delete file:', {
-                    status: deleteResponse.status,
-                    data: deleteResponse.data,
-                    url: deleteUrl
-                });
-            }
-        } catch (e) {
-            console.error('Error during file cleanup:', {
-                error: e.message,
-                url: uploadedUrl
-            });
-        }
-    }
+    console.log(`[cleanupHashAndFile] Starting cleanup for hash: ${hash}, url: ${uploadedUrl}, baseUrl: ${baseUrl}`);
     
+    // Only perform hash operations if hash is provided
     if (hash) {
         try {
-            console.log('Cleaning up hash:', hash);
-            const clearResponse = await axios.get(baseUrl, {
-                params: { hash, clearHash: true },
-                validateStatus: () => true,
-                timeout: 5000 // Add timeout
-            });
-            
-            if (clearResponse.status !== 200) {
-                console.error('Failed to clear hash:', {
-                    status: clearResponse.status,
-                    data: clearResponse.data,
-                    hash
-                });
-            }
-        } catch (e) {
-            console.error('Error during hash cleanup:', {
-                error: e.message,
-                hash
-            });
+            console.log(`[cleanupHashAndFile] Attempting to clear hash: ${hash}`);
+            const clearResponse = await axios.get(
+                `${baseUrl}?hash=${hash}&clearHash=true`,
+                {
+                    validateStatus: (status) => true,
+                    timeout: 5000,
+                },
+            );
+            console.log(`[cleanupHashAndFile] Clear hash response status: ${clearResponse.status}`);
+            console.log(`[cleanupHashAndFile] Clear hash response: ${clearResponse.data}`);
+        } catch (error) {
+            console.error(`[cleanupHashAndFile] Error clearing hash: ${error.message}`);
+        }
+    }
+
+    // Then delete the file
+    try {
+        const folderName = getFolderNameFromUrl(uploadedUrl);
+        console.log(`[cleanupHashAndFile] Attempting to delete file with folder: ${folderName}`);
+        const deleteResponse = await axios.delete(
+            `${baseUrl}?operation=delete&requestId=${folderName}`,
+            {
+                validateStatus: (status) => true,
+                timeout: 5000,
+            },
+        );
+        console.log(`[cleanupHashAndFile] Delete file response status: ${deleteResponse.status}`);
+        console.log(`[cleanupHashAndFile] Delete file response: ${JSON.stringify(deleteResponse.data)}`);
+    } catch (error) {
+        console.error(`[cleanupHashAndFile] Error deleting file: ${error.message}`);
+    }
+
+    // Only verify hash if hash was provided
+    if (hash) {
+        try {
+            console.log(`[cleanupHashAndFile] Verifying hash is gone: ${hash}`);
+            const verifyResponse = await axios.get(
+                `${baseUrl}?hash=${hash}&checkHash=true`,
+                {
+                    validateStatus: (status) => true,
+                    timeout: 5000,
+                },
+            );
+            console.log(`[cleanupHashAndFile] Verify hash response status: ${verifyResponse.status}`);
+            console.log(`[cleanupHashAndFile] Verify hash response: ${verifyResponse.data}`);
+        } catch (error) {
+            console.error(`[cleanupHashAndFile] Error verifying hash: ${error.message}`);
         }
     }
 }

@@ -11,10 +11,10 @@ import {
     gcsUrlExists,
     deleteGCS,
     getBlobClient,
-} from '../blobHandler.js';
-import { urlExists } from '../helper.js';
-import CortexFileHandler from '../index.js';
-import { setFileStoreMap } from '../redis.js';
+} from '../src/blobHandler.js';
+import { urlExists } from '../src/helper.js';
+import CortexFileHandler from '../src/index.js';
+import { setFileStoreMap } from '../src/redis.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

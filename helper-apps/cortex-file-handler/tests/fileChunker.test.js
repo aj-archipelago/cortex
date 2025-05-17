@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import test from 'ava';
 import nock from 'nock';
 
-import { splitMediaFile, downloadFile } from '../fileChunker.js';
+import { splitMediaFile, downloadFile } from '../src/fileChunker.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
