@@ -25,7 +25,16 @@ export class ConversionService {
      * @returns {boolean} - Whether the file needs conversion
      */
     needsConversion(filename) {
-        const ext = path.extname(filename).toLowerCase();
+        // Accept either a full filename/path or a raw extension (e.g. ".docx")
+        const input = filename.toLowerCase();
+
+        // If the input looks like an extension already, check directly
+        if (input.startsWith('.') && !input.includes('/') && !input.includes('\\')) {
+            return CONVERTED_EXTENSIONS.includes(input);
+        }
+
+        // Otherwise, extract the extension from the filename/path
+        const ext = path.extname(input).toLowerCase();
         return CONVERTED_EXTENSIONS.includes(ext);
     }
 
@@ -78,16 +87,16 @@ export class ConversionService {
      */
     async ensureConvertedVersion(fileInfo, requestId) {
         const { url, gcs } = fileInfo;
-        const extension = path.extname(url).toLowerCase();
+        // Remove any query parameters before extension check
+        const extension = path.extname(url.split('?')[0]).toLowerCase();
         
         // If file doesn't need conversion, return original info
         if (!this.needsConversion(extension)) {
             return fileInfo;
         }
 
-        // Check if converted version exists in the hash map
-        const convertedKey = `${fileInfo.hash}_converted`;
-        const convertedInfo = await this._getFileStoreMap(convertedKey);
+        // Work with any converted info already stored inside the main hash element
+        const convertedInfo = fileInfo.converted;
         
         let needsConversion = false;
         if (convertedInfo) {
@@ -147,11 +156,9 @@ export class ConversionService {
                     gcs: gcsUrl
                 };
 
-                // Only store in map if we have at least the primary URL
-                if (convertedFileInfo.url) {
-                    await this._setFileStoreMap(convertedKey, convertedFileInfo);
-                    this.context.log('Stored converted file info:', convertedFileInfo);
-                } else {
+                // Attach converted info directly to the main file record –
+                // the caller (index.js) will persist the updated fileInfo
+                if (!convertedFileInfo.url) {
                     throw new Error('Failed to get primary URL for converted file');
                 }
 
