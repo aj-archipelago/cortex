@@ -7,7 +7,8 @@ import axios from 'axios';
 import FormData from 'form-data';
 import { port } from '../start.js';
 import { gcs } from '../blobHandler.js';
-import { cleanupHashAndFile } from './testUtils.helper.js';
+import { cleanupHashAndFile, getFolderNameFromUrl } from './testUtils.helper.js';
+import XLSX from 'xlsx';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,7 +46,7 @@ async function uploadFile(filePath, requestId = null, hash = null) {
             'Content-Type': 'multipart/form-data',
         },
         validateStatus: (status) => true,
-        timeout: 5000,
+        timeout: 30000,
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
     });
@@ -83,7 +84,25 @@ test.before(async (t) => {
 
 // Cleanup
 test.after.always(async (t) => {
+    // Clean up test directory
     await fs.promises.rm(t.context.testDir, { recursive: true, force: true });
+    
+    // Clean up any remaining files in the files directory
+    const filesDir = path.join(__dirname, '..', 'files');
+    if (fs.existsSync(filesDir)) {
+        const dirs = await fs.promises.readdir(filesDir);
+        for (const dir of dirs) {
+            const dirPath = path.join(filesDir, dir);
+            try {
+                await fs.promises.rm(dirPath, { recursive: true, force: true });
+            } catch (e) {
+                console.error('Error cleaning up directory:', {
+                    dir: dirPath,
+                    error: e.message
+                });
+            }
+        }
+    }
 });
 
 // Basic File Upload Tests
@@ -91,9 +110,10 @@ test.serial('should handle basic file upload', async (t) => {
     const fileContent = 'test content';
     const filePath = await createTestFile(fileContent, 'txt');
     const requestId = uuidv4();
+    let response;
     
     try {
-        const response = await uploadFile(filePath, requestId);
+        response = await uploadFile(filePath, requestId);
         
         t.is(response.status, 200);
         t.truthy(response.data.url);
@@ -104,6 +124,9 @@ test.serial('should handle basic file upload', async (t) => {
         t.deepEqual(uploadedContent, Buffer.from(fileContent), 'Uploaded file content should match');
     } finally {
         fs.unlinkSync(filePath);
+        if (response?.data?.url) {
+            await cleanupHashAndFile(null, response.data.url, baseUrl);
+        }
     }
 });
 
@@ -114,9 +137,11 @@ test.serial('should handle file upload with hash', async (t) => {
     const hash = 'test-hash-' + uuidv4();
     let uploadedUrl;
     let convertedUrl;
+    let response;
+    
     try {
         // First upload the file
-        const response = await uploadFile(filePath, requestId, hash);
+        response = await uploadFile(filePath, requestId, hash);
         t.is(response.status, 200);
         t.truthy(response.data.url);
         uploadedUrl = response.data.url;
@@ -153,9 +178,11 @@ test.serial('should handle file upload with hash', async (t) => {
         t.deepEqual(Buffer.from(fileResponse.data), Buffer.from(fileContent), 'Uploaded file content should match');
     } finally {
         fs.unlinkSync(filePath);
-        await cleanupHashAndFile(hash, uploadedUrl, baseUrl);
+        if (uploadedUrl) {
+            await cleanupHashAndFile(hash, uploadedUrl, baseUrl);
+        }
         if (convertedUrl) {
-            await cleanupHashAndFile(`${hash}_converted`, convertedUrl, baseUrl);
+            await cleanupHashAndFile(null, convertedUrl, baseUrl);
         }
     }
 });
@@ -166,9 +193,10 @@ test.serial('should handle PDF document upload and conversion', async (t) => {
     const fileContent = '%PDF-1.4\nTest PDF content';
     const filePath = await createTestFile(fileContent, 'pdf');
     const requestId = uuidv4();
+    let response;
     
     try {
-        const response = await uploadFile(filePath, requestId);
+        response = await uploadFile(filePath, requestId);
         t.is(response.status, 200);
         t.truthy(response.data.url);
 
@@ -186,6 +214,12 @@ test.serial('should handle PDF document upload and conversion', async (t) => {
         }
     } finally {
         fs.unlinkSync(filePath);
+        if (response?.data?.url) {
+            await cleanupHashAndFile(null, response.data.url, baseUrl);
+        }
+        if (response?.data?.converted?.url) {
+            await cleanupHashAndFile(null, response.data.converted.url, baseUrl);
+        }
     }
 });
 
@@ -195,9 +229,10 @@ test.serial('should handle media file chunking', async (t) => {
     const chunkContent = 'x'.repeat(1024 * 1024);
     const filePath = await createTestFile(chunkContent, 'mp4');
     const requestId = uuidv4();
+    let response;
     
     try {
-        const response = await uploadFile(filePath, requestId);
+        response = await uploadFile(filePath, requestId);
         t.is(response.status, 200);
         t.truthy(response.data);
         
@@ -232,6 +267,17 @@ test.serial('should handle media file chunking', async (t) => {
         }
     } finally {
         fs.unlinkSync(filePath);
+        if (response?.data) {
+            if (Array.isArray(response.data)) {
+                for (const chunk of response.data) {
+                    if (chunk.uri) {
+                        await cleanupHashAndFile(null, chunk.uri, baseUrl);
+                    }
+                }
+            } else if (response.data.url) {
+                await cleanupHashAndFile(null, response.data.url, baseUrl);
+            }
+        }
     }
 });
 
@@ -249,7 +295,7 @@ test.serial('should handle invalid file upload', async (t) => {
             'Content-Type': 'multipart/form-data',
         },
         validateStatus: (status) => true,
-        timeout: 5000,
+        timeout: 30000,
     });
     
     // Log the response for debugging
@@ -276,8 +322,7 @@ test.serial('should handle file deletion', async (t) => {
         await new Promise(resolve => setTimeout(resolve, 1000));
         
         // Extract the file identifier from the URL
-        const fileUrl = new URL(uploadResponse.data.url);
-        const fileIdentifier = fileUrl.pathname.split('/').pop().split('_')[0];
+        const fileIdentifier = getFolderNameFromUrl(uploadResponse.data.url);
         console.log('File identifier for deletion:', fileIdentifier);
         
         // Delete file using the correct identifier
@@ -338,14 +383,61 @@ test.serial('should handle document upload with save option', async (t) => {
         t.true(Array.isArray(saveResponse.data), 'Response body should be an array');
     } finally {
         fs.unlinkSync(filePath);
+        await cleanupHashAndFile(null, uploadedUrl, baseUrl);
+        await cleanupHashAndFile(null, `${baseUrl}?requestId=${saveRequestId}`, baseUrl);
+    }
+});
 
-        // Cleanup the initially uploaded file
-        if (uploadedUrl) {
-            const identifier = new URL(uploadedUrl).pathname.split('/').pop().split('_')[0];
-            await axios.delete(`${baseUrl}?operation=delete&requestId=${identifier}`).catch(() => {});
+// Converted file persistence test – ensures needsConversion works for extension-only checks
+test.serial('should preserve converted version when checking hash for convertible file', async (t) => {
+    // Create a minimal XLSX workbook in-memory
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.aoa_to_sheet([
+        ['Name', 'Score'],
+        ['Alice', 10],
+        ['Bob', 8],
+    ]);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+
+    // Write it to a temp file inside the test directory
+    const filePath = path.join(t.context.testDir, `${uuidv4()}.xlsx`);
+    XLSX.writeFile(workbook, filePath);
+
+    const requestId = uuidv4();
+    const hash = `test-hash-${uuidv4()}`;
+
+    let uploadedUrl;
+    let convertedUrl;
+
+    try {
+        // 1. Upload the XLSX file (conversion should run automatically)
+        const uploadResponse = await uploadFile(filePath, requestId, hash);
+        t.is(uploadResponse.status, 200, 'Upload should succeed');
+        t.truthy(uploadResponse.data.converted, 'Upload response must contain converted info');
+        t.truthy(uploadResponse.data.converted.url, 'Converted URL should be present');
+
+        uploadedUrl = uploadResponse.data.url;
+        convertedUrl = uploadResponse.data.converted.url;
+
+        // 2. Give Redis a moment to persist
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        // 3. Ask the handler for the hash – it will invoke ensureConvertedVersion
+        const checkResponse = await axios.get(baseUrl, {
+            params: { hash, checkHash: true },
+            validateStatus: (status) => true,
+            timeout: 30000,
+        });
+
+        t.is(checkResponse.status, 200, 'Hash check should succeed');
+        t.truthy(checkResponse.data.converted, 'Hash response should include converted info');
+        t.truthy(checkResponse.data.converted.url, 'Converted URL should still be present after hash check');
+    } finally {
+        // Clean up temp file and remote artifacts
+        fs.unlinkSync(filePath);
+        await cleanupHashAndFile(hash, uploadedUrl, baseUrl);
+        if (convertedUrl) {
+            await cleanupHashAndFile(null, convertedUrl, baseUrl);
         }
-
-        // Cleanup files created by save request
-        await axios.delete(`${baseUrl}?operation=delete&requestId=${saveRequestId}`).catch(() => {});
     }
 }); 

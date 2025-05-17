@@ -422,8 +422,6 @@ async function CortexFileHandler(context, req) {
                         url: convertedSaveResult.url,
                         gcs: hashResult.converted.gcs
                     };
-                    // Update the hash map with the new converted info
-                    await setFileStoreMap(`${hashResult.hash}_converted`, response.converted);
                 }
             } else {
                 context.log(`No converted info to add to final response`);

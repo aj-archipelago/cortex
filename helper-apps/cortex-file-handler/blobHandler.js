@@ -476,7 +476,58 @@ function uploadBlob(
                                 }
                             }
 
-                            // Respond as soon as cloud uploads are done
+                            // After original uploads, handle optional conversion
+                            const conversionService = new FileConversionService(context, !saveToLocal);
+
+                            if (conversionService.needsConversion(safeFilename)) {
+                                try {
+                                    context.log('Starting file conversion (busboy)...');
+
+                                    // Ensure we have a local copy of the file for conversion
+                                    let localPathForConversion = tempFilePath;
+
+                                    if (!localPathForConversion) {
+                                        // No temp file was written (saveToLocal === false). Download from primary URL.
+                                        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'convert-'));
+                                        localPathForConversion = path.join(tmpDir, safeFilename);
+                                        await conversionService._downloadFile(result.url, localPathForConversion);
+                                    } else {
+                                        // Wait until disk write completes to guarantee full file is present
+                                        if (diskWritePromise) {
+                                            await diskWritePromise;
+                                        }
+                                    }
+
+                                    // Perform the conversion
+                                    const conversion = await conversionService.convertFile(localPathForConversion, result.url);
+                                    context.log('File conversion completed (busboy):', conversion);
+
+                                    if (conversion.converted) {
+                                        context.log('Saving converted file (busboy)...');
+                                        // Save converted file to primary storage
+                                        const convertedSaveResult = await conversionService._saveConvertedFile(conversion.convertedPath, requestId);
+
+                                        // Optionally save to GCS
+                                        let convertedGcsUrl;
+                                        if (conversionService._isGCSConfigured()) {
+                                            convertedGcsUrl = await conversionService._uploadChunkToGCS(conversion.convertedPath, requestId);
+                                        }
+
+                                        // Attach to response body
+                                        result.converted = {
+                                            url: convertedSaveResult.url,
+                                            gcs: convertedGcsUrl,
+                                        };
+                                        context.log('Conversion process (busboy) completed successfully');
+                                    }
+                                } catch (convErr) {
+                                    console.error('Error converting file (busboy):', convErr);
+                                    context.log('Error during conversion (busboy):', convErr.message);
+                                    // Continue without failing the upload
+                                }
+                            }
+
+                            // Respond after conversion (if any)
                             context.res = { status: 200, body: result };
                             resolve(result);
                         } catch (err) {
