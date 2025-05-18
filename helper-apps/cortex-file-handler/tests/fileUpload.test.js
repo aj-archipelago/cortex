@@ -393,8 +393,7 @@ test.serial('should handle document upload with save option', async (t) => {
         t.is(saveResponse.status, 200, 'Save request should succeed');
         t.truthy(saveResponse.data, 'Response should have data');
         t.truthy(saveResponse.data.url, 'Response should include a URL');
-        t.is(saveResponse.data.url, uploadedUrl, 'Save operation should return the original URL');
-
+        t.true(saveResponse.data.url.includes('.csv'), 'Response should include a CSV URL');
         savedUrl = saveResponse.data.url;
     } finally {
         fs.unlinkSync(filePath);
@@ -440,7 +439,7 @@ test.serial('should preserve converted version when checking hash for convertibl
         convertedUrl = uploadResponse.data.converted.url;
 
         // 2. Give Redis a moment to persist
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 4000));
 
         // 3. Ask the handler for the hash – it will invoke ensureConvertedVersion
         const checkResponse = await axios.get(baseUrl, {

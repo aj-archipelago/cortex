@@ -1,21 +1,18 @@
 import axios from 'axios';
+import { execSync } from 'child_process';
+import fs from 'fs/promises';
 
-export async function cleanupHashAndFile(hash, uploadedUrl, baseUrl) {
-    console.log(`[cleanupHashAndFile] Starting cleanup for hash: ${hash}, url: ${uploadedUrl}, baseUrl: ${baseUrl}`);
-    
+export async function cleanupHashAndFile(hash, uploadedUrl, baseUrl) {   
     // Only perform hash operations if hash is provided
     if (hash) {
         try {
-            console.log(`[cleanupHashAndFile] Attempting to clear hash: ${hash}`);
             const clearResponse = await axios.get(
                 `${baseUrl}?hash=${hash}&clearHash=true`,
                 {
                     validateStatus: (status) => true,
-                    timeout: 5000,
+                    timeout: 10000,
                 },
             );
-            console.log(`[cleanupHashAndFile] Clear hash response status: ${clearResponse.status}`);
-            console.log(`[cleanupHashAndFile] Clear hash response: ${clearResponse.data}`);
         } catch (error) {
             console.error(`[cleanupHashAndFile] Error clearing hash: ${error.message}`);
         }
@@ -24,16 +21,13 @@ export async function cleanupHashAndFile(hash, uploadedUrl, baseUrl) {
     // Then delete the file
     try {
         const folderName = getFolderNameFromUrl(uploadedUrl);
-        console.log(`[cleanupHashAndFile] Attempting to delete file with folder: ${folderName}`);
         const deleteResponse = await axios.delete(
             `${baseUrl}?operation=delete&requestId=${folderName}`,
             {
                 validateStatus: (status) => true,
-                timeout: 5000,
+                timeout: 10000,
             },
         );
-        console.log(`[cleanupHashAndFile] Delete file response status: ${deleteResponse.status}`);
-        console.log(`[cleanupHashAndFile] Delete file response: ${JSON.stringify(deleteResponse.data)}`);
     } catch (error) {
         console.error(`[cleanupHashAndFile] Error deleting file: ${error.message}`);
     }
@@ -41,16 +35,13 @@ export async function cleanupHashAndFile(hash, uploadedUrl, baseUrl) {
     // Only verify hash if hash was provided
     if (hash) {
         try {
-            console.log(`[cleanupHashAndFile] Verifying hash is gone: ${hash}`);
             const verifyResponse = await axios.get(
                 `${baseUrl}?hash=${hash}&checkHash=true`,
                 {
                     validateStatus: (status) => true,
-                    timeout: 5000,
+                    timeout: 10000,
                 },
             );
-            console.log(`[cleanupHashAndFile] Verify hash response status: ${verifyResponse.status}`);
-            console.log(`[cleanupHashAndFile] Verify hash response: ${verifyResponse.data}`);
         } catch (error) {
             console.error(`[cleanupHashAndFile] Error verifying hash: ${error.message}`);
         }
@@ -64,4 +55,31 @@ export function getFolderNameFromUrl(url) {
         return parts[2].split('_')[0];
     }
     return parts[1].split('_')[0];
+}
+
+// Helper function to create a test media (audio) file of specified duration using ffmpeg
+export async function createTestMediaFile(filepath, durationSeconds = 10) {
+    try {
+        console.log(`Creating test file: ${filepath} (${durationSeconds}s)`);
+        // Generate silence using ffmpeg (mono, 44.1kHz)
+        execSync(
+            `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t ${durationSeconds} -q:a 9 -acodec libmp3lame "${filepath}"`,
+            {
+                stdio: ['ignore', 'pipe', 'pipe'], // Capture stdout and stderr
+            },
+        );
+
+        // Verify the file was created and has content
+        const stats = await fs.stat(filepath);
+        if (stats.size === 0) {
+            throw new Error('Generated file is empty');
+        }
+        console.log(
+            `Successfully created ${filepath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`,
+        );
+    } catch (error) {
+        console.error(`Error creating test file ${filepath}:`, error.message);
+        if (error.stderr) console.error('ffmpeg error:', error.stderr.toString());
+        throw error;
+    }
 } 

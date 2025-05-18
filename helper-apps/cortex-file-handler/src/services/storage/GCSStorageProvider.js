@@ -20,6 +20,10 @@ export class GCSStorageProvider extends StorageProvider {
         });
     }
 
+    isConfigured() {
+        return !!this.storage && !!this.bucketName;
+    }
+
     ensureUnencodedGcsUrl(url) {
         if (!url || !url.startsWith('gs://')) {
             return url;

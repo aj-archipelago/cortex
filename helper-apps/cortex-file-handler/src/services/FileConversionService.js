@@ -5,6 +5,7 @@ import { gcsUrlExists, uploadChunkToGCS, gcs } from '../blobHandler.js';
 import { downloadFile } from '../fileChunker.js';
 import { saveFileToBlob } from '../blobHandler.js';
 import { moveFileToPublicFolder } from '../localFileHandler.js';
+import { v4 as uuidv4 } from 'uuid';
 
 export class FileConversionService extends ConversionService {
     constructor(context, useAzure = true) {
@@ -33,12 +34,15 @@ export class FileConversionService extends ConversionService {
     }
 
     async _saveConvertedFile(filePath, requestId) {
-        let fileUrl;    
+        // Generate a fallback requestId if none supplied (e.g. during checkHash calls)
+        const reqId = requestId || uuidv4();
+
+        let fileUrl;
         if (this.useAzure) {
-            const savedBlob = await saveFileToBlob(filePath, requestId);
+            const savedBlob = await saveFileToBlob(filePath, reqId);
             fileUrl = savedBlob.url;
         } else {
-            fileUrl = await moveFileToPublicFolder(filePath, requestId);
+            fileUrl = await moveFileToPublicFolder(filePath, reqId);
         }
         return { url: fileUrl };
     }

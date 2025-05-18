@@ -81,8 +81,15 @@ function ensureUnencodedGcsUrl(url) {
     }
     // Split into bucket and path parts
     const [bucket, ...pathParts] = url.replace('gs://', '').split('/');
-    // Reconstruct URL with decoded path parts
-    return `gs://${bucket}/${pathParts.map(part => decodeURIComponent(part)).join('/')}`;
+    // Reconstruct URL with decoded path parts, handling invalid characters
+    return `gs://${bucket}/${pathParts.map(part => {
+        try {
+            return decodeURIComponent(part);
+        } catch (error) {
+            // If decoding fails, sanitize the filename by removing invalid characters
+            return part.replace(/[^\w\-\.]/g, '_');
+        }
+    }).join('/')}`;
 }
 
 async function gcsUrlExists(url, defaultReturn = false) {
@@ -348,14 +355,11 @@ function uploadBlob(
                                 return;
                             }
                             tempFilePath = path.join(tempDir, safeFilename);
-                            console.log('Temp dir:', tempDir, 'Original filename:', filename, 'Safe filename:', safeFilename, 'Temp file path:', tempFilePath);
-                            console.log('About to create write stream for:', tempFilePath);
                             try {
                                 diskWriteStream = fs.createWriteStream(tempFilePath, {
                                     highWaterMark: 1024 * 1024,
                                     autoClose: true,
                                 });
-                                console.log('Write stream created successfully for:', tempFilePath);
                             } catch (err) {
                                 console.error('Error creating write stream:', err, 'Temp dir exists:', fs.existsSync(tempDir));
                                 errorOccurred = true;
@@ -603,10 +607,14 @@ function uploadBlob(
 async function saveToLocalStorage(context, requestId, encodedFilename, file) {
     const localPath = join(publicFolder, requestId);
     fs.mkdirSync(localPath, { recursive: true });
-    const destinationPath = `${localPath}/${encodedFilename}`;
+    
+    // Sanitize filename by removing invalid characters
+    const sanitizedFilename = encodedFilename.replace(/[^\w\-\.]/g, '_');
+    const destinationPath = `${localPath}/${sanitizedFilename}`;
+    
     context.log(`Saving to local storage... ${destinationPath}`);
     await pipeline(file, fs.createWriteStream(destinationPath));
-    return `http://${ipAddress}:${port}/files/${requestId}/${encodedFilename}`;
+    return `http://${ipAddress}:${port}/files/${requestId}/${sanitizedFilename}`;
 }
 
 // Helper function to handle Azure blob storage
@@ -619,6 +627,9 @@ async function saveToAzureStorage(context, encodedFilename, file) {
     if (isEncoded(blobName)) {
         blobName = decodeURIComponent(blobName);
     }
+    
+    // Sanitize filename by removing invalid characters
+    blobName = blobName.replace(/[^\w\-\.]/g, '_');
     
     const options = {
         blobHTTPHeaders: contentType ? { blobContentType: contentType } : {},

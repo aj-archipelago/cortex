@@ -212,7 +212,7 @@ export class StorageService {
     }
 
     async ensureGCSUpload(context, existingFile) {
-        if (!this.backupProvider || !existingFile.url) {
+        if (!this.backupProvider || !existingFile.url || !this.backupProvider.isConfigured()) {
             return existingFile;
         }
 

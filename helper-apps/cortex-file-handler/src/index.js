@@ -61,13 +61,20 @@ async function CortexFileHandler(context, req) {
         load,
         restore,
     } = req.body?.params || req.query;
-    const operation = save
+
+    // Normalize boolean parameters
+    const shouldSave = save === true || save === 'true';
+    const shouldCheckHash = checkHash === true || checkHash === 'true';
+    const shouldClearHash = clearHash === true || clearHash === 'true';
+    const shouldFetchRemote = fetch || load || restore;
+
+    const operation = shouldSave
         ? 'save'
-        : checkHash
+        : shouldCheckHash
             ? 'checkHash'
-            : clearHash
+            : shouldClearHash
                 ? 'clearHash'
-                : fetch || load || restore
+                : shouldFetchRemote
                     ? 'remoteFile'
                     : req.method.toLowerCase() === 'delete' ||
               req.query.operation === 'delete'
@@ -87,6 +94,34 @@ async function CortexFileHandler(context, req) {
     // Initialize services
     const storageService = new StorageService();
     const conversionService = new FileConversionService(context, storageService.primaryProvider.constructor.name === 'AzureStorageProvider');
+
+    // Validate URL for document processing and media chunking operations
+    if (operation === 'document_processing' || operation === 'media_chunking') {
+        try {
+            const urlObj = new URL(uri);
+            if (!['http:', 'https:', 'gs:'].includes(urlObj.protocol)) {
+                context.res = {
+                    status: 400,
+                    body: 'Invalid URL protocol - only HTTP, HTTPS, and GCS URLs are supported',
+                };
+                return;
+            }
+            // Check if the pathname is too long (e.g., > 1024 characters)
+            if (urlObj.pathname.length > 1024) {
+                context.res = {
+                    status: 400,
+                    body: 'URL pathname is too long',
+                };
+                return;
+            }
+        } catch (error) {
+            context.res = {
+                status: 400,
+                body: 'Invalid URL format',
+            };
+            return;
+        }
+    }
 
     // Clean up files when request delete which means processing marked completed
     if (operation === 'delete') {
@@ -117,7 +152,7 @@ async function CortexFileHandler(context, req) {
         return;
     }
 
-    const remoteUrl = fetch || restore || load;
+    const remoteUrl = shouldFetchRemote;
     if (req.method.toLowerCase() === 'get' && remoteUrl) {
         context.log(`Remote file: ${remoteUrl}`);
         let filename;
@@ -249,7 +284,7 @@ async function CortexFileHandler(context, req) {
                     await removeFromFileStoreMap(hash);
                     context.res = {
                         status: 404,
-                        body: `Hash ${hash} not found`,
+                        body: `Hash ${hash} not found in storage`,
                     };
                     return;
                 }
@@ -272,7 +307,7 @@ async function CortexFileHandler(context, req) {
                 }
 
                 // If primary is missing but GCS exists, restore from GCS
-                if (!primaryExists && gcsExists && hashResult?.gcs) {
+                if (!primaryExists && gcsExists && hashResult?.gcs && storageService.backupProvider?.isConfigured()) {
                     context.log(`Primary storage file missing, restoring from GCS: ${hash}`);
                     try {
                         // Create a temporary file to store the downloaded content
@@ -339,34 +374,19 @@ async function CortexFileHandler(context, req) {
                     timestamp: new Date().toISOString()
                 };
 
-                // Add converted info if it exists and has a valid URL
-                if (hashResult.converted?.url) {
-                    context.log(`Adding converted info to final response`);
+                // Ensure converted version exists and is synced across storage providers
+                try {
+                    hashResult = await conversionService.ensureConvertedVersion(hashResult, requestId);
+                } catch (error) {
+                    context.log(`Error ensuring converted version: ${error}`);
+                }
+
+                // Attach converted info to response if present
+                if (hashResult.converted) {
                     response.converted = {
                         url: hashResult.converted.url,
                         gcs: hashResult.converted.gcs
                     };
-                } else if (hashResult.converted?.gcs) {
-                    // If we only have GCS URL, trigger conversion
-                    context.log(`Only GCS URL exists for converted file, triggering conversion`);
-                    try {
-                        const convertedResult = await conversionService.convertFile(
-                            await downloadFile(hashResult.url, path.join(os.tmpdir(), path.basename(hashResult.url))),
-                            hashResult.url
-                        );
-                        if (convertedResult.converted) {
-                            const convertedSaveResult = await conversionService._saveConvertedFile(convertedResult.convertedPath, requestId);
-                            response.converted = {
-                                url: convertedSaveResult.url,
-                                gcs: hashResult.converted.gcs
-                            };
-                        }
-                    } catch (error) {
-                        context.log(`Error converting file: ${error}`);
-                        // Don't fail the request if conversion fails
-                    }
-                } else {
-                    context.log(`No converted info to add to final response`);
                 }
 
                 //update redis timestamp with current time
@@ -451,20 +471,48 @@ async function CortexFileHandler(context, req) {
             await downloadFile(uri, downloadedFile);
 
             try {
-                if (save) {
-                    // For save operation, just return the existing URL
-                    const urlObj = new URL(uri);
-                    const pathname = urlObj.pathname;
-                    context.res = {
-                        status: 200,
-                        body: {
-                            url: uri,
-                            blobName: path.basename(pathname)
+                if (shouldSave) {
+                    // Check if file needs conversion first
+                    if (conversionService.needsConversion(downloadedFile)) {
+                        // Convert the file
+                        const conversion = await conversionService.convertFile(downloadedFile, uri);
+                        if (!conversion.converted) {
+                            throw new Error('File conversion failed');
                         }
-                    };
+                        
+                        // Save the converted file
+                        const convertedSaveResult = await conversionService._saveConvertedFile(conversion.convertedPath, requestId);
+                        
+                        // Return the converted file URL
+                        context.res = {
+                            status: 200,
+                            body: {
+                                url: convertedSaveResult.url,
+                                blobName: path.basename(convertedSaveResult.url)
+                            }
+                        };
+                    } else {
+                        // File doesn't need conversion, save the original file
+                        const saveResult = await conversionService._saveConvertedFile(downloadedFile, requestId);
+                        
+                        // Return the original file URL
+                        context.res = {
+                            status: 200,
+                            body: {
+                                url: saveResult.url,
+                                blobName: path.basename(saveResult.url)
+                            }
+                        };
+                    }
                     return;
                 } else {
-                    const text = await conversionService.convertFile(downloadedFile, uri, true);
+                    let text;
+                    if (conversionService.needsConversion(downloadedFile)) {
+                        text = await conversionService.convertFile(downloadedFile, uri, true);
+                    } else {
+                        // For files that don't need conversion, read the file contents directly
+                        text = await fs.promises.readFile(downloadedFile, 'utf-8');
+                    }
                     result.push(...easyChunker(text));
                 }
             } catch (err) {
@@ -484,14 +532,16 @@ async function CortexFileHandler(context, req) {
                     console.log(`Error cleaning temp file ${downloadedFile}:`, err);
                 }
 
-                try {
-                    //delete uploaded prev nontext file
+                // Delete uploaded files only if we're NOT saving the converted version.
+                // When save=true we need to keep the converted file (which is stored under the same requestId prefix),
+                // so skip the cleanup in that case.
+                if (!shouldSave) {
                     await storageService.deleteFiles(requestId);
                     console.log(
-                        `Cleaned temp file ${uri} with request id ${requestId}`,
+                        `Cleaned temp files for request id ${requestId}`,
                     );
-                } catch (err) {
-                    console.log(`Error cleaning temp file ${uri}:`, err);
+                } else {
+                    console.log(`Skip cleanup for request id ${requestId} because save flag is set`);
                 }
             }
         } else {

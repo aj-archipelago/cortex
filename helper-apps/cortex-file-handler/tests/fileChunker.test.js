@@ -10,35 +10,9 @@ import test from 'ava';
 import nock from 'nock';
 
 import { splitMediaFile, downloadFile } from '../src/fileChunker.js';
+import { createTestMediaFile } from './testUtils.helper.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-// Helper function to create a test media file of specified duration using ffmpeg
-async function createTestMediaFile(filepath, durationSeconds = 10) {
-    try {
-        console.log(`Creating test file: ${filepath} (${durationSeconds}s)`);
-        // Generate silence using ffmpeg
-        execSync(
-            `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t ${durationSeconds} -q:a 9 -acodec libmp3lame "${filepath}"`,
-            {
-                stdio: ['ignore', 'pipe', 'pipe'], // Capture stdout and stderr
-            },
-        );
-
-        // Verify the file was created and has content
-        const stats = await fs.stat(filepath);
-        if (stats.size === 0) {
-            throw new Error('Generated file is empty');
-        }
-        console.log(
-            `Successfully created ${filepath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`,
-        );
-    } catch (error) {
-        console.error(`Error creating test file ${filepath}:`, error.message);
-        if (error.stderr) console.error('ffmpeg error:', error.stderr.toString());
-        throw error;
-    }
-}
 
 // Setup: Create test files and mock external services
 test.before(async (t) => {

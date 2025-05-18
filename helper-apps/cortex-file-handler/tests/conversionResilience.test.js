@@ -79,8 +79,8 @@ test.serial('remote URL save returns converted info', async t => {
     });
 
     t.is(saveRes.status, 200);
-    // save returns array of urls; ensure at least one has .md/.csv
-    t.true(Array.isArray(saveRes.data));
+
+    t.true(saveRes.data?.url?.includes('.csv'));
 
     await cleanupHashAndFile(hash, up.data.url, baseUrl);
 });

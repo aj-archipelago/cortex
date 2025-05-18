@@ -259,10 +259,11 @@ test.serial('should reject invalid URLs', async (t) => {
         },
     );
 
-    t.is(response.status, 500, 'Should return 500 for invalid URL');
-    t.true(
-        response.data.includes('Invalid URL'),
-        'Should indicate invalid URL in error message',
+    t.is(response.status, 400, 'Should return 400 for invalid URL');
+    t.is(
+        response.data,
+        'Invalid URL format',
+        'Should indicate invalid URL format in error message',
     );
 });
 
@@ -279,10 +280,11 @@ test.serial('should reject unsupported protocols', async (t) => {
         },
     );
 
-    t.is(response.status, 500, 'Should return 500 for unsupported protocol');
-    t.true(
-        response.data.includes('Error processing media file'),
-        'Should indicate error processing media file',
+    t.is(response.status, 400, 'Should return 400 for unsupported protocol');
+    t.is(
+        response.data,
+        'Invalid URL protocol - only HTTP, HTTPS, and GCS URLs are supported',
+        'Should indicate invalid protocol in error message',
     );
 });
 
