@@ -41,10 +41,6 @@ export class GCSStorageProvider extends StorageProvider {
         let baseName = typeof filePath === 'string' ? path.basename(filePath) : requestId;
         // Remove any query parameters from the filename
         baseName = baseName.split('?')[0];
-        // Only encode if not already encoded
-        if (!this.isEncoded(baseName)) {
-            baseName = encodeURIComponent(baseName);
-        }
         const blobName = `${requestId}/${uuidv4()}_${baseName}`;
         
         if (typeof filePath === 'string') {

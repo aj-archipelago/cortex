@@ -132,4 +132,59 @@ test('should handle file download', async (t) => {
             fs.unlinkSync(testFile);
         }
     }
+});
+
+test('should handle file existence check with spaces and special characters', async (t) => {
+    if (!process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 && !process.env.GCP_SERVICE_ACCOUNT_KEY) {
+        t.pass('Skipping test - GCS not configured');
+        return;
+    }
+
+    const credentials = JSON.parse(
+        process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64
+            ? Buffer.from(process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64, 'base64').toString()
+            : process.env.GCP_SERVICE_ACCOUNT_KEY
+    );
+
+    const provider = new GCSStorageProvider(
+        credentials,
+        process.env.GCS_BUCKETNAME || 'cortextempfiles'
+    );
+
+    // Create test file with spaces and special characters in name
+    const testContent = 'Hello World!';
+    const testFileName = 'test file with spaces & special chars!.txt';
+    const testFile = path.join(__dirname, testFileName);
+    fs.writeFileSync(testFile, testContent);
+
+    try {
+        // Upload file
+        const requestId = 'test-special-chars';
+        const result = await provider.uploadFile({}, testFile, requestId);
+        
+        t.truthy(result.url);
+        t.true(result.url.includes(testFileName));
+        t.true(result.url.startsWith('gs://'));
+
+        // Verify file exists with original URL
+        const exists = await provider.fileExists(result.url);
+        t.true(exists, 'File should exist with original URL');
+
+        // Verify file exists with encoded URL
+        const encodedUrl = result.url.replace(/ /g, '%20');
+        const existsEncoded = await provider.fileExists(encodedUrl);
+        t.true(existsEncoded, 'File should exist with encoded URL');
+
+        // Cleanup
+        await provider.deleteFiles(requestId);
+        
+        // Verify file is gone
+        const existsAfterDelete = await provider.fileExists(result.url);
+        t.false(existsAfterDelete, 'File should not exist after deletion');
+    } finally {
+        // Cleanup test file
+        if (fs.existsSync(testFile)) {
+            fs.unlinkSync(testFile);
+        }
+    }
 }); 
