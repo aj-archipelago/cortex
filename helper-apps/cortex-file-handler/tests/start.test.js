@@ -11,7 +11,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import { v4 as uuidv4 } from 'uuid';
 
-import { port, publicFolder, ipAddress } from '../start.js';
+import { port, publicFolder, ipAddress } from '../src/start.js';
 import { cleanupHashAndFile, getFolderNameFromUrl } from './testUtils.helper.js';
 
 // Add these helper functions at the top after imports
@@ -259,10 +259,11 @@ test.serial('should reject invalid URLs', async (t) => {
         },
     );
 
-    t.is(response.status, 500, 'Should return 500 for invalid URL');
-    t.true(
-        response.data.includes('Invalid URL'),
-        'Should indicate invalid URL in error message',
+    t.is(response.status, 400, 'Should return 400 for invalid URL');
+    t.is(
+        response.data,
+        'Invalid URL format',
+        'Should indicate invalid URL format in error message',
     );
 });
 
@@ -279,10 +280,11 @@ test.serial('should reject unsupported protocols', async (t) => {
         },
     );
 
-    t.is(response.status, 500, 'Should return 500 for unsupported protocol');
-    t.true(
-        response.data.includes('Error processing media file'),
-        'Should indicate error processing media file',
+    t.is(response.status, 400, 'Should return 400 for unsupported protocol');
+    t.is(
+        response.data,
+        'Invalid URL protocol - only HTTP, HTTPS, and GCS URLs are supported',
+        'Should indicate invalid protocol in error message',
     );
 });
 
@@ -668,7 +670,7 @@ test.serial(
         t.is(uploadResponse.status, 200, 'Upload should succeed');
         t.truthy(uploadResponse.data.url, 'Response should contain URL');
 
-        await cleanupUploadedFile(t, uploadResponse.data.url);
+        await cleanupHashAndFile(testHash, uploadResponse.data.url, baseUrl);
 
         // Verify hash is gone by trying to get the file URL
         const hashCheckResponse = await axios.get(`${baseUrl}`, {
@@ -835,13 +837,19 @@ async function checkGCSFile(gcsUrl) {
     const [, , bucket, ...objectParts] = gcsUrl.split('/');
     const object = objectParts.join('/');
 
+    console.log(`[checkGCSFile] Checking file in GCS: ${gcsUrl}`);
+    console.log(`[checkGCSFile] Bucket: ${bucket}, Object: ${object}`);
+    console.log(`[checkGCSFile] Using emulator at ${process.env.STORAGE_EMULATOR_HOST}`);
+
     // Query fake-gcs-server
     const response = await axios.get(
-        `http://localhost:4443/storage/v1/b/${bucket}/o/${encodeURIComponent(object)}`,
+        `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${bucket}/o/${encodeURIComponent(object)}`,
         {
             validateStatus: (status) => true,
         },
     );
+    console.log(`[checkGCSFile] Response status: ${response.status}`);
+    console.log(`[checkGCSFile] File ${response.status === 200 ? 'exists' : 'does not exist'}`);
     return response.status === 200;
 }
 
@@ -1031,6 +1039,7 @@ test.serial(
             params: {
                 uri: testFileUrl,
                 requestId,
+                useGCS: true,
             },
             validateStatus: (status) => true,
             timeout: 5000,
@@ -1327,13 +1336,14 @@ test.serial(
     async (t) => {
         const testContent = 'test content for legacy sequence';
         const testHash = 'test-legacy-sequence-hash';
+        const legacyBaseUrl = `http://localhost:${port}/api/MediaFileChunker`;
         const form = new FormData();
         form.append('file', Buffer.from(testContent), 'sequence-test.txt');
         form.append('hash', testHash);
 
         // Upload file with hash through legacy endpoint
         const uploadResponse = await axios.post(
-            `http://localhost:${port}/api/MediaFileChunker`,
+            legacyBaseUrl,
             form,
             {
                 headers: form.getHeaders(),
@@ -1348,17 +1358,43 @@ test.serial(
         );
         t.truthy(uploadResponse.data.url, 'Response should contain URL');
 
-        await cleanupUploadedFile(t, uploadResponse.data.url);
+        // Wait for Redis to be updated after upload
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
-        // Verify hash is gone by trying to get the file URL through legacy endpoint
-        const hashCheckResponse = await axios.get(
-            `http://localhost:${port}/api/MediaFileChunker`,
+        // Verify hash exists after upload using legacy endpoint
+        const initialHashCheck = await axios.get(
+            legacyBaseUrl,
             {
                 params: {
                     hash: testHash,
                     checkHash: true,
                 },
                 validateStatus: (status) => true,
+                timeout: 5000,
+            },
+        );
+        t.is(initialHashCheck.status, 200, 'Hash should exist after upload');
+        t.truthy(initialHashCheck.data.url, 'Hash check should return file URL');
+
+        // Wait for Redis to be updated after initial check
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Clean up the file and hash using the legacy endpoint
+        await cleanupHashAndFile(testHash, uploadResponse.data.url, legacyBaseUrl);
+
+        // Wait for Redis to be updated after cleanup
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Verify hash is gone by trying to get the file URL through legacy endpoint
+        const hashCheckResponse = await axios.get(
+            legacyBaseUrl,
+            {
+                params: {
+                    hash: testHash,
+                    checkHash: true,
+                },
+                validateStatus: (status) => true,
+                timeout: 5000,
             },
         );
         t.is(hashCheckResponse.status, 404, 'Hash should not exist after deletion');

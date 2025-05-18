@@ -104,30 +104,17 @@ async function downloadFile(url, outputPath) {
             }),
         };
 
-        let response;
-        try {
-            response = await axios.get(decodeURIComponent(url), {
-                responseType: 'stream',
-                timeout: 30000,
-                maxContentLength: Infinity,
-                decompress: true,
-                httpAgent: agent.http,
-                httpsAgent: agent.https,
-                maxRedirects: 5,
-                validateStatus: (status) => status >= 200 && status < 300,
-            });
-        } catch (error) {
-            response = await axios.get(url, {
-                responseType: 'stream',
-                timeout: 30000,
-                maxContentLength: Infinity,
-                decompress: true,
-                httpAgent: agent.http,
-                httpsAgent: agent.https,
-                maxRedirects: 5,
-                validateStatus: (status) => status >= 200 && status < 300,
-            });
-        }
+        // Use the original URL without any decoding
+        const response = await axios.get(url, {
+            responseType: 'stream',
+            timeout: 30000,
+            maxContentLength: Infinity,
+            decompress: true,
+            httpAgent: agent.http,
+            httpsAgent: agent.https,
+            maxRedirects: 5,
+            validateStatus: (status) => status >= 200 && status < 300,
+        });
 
         // Use pipeline for better error handling and memory management
         await pipeline(

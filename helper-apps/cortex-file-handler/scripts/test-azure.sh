@@ -27,6 +27,9 @@ TEST_RESULT=$?
 echo "Cleaning up..."
 kill $AZURITE_PID
 
+# Wait for Azurite to finish cleanup
+sleep 2
+
 # Clean up Azurite directory
 rm -rf $AZURITE_DIR
 

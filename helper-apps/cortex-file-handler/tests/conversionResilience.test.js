@@ -5,11 +5,11 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import XLSX from 'xlsx';
 
-import { port } from '../start.js';
-import { gcs, GCS_BUCKETNAME } from '../blobHandler.js';
-import { getFileStoreMap, setFileStoreMap } from '../redis.js';
+import { port } from '../src/start.js';
+import { gcs, GCS_BUCKETNAME } from '../src/blobHandler.js';
+import { getFileStoreMap, setFileStoreMap } from '../src/redis.js';
 import { cleanupHashAndFile } from './testUtils.helper.js';
-import { gcsUrlExists } from '../blobHandler.js';
+import { gcsUrlExists } from '../src/blobHandler.js';
 
 const baseUrl = `http://localhost:${port}/api/CortexFileHandler`;
 
@@ -79,8 +79,8 @@ test.serial('remote URL save returns converted info', async t => {
     });
 
     t.is(saveRes.status, 200);
-    // save returns array of urls; ensure at least one has .md/.csv
-    t.true(Array.isArray(saveRes.data));
+
+    t.true(saveRes.data?.url?.includes('.csv'));
 
     await cleanupHashAndFile(hash, up.data.url, baseUrl);
 });

@@ -102,10 +102,10 @@ export class ConversionService {
         if (convertedInfo) {
             // Verify both primary and GCS URLs exist
             const primaryExists = await this._urlExists(convertedInfo?.url);
-            const gcsExists = gcs ? await this._gcsUrlExists(convertedInfo?.gcs) : false;
+            const gcsExists = this._isGCSConfigured() ? await this._gcsUrlExists(convertedInfo?.gcs) : false;
             
             // If both URLs exist, return the info
-            if (primaryExists.valid && (!gcs || gcsExists)) {
+            if (primaryExists.valid && (!this._isGCSConfigured() || gcsExists)) {
                 return { ...fileInfo, converted: convertedInfo };
             }
             

@@ -5,8 +5,8 @@ import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
 import FormData from 'form-data';
-import { port } from '../start.js';
-import { gcs } from '../blobHandler.js';
+import { port } from '../src/start.js';
+import { gcs } from '../src/blobHandler.js';
 import { cleanupHashAndFile, getFolderNameFromUrl } from './testUtils.helper.js';
 import XLSX from 'xlsx';
 
@@ -352,13 +352,24 @@ test.serial('should handle file deletion', async (t) => {
 
 // Save Option Test
 test.serial('should handle document upload with save option', async (t) => {
-    const fileContent = 'Sample DOCX content';
-    const filePath = await createTestFile(fileContent, 'docx');
+    // Create a minimal XLSX workbook in-memory
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.aoa_to_sheet([
+        ['Name', 'Score'],
+        ['Alice', 10],
+        ['Bob', 8],
+    ]);
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
+
+    // Write it to a temp file inside the test directory
+    const filePath = path.join(t.context.testDir, `${uuidv4()}.xlsx`);
+    XLSX.writeFile(workbook, filePath);
 
     const initialRequestId = uuidv4();
     const saveRequestId = uuidv4();
 
     let uploadedUrl;
+    let savedUrl;
 
     try {
         // First, upload the document so we have a publicly reachable URL
@@ -378,13 +389,21 @@ test.serial('should handle document upload with save option', async (t) => {
             validateStatus: (status) => true,
         });
 
-        // The current implementation returns an empty array but should still be 200
+        // The save operation should return a 200 status with a result object
         t.is(saveResponse.status, 200, 'Save request should succeed');
-        t.true(Array.isArray(saveResponse.data), 'Response body should be an array');
+        t.truthy(saveResponse.data, 'Response should have data');
+        t.truthy(saveResponse.data.url, 'Response should include a URL');
+        t.true(saveResponse.data.url.includes('.csv'), 'Response should include a CSV URL');
+        savedUrl = saveResponse.data.url;
     } finally {
         fs.unlinkSync(filePath);
-        await cleanupHashAndFile(null, uploadedUrl, baseUrl);
-        await cleanupHashAndFile(null, `${baseUrl}?requestId=${saveRequestId}`, baseUrl);
+        // Clean up both URLs
+        if (uploadedUrl) {
+            await cleanupHashAndFile(null, uploadedUrl, baseUrl);
+        }
+        if (savedUrl && savedUrl !== uploadedUrl) {
+            await cleanupHashAndFile(null, savedUrl, baseUrl);
+        }
     }
 });
 
@@ -420,7 +439,7 @@ test.serial('should preserve converted version when checking hash for convertibl
         convertedUrl = uploadResponse.data.converted.url;
 
         // 2. Give Redis a moment to persist
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 4000));
 
         // 3. Ask the handler for the hash – it will invoke ensureConvertedVersion
         const checkResponse = await axios.get(baseUrl, {
