@@ -211,7 +211,8 @@ export class ConversionService {
         }
 
         const ext = path.extname(filePath);
-        const baseFilename = path.basename(filePath, ext);
+        // Decode the filename before using it
+        const baseFilename = decodeURIComponent(path.basename(filePath, ext));
         const convertedPath = path.join(tempDir, `${baseFilename}.md`);
         await fs.writeFile(convertedPath, markdown);
         
