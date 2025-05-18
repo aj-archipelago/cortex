@@ -16,4 +16,4 @@ EXPOSE 7071
 
 # RUN npm run build
 
-CMD [ "node", "start.js" ]
+CMD [ "npm", "start" ]
