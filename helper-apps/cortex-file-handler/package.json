@@ -1,6 +1,6 @@
 {
   "name": "@aj-archipelago/cortex-file-handler",
-  "version": "2.0.01",
+  "version": "2.0.02",
   "description": "File handling service for Cortex - handles file uploads, media chunking, and document processing",
   "type": "module",
   "main": "src/index.js",
