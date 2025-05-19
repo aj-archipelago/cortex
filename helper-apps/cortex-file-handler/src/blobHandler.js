@@ -23,6 +23,7 @@ import { CONVERTED_EXTENSIONS } from './constants.js';
 import mime from 'mime-types';
 
 import os from 'os';
+import { sanitizeFilename } from './utils/filenameUtils.js';
 
 import { FileConversionService } from './services/FileConversionService.js';
 
@@ -609,10 +610,9 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
     fs.mkdirSync(localPath, { recursive: true });
     
     // Sanitize filename by removing invalid characters
-    const sanitizedFilename = encodedFilename.replace(/[^\w\-\.]/g, '_');
+    const sanitizedFilename = sanitizeFilename(encodedFilename);
     const destinationPath = `${localPath}/${sanitizedFilename}`;
     
-    context.log(`Saving to local storage... ${destinationPath}`);
     await pipeline(file, fs.createWriteStream(destinationPath));
     return `http://${ipAddress}:${port}/files/${requestId}/${sanitizedFilename}`;
 }
@@ -621,16 +621,11 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
 async function saveToAzureStorage(context, encodedFilename, file) {
     const { containerClient } = await getBlobClient();
     const contentType = mime.lookup(encodedFilename);
-    
-    // Decode the filename if it's already encoded to prevent double-encoding
-    let blobName = encodedFilename;
-    if (isEncoded(blobName)) {
-        blobName = decodeURIComponent(blobName);
-    }
-    
-    // Sanitize filename by removing invalid characters
-    blobName = blobName.replace(/[^\w\-\.]/g, '_');
-    
+
+    // Create a safe blob name that is URI-encoded once (no double encoding)
+    let blobName = sanitizeFilename(encodedFilename);
+    blobName = encodeURIComponent(blobName);
+
     const options = {
         blobHTTPHeaders: contentType ? { blobContentType: contentType } : {},
         maxConcurrency: 50,
@@ -645,31 +640,29 @@ async function saveToAzureStorage(context, encodedFilename, file) {
 }
 
 // Helper function to upload a file to Google Cloud Storage
-async function uploadToGCS(context, file, encodedFilename) {
-    const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(encodedFilename);
+async function uploadToGCS(context, file, filename) {
+    const objectName = sanitizeFilename(filename);
+    const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(objectName);
     const writeStream = gcsFile.createWriteStream({
         resumable: true,
         validation: false,
         metadata: {
-            contentType: mime.lookup(encodedFilename) || 'application/octet-stream',
+            contentType: mime.lookup(objectName) || 'application/octet-stream',
         },
         chunkSize: 8 * 1024 * 1024,
         numRetries: 3,
         retryDelay: 1000,
     });
-    context.log(`Uploading to GCS... ${encodedFilename}`);
+    context.log(`Uploading to GCS... ${objectName}`);
     await pipeline(file, writeStream);
-    // Never encode GCS URLs
-    const gcsUrl = `gs://${GCS_BUCKETNAME}/${encodedFilename}`;
-    return gcsUrl;
+    return `gs://${GCS_BUCKETNAME}/${objectName}`;
 }
 
-// Helper function to handle Google Cloud Storage
+// Wrapper that checks if GCS is configured
 async function saveToGoogleStorage(context, encodedFilename, file) {
     if (!gcs) {
         throw new Error('Google Cloud Storage is not initialized');
     }
-
     return uploadToGCS(context, file, encodedFilename);
 }
 
@@ -878,7 +871,6 @@ async function cleanup(context, urls = null) {
                     cleanedURLs.push(blob.name);
                 } catch (error) {
                     if (error.statusCode !== 404) {
-                        // Ignore "not found" errors
                         context.log(`Error cleaning blob ${blob.name}:`, error);
                     }
                 }
@@ -894,7 +886,6 @@ async function cleanup(context, urls = null) {
                 cleanedURLs.push(blobName);
             } catch (error) {
                 if (error.statusCode !== 404) {
-                    // Ignore "not found" errors
                     context.log(`Error cleaning blob ${url}:`, error);
                 }
             }
@@ -904,13 +895,14 @@ async function cleanup(context, urls = null) {
 }
 
 async function cleanupGCS(urls = null) {
+    if (!gcs) return [];
     const bucket = gcs.bucket(GCS_BUCKETNAME);
     const directories = new Set();
     const cleanedURLs = [];
 
     if (!urls) {
         const daysN = 30;
-        const thirtyDaysAgo = new Date(Date.now() - daysN * 24 * 60 * 60 * 1000);
+        const threshold = Date.now() - daysN * 24 * 60 * 60 * 1000;
         const [files] = await bucket.getFiles();
 
         for (const file of files) {
@@ -918,33 +910,27 @@ async function cleanupGCS(urls = null) {
             const directoryPath = path.dirname(file.name);
             directories.add(directoryPath);
             if (metadata.updated) {
-                const updatedTime = new Date(metadata.updated);
-                if (updatedTime.getTime() < thirtyDaysAgo.getTime()) {
-                    console.log(`Cleaning file: ${file.name}`);
+                const updatedTime = new Date(metadata.updated).getTime();
+                if (updatedTime < threshold) {
                     await file.delete();
                     cleanedURLs.push(file.name);
                 }
             }
         }
     } else {
-        try {
-            for (const url of urls) {
-                const filename = path.join(url.split('/').slice(3).join('/'));
-                const file = bucket.file(filename);
-                const directoryPath = path.dirname(file.name);
-                directories.add(directoryPath);
-                await file.delete();
-                cleanedURLs.push(url);
-            }
-        } catch (error) {
-            console.error(`Error cleaning up files: ${error}`);
+        for (const url of urls) {
+            const filePath = url.split('/').slice(3).join('/');
+            const file = bucket.file(filePath);
+            const directoryPath = path.dirname(file.name);
+            directories.add(directoryPath);
+            await file.delete();
+            cleanedURLs.push(url);
         }
     }
 
     for (const directory of directories) {
         const [files] = await bucket.getFiles({ prefix: directory });
         if (files.length === 0) {
-            console.log(`Deleting empty directory: ${directory}`);
             await bucket.deleteFiles({ prefix: directory });
         }
     }
@@ -1039,37 +1025,19 @@ async function deleteGCS(blobName) {
 async function ensureGCSUpload(context, existingFile) {
     if (!existingFile.gcs && gcs) {
         context.log('GCS file was missing - uploading.');
-        let encodedFilename = path.basename(existingFile.url.split('?')[0]);
-        if (!isEncoded(encodedFilename)) {
-            encodedFilename = encodeURIComponent(encodedFilename);
-        }
-        // Download the file from Azure/local storage
-        const response = await axios({
-            method: 'get',
-            url: existingFile.url,
-            responseType: 'stream',
-        });
-        // Upload the file stream to GCS
-        existingFile.gcs = await uploadToGCS(
-            context,
-            response.data,
-            encodedFilename,
-        );
+        const fileName = sanitizeFilename(path.basename(existingFile.url.split('?')[0]));
+        const response = await axios({ method: 'get', url: existingFile.url, responseType: 'stream' });
+        existingFile.gcs = await uploadToGCS(context, response.data, fileName);
     }
     return existingFile;
 }
 
-// Helper function to upload a chunk to GCS
 async function uploadChunkToGCS(chunkPath, requestId) {
     if (!gcs) return null;
-    let baseName = path.basename(chunkPath);
-    if (!isEncoded(baseName)) {
-        baseName = encodeURIComponent(baseName);
-    }
-    const gcsFileName = `${requestId}/${baseName}`;
-    await gcs.bucket(GCS_BUCKETNAME).upload(chunkPath, {
-        destination: gcsFileName,
-    });
+    const dirName = requestId || uuidv4();
+    const baseName = sanitizeFilename(path.basename(chunkPath));
+    const gcsFileName = `${dirName}/${baseName}`;
+    await gcs.bucket(GCS_BUCKETNAME).upload(chunkPath, { destination: gcsFileName });
     return `gs://${GCS_BUCKETNAME}/${gcsFileName}`;
 }
 

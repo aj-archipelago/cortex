@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GCSStorageProvider } from '../../src/services/storage/GCSStorageProvider.js';
+import { sanitizeFilename } from '../../src/utils/filenameUtils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -163,7 +164,9 @@ test('should handle file existence check with spaces and special characters', as
         const result = await provider.uploadFile({}, testFile, requestId);
         
         t.truthy(result.url);
-        t.true(result.url.includes(testFileName));
+        // Compare against sanitized filename instead of original
+        const sanitizedFileName = sanitizeFilename(testFileName);
+        t.true(result.url.includes(sanitizedFileName));
         t.true(result.url.startsWith('gs://'));
 
         // Verify file exists with original URL

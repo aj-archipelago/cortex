@@ -3,6 +3,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { fileURLToPath } from 'url';
 import { ipAddress, port } from '../../start.js';
+import { sanitizeFilename } from '../../utils/filenameUtils.js';
 
 import { StorageProvider } from './StorageProvider.js';
 
@@ -30,14 +31,11 @@ export class LocalStorageProvider extends StorageProvider {
         }
 
         // Generate unique filename
-        let baseName = path.basename(filePath);
-        // Remove any query parameters from the filename
-        baseName = baseName.split('?')[0];
-        // Only encode if not already encoded
-        if (!this.isEncoded(baseName)) {
-            baseName = encodeURIComponent(baseName);
-        }
-        const uniqueFileName = `${uuidv4()}_${baseName}`;
+        let baseName = sanitizeFilename(path.basename(filePath));
+        // Local storage URLs shouldn't be double-encoded, so leave the name raw in the FS path,
+        // but use encodeURIComponent when building the external URL so browsers read it fine.
+        const encodedForUrl = encodeURIComponent(baseName);
+        const uniqueFileName = `${uuidv4()}_${encodedForUrl}`;
         const destinationPath = path.join(requestFolder, uniqueFileName);
 
         // Copy file to public folder
