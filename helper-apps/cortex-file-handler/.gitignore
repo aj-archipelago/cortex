@@ -60,6 +60,9 @@ typings/
 
 # dotenv environment variables file
 .env
+.env.test
+.env.test.azure
+.env.test.gcs
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
