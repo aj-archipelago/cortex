@@ -3,6 +3,7 @@ import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { Storage } from '@google-cloud/storage';
 import axios from 'axios';
+import { sanitizeFilename } from '../../utils/filenameUtils.js';
 
 import { StorageProvider } from './StorageProvider.js';
 
@@ -38,7 +39,7 @@ export class GCSStorageProvider extends StorageProvider {
         const bucket = this.storage.bucket(this.bucketName);
         
         // Use the filename with a UUID as the blob name
-        let baseName = typeof filePath === 'string' ? path.basename(filePath) : requestId;
+        let baseName = typeof filePath === 'string' ? sanitizeFilename(path.basename(filePath)) : requestId;
         // Remove any query parameters from the filename
         baseName = baseName.split('?')[0];
         const blobName = `${requestId}/${uuidv4()}_${baseName}`;

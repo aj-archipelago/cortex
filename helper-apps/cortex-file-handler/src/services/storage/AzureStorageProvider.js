@@ -6,6 +6,7 @@ import {
     StorageSharedKeyCredential,
     BlobServiceClient,
 } from '@azure/storage-blob';
+import { sanitizeFilename } from '../../utils/filenameUtils.js';
 
 import { StorageProvider } from './StorageProvider.js';
 
@@ -55,14 +56,9 @@ export class AzureStorageProvider extends StorageProvider {
     async uploadFile(context, filePath, requestId, hash = null) {
         const { containerClient } = await this.getBlobClient();
         
-        // Use the filename with a UUID as the blob name
-        let baseName = path.basename(filePath);
-        // Remove any query parameters from the filename
-        baseName = baseName.split('?')[0];
-        // Only encode if not already encoded
-        if (!this.isEncoded(baseName)) {
-            baseName = encodeURIComponent(baseName);
-        }
+        // Create a consistent, sanitised blob name and encode once for Azure URL
+        let baseName = sanitizeFilename(path.basename(filePath));
+        baseName = encodeURIComponent(baseName);
         const blobName = `${requestId}/${uuidv4()}_${baseName}`;
         
         // Create a read stream for the file

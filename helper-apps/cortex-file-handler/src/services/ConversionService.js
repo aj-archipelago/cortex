@@ -7,6 +7,7 @@ import axios from 'axios';
 import XLSX from 'xlsx';
 import { CONVERTED_EXTENSIONS } from '../constants.js';
 import { v4 as uuidv4 } from 'uuid';
+import { sanitizeFilename } from '../utils/filenameUtils.js';
 
 const MARKITDOWN_CONVERT_URL = process.env.MARKITDOWN_CONVERT_URL;
 
@@ -49,7 +50,7 @@ export class ConversionService {
         this.context.log('Converting file:', { filePath, originalUrl, forceConversion });
         
         // Clean the file path by removing any query parameters
-        const cleanFilePath = filePath.split('?')[0];
+        const cleanFilePath = sanitizeFilename(filePath.split('?')[0]);
         const ext = path.extname(cleanFilePath).toLowerCase();
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'convert-'));
         
@@ -127,8 +128,9 @@ export class ConversionService {
                 const tempDir = path.join(os.tmpdir(), `${uuidv4()}`);
                 await fs.mkdir(tempDir);
                 
-                // Download original file
-                const downloadedFile = path.join(tempDir, path.basename(url));
+                // Ensure we strip any query parameters from the URL when determining the local filename
+                const cleanUrlPath = url.split('?')[0];
+                const downloadedFile = path.join(tempDir, path.basename(cleanUrlPath));
                 await this._downloadFile(url, downloadedFile);
 
                 // Convert the file
@@ -210,9 +212,11 @@ export class ConversionService {
             throw new Error('Markdown conversion returned empty result');
         }
 
-        const ext = path.extname(filePath);
-        // Decode the filename before using it
-        const baseFilename = decodeURIComponent(path.basename(filePath, ext));
+        // Remove any query parameters from the file path before processing
+        const cleanFilePath = filePath.split('?')[0];
+        const ext = path.extname(cleanFilePath);
+        // Decode the filename before using it (and ensure query params are removed)
+        const baseFilename = decodeURIComponent(path.basename(cleanFilePath, ext));
         const convertedPath = path.join(tempDir, `${baseFilename}.md`);
         await fs.writeFile(convertedPath, markdown);
         
@@ -285,7 +289,16 @@ export class ConversionService {
     async _cleanupTempFiles(...files) {
         for (const file of files) {
             try {
-                if (file && await fs.access(file).then(() => true).catch(() => false)) {
+                if (!file) continue;
+                // Check if the file/directory exists
+                await fs.access(file).catch(() => null);
+                // Determine if the path is a directory or a file
+                const stats = await fs.lstat(file).catch(() => null);
+                if (!stats) continue;
+
+                if (stats.isDirectory()) {
+                    await fs.rm(file, { recursive: true, force: true });
+                } else {
                     await fs.unlink(file);
                 }
             } catch (err) {

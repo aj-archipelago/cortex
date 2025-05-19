@@ -7,8 +7,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import XLSX from 'xlsx';
 import { port } from '../src/start.js';
-import { cleanupHashAndFile, getFolderNameFromUrl, createTestMediaFile } from './testUtils.helper.js';
-import { setFileStoreMap } from '../src/redis.js';
+import { cleanupHashAndFile, createTestMediaFile } from './testUtils.helper.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -229,7 +228,8 @@ test.serial('should cache remote files in Redis', async (t) => {
         params: {
             fetch: 'https://example.com/test.txt',
             requestId,
-            hash
+            hash,
+            timeout: 10000
         },
         validateStatus: (status) => true
     });
