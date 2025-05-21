@@ -186,7 +186,7 @@ export default async function GlossaryHandler(context, req) {
             try {
                 const resp = await fetch(`${APPTEK_BASE_URL}/${glossaryId}`, {
                     method: 'GET',
-                    headers: { 'accept': 'application/json', 'x-token': token }
+                    headers: {'x-token': token }
                 });
                 
                 console.log(`📤 Get glossary request sent, response status: ${resp.status}`);
