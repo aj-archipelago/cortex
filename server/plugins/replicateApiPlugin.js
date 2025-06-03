@@ -91,6 +91,22 @@ class ReplicateApiPlugin extends ModelPlugin {
         };
         break;
       }
+      case "replicate-flux-kontext-pro":
+      case "replicate-flux-kontext-max": {
+        const validRatios = [
+          '1:1', '16:9', '21:9', '3:2', '2:3', '4:5',
+          '5:4', '3:4', '4:3', '9:16', '9:21', 'match_input_image'
+        ];
+
+        requestParameters = {
+          input: {
+            prompt: modelPromptText,
+            input_image: combinedParameters.input_image,
+            aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
+          },
+        };
+        break;
+      }
     }
 
     return requestParameters;

@@ -1,5 +1,5 @@
 // sys_tool_image.js
-// Entity tool that creates images for the entity to show to the user
+// Entity tool that creates and modifies images for the entity to show to the user
 import { callPathway } from '../../../../lib/pathwayTools.js';
 
 export default {
@@ -10,7 +10,7 @@ export default {
         model: 'oai-gpt4o',
     },
     timeout: 300,
-    toolDefinition: {
+    toolDefinition: [{
         type: "function",
         icon: "🎨",
         function: {
@@ -36,6 +36,32 @@ export default {
             }
         }
     },
+    {
+        type: "function",
+        icon: "🔄",
+        function: {
+            name: "ModifyImage",
+            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated.",
+            parameters: {
+                type: "object",
+                properties: {
+                    inputImage: {
+                        type: "string",
+                        description: "The URL of the input image to modify. This should be a publicly accessible URL of an image that has been previously uploaded or generated."
+                    },
+                    detailedInstructions: {
+                        type: "string",
+                        description: "A very detailed prompt describing how you want to modify the image. Be specific about the changes you want to make, including style changes, artistic effects, or specific modifications. The more detailed and descriptive the prompt, the better the result."
+                    },
+                    userMessage: {
+                        type: "string",
+                        description: "A user-friendly message that describes what you're doing with this tool"
+                    }
+                },
+                required: ["inputImage", "detailedInstructions", "userMessage"]
+            }
+        }
+    }],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
@@ -46,8 +72,21 @@ export default {
             let numberResults = args.numberResults || 1;
             let negativePrompt = args.negativePrompt || "";
 
+            // If we have an input image, use the flux-kontext-max model
+            if (args.inputImage) {
+                model = "replicate-flux-kontext-max";
+            }
+
             pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
-            return await callPathway('image_flux', {...args, text: prompt, negativePrompt, numberResults, model, stream: false });
+            return await callPathway('image_flux', {
+                ...args, 
+                text: prompt, 
+                negativePrompt, 
+                numberResults, 
+                model, 
+                stream: false,
+                input_image: args.inputImage
+            });
 
         } catch (e) {
             pathwayResolver.logError(e.message ?? e);
