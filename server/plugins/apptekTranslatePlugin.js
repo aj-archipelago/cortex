@@ -9,13 +9,19 @@ class ApptekTranslatePlugin extends ModelPlugin {
         // Get API configuration from environment variables through the base class
         const apiEndpoint = this.environmentVariables.APPTEK_API_ENDPOINT;
         const apiKey = this.environmentVariables.APPTEK_API_KEY;
+        const fallbackLanguageApiEndpoint = this.environmentVariables.FALLBACK_LANGUAGE_DETECTION_ENDPOINT;
         
         if (!apiEndpoint || !apiKey) {
             throw new Error('AppTek API configuration missing. Please check APPTEK_API_ENDPOINT and APPTEK_API_KEY environment variables.');
         }
 
+        if (!fallbackLanguageApiEndpoint) {
+            throw new Error('Fallback Language Detection API endpoint missing. Please check FALLBACK_LANGUAGE_DETECTION_ENDPOINT environment variable.');
+        }
+
         this.apiEndpoint = apiEndpoint;
         this.apiKey = apiKey;
+        this.fallbackLanguageApiEndpoint = fallbackLanguageApiEndpoint;
     }
 
     // Set up parameters specific to the AppTek Translate API
@@ -89,10 +95,43 @@ class ApptekTranslatePlugin extends ModelPlugin {
             if (resultResponse.status === 200) {
                 const result = await resultResponse.text();
                 detectedLanguage = result.split('\n')[0].split(';')[0];
+            }else {
+                logger.error('Apptek Language detection failed with status:', resultResponse.status);
+                logger.debug({error: resultResponse, text})                
             }
 
             if (!detectedLanguage) {
-                throw new Error('Language detection timed out');
+                logger.info('Primary AppTek language detection failed, attempting fallback.');
+                try {
+                    const fallbackResponse = await fetch(`${this.fallbackLanguageApiEndpoint}/detect-language`, {
+                        method: 'POST',
+                        headers: {
+                            'accept': 'application/json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ text: text })
+                    });
+
+                    if (fallbackResponse.status === 200) {
+                        const fallbackResult = await fallbackResponse.json();
+                        if (fallbackResult && fallbackResult.language_code) {
+                            detectedLanguage = fallbackResult.language_code;
+                            logger.info(`Fallback language detection successful: ${detectedLanguage}`);
+                        } else {
+                            logger.error('Fallback language detection response did not contain language_code.');
+                        }
+                    } else {
+                        logger.error('Fallback language detection failed with status:', fallbackResponse.status);
+                        const errorBody = await fallbackResponse.text();
+                        logger.debug({ error: `Status: ${fallbackResponse.status}, Body: ${errorBody}`, text });
+                    }
+                } catch (fallbackError) {
+                    logger.error('Fallback language detection request error:', fallbackError);
+                }
+
+                if (!detectedLanguage) {
+                    throw new Error('Apptek Language detection failed after primary and fallback attempts');
+                }
             }
 
             return detectedLanguage;
