@@ -45,16 +45,48 @@ class ApptekTranslatePlugin extends ModelPlugin {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
         const { from = 'auto', to } = requestParameters.params;
 
-        // If source language is 'auto', we need to detect it first
+        let sourceLanguage = from;
+
+        // If source language is 'auto', detect it
         if (from === 'auto') {
+            // Assuming requestParameters.data contains the text for language detection (usually same as 'text')
             const detectedLang = await this.detectLanguage(requestParameters.data);
-            requestParameters.params.from = detectedLang;
+            if (detectedLang) {
+                sourceLanguage = detectedLang;
+                requestParameters.params.from = detectedLang; // Update for subsequent use
+            } else {
+                const warnMsg = `ApptekTranslatePlugin: Language detection for 'auto' did not return a language. Proceeding with 'auto' or default.`;
+                if (typeof logger !== 'undefined' && logger.warn) {
+                    logger.warn(warnMsg);
+                } else {
+                    console.warn(warnMsg);
+                }
+                // sourceLanguage remains 'auto'. The comparison 'auto' === to will likely be false.
+            }
+        }
+        // At this point, sourceLanguage is either the initially provided 'from' language,
+        // or the detected language if 'from' was 'auto' and detection was successful.
+        // requestParameters.params.from is also updated if detection occurred.
+
+        // Check if source and target languages are the same
+        // Ensure 'to' is a valid language string, not empty or null.
+        if (to && sourceLanguage && sourceLanguage !== 'auto' && sourceLanguage === to) {
+            const logMessage = `ApptekTranslatePlugin: Source language (${sourceLanguage}) matches target language (${to}). Skipping translation.`;
+            if (typeof logger !== 'undefined' && logger.info) {
+                logger.info(logMessage);
+            } else {
+                console.info(logMessage);
+            }
+            // Return the original text. Ensure the return format matches what `this.executeRequest`
+            // would return for a successful translation (e.g., string or object).
+            // Assuming it's a string based on typical translation plugin behavior.
+            return text;
         }
 
-        // Construct the URL with language pair for translation
-        const langPair = `${requestParameters.params.from}-${to}`;
+        // Construct the URL with the (potentially detected) source language and target language
+        const langPair = `${requestParameters.params.from}-${to}`; // requestParameters.params.from is correctly set
         cortexRequest.url = `${this.apiEndpoint}/api/v2/quicktranslate/${langPair}`;
-        cortexRequest.data = requestParameters.data;
+        cortexRequest.data = requestParameters.data; 
         cortexRequest.method = 'POST';
         cortexRequest.headers = {
             'x-token': this.apiKey,
@@ -64,12 +96,16 @@ class ApptekTranslatePlugin extends ModelPlugin {
         
         // Add glossary_id parameter if it's provided and not 'none'
         if (requestParameters.params.glossaryId && requestParameters.params.glossaryId !== 'none') {
-            // Add glossary_id as a query parameter
             const url = new URL(cortexRequest.url);
             url.searchParams.append('glossary_id', requestParameters.params.glossaryId);
             cortexRequest.url = url.toString();
             
-            logger.verbose(`Using glossary ID: ${requestParameters.params.glossaryId}`);
+            const glossaryLogMessage = `ApptekTranslatePlugin: Using glossary ID: ${requestParameters.params.glossaryId}`;
+            if (typeof logger !== 'undefined' && logger.verbose) {
+                logger.verbose(glossaryLogMessage);
+            } else {
+                console.debug(glossaryLogMessage); // console.debug might be more appropriate for verbose
+            }
         }
 
         return this.executeRequest(cortexRequest);
