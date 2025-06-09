@@ -79,10 +79,17 @@ export default {
             const { codingTask, userMessage, inputFiles, codingTaskKeywords } = args;
             const { contextId } = args;
 
-            let taskSuffix = "";
-            if (inputFiles) {
-                taskSuffix = `You must use the following files as input to complete the task: ${inputFiles}.`
+            let taskSuffix = `\n\n<EXTRA_INFO> Chat History with User (This chat triggered the coding task):\n${args?.chatHistory?.map(message => `${message?.role}: ${message?.content}`).join('\n')}\n\n</EXTRA_INFO>`;
+            const maxSuffixLength = 20000; // Maximum length for the task suffix
+            if(taskSuffix.length > maxSuffixLength) {
+                logger.warn(`Task suffix is too long (${taskSuffix.length} characters). Truncating to last ${maxSuffixLength} characters.`);
+                taskSuffix = taskSuffix.slice(-maxSuffixLength); // truncate to last characters to avoid exceeding 
             }
+            
+            // if (inputFiles) {
+            //     taskSuffix = `You must use the following files as input to complete the task: ${inputFiles}.`
+            // }
+
 
 
             // Send the task to the queue
