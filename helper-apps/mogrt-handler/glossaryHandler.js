@@ -34,7 +34,7 @@ export default async function GlossaryHandler(context, req) {
             for (const entry of body.entries) {
                 entry.target_alternatives = [];
             }
-            const resp = await fetch(`${APPTEK_BASE_URL}/${langPair}?name=${encodeURIComponent(name)}`, {
+            const resp = await fetch(`${APPTEK_BASE_URL}/${langPair}`, {
                 method: 'POST',
                 headers: { 'accept': 'application/json', 'x-token': token, 'content-type': 'application/json' },
                 body: JSON.stringify(body)
@@ -117,7 +117,7 @@ export default async function GlossaryHandler(context, req) {
             // 2. Create (reuse create logic)
             const { source_lang_code, target_lang_code, entries, name } = body;
             const langPair = `${source_lang_code}-${target_lang_code}`;
-            const resp = await fetch(`${APPTEK_BASE_URL}/${langPair}?name=${encodeURIComponent(name || glossaryId)}`, {
+            const resp = await fetch(`${APPTEK_BASE_URL}/${langPair}`, {
                 method: 'POST',
                 headers: { 'accept': 'application/json', 'x-token': token, 'content-type': 'application/json' },
                 body: JSON.stringify(body)
