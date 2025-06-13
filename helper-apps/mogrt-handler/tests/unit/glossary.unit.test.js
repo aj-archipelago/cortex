@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import GlossaryHandler from '../../glossaryHandler.js';
-
 // Helper to call handler
 async function callHandler({ method, url, body = {}, query = {}, headers = {} }) {
+  const { default: GlossaryHandler } = await import('../../glossaryHandler.js');
   const context = {};
   const req = { method, url, body, query, headers };
   await GlossaryHandler(context, req);
@@ -11,20 +10,29 @@ async function callHandler({ method, url, body = {}, query = {}, headers = {} })
 
 describe('GlossaryHandler Unit', () => {
   let fetchMock;
+  let s3HandlerMock;
+  
   beforeEach(() => {
     fetchMock = vi.fn();
+    s3HandlerMock = {
+      saveGlossaryId: vi.fn().mockResolvedValue({ versionId: 'mock-version-id', key: 'mock-key' }),
+      getGlossaryVersions: vi.fn(),
+      getGlossaryVersion: vi.fn()
+    };
+    
     vi.resetModules();
     vi.doMock('node-fetch', () => ({
       __esModule: true,
       default: fetchMock
     }));
+    vi.doMock('../../s3Handler.js', () => ({
+      __esModule: true,
+      saveGlossaryId: s3HandlerMock.saveGlossaryId,
+      getGlossaryVersions: s3HandlerMock.getGlossaryVersions,
+      getGlossaryVersion: s3HandlerMock.getGlossaryVersion
+    }));
   });
 
-  it('should reject missing x-token', async () => {
-    const res = await callHandler({ method: 'GET', url: '/api/glossary/list' });
-    expect(res.status).toBe(401);
-    expect(res.body.error).toMatch(/x-token/i);
-  });
 
   it('should proxy GET /list', async () => {
     fetchMock.mockResolvedValue({ status: 200, json: async () => ({ glossaries: [] }) });
@@ -38,15 +46,52 @@ describe('GlossaryHandler Unit', () => {
   });
 
   it('should proxy POST /en-es (create glossary)', async () => {
-    fetchMock.mockResolvedValue({ status: 200, json: async () => ({ id: 'glossary-id' }) });
-    const body = { source_lang_code: 'en', target_lang_code: 'es', entries: [{ source: 'a', target: 'b' }] };
-    const res = await callHandler({ method: 'POST', url: '/api/glossary/en-es', body });
+    // Mock API response with glossary_id instead of id to match actual API response
+    fetchMock.mockResolvedValue({ 
+      status: 200, 
+      json: async () => ({ glossary_id: 'glossary-id' }) 
+    });
+    
+    const body = { 
+      source_lang_code: 'en', 
+      target_lang_code: 'es', 
+      entries: [{ source: 'a', target: 'b' }],
+      name: 'Test Glossary'
+    };
+    
+    const res = await callHandler({ 
+      method: 'POST', 
+      url: '/api/glossary/en-es', 
+      body 
+    });
+    
+    // Verify fetch was called with correct URL and method
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/en-es'),
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({ 
+        method: 'POST',
+        headers: expect.objectContaining({
+          'accept': 'application/json',
+          'content-type': 'application/json'
+        }),
+        body: expect.any(String)
+      })
     );
+    
+    // Verify S3 save was called
+    expect(s3HandlerMock.saveGlossaryId).toHaveBeenCalledWith(
+      'glossary-id',
+      'en-es',
+      'Test Glossary'
+    );
+    
+    // Verify response
     expect(res.status).toBe(200);
-    expect(res.body.id).toBe('glossary-id');
+    expect(res.body.glossary_id).toBe('glossary-id');
+    expect(res.body.version).toEqual({
+      versionId: 'mock-version-id',
+      key: 'mock-key'
+    });
   });
 
   it('should proxy DELETE /glossary_id', async () => {

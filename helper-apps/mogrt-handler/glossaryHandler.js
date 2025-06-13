@@ -29,7 +29,7 @@ export default async function GlossaryHandler(context, req) {
         // Create glossary
         if (method === 'POST' && url.match(/\/api\/glossary\/[a-z]{2}-[a-z]{2}/)) {
             const langPair = url.match(/\/api\/glossary\/([a-z]{2}-[a-z]{2})/)[1];
-            const name = query.name || (body && body.name) || '';
+            body.name = ""
 
             for (const entry of body.entries) {
                 entry.target_alternatives = [];
@@ -115,7 +115,8 @@ export default async function GlossaryHandler(context, req) {
                 // Continue with create even if delete fails
             }
             // 2. Create (reuse create logic)
-            const { source_lang_code, target_lang_code, entries, name } = body;
+            const { source_lang_code, target_lang_code, entries } = body;
+            body.name = ""
             const langPair = `${source_lang_code}-${target_lang_code}`;
             const resp = await fetch(`${APPTEK_BASE_URL}/${langPair}`, {
                 method: 'POST',
@@ -127,7 +128,7 @@ export default async function GlossaryHandler(context, req) {
             // If successful, save the glossary ID to S3 with versioning
             if (resp.status === 200 && data.glossary_id) {
                 try {
-                    const versionInfo = await saveGlossaryId(data.glossary_id, langPair, name || glossaryId);
+                    const versionInfo = await saveGlossaryId(data.glossary_id, langPair);
                     // Add version info to the response
                     data.version = {
                         versionId: versionInfo.versionId,
