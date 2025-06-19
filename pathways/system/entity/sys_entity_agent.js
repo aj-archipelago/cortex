@@ -5,7 +5,7 @@ const MAX_TOOL_CALLS = 50;
 import { callPathway, callTool, say } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
-import { chatArgsHasImageUrl, removeOldImageAndFileContent } from '../../../lib/util.js';
+import { chatArgsHasImageUrl, removeOldImageAndFileContent, getAvailableFiles } from '../../../lib/util.js';
 import { Prompt } from '../../../server/prompt.js';
 import { getToolsForEntity, loadEntityConfig } from './tools/shared/sys_entity_tools.js';
 
@@ -275,7 +275,7 @@ export default {
         const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n`;
 
         const promptMessages = [
-            {"role": "system", "content": `${promptPrefix}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_SEARCH_RULES}}\n\n{{renderTemplate AI_SEARCH_SYNTAX}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n${memoryTemplates}{{renderTemplate AI_DATETIME}}`},
+            {"role": "system", "content": `${promptPrefix}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_SEARCH_RULES}}\n\n{{renderTemplate AI_SEARCH_SYNTAX}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n${memoryTemplates}{{renderTemplate AI_AVAILABLE_FILES}}\n\n{{renderTemplate AI_DATETIME}}`},
             "{{chatHistory}}",
         ];
 
@@ -293,6 +293,8 @@ export default {
         } else {
             args.chatHistory = args.chatHistory.slice(-20);
         }
+
+        const availableFiles = getAvailableFiles(args.chatHistory);
 
         // remove old image and file content
         const visionContentPresent = chatArgsHasImageUrl(args);
@@ -327,6 +329,7 @@ export default {
             let response = await runAllPrompts({
                 ...args,
                 chatHistory: currentMessages,
+                availableFiles,
                 tools: entityToolsOpenAiFormat,
                 tool_choice: memoryLookupRequired ? "required" : "auto"
             });

@@ -103,6 +103,24 @@ class ReplicateApiPlugin extends ModelPlugin {
             prompt: modelPromptText,
             input_image: combinedParameters.input_image,
             aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
+            safety_tolerance: (combinedParameters.input_image ? 2 : combinedParameters.safety_tolerance || 3),
+          },
+        };
+        break;
+      }
+      case "replicate-multi-image-kontext-max": {
+        const validRatios = [
+          '1:1', '16:9', '21:9', '3:2', '2:3', '4:5',
+          '5:4', '3:4', '4:3', '9:16', '9:21', 'match_input_image'
+        ];
+
+        requestParameters = {
+          input: {
+            prompt: modelPromptText,
+            input_image_1: combinedParameters.input_image_1 || combinedParameters.input_image,
+            input_image_2: combinedParameters.input_image_2,
+            aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
+            safety_tolerance: (combinedParameters.input_image ? 2 : combinedParameters.safety_tolerance || 3),
           },
         };
         break;
