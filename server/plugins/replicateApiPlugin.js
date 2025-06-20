@@ -98,11 +98,39 @@ class ReplicateApiPlugin extends ModelPlugin {
           '5:4', '3:4', '4:3', '9:16', '9:21', 'match_input_image'
         ];
 
+        let safetyTolerance = combinedParameters.safety_tolerance || 3;
+        if(combinedParameters.input_image){
+          safetyTolerance = Math.min(safetyTolerance, 2);
+        }
+
         requestParameters = {
           input: {
             prompt: modelPromptText,
             input_image: combinedParameters.input_image,
             aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
+            safety_tolerance: safetyTolerance,
+          },
+        };
+        break;
+      }
+      case "replicate-multi-image-kontext-max": {
+        const validRatios = [
+          '1:1', '16:9', '21:9', '3:2', '2:3', '4:5',
+          '5:4', '3:4', '4:3', '9:16', '9:21', 'match_input_image'
+        ];
+
+        let safetyTolerance = combinedParameters.safety_tolerance || 3;
+        if(combinedParameters.input_image_1 || combinedParameters.input_image) {
+          safetyTolerance = Math.min(safetyTolerance, 2);
+        }
+
+        requestParameters = {
+          input: {
+            prompt: modelPromptText,
+            input_image_1: combinedParameters.input_image_1 || combinedParameters.input_image,
+            input_image_2: combinedParameters.input_image_2,
+            aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
+            safety_tolerance: safetyTolerance,
           },
         };
         break;

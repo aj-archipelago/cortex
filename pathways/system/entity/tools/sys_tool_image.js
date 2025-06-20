@@ -41,13 +41,17 @@ export default {
         icon: "🔄",
         function: {
             name: "ModifyImage",
-            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated.",
+            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated. It takes up to two input images as a reference and outputs a new image based on the instructions.",
             parameters: {
                 type: "object",
                 properties: {
                     inputImage: {
                         type: "string",
-                        description: "The URL of the input image to modify. This should be a publicly accessible URL of an image that has been previously uploaded or generated."
+                        description: "The first image URL copied exactly from an image_url field in your chat context."
+                    },
+                    inputImage2: {
+                        type: "string",
+                        description: "The second input image URL copied exactly from an image_url field in your chat context if there is one."
                     },
                     detailedInstructions: {
                         type: "string",
@@ -77,6 +81,11 @@ export default {
                 model = "replicate-flux-kontext-max";
             }
 
+            // If we have two input images, use the multi-image-kontext-max model
+            if (args.inputImage2) {
+                model = "replicate-multi-image-kontext-max";
+            }
+
             pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
             return await callPathway('image_flux', {
                 ...args, 
@@ -85,7 +94,8 @@ export default {
                 numberResults, 
                 model, 
                 stream: false,
-                input_image: args.inputImage
+                input_image: args.inputImage,
+                input_image_2: args.inputImage2,
             });
 
         } catch (e) {

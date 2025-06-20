@@ -14,5 +14,6 @@ export default {
     output_quality: 80,
     steps: 4,
     input_image: "", // URL to input image for models that support it
+    input_image_2: "", // URL to second input image for models that support it
   },
 };
