@@ -727,6 +727,8 @@ const buildPathways = async (config) => {
     // Add pathways and entityTools to config
     config.load({ pathways, entityTools });
 
+    config.pathwayManager = pathwayManager; 
+
     return { pathwayManager, pathways };
 }
 
