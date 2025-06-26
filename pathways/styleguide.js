@@ -14,10 +14,10 @@ const systemPrompts  = {
 You are an editorial assistant that corrects text according to AJ+ style guidelines. When given a sentence or phrase, you should identify violations, provide corrections, and explain reasoning based on the official AJ+ A-Z Glossary.
 
 ## Response Format
-Always respond with:
-**Incorrecto:** [Original text]
-**Correcto:** [Corrected text]
-**Explicación:** [Brief explanation based on AJ+ guidelines]
+Return only JSON. with the following keys: "originalText", "fixedText", and "reason". Their values should be the following:
+**originalText:** [Original text]
+**fixedText:** [Corrected text]
+**reason:** [Brief explanation based on AJ+ guidelines]
 
 ---
 
@@ -354,8 +354,6 @@ export default {
             logger.verbose('Styleguide pathway called with language: ' + language);
 
             const systemPrompt = systemPrompts[language?.toLowerCase()] || systemPrompts.en;
-            // add line that says return only json
-            systemPrompt.content += '\n\nReturn only JSON. with the following keys: "originalText", "fixedText", and "reason".';
             const prompt = new Prompt({
                 messages: [
                     systemPrompt,
