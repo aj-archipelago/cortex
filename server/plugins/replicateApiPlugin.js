@@ -35,6 +35,7 @@ class ReplicateApiPlugin extends ModelPlugin {
             height: combinedParameters.height,
             size: combinedParameters.size || "1024x1024",
             style: combinedParameters.style || "realistic_image",
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) ? { seed: combinedParameters.seed } : {}),
           },
         };
         break;
@@ -109,6 +110,7 @@ class ReplicateApiPlugin extends ModelPlugin {
             input_image: combinedParameters.input_image,
             aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
             safety_tolerance: safetyTolerance,
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
           },
         };
         break;
@@ -131,6 +133,25 @@ class ReplicateApiPlugin extends ModelPlugin {
             input_image_2: combinedParameters.input_image_2,
             aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
             safety_tolerance: safetyTolerance,
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+          },
+        };
+        break;
+      }
+      case "replicate-seedance-1-pro": {
+        const validResolutions = ["480p", "1080p"];
+        const validRatios = ["16:9", "4:3", "9:16", "1:1", "3:4", "21:9", "9:21"];
+        const validFps = [24];
+
+        requestParameters = {
+          input: {
+            prompt: modelPromptText,
+            resolution: validResolutions.includes(combinedParameters.resolution) ? combinedParameters.resolution : "1080p",
+            aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "16:9",
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+            fps: validFps.includes(combinedParameters.fps) ? combinedParameters.fps : 24,
+            duration: combinedParameters.duration || 5,
+            ...(combinedParameters.image ? { image: combinedParameters.image } : {}),
           },
         };
         break;

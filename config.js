@@ -290,6 +290,15 @@ var config = convict({
                     "Content-Type": "application/json"
                 },
             },
+            "replicate-seedance-1-pro": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/bytedance/seedance-1-pro/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
             "replicate-flux-11-pro": {
                 "type": "REPLICATE-API",
                 "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions",

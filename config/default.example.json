@@ -37,7 +37,7 @@
         },
         "gemini-pro-15-vision": {
             "type": "GEMINI-VISION",
-            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/gemini-1.5-pro-preview-0215:streamGenerateContent",
+            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/gemini-1.5-pro:streamGenerateContent",
             "headers": {
                 "Content-Type": "application/json"
             },
@@ -48,7 +48,7 @@
         },
         "gemini-pro-25-vision": {
             "type": "GEMINI-VISION",
-            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/gemini-2.5-pro-exp-03-25:streamGenerateContent",
+            "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/gemini-2.5-pro:streamGenerateContent",
             "headers": {
                 "Content-Type": "application/json"
             },
