@@ -150,6 +150,7 @@ class ReplicateApiPlugin extends ModelPlugin {
             aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "16:9",
             ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
             fps: validFps.includes(combinedParameters.fps) ? combinedParameters.fps : 24,
+            camera_fixed: combinedParameters.camera_fixed || false,
             duration: combinedParameters.duration || 5,
             ...(combinedParameters.image ? { image: combinedParameters.image } : {}),
           },

@@ -9,6 +9,7 @@ export default {
     fps: 24,
     duration: 5,
     image: "",
+    camera_fixed: false,
     seed: -1,
   },
 
