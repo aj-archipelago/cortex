@@ -35,6 +35,7 @@ class ReplicateApiPlugin extends ModelPlugin {
             height: combinedParameters.height,
             size: combinedParameters.size || "1024x1024",
             style: combinedParameters.style || "realistic_image",
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) ? { seed: combinedParameters.seed } : {}),
           },
         };
         break;
@@ -87,6 +88,71 @@ class ReplicateApiPlugin extends ModelPlugin {
             num_outputs: combinedParameters.numberResults,
             num_inference_steps: combinedParameters.steps || 4,
             disable_safety_checker: true,
+          },
+        };
+        break;
+      }
+      case "replicate-flux-kontext-pro":
+      case "replicate-flux-kontext-max": {
+        const validRatios = [
+          '1:1', '16:9', '21:9', '3:2', '2:3', '4:5',
+          '5:4', '3:4', '4:3', '9:16', '9:21', 'match_input_image'
+        ];
+
+        let safetyTolerance = combinedParameters.safety_tolerance || 3;
+        if(combinedParameters.input_image){
+          safetyTolerance = Math.min(safetyTolerance, 2);
+        }
+
+        requestParameters = {
+          input: {
+            prompt: modelPromptText,
+            input_image: combinedParameters.input_image,
+            aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
+            safety_tolerance: safetyTolerance,
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+          },
+        };
+        break;
+      }
+      case "replicate-multi-image-kontext-max": {
+        const validRatios = [
+          '1:1', '16:9', '21:9', '3:2', '2:3', '4:5',
+          '5:4', '3:4', '4:3', '9:16', '9:21', 'match_input_image'
+        ];
+
+        let safetyTolerance = combinedParameters.safety_tolerance || 3;
+        if(combinedParameters.input_image_1 || combinedParameters.input_image) {
+          safetyTolerance = Math.min(safetyTolerance, 2);
+        }
+
+        requestParameters = {
+          input: {
+            prompt: modelPromptText,
+            input_image_1: combinedParameters.input_image_1 || combinedParameters.input_image,
+            input_image_2: combinedParameters.input_image_2,
+            aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
+            safety_tolerance: safetyTolerance,
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+          },
+        };
+        break;
+      }
+      case "replicate-seedance-1-pro": {
+        const validResolutions = ["480p", "1080p"];
+        const validRatios = ["16:9", "4:3", "9:16", "1:1", "3:4", "21:9", "9:21"];
+        const validFps = [24];
+
+        requestParameters = {
+          input: {
+            prompt: modelPromptText,
+            resolution: validResolutions.includes(combinedParameters.resolution) ? combinedParameters.resolution : "1080p",
+            aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "16:9",
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+            fps: validFps.includes(combinedParameters.fps) ? combinedParameters.fps : 24,
+            camera_fixed: combinedParameters.camera_fixed || false,
+            duration: combinedParameters.duration || 5,
+            ...(combinedParameters.image ? { image: combinedParameters.image } : {}),
           },
         };
         break;

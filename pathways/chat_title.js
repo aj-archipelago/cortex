@@ -16,10 +16,11 @@ export default {
         }),
     ],
     inputParameters: {
+        chatHistory: [{role: '', content: []}],
         title: '',
         text: '',
     },
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41-mini',
     useInputChunking: false,
     temperature: 0,
     enableDuplicateRequests: false

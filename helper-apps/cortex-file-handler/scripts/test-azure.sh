@@ -6,7 +6,7 @@ mkdir -p $AZURITE_DIR
 
 # Start Azurite in background
 echo "Starting Azurite..."
-azurite --silent --location $AZURITE_DIR &
+azurite --silent --skipApiVersionCheck --location $AZURITE_DIR &
 AZURITE_PID=$!
 
 # Wait for Azurite to start
@@ -26,6 +26,9 @@ TEST_RESULT=$?
 # Kill Azurite
 echo "Cleaning up..."
 kill $AZURITE_PID
+
+# Wait for Azurite to finish cleanup
+sleep 2
 
 # Clean up Azurite directory
 rm -rf $AZURITE_DIR

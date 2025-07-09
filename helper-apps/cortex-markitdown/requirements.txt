@@ -1,0 +1,2 @@
+azure-functions
+markitdown[all]>=0.1.0

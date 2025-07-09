@@ -27,7 +27,7 @@ export default {
         section: "",
         operations: "[]"
     },
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41',
     useInputChunking: false,
     enableDuplicateRequests: false,
     json: true,

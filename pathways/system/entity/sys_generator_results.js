@@ -25,7 +25,7 @@ export default {
         language: "English",
         chatId: ``,
         dataSources: [""],
-        model: 'oai-gpt4o',
+        model: 'oai-gpt41-mini',
     },
     timeout: 300,
 

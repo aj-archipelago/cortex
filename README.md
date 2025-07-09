@@ -18,20 +18,21 @@ Just about anything! It's kind of an LLM swiss army knife.  Here are some ideas:
 * Simple architecture to build custom functional endpoints (called `pathways`), that implement common NL AI tasks. Default pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, sentiment analysis, and bias analysis.
 * Extensive model support with built-in integrations for:
   - OpenAI models:
+    - GPT-4.1 (+mini, +nano)
     - GPT-4 Omni (GPT-4o)
-    - GPT-4 Omni Mini (GPT-4o-mini)
-    - O1 and O3-mini (Advanced reasoning models)
-    - Most of the earlier GPT models (GPT-4, 3.5 Turbo, etc.)
+    - O3 and O4-mini (Advanced reasoning models)
+    - Most of the earlier GPT models (GPT-4 series, 3.5 Turbo, etc.)
   - Google models:
-    - Gemini 1.5 Pro
-    - Gemini 2.0 Flash (experimental, via 1.5 Vision API)
-    - Gemini 1.5 Flash
-    - Earlier Google models (Gemini 1.0 series, PaLM)
+    - Gemini 2.5 Pro
+    - Gemini 2.5 Flash
+    - Gemini 2.0 Flash
+    - Earlier Google models (Gemini 1.5 series)
   - Anthropic models:
-    - Claude 3.5 Sonnet v2 (latest)
+    - Claude 3.7 Sonnet
     - Claude 3.5 Sonnet
     - Claude 3.5 Haiku
     - Claude 3 Series
+  - Ollama support
   - Azure OpenAI support
   - Custom model implementations
 * Advanced voice and audio capabilities:
@@ -527,7 +528,6 @@ Models are configured in the `models` section of the config. Each model can have
 - `GEMINI-1.5-CHAT`: For Gemini 1.5 Pro chat models
 - `GEMINI-1.5-VISION`: For Gemini vision models (including 2.0 Flash experimental)
 - `CLAUDE-3-VERTEX`: For Claude-3 and 3.5 models (Haiku, Opus, Sonnet)
-- `PALM-CHAT`: For PaLM chat models
 - `AZURE-TRANSLATE`: For Azure translation services
 
 Each model configuration can include:
