@@ -127,11 +127,9 @@ class ModelExecutor {
             case 'GOOGLE-TRANSLATE':
                 plugin = new GoogleTranslatePlugin(pathway, model);
                 break;
-            case 'GROQ-TRANSLATE':
-                plugin = new GroqChatPlugin(pathway, model);
-                break;
             case 'GROQ-CHAT':
                 plugin = new GroqChatPlugin(pathway, model);
+                break;
             case 'VEO-VIDEO':
                 plugin = new VeoVideoPlugin(pathway, model);
                 break;

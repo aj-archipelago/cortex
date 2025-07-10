@@ -15,10 +15,6 @@ class ApptekTranslatePlugin extends ModelPlugin {
             throw new Error('AppTek API configuration missing. Please check APPTEK_API_ENDPOINT and APPTEK_API_KEY environment variables.');
         }
 
-        if (!fallbackLanguageApiEndpoint) {
-            throw new Error('Fallback Language Detection API endpoint missing. Please check FALLBACK_LANGUAGE_DETECTION_ENDPOINT environment variable.');
-        }
-
         this.apiEndpoint = apiEndpoint;
         this.apiKey = apiKey;
         this.fallbackLanguageApiEndpoint = fallbackLanguageApiEndpoint;
@@ -136,7 +132,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
                 logger.debug({error: resultResponse, text})                
             }
 
-            if (!detectedLanguage) {
+            if (!detectedLanguage && this.fallbackLanguageApiEndpoint) {
                 logger.info('Primary AppTek language detection failed, attempting fallback.');
                 try {
                     const fallbackResponse = await fetch(`${this.fallbackLanguageApiEndpoint}/detect-language`, {

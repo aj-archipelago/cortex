@@ -168,9 +168,5 @@
     },
     "enableCache": false,
     "enableRestEndpoints": false,
-    "subscriptionKeepAlive": 10000,
-    "enabledTranslationModels": [
-        "translate_apptek",
-        "translate_groq"
-    ]
+    "subscriptionKeepAlive": 10000
 }
