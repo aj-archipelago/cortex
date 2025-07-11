@@ -665,7 +665,6 @@ const buildPathways = async (config) => {
             }
         } catch (error) {
             logger.error(`Error loading pathways from ${dirPath}: ${error.message}`);
-            console.log(error.stack);
         }
         return pathways;
     };
