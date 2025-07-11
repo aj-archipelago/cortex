@@ -238,7 +238,6 @@ describe('MogrtHandler', () => {
       const mogrtHandlerPromise = MogrtHandler(context, req);
       await simulateBusboyEventsAsync(filesData, [{ fieldname: 'name', value: 'Test' }]);
       await mogrtHandlerPromise;
-      console.log("GOTCHA....", context.res)
       expect(context.res.status).toBe(500);
       expect(context.res.body).toEqual({ error: 'Both MOGRT and preview files (GIF or MP4) are required' });
     });
@@ -337,7 +336,6 @@ describe('MogrtHandler', () => {
     it('should not set a response for an unhandled HTTP method (e.g., PUT)', async () => {
       const req = mockReq('PUT');
       await MogrtHandler(context, req);
-      console.log(context.res)
       expect(context.res.status).toBe(500);
     });
 

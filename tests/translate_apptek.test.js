@@ -51,23 +51,6 @@ test.beforeEach((t) => {
         to: 'es'
     };
 
-    try {
-        t.context.resolver = new PathwayResolver({
-            config: t.context.mockConfig,
-            pathway: t.context.pathway,
-            args: t.context.args,
-            endpoints: {
-                "apptek-translate": {
-                    resolve: t.context.sandbox.stub().resolves('translated text'),
-                    type: 'APPTEK-TRANSLATE'
-                }
-            }
-        });
-    } catch (error) {
-        t.log(error);
-        console.log(error);
-    }
-    
     // Create resolver instance
     t.context.resolver = new PathwayResolver({
         config: t.context.mockConfig,

@@ -51,7 +51,6 @@ class PathwayResolver {
                 this.logWarning(`No model specified in the pathway, using ${this.modelName}.`);
             }
         }
-        console.log(this.model, this.pathway)
 
         this.previousResult = '';
         this.prompts = [];
