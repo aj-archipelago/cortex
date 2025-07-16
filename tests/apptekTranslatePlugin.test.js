@@ -28,7 +28,6 @@ test.beforeEach((t) => {
     // Set environment variables for testing
     process.env.APPTEK_API_ENDPOINT = 'https://api.mock-apptek.com';
     process.env.APPTEK_API_KEY = 'mock-api-key';
-    process.env.FALLBACK_LANGUAGE_DETECTION_ENDPOINT = 'https://fallback-api.example.com';
     
     // Create a sinon sandbox
     t.context.sandbox = sinon.createSandbox();
@@ -52,7 +51,6 @@ test('constructor initializes with correct configuration', (t) => {
     const plugin = t.context.plugin;
     t.is(plugin.apiEndpoint, 'https://api.mock-apptek.com');
     t.is(plugin.apiKey, 'mock-api-key');
-    t.is(plugin.fallbackLanguageApiEndpoint, 'https://fallback-api.example.com');
     t.is(plugin.config, config); // Verify that it uses the imported config
     t.is(plugin.pathwayPrompt, mockPathway.prompt);
     t.is(plugin.modelName, mockModel.name);

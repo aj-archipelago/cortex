@@ -33,14 +33,9 @@ export default {
                         description: 'High-quality translation using GPT-4',
                         supportedLanguages: 'All languages supported'
                     },
-                    'translate_gpt4_turbo': {
-                        name: 'GPT-4 Turbo Translator',
-                        description: 'Fast, high-quality translation using GPT-4 Turbo',
-                        supportedLanguages: 'All languages supported'
-                    },
-                    'translate_turbo': {
-                        name: 'GPT-3.5 Turbo Translator',
-                        description: 'Fast translation using GPT-3.5 Turbo',
+                    'translate_gpt4_omni': {
+                        name: 'GPT-4 Omni Translator',
+                        description: 'High-quality translation using GPT-4 Omni',
                         supportedLanguages: 'All languages supported'
                     },
                     'translate_google': {

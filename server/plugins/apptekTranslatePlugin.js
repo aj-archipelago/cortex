@@ -9,7 +9,6 @@ class ApptekTranslatePlugin extends ModelPlugin {
         // Get API configuration from environment variables through the base class
         const apiEndpoint = this.environmentVariables.APPTEK_API_ENDPOINT;
         const apiKey = this.environmentVariables.APPTEK_API_KEY;
-        const fallbackLanguageApiEndpoint = this.environmentVariables.FALLBACK_LANGUAGE_DETECTION_ENDPOINT;
         
         if (!apiEndpoint || !apiKey) {
             throw new Error('AppTek API configuration missing. Please check APPTEK_API_ENDPOINT and APPTEK_API_KEY environment variables.');
@@ -17,7 +16,6 @@ class ApptekTranslatePlugin extends ModelPlugin {
 
         this.apiEndpoint = apiEndpoint;
         this.apiKey = apiKey;
-        this.fallbackLanguageApiEndpoint = fallbackLanguageApiEndpoint;
     }
 
     // Set up parameters specific to the AppTek Translate API
@@ -53,11 +51,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
                     requestParameters.params.from = detectedLang; // Update for subsequent use
                 } else {
                     const warnMsg = `ApptekTranslatePlugin: Language detection for 'auto' did not return a language. Proceeding with 'auto' or default.`;
-                    if (typeof logger !== 'undefined' && logger.warn) {
-                        logger.warn(warnMsg);
-                    } else {
-                        console.warn(warnMsg);
-                    }
+                    logger.warn(warnMsg)
                     // sourceLanguage remains 'auto'. The comparison 'auto' === to will likely be false.
                 }
             }
@@ -69,11 +63,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
             // Ensure 'to' is a valid language string, not empty or null.
             if (to && sourceLanguage && sourceLanguage !== 'auto' && sourceLanguage === to) {
                 const logMessage = `ApptekTranslatePlugin: Source language (${sourceLanguage}) matches target language (${to}). Skipping translation.`;
-                if (typeof logger !== 'undefined' && logger.info) {
-                    logger.info(logMessage);
-                } else {
-                    console.info(logMessage);
-                }
+                logger.verbose(logMessage)
                 // Return the original text. Ensure the return format matches what `this.executeRequest`
                 // would return for a successful translation (e.g., string or object).
                 // Assuming it's a string based on typical translation plugin behavior.
@@ -98,11 +88,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
                 cortexRequest.url = url.toString();
                 
                 const glossaryLogMessage = `ApptekTranslatePlugin: Using glossary ID: ${requestParameters.params.glossaryId}`;
-                if (typeof logger !== 'undefined' && logger.verbose) {
-                    logger.verbose(glossaryLogMessage);
-                } else {
-                    console.debug(glossaryLogMessage); // console.debug might be more appropriate for verbose
-                }
+                logger.verbose(glossaryLogMessage)
             }
 
             return this.executeRequest(cortexRequest);
@@ -120,12 +106,12 @@ class ApptekTranslatePlugin extends ModelPlugin {
                     to: parameters.to || this.promptParameters.to,
                 });
                 
-                logger.info('Successfully used Groq translate as fallback');
+                logger.verbose('Successfully used Groq translate as fallback');
                 return result;
             } catch (fallbackError) {
                 // If even the fallback fails, log it and rethrow the original error
                 logger.error(`Groq translate fallback also failed: ${fallbackError.message}`);
-                throw error; // Rethrow original error
+                throw fallbackError;
             }
         }
     }
@@ -151,49 +137,33 @@ class ApptekTranslatePlugin extends ModelPlugin {
                 const result = await resultResponse.text();
                 detectedLanguage = result.split('\n')[0].split(';')[0];
             }else {
-                logger.error('Apptek Language detection failed with status:', resultResponse.status);
-                logger.debug({error: resultResponse, text})                
+                logger.error(`Apptek Language detection failed with status: ${resultResponse.status}`);
+                logger.debug({error: resultResponse, text})
             }
 
-            if (!detectedLanguage && this.fallbackLanguageApiEndpoint) {
-                logger.info('Primary AppTek language detection failed, attempting fallback.');
-                try {
-                    const fallbackResponse = await fetch(`${this.fallbackLanguageApiEndpoint}/detect-language`, {
-                        method: 'POST',
-                        headers: {
-                            'accept': 'application/json',
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ text: text })
-                    });
-
-                    if (fallbackResponse.status === 200) {
-                        const fallbackResult = await fallbackResponse.json();
-                        if (fallbackResult && fallbackResult.language_code) {
-                            detectedLanguage = fallbackResult.language_code;
-                            logger.info(`Fallback language detection successful: ${detectedLanguage}`);
-                        } else {
-                            logger.error('Fallback language detection response did not contain language_code.');
-                        }
-                    } else {
-                        logger.error('Fallback language detection failed with status:', fallbackResponse.status);
-                        const errorBody = await fallbackResponse.text();
-                        logger.debug({ error: `Status: ${fallbackResponse.status}, Body: ${errorBody}`, text });
-                    }
-                } catch (fallbackError) {
-                    logger.error('Fallback language detection request error:', fallbackError);
-                }
-
-                if (!detectedLanguage) {
-                    throw new Error('Apptek Language detection failed after primary and fallback attempts');
-                }
+            if (!detectedLanguage) {
+               throw new Error('Language detection failed');
             }
 
             return detectedLanguage;
 
         } catch (error) {
-            logger.error('AppTek language detection error:', error);
-            throw error;
+            try {
+                // Import the callPathway function if it hasn't been imported at the top
+                const { callPathway } = await import('../../lib/pathwayTools.js');
+                
+                // Call the language pathway as a fallback
+                const detectedLanguage = await callPathway('language', { 
+                    text,
+                });
+                
+                logger.verbose('Successfully used language pathway as fallback');
+                return detectedLanguage;
+            } catch (fallbackError) {
+                // If even the fallback fails, log it and rethrow the original error
+                logger.error(`Language pathway fallback also failed: ${fallbackError.message}`);
+                throw fallbackError;
+            }
         }
     }
 
