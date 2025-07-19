@@ -1,19 +1,25 @@
 import test from 'ava';
 import sinon from 'sinon';
 import { PathwayResolver } from '../server/pathwayResolver.js';
-import translate_apptek from '../pathways/translate_apptek.js';
-import { config } from '../config.js';
 
 // Mock configuration
 const mockModel = {
     name: 'apptek-translate',
     type: 'APPTEK-TRANSLATE',
-    apiEndpoint: 'https://api.mock-apptek.com'
+    apiEndpoint: 'https://api.mock-apptek.com',
+    apiKey: 'mock-api-key'
 };
 
 test.beforeEach((t) => {
     // Create a sinon sandbox
     t.context.sandbox = sinon.createSandbox();
+
+    // Save original environment variables
+    t.context.originalEnv = { ...process.env };
+    
+    // Set environment variables for testing
+    process.env.APPTEK_API_ENDPOINT = 'https://api.mock-apptek.com';
+    process.env.APPTEK_API_KEY = 'mock-api-key';
     
     // Create config mock
     t.context.mockConfig = {
@@ -23,11 +29,18 @@ test.beforeEach((t) => {
                     'apptek-translate': mockModel
                 },
                 'models.apptek-translate': mockModel,
-                defaultModelName: 'apptek-translate'
+                defaultModelName: 'apptek-translate',
+                environmentVariables: {
+                    APPTEK_API_ENDPOINT: 'https://api.mock-apptek.com',
+                    APPTEK_API_KEY: 'mock-api-key'
+                }
             };
             return configs[key];
         },
-        getEnv: () => ({}),
+        getEnv: () => ({
+            APPTEK_API_ENDPOINT: 'https://api.mock-apptek.com',
+            APPTEK_API_KEY: 'mock-api-key'
+        }),
         models: {
             'apptek-translate': mockModel
         }
