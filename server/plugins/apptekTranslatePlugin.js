@@ -1,6 +1,8 @@
 // ApptekTranslatePlugin.js
 import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
+const { callPathway } = await import('../../lib/pathwayTools.js');
+                
 
 class ApptekTranslatePlugin extends ModelPlugin {
     constructor(pathway, model) {
@@ -149,9 +151,6 @@ class ApptekTranslatePlugin extends ModelPlugin {
 
         } catch (error) {
             try {
-                // Import the callPathway function if it hasn't been imported at the top
-                const { callPathway } = await import('../../lib/pathwayTools.js');
-                
                 // Call the language pathway as a fallback
                 const detectedLanguage = await callPathway('language', { 
                     text,

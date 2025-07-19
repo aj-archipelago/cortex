@@ -2,6 +2,7 @@ import test from 'ava';
 import sinon from 'sinon';
 import ApptekTranslatePlugin from '../server/plugins/apptekTranslatePlugin.js';
 import { config } from '../config.js';
+import * as pathwayTools from '../lib/pathwayTools.js';
 
 // Mock pathway and model
 const mockPathway = {
@@ -84,7 +85,7 @@ test('detectLanguage successfully detects language', async (t) => {
     t.true(t.context.plugin.detectLanguage.calledWith(text));
 });
 
-test('detectLanguage handles API errors', async (t) => {
+test('detectLanguage handles API errors and attempts fallback', async (t) => {
     // Create a new instance for this test to avoid stub conflicts
     const plugin = new ApptekTranslatePlugin(mockPathway, mockModel);
     
@@ -100,11 +101,62 @@ test('detectLanguage handles API errors', async (t) => {
     // Reset and configure fetch stub for this test
     global.fetch = t.context.sandbox.stub().resolves(errorResponse);
     
-    // Use a specific assertion function that throws if the function doesn't throw
-    await t.throwsAsync(
-        () => plugin.detectLanguage(text),
-        { message: /Language detection failed/ }
-    );
+    // Test that the fallback is attempted - this will either succeed (if language pathway exists)
+    // or fail with a specific error indicating the pathway was not found
+    try {
+        const result = await plugin.detectLanguage(text);
+        // If we get here, the fallback succeeded
+        t.is(typeof result, 'string', 'Should return a language code string');
+    } catch (error) {
+        // If we get an error, it should be about the language pathway not being found
+        t.true(
+            error.message.includes('cannot find configuration param \'pathways.language\'') ||
+            error.message.includes('Pathway language not found'),
+            `Error should indicate language pathway fallback was attempted. Got: ${error.message}`
+        );
+    }
+});
+
+test('detectLanguage fallback calls language pathway with correct parameters', async (t) => {
+    // This test verifies the fallback mechanism by creating a mock pathway configuration
+    // and ensuring the language pathway would be called with the correct parameters
+    
+    const plugin = new ApptekTranslatePlugin(mockPathway, mockModel);
+    const text = 'Hello, how are you?';
+    
+    // Mock API error response
+    const errorResponse = {
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error'
+    };
+    
+    global.fetch = t.context.sandbox.stub().resolves(errorResponse);
+    
+    // Create a temporary pathway configuration for the language pathway
+    const originalGet = config.get;
+    const configStub = t.context.sandbox.stub(config, 'get');
+    
+    // Mock the language pathway configuration
+    configStub.withArgs('pathways.language').returns({
+        rootResolver: async (parent, args, context) => {
+            // Verify the correct parameters are passed
+            t.is(args.text, text, 'Text parameter should be passed correctly');
+            return { result: 'en' };
+        }
+    });
+    
+    // For any other config.get calls, return undefined to trigger the original error path
+    configStub.callThrough();
+    
+    // Call detectLanguage and expect it to succeed using the fallback
+    const result = await plugin.detectLanguage(text);
+    
+    // Verify the result
+    t.is(result, 'en', 'Should return the language detected by the fallback pathway');
+    
+    // Verify that config.get was called for the language pathway
+    t.true(configStub.calledWith('pathways.language'), 'Should attempt to get language pathway configuration');
 });
 
 test('execute successfully translates text', async (t) => {
