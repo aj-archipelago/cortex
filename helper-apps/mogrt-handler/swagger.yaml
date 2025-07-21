@@ -1,0 +1,436 @@
+openapi: 3.0.0
+info:
+  title: MOGRT Handler API
+  version: 1.0.0
+  description: API for handling MOGRT files and preview GIFs with S3 storage
+servers:
+  - url: http://localhost:7072
+    description: Development server
+
+tags:
+  - name: MOGRT Management
+    description: Endpoints for managing MOGRT files and manifests
+  - name: Glossary Management
+    description: Endpoints for managing translation glossaries
+  - name: Glossary Versioning
+    description: Endpoints for working with glossary versions
+
+paths:
+  /api/MogrtHandler:
+    get:
+      tags:
+        - MOGRT Management
+      summary: Get MOGRT manifest
+      parameters:
+        - in: query
+          name: manifestId
+          schema:
+            type: string
+          description: ID of the manifest to retrieve. If not provided, returns master manifest.
+      responses:
+        '200':
+          description: Returns the requested manifest
+        '500':
+          description: Server error
+    post:
+      tags:
+        - MOGRT Management
+      summary: Upload MOGRT file
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: MOGRT file to upload
+                preview:
+                  type: string
+                  format: binary
+                  description: Preview GIF/PNG file
+                name:
+                  type: string
+                  description: Display name for the MOGRT
+                id:
+                  type: string
+                  description: Optional ID to use (will be generated if not provided)
+                manifestId:
+                  type: string
+                  description: Optional manifest ID to add MOGRT to
+      responses:
+        '200':
+          description: MOGRT uploaded successfully
+        '400':
+          description: Bad request
+        '500':
+          description: Server error
+          
+  /api/MogrtHandler/{id}:
+    delete:
+      tags:
+        - MOGRT Management
+      summary: Delete MOGRT from manifest
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: ID of the MOGRT to delete
+        - in: query
+          name: manifestId
+          schema:
+            type: string
+          description: Optional manifest ID to delete from (defaults to master)
+      responses:
+        '200':
+          description: MOGRT deleted
+        '404':
+          description: MOGRT not found
+        '500':
+          description: Server error
+          
+  /api/glossary/list:
+    get:
+      tags:
+        - Glossary Management
+      summary: List all glossaries
+      responses:
+        '200':
+          description: Returns list of glossaries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  glossaries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        source_lang_code:
+                          type: string
+                        target_lang_code:
+                          type: string
+        '500':
+          description: Server error
+          
+  /api/glossary/{langPair}:
+    post:
+      tags:
+        - Glossary Management
+      summary: Create a new glossary
+      parameters:
+        - in: path
+          name: langPair
+          schema:
+            type: string
+          required: true
+          description: The language pair in format 'xx-xx' (e.g., 'en-es')
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: Name of the glossary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - source_lang_code
+                - target_lang_code
+                - entries
+              properties:
+                source_lang_code:
+                  type: string
+                  example: en
+                target_lang_code:
+                  type: string
+                  example: es
+                name:
+                  type: string
+                  example: My Glossary
+                entries:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - source_text
+                      - target_text
+                    properties:
+                      source_text:
+                        type: string
+                        example: hello
+                      target_text:
+                        type: string
+                        example: hola
+      responses:
+        '200':
+          description: Glossary created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  glossary_id:
+                    type: string
+                  version:
+                    type: object
+                    properties:
+                      versionId:
+                        type: string
+                      key:
+                        type: string
+        '400':
+          description: Bad request
+        '500':
+          description: Server error
+          
+  /api/glossary/{id}:
+    get:
+      tags:
+        - Glossary Management
+      summary: Get a glossary by ID
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The glossary ID
+      responses:
+        '200':
+          description: Glossary details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  glossary_id:
+                    type: string
+                  name:
+                    type: string
+                  source_lang_code:
+                    type: string
+                  target_lang_code:
+                    type: string
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source_text:
+                          type: string
+                        target_text:
+                          type: string
+        '404':
+          description: Glossary not found
+        '500':
+          description: Server error
+    delete:
+      tags:
+        - Glossary Management
+      summary: Delete a glossary by ID
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The glossary ID
+      responses:
+        '200':
+          description: Glossary deleted
+        '404':
+          description: Glossary not found
+        '500':
+          description: Server error
+          
+  /api/glossary/edit/{id}:
+    post:
+      tags:
+        - Glossary Management
+      summary: Edit a glossary by ID (delete and recreate)
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The glossary ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - source_lang_code
+                - target_lang_code
+                - entries
+              properties:
+                source_lang_code:
+                  type: string
+                  example: en
+                target_lang_code:
+                  type: string
+                  example: es
+                name:
+                  type: string
+                  example: My Glossary
+                entries:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - source_text
+                      - target_text
+                    properties:
+                      source_text:
+                        type: string
+                        example: hello
+                      target_text:
+                        type: string
+                        example: hola
+      responses:
+        '200':
+          description: Glossary edited
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  glossary_id:
+                    type: string
+                  version:
+                    type: object
+                    properties:
+                      versionId:
+                        type: string
+                      key:
+                        type: string
+        '400':
+          description: Bad request
+        '404':
+          description: Glossary not found
+        '500':
+          description: Server error
+          
+  /api/glossary/{langPair}/versions/{glossaryId}:
+    get:
+      tags:
+        - Glossary Versioning
+      summary: Get all versions of a glossary
+      parameters:
+        - in: path
+          name: langPair
+          schema:
+            type: string
+          required: true
+          description: The language pair in format 'xx-xx' (e.g., 'en-es')
+        - in: path
+          name: glossaryId
+          schema:
+            type: string
+          required: true
+          description: The glossary ID
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: Optional name of the glossary
+      responses:
+        '200':
+          description: List of glossary versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        versionId:
+                          type: string
+                          description: S3 version ID
+                        glossaryId:
+                          type: string
+                          description: Glossary ID
+                        lastModified:
+                          type: string
+                          format: date-time
+                          description: Version creation timestamp
+                        isLatest:
+                          type: boolean
+                          description: Whether this is the latest version
+                        metadata:
+                          type: object
+                          description: Additional metadata
+        '500':
+          description: Server error
+          
+  /api/glossary/{langPair}/version/{glossaryId}/{versionId}:
+    get:
+      tags:
+        - Glossary Versioning
+      summary: Get a specific version of a glossary
+      parameters:
+        - in: path
+          name: langPair
+          schema:
+            type: string
+          required: true
+          description: The language pair in format 'xx-xx' (e.g., 'en-es')
+        - in: path
+          name: glossaryId
+          schema:
+            type: string
+          required: true
+          description: The glossary ID
+        - in: path
+          name: versionId
+          schema:
+            type: string
+          required: true
+          description: The S3 version ID
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: Optional name of the glossary
+      responses:
+        '200':
+          description: Glossary version details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versionId:
+                    type: string
+                    description: S3 version ID
+                  glossaryId:
+                    type: string
+                    description: Glossary ID
+                  lastModified:
+                    type: string
+                    format: date-time
+                    description: Version creation timestamp
+                  metadata:
+                    type: object
+                    description: Additional metadata
+        '404':
+          description: Version not found
+        '500':
+          description: Server error
