@@ -1,6 +1,4 @@
 import basePathway from './basePathway.js';
-import { callPathway } from '../lib/pathwayTools.js';
-import logger from "../lib/logger.js";
 
 export default {
     ...basePathway,
@@ -13,6 +11,16 @@ export default {
 
         // Map of pathway names to their descriptions
         const modelDescriptions = {
+                    'translate_apptek': {
+                        name: 'AppTek Translator',
+                        description: 'AppTek specialized translation service',
+                        supportedLanguages: 'Selected languages supported'
+                    },
+                    'translate_groq': {
+                        name: 'Groq Llama 4 Scout Translator',
+                        description: 'High-performance translation using Groq Llama 4 Scout models',
+                        supportedLanguages: 'All major languages supported'
+                    },
                     'translate': {
                         name: 'Default Translator',
                         description: 'Default translation service using GPT',
@@ -22,11 +30,6 @@ export default {
                         name: 'Azure Translator',
                         description: 'Microsoft Azure Translation service',
                         supportedLanguages: 'Over 100 languages supported'
-                    },
-                    'translate_apptek': {
-                        name: 'AppTek Translator',
-                        description: 'AppTek specialized translation service',
-                        supportedLanguages: 'Selected languages supported'
                     },
                     'translate_gpt4': {
                         name: 'GPT-4 Translator',
@@ -42,11 +45,6 @@ export default {
                         name: 'Google Translator',
                         description: 'Google Cloud Translation service',
                         supportedLanguages: 'Over 100 languages supported'
-                    },
-                    'translate_groq': {
-                        name: 'Groq Llama 4 Scout Translator',
-                        description: 'High-performance translation using Groq Llama 4 Scout models',
-                        supportedLanguages: 'All major languages supported'
                     }
                 };  
                 
