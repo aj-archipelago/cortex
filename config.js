@@ -533,12 +533,7 @@ var config = convict({
         format: String,
         default: null,
         env: 'JINA_API_KEY'
-    },
-    styleguideSystemPromptsUrl: {
-        format: String,
-        default: null,
-        env: 'STYLEGUIDE_SYSTEM_PROMPTS_URL'
-    },
+    }
 });
 
 // Read in environment variables and set up service configuration
