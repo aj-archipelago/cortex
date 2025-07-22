@@ -412,6 +412,36 @@ var config = convict({
                 "maxReturnTokens": 4096,
                 "supportsStreaming": true
             },
+            "xai-grok-3": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-3-latest"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 131072,
+                "maxReturnTokens": 4096,
+                "supportsStreaming": true
+            },
+            "xai-grok-4": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-0709"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 131072,
+                "maxReturnTokens": 4096,
+                "supportsStreaming": true
+            }
         },
         env: 'CORTEX_MODELS'
     },

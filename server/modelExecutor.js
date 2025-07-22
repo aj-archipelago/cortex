@@ -30,6 +30,7 @@ import AzureVideoTranslatePlugin from './plugins/azureVideoTranslatePlugin.js';
 import OllamaChatPlugin from './plugins/ollamaChatPlugin.js';
 import OllamaCompletionPlugin from './plugins/ollamaCompletionPlugin.js';
 import VeoVideoPlugin from './plugins/veoVideoPlugin.js';
+import GrokVisionPlugin from './plugins/grokVisionPlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -120,6 +121,9 @@ class ModelExecutor {
                 break;
             case 'VEO-VIDEO':
                 plugin = new VeoVideoPlugin(pathway, model);
+                break;
+            case 'GROK-VISION':
+                plugin = new GrokVisionPlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);
