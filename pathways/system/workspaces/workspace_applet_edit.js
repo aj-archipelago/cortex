@@ -1,4 +1,4 @@
-import { Prompt } from '@aj-archipelago/cortex/server/prompt.js';
+import { Prompt } from "../../../server/prompt.js" 
 
 export default {
     useInputChunking: false,
