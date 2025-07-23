@@ -156,7 +156,10 @@ class ApptekTranslatePlugin extends ModelPlugin {
                     text,
                 });
                 
-                logger.verbose('Successfully used language pathway as fallback');
+                logger.verbose('Successfully used language pathway as fallback', {detectedLanguage});
+                if (!detectedLanguage) {
+                    throw new Error('Language detection failed using fallback language pathway');
+                }
                 return detectedLanguage;
             } catch (fallbackError) {
                 // If even the fallback fails, log it and rethrow the original error
