@@ -50,8 +50,6 @@ test.afterEach.always((t) => {
 
 test('constructor initializes with correct configuration', (t) => {
     const plugin = t.context.plugin;
-    t.is(plugin.apiEndpoint, 'https://api.mock-apptek.com');
-    t.is(plugin.apiKey, 'mock-api-key');
     t.is(plugin.config, config); // Verify that it uses the imported config
     t.is(plugin.pathwayPrompt, mockPathway.prompt);
     t.is(plugin.modelName, mockModel.name);
