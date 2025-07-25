@@ -1,18 +1,20 @@
 # Cortex File Handler Interface Documentation
 
 ## Overview
+
 The Cortex File Handler is a service that processes files through various operations including uploading, downloading, chunking, and document processing. It supports multiple storage backends (Azure Blob Storage, Google Cloud Storage, and Local File System).
 
 ## Request Methods
 
 ### POST
+
 - **Purpose**: Upload a file
 - **Content-Type**: `multipart/form-data`
 - **Parameters**:
   - `hash` (optional): Unique identifier for the file
   - `requestId` (required): Unique identifier for the request
   - File content must be included in the form data
-- **Behavior**: 
+- **Behavior**:
   - Uploads file to primary storage (Azure or Local)
   - If GCS is configured, also uploads to GCS
   - If hash is provided, stores file metadata in Redis
@@ -26,6 +28,7 @@ The Cortex File Handler is a service that processes files through various operat
 - **Note**: The `save` parameter is not supported in POST requests. To convert and save a document as text, use GET with the `save` parameter.
 
 ### GET
+
 - **Purpose**: Process or retrieve files
 - **Parameters** (can be in query string or request body):
   - `uri` (required if not using fetch/load/restore): URL of the file to process
@@ -48,13 +51,13 @@ The Cortex File Handler is a service that processes files through various operat
     - Truncates long filenames
 - **Behavior**:
   - For documents (PDF, DOC, etc.):
-    - If `save=true`: 
+    - If `save=true`:
       - Converts document to text
       - Saves text file to primary storage (Azure or Local)
       - Deletes original document from storage
       - Does not save to GCS
       - Returns object with primary storage URL
-    - If `save=false`: 
+    - If `save=false`:
       - Converts document to text
       - Returns array of text chunks
       - Does not persist any files
@@ -72,6 +75,7 @@ The Cortex File Handler is a service that processes files through various operat
     - Ensures correct file extension based on content type
 
 ### DELETE
+
 - **Purpose**: Remove files from storage
 - **Parameters** (can be in query string or request body):
   - `requestId` (required): Unique identifier for the request
@@ -82,12 +86,14 @@ The Cortex File Handler is a service that processes files through various operat
 - **Response**: Array of deleted file URLs
 
 ## Storage Configuration
+
 - **Azure**: Enabled if `AZURE_STORAGE_CONNECTION_STRING` is set
 - **GCS**: Enabled if `GCP_SERVICE_ACCOUNT_KEY_BASE64` or `GCP_SERVICE_ACCOUNT_KEY` is set
 - **Local**: Used as fallback if Azure is not configured
 
 ## Response Format
-- **Success**: 
+
+- **Success**:
   - Status: 200
   - Body: Varies by operation (see specific methods above)
 - **Error**:
@@ -95,6 +101,7 @@ The Cortex File Handler is a service that processes files through various operat
   - Body: Error message string
 
 ## Progress Tracking
+
 - Progress updates are published to Redis for each operation
 - Progress includes:
   - `progress`: Completion percentage (0-1)
@@ -105,8 +112,9 @@ The Cortex File Handler is a service that processes files through various operat
 - Progress updates are published to Redis channel associated with `requestId`
 
 ## File Types
+
 - **Documents**: Processed based on `DOC_EXTENSIONS` list
-  - Supported extensions: 
+  - Supported extensions:
     - Text: .txt, .json, .csv, .md, .xml, .js, .html, .css
     - Office: .doc, .docx, .xls, .xlsx
   - Document processing limitations:
@@ -135,6 +143,7 @@ The Cortex File Handler is a service that processes files through various operat
     - Truncates filenames longer than 200 characters
 
 ## Storage Behavior
+
 - **Primary Storage** (Azure or Local):
   - Files are stored with UUID-based names
   - Organized by requestId folders
@@ -151,6 +160,7 @@ The Cortex File Handler is a service that processes files through various operat
   - Used for progress tracking
 
 ## Cleanup
+
 - Automatic cleanup of inactive files
 - Removes files from:
   - Primary storage (Azure/Local)
@@ -163,16 +173,17 @@ The Cortex File Handler is a service that processes files through various operat
   - On error conditions
 
 ## Error Handling
-- **400 Bad Request**: 
+
+- **400 Bad Request**:
   - Missing required parameters
   - Invalid or inaccessible URL
   - Unsupported file type
-- **404 Not Found**: 
+- **404 Not Found**:
   - File or hash not found
   - File not found in storage
-- **500 Internal Server Error**: 
+- **500 Internal Server Error**:
   - Processing errors
   - Storage errors
   - Document conversion errors
   - PDF processing errors (scanned, encrypted, password-protected)
-- All errors include descriptive message in response body 
+- All errors include descriptive message in response body
