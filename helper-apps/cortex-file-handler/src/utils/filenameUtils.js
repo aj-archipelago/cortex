@@ -55,7 +55,7 @@ export function generateShortId() {
  */
 export function generateBlobName(requestId, filename) {
   // If no requestId is provided, just return the filename (for single files like remote downloads)
-  if (!requestId || requestId === '') {
+  if (!requestId) {
     return filename;
   }
   return `${requestId}/${filename}`;
