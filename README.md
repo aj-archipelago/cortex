@@ -561,6 +561,12 @@ Each model configuration can include:
 }
 ```
 
+**Rate Limiting**: The `requestsPerSecond` parameter controls the rate limiting for each model endpoint. If not specified, Cortex defaults to **100 requests per second** per endpoint. This rate limiting is implemented using the Bottleneck library with a token bucket algorithm that includes:
+- Minimum time between requests (`minTime`)
+- Maximum concurrent requests (`maxConcurrent`)
+- Token reservoir that refreshes every second
+- Optional Redis clustering support when `storageConnectionString` is configured
+
 ### API Compatibility
 
 Cortex provides OpenAI-compatible REST endpoints that allow you to use various models through a standardized interface. When `enableRestEndpoints` is set to `true`, Cortex exposes the following endpoints:

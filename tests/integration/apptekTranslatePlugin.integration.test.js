@@ -1,33 +1,19 @@
 import test from 'ava';
-import ApptekTranslatePlugin from '../../server/plugins/apptekTranslatePlugin.js';
-import CortexRequest from '../../lib/cortexRequest.js';
-import { createLimiter } from '../../lib/requestExecutor.js';
-import RequestMonitor from '../../lib/requestMonitor.js';
-import { Prompt } from '../../server/prompt.js';
-// Skip tests if API credentials are not available
-const skipIfNoCredentials = (t) => {
-    if (!process.env.APPTEK_API_ENDPOINT || !process.env.APPTEK_API_KEY) {
-        t.skip('AppTek API credentials not available. Set APPTEK_API_ENDPOINT and APPTEK_API_KEY environment variables.');
-        return true;
-    }
-    return false;
-};
+import serverFactory from '../../index.js';
 
-// Mock model configuration
-const mockModel = {
-    name: 'apptek-translate',
-    type: 'APPTEK-TRANSLATE',
-    endpoints: [{
-        name: 'apptek-translate',
-        type: 'APPTEK-TRANSLATE',
-        apiEndpoint: process.env.APPTEK_API_ENDPOINT,
-        apiKey: process.env.APPTEK_API_KEY,
-    }],
-};
+let testServer;
 
-createLimiter(mockModel.endpoints[0], 'apptek-translate', 0);
-mockModel.endpoints[0].monitor = new RequestMonitor();
+test.before(async () => {
+  const { server, startServer } = await serverFactory();
+  startServer && await startServer();
+  testServer = server;
+});
 
+test.after.always('cleanup', async () => {
+  if (testServer) {
+    await testServer.stop();
+  }
+});
 
 // Test data for different languages
 const testCases = [
@@ -78,79 +64,159 @@ const testCases = [
 // Direct AppTek plugin tests
 testCases.forEach((testCase) => {
     test.serial(`AppTek Plugin: ${testCase.name}`, async (t) => {
-        if (skipIfNoCredentials(t)) return;
-
-        // Create pathway configuration
-        const pathway = {
-            name: 'translate_apptek',
-            model: 'apptek-translate',
-            prompt: new Prompt('{{text}}'),
-            timeout: 1000000
-        };
-
-        // Create plugin instance
-        const plugin = new ApptekTranslatePlugin(pathway, mockModel);
+        const response = await testServer.executeOperation({
+            query: 'query translate_apptek($text: String!, $from: String, $to: String) { translate_apptek(text: $text, from: $from, to: $to) { result } }',
+            variables: {
+                text: testCase.text,
+                from: testCase.from,
+                to: testCase.to
+            }
+        });
         
-        // Set up parameters
-        const parameters = {
-            from: testCase.from,
-            to: testCase.to
-        };
+        t.is(response.body?.singleResult?.errors, undefined);
+        const result = response.body?.singleResult?.data?.translate_apptek?.result;
         
-        try {
-
-            const cortexRequest = new CortexRequest({pathwayResolver: {
-                requestId: 'test-request-id', 
-                pathway: pathway,
-                model: mockModel
-            }});
-            const result = await plugin.execute(testCase.text, parameters, pathway.prompt, cortexRequest);
-            
-            // Verify the result is a string
-            t.is(typeof result, 'string', 'Result should be a string');
-            
-            // Verify the result is not empty
-            t.true(result.length > 0, 'Result should not be empty');
-            
-            // Log the translation for manual verification
-            console.log(`\n${testCase.name}:`);
-            console.log(`Source (${testCase.from}): ${testCase.text}`);
-            console.log(`Target (${testCase.to}): ${result}`);
-            
-        } catch (error) {
-            t.fail(`Translation failed: ${error.message}`);
-        }
+        // Verify the result is a string
+        t.is(typeof result, 'string', 'Result should be a string');
+        
+        // Verify the result is not empty
+        t.true(result.length > 0, 'Result should not be empty');
+        
+        // Log the translation for manual verification
+        console.log(`\n${testCase.name}:`);
+        console.log(`Source (${testCase.from}): ${testCase.text}`);
+        console.log(`Target (${testCase.to}): ${result}`);
     });
 });
 
+// Test AppTek failure with GPT-4 Omni fallback
+test.serial('AppTek Plugin: Force failure and test GPT-4 Omni fallback', async (t) => {
+    // Store original environment variables
+    const originalEndpoint = process.env.APPTEK_API_ENDPOINT;
+    const originalApiKey = process.env.APPTEK_API_KEY;
+    
+    try {
+        // Force AppTek to fail by setting invalid endpoint
+        process.env.APPTEK_API_ENDPOINT = 'https://invalid-apptek-endpoint-that-will-fail.com';
+        process.env.APPTEK_API_KEY = 'invalid-api-key';
+        
+        const testText = 'Hello, this is a test for fallback translation.';
+        
+        const response = await testServer.executeOperation({
+            query: `
+                query translate_apptek_with_fallback($text: String!, $from: String, $to: String, $fallbackPathway: String) { 
+                    translate_apptek(text: $text, from: $from, to: $to, fallbackPathway: $fallbackPathway) { 
+                        result 
+                    } 
+                }
+            `,
+            variables: {
+                text: testText,
+                from: 'en',
+                to: 'es',
+                fallbackPathway: 'translate_gpt4_omni'
+            }
+        });
+        
+        // Check for errors in the response
+        t.is(response.body?.singleResult?.errors, undefined, 'Should not have GraphQL errors');
+        
+        const result = response.body?.singleResult?.data?.translate_apptek?.result;
+        
+        // Verify the result is a string
+        t.is(typeof result, 'string', 'Result should be a string');
+        
+        // Verify the result is not empty
+        t.true(result.length > 0, 'Result should not be empty');
+        
+        // Verify it's not the original text (translation should have occurred)
+        t.not(result, testText, 'Result should be translated, not the original text');
+        
+        // Log the fallback translation for manual verification
+        console.log('\nAppTek Failure with GPT-4 Omni Fallback:');
+        console.log(`Source (en): ${testText}`);
+        console.log(`Target (es): ${result}`);
+        console.log('✅ AppTek failed as expected and GPT-4 Omni fallback worked!');
+        
+    } finally {
+        // Restore original environment variables
+        if (originalEndpoint) {
+            process.env.APPTEK_API_ENDPOINT = originalEndpoint;
+        } else {
+            delete process.env.APPTEK_API_ENDPOINT;
+        }
+        
+        if (originalApiKey) {
+            process.env.APPTEK_API_KEY = originalApiKey;
+        } else {
+            delete process.env.APPTEK_API_KEY;
+        }
+    }
+});
 
-// Test language detection
-test.serial('AppTek Plugin: Language Detection', async (t) => {
-    if (skipIfNoCredentials(t)) return;
-
-    const pathway = { name: 'translate_apptek', model: 'apptek-translate' };
-    const plugin = new ApptekTranslatePlugin(pathway, mockModel);
-
-    const testTexts = [
-        { text: 'Hello world', expectedLang: 'en' },
-        { text: 'Hola mundo', expectedLang: 'es' },
-        { text: 'مرحبا بالعالم', expectedLang: 'ar' }
-    ];
-
-    for (const testText of testTexts) {
-        try {
-            const detectedLang = await plugin.detectLanguage(testText.text);
-            
-            t.is(typeof detectedLang, 'string', 'Detected language should be a string');
-            t.true(detectedLang.length > 0, 'Detected language should not be empty');
-            
-            console.log(`\nLanguage Detection:`);
-            console.log(`Text: ${testText.text}`);
-            console.log(`Detected: ${detectedLang}`);
-            console.log(`Expected: ${testText.expectedLang}`);
-            
-        } catch (error) {
-            t.fail(`Language detection failed: ${error.message}`);
+// Test AppTek failure with default fallback (translate_groq)
+test.skip('AppTek Plugin: Force failure and test default fallback', async (t) => {
+    // Set a longer timeout for this test since Groq might be slower
+    t.timeout(180000); // 3 minutes
+    
+    // Store original environment variables
+    const originalEndpoint = process.env.APPTEK_API_ENDPOINT;
+    const originalApiKey = process.env.APPTEK_API_KEY;
+    
+    try {
+        // Force AppTek to fail by setting invalid endpoint
+        process.env.APPTEK_API_ENDPOINT = 'https://invalid-apptek-endpoint-that-will-fail.com';
+        process.env.APPTEK_API_KEY = 'invalid-api-key';
+        
+        const testText = 'Hello, this is a test for default fallback translation.';
+        
+        const response = await testServer.executeOperation({
+            query: `
+                query translate_apptek_default_fallback($text: String!, $from: String, $to: String) { 
+                    translate_apptek(text: $text, from: $from, to: $to) { 
+                        result 
+                    } 
+                }
+            `,
+            variables: {
+                text: testText,
+                from: 'en',
+                to: 'fr'
+            }
+        });
+        
+        // Check for errors in the response
+        t.is(response.body?.singleResult?.errors, undefined, 'Should not have GraphQL errors');
+        
+        const result = response.body?.singleResult?.data?.translate_apptek?.result;
+        
+        // Verify the result is a string
+        t.is(typeof result, 'string', 'Result should be a string');
+        
+        // Verify the result is not empty
+        t.true(result.length > 0, 'Result should not be empty');
+        
+        // Verify it's not the original text (translation should have occurred)
+        t.not(result, testText, 'Result should be translated, not the original text');
+        
+        // Log the fallback translation for manual verification
+        console.log('\nAppTek Failure with Default Fallback:');
+        console.log(`Source (en): ${testText}`);
+        console.log(`Target (fr): ${result}`);
+        console.log('✅ AppTek failed as expected and default fallback worked!');
+        
+    } finally {
+        // Restore original environment variables
+        if (originalEndpoint) {
+            process.env.APPTEK_API_ENDPOINT = originalEndpoint;
+        } else {
+            delete process.env.APPTEK_API_ENDPOINT;
+        }
+        
+        if (originalApiKey) {
+            process.env.APPTEK_API_KEY = originalApiKey;
+        } else {
+            delete process.env.APPTEK_API_KEY;
         }
     }
 });

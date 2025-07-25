@@ -435,6 +435,17 @@ var config = convict({
                 "maxReturnTokens": 4096,
                 "supportsStreaming": true
             },
+            "apptek-translate": {
+                "type": "APPTEK-TRANSLATE",
+                "url": "{{APPTEK_API_ENDPOINT}}",
+                "headers": {
+                    "x-token": "{{APPTEK_API_KEY}}",
+                    "Accept": "application/json",
+                    "Content-Type": "text/plain"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 128000
+            },
         },
         env: 'CORTEX_MODELS'
     },
@@ -533,6 +544,17 @@ var config = convict({
         format: String,
         default: null,
         env: 'JINA_API_KEY'
+    },
+    apptekApiKey: {
+        format: String,
+        default: null,
+        env: 'APPTEK_API_KEY',
+        sensitive: true
+    },
+    apptekApiEndpoint: {
+        format: String,
+        default: null,
+        env: 'APPTEK_API_ENDPOINT'
     }
 });
 
