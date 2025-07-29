@@ -1,4 +1,4 @@
-// sys_openai_chat_o1.js
+// sys_openai_chat_o3.js
 
 import { Prompt } from '../../../server/prompt.js';
 
