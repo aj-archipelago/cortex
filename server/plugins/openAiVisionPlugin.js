@@ -31,10 +31,40 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                     };
                 }
 
-                if (Array.isArray(message.content)) {
+                // Handle empty, null, or undefined content
+                if (message.content === "" || message.content === null || message.content === undefined) {
+                    // For assistant messages with tool calls, content can be null
+                    if (message.role === "assistant" && message.tool_calls) {
+                        return {
+                            ...message,
+                            content: null
+                        };
+                    }
+                    // For other cases, use empty string which will be converted to proper format
                     return {
                         ...message,
-                        content: await Promise.all(message.content.map(async item => {
+                        content: [{ type: 'text', text: '' }]
+                    };
+                }
+
+                // Handle string content (convert to proper format)
+                if (typeof message.content === 'string') {
+                    return {
+                        ...message,
+                        content: [{ type: 'text', text: message.content }]
+                    };
+                }
+
+                if (Array.isArray(message.content)) {
+                    // Flatten content if it's a nested array
+                    let content = message.content;
+                    if (Array.isArray(content)) {
+                        content = content.flat();
+                    }
+                    
+                    return {
+                        ...message,
+                        content: await Promise.all(content.map(async item => {
                             const parsedItem = safeJsonParse(item);
 
                             if (typeof parsedItem === 'string') {
@@ -42,6 +72,11 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                             }
 
                             if (typeof parsedItem === 'object' && parsedItem !== null) {
+                                // If parsedItem is an array, treat it as text content
+                                if (Array.isArray(parsedItem)) {
+                                    return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
+                                }
+                                
                                 // Handle both 'image' and 'image_url' types
                                 if (parsedItem.type === 'image' || parsedItem.type === 'image_url') {
                                     const url = parsedItem.url || parsedItem.image_url?.url;
@@ -50,9 +85,18 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                                     }
                                     return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
                                 }
+                                
+                                // If parsedItem already has a type property, return it as-is
+                                if (parsedItem.type) {
+                                    return parsedItem;
+                                }
+                                
+                                // Otherwise, treat it as text content
+                                return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
                             }
                             
-                            return parsedItem;
+                            // Fallback: treat anything else as text content
+                            return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
                         }))
                     };
                 }
@@ -134,15 +178,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         const requestParameters = super.getRequestParameters(text, parameters, prompt);
 
         requestParameters.messages = await this.tryParseMessages(requestParameters.messages);
-
-        // Add tools support if provided in parameters
-        if (parameters.tools) {
-            requestParameters.tools = parameters.tools;
-        }
-
-        if (parameters.tool_choice) {
-            requestParameters.tool_choice = parameters.tool_choice;
-        }
 
         const modelMaxReturnTokens = this.getModelMaxReturnTokens();
         const maxTokensPrompt = this.promptParameters.max_tokens;
