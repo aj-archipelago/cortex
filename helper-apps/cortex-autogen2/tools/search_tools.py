@@ -104,7 +104,6 @@ async def bing_combined_search(query: str, count: int = 5) -> str:
     return await bing_web_search(query, count, "Webpages,Images")
 
 
-import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
