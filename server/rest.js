@@ -53,7 +53,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                         content: msg.content || null // Keep content as-is for tool call messages, null if empty
                     };
                 }
-                
+
                 // Handle empty, null, or undefined content
                 if (msg.content === "" || msg.content === null || msg.content === undefined) {
                     return {
@@ -61,7 +61,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                         content: msg.role === "assistant" && msg.tool_calls ? null : ""
                     };
                 }
-                
+
                 // Handle string content - leave as string for OpenAI API
                 if (typeof msg.content === 'string') {
                     return {
@@ -69,28 +69,15 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                         content: msg.content
                     };
                 }
-                
-                // Handle array content - ensure all items have proper type
+
+                // Handle array content - JSON.stringify each item as per original implementation
                 if (Array.isArray(msg.content)) {
                     return {
                         ...msg,
-                        content: msg.content.map(item => {
-                            if (typeof item === 'string') {
-                                return { type: 'text', text: item };
-                            } else if (typeof item === 'object' && item !== null) {
-                                // If item already has a type, return as-is
-                                if (item.type) {
-                                    return item;
-                                }
-                                // Otherwise convert to text
-                                return { type: 'text', text: JSON.stringify(item) };
-                            } else {
-                                return { type: 'text', text: String(item) };
-                            }
-                        })
+                        content: msg.content.map(item => JSON.stringify(item))
                     };
                 }
-                
+
                 // For any other type, convert to string
                 return {
                     ...msg,
@@ -103,8 +90,8 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                 ...tool,
                 function: tool.function ? {
                     ...tool.function,
-                    parameters: typeof tool.function.parameters === 'object' ? 
-                        JSON.stringify(tool.function.parameters) : 
+                    parameters: typeof tool.function.parameters === 'object' ?
+                        JSON.stringify(tool.function.parameters) :
                         tool.function.parameters
                 } : tool.function
             }));
@@ -112,8 +99,8 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             // Handle OpenAI functions parameter (legacy) - stringify the parameters field
             return value.map(func => ({
                 ...func,
-                parameters: typeof func.parameters === 'object' ? 
-                    JSON.stringify(func.parameters) : 
+                parameters: typeof func.parameters === 'object' ?
+                    JSON.stringify(func.parameters) :
                     func.parameters
             }));
         } else if (type === '[Message]' && Array.isArray(value)) {
@@ -156,16 +143,16 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             return `[ERROR] ${result.body.singleResult.errors[0].message.split(';')[0]}`;
         }
     }
-    
+
     // otherwise errors can just be returned as a string
     let resultText = result?.body?.singleResult?.data?.[name]?.result || result?.body?.singleResult?.errors?.[0]?.message || "";
     const toolData = result?.body?.singleResult?.data?.[name]?.tool;
-    
+
     // Ensure resultText is always a string for OpenAI API compatibility
     if (typeof resultText !== 'string') {
         resultText = JSON.stringify(resultText);
     }
-    
+
     return { resultText, toolData };
 };
 
@@ -179,7 +166,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
     }
-    
+
     const finishStream = (res, jsonResponse) => {
         // Send the last partial token if it exists
         const lastTokens = chunkTextIntoTokens('', true, useSingleTokenStream);
@@ -193,7 +180,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         // If we haven't sent the stop message yet, do it now
         if (jsonResponse.choices?.[0]?.finish_reason !== "stop") {
             let jsonEndStream = JSON.parse(JSON.stringify(jsonResponse));
-    
+
             if (jsonEndStream.object === 'text_completion') {
                 jsonEndStream.choices[0].index = 0;
                 jsonEndStream.choices[0].finish_reason = "stop";
@@ -203,16 +190,16 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
                 jsonEndStream.choices[0].index = 0;
                 jsonEndStream.choices[0].delta = {};
             }
-    
+
             sendStreamData(jsonEndStream);
         }
-    
+
         sendStreamData('[DONE]');
         res.end();
     }
 
     const sendStreamData = (data) => {
-        const dataString = (data==='[DONE]') ? data : JSON.stringify(data);
+        const dataString = (data === '[DONE]') ? data : JSON.stringify(data);
 
         if (!res.writableEnded) {
             res.write(`data: ${dataString}\n\n`);
@@ -244,7 +231,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
     let subscription;
 
     subscription = pubsub.subscribe('REQUEST_PROGRESS', (data) => {
-        
+
         const safeUnsubscribe = async () => {
             if (subscription) {
                 try {
@@ -281,7 +268,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         if (data.requestProgress.requestId !== requestId) return;
 
         logger.debug(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
-        
+
         const { progress, data: progressData } = data.requestProgress;
 
         try {
@@ -340,7 +327,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
     resolver && resolver(args);
 
     return subscription;
-  
+
 }
 
 function buildRestEndpoints(pathways, app, server, config) {
@@ -360,7 +347,7 @@ function buildRestEndpoints(pathways, app, server, config) {
                     openAIChatModels[pathway.emulateOpenAIChatModel] = name;
                 }
                 if (pathway.emulateOpenAICompletionModel) {
-                        openAICompletionModels[pathway.emulateOpenAICompletionModel] = name;
+                    openAICompletionModels[pathway.emulateOpenAICompletionModel] = name;
                 }
             } else {
                 app.post(`/rest/${name}`, async (req, res) => {
@@ -405,12 +392,12 @@ function buildRestEndpoints(pathways, app, server, config) {
                 created: Date.now(),
                 model: req.body.model,
                 choices: [
-                {
-                    text: resultText,
-                    index: 0,
-                    logprobs: null,
-                    finish_reason: "stop"
-                }
+                    {
+                        text: resultText,
+                        index: 0,
+                        logprobs: null,
+                        finish_reason: "stop"
+                    }
                 ],
             };
 
@@ -426,7 +413,7 @@ function buildRestEndpoints(pathways, app, server, config) {
                 res.json(jsonResponse);
             }
         });
-        
+
         app.post('/v1/chat/completions', async (req, res) => {
             const modelName = req.body.model || 'gpt-3.5-turbo';
             let pathwayName;
@@ -466,11 +453,11 @@ function buildRestEndpoints(pathways, app, server, config) {
                 }
                 // Note: We don't auto-parse plain JSON strings since they might be intended as plain text
             }
-            
+
             // Ensure resultText is always a string for OpenAI API compatibility
             if (typeof resultText !== 'string') {
                 resultText = JSON.stringify(resultText);
-            }   
+            }
 
             const jsonResponse = {
                 id: `chatcmpl`,
@@ -520,31 +507,8 @@ function buildRestEndpoints(pathways, app, server, config) {
                 jsonResponse.id = `chatcmpl-${requestId}`;
 
 
-                //check if model is claude
-                if (modelName.startsWith('claude-')) {
-                    // Non-streaming response
-                    const anthropicResponse = {
-                        id: `msg_${uuidv4()}`,
-                        type: "message",
-                        role: "assistant",
-                        content: [
-                            {
-                                type: "text",
-                                text: resultText
-                            }
-                        ],
-                        model: req.body.model,
-                        stop_reason: "end_turn",
-                        stop_sequence: null,
-                        usage: {
-                            input_tokens: 0,
-                        }
-                    };
-                    
-                    res.json(anthropicResponse);
-                }else {
-                    res.json(jsonResponse);
-                }
+                // Always return OpenAI format for /v1/chat/completions endpoint
+                res.json(jsonResponse);
             }
 
         });
@@ -553,7 +517,7 @@ function buildRestEndpoints(pathways, app, server, config) {
         app.post('/v1/messages', (req, res) => {
             // Forward to the chat completions endpoint logic
             // Note: This is a workaround to allow /v1/messages to work like /v1/chat/completions
-            req.body.model = 'claude-3.7-sonnet'; 
+            req.body.model = 'claude-3.7-sonnet';
             app._router.handle({ ...req, url: '/v1/chat/completions', originalUrl: '/v1/messages' }, res);
         });
 
