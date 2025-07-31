@@ -26,7 +26,7 @@ RUN mkdir -p /app/coding
 RUN touch README.md
 
 # Copy the application's code before installing dependencies
-COPY . .
+COPY . /app/src/cortex_autogen2
 
 # Install dependencies (including the current project)
 RUN poetry install --without dev --no-ansi --no-interaction
@@ -35,7 +35,7 @@ RUN poetry install --without dev --no-ansi --no-interaction
 RUN playwright install
 
 # Ensure Python can import our source package
-ENV PYTHONPATH="/app"
+ENV PYTHONPATH="/app/src:/app/src/cortex_autogen2"
 
 # The command to run the application
-CMD ["python", "main.py"] 
+CMD ["python", "-m", "cortex_autogen2.main"] 
