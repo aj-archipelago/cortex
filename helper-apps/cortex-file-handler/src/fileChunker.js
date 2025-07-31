@@ -190,9 +190,9 @@ async function splitMediaFile(
     );
 
     // Generate filename once for all chunks
-    const fileExtension = path.extname(inputPath);
+    // Since we're converting to MP3 format for transcription, use .mp3 extension
     const chunkBaseId = generateShortId();
-    const chunkBaseName = `${chunkBaseId}${fileExtension}`;
+    const chunkBaseName = `${chunkBaseId}.mp3`;
 
     const chunkResults = new Array(numChunks); // Pre-allocate array to maintain order
     const chunkOffsets = new Array(numChunks); // Pre-allocate offsets array
