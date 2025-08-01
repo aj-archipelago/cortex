@@ -22,7 +22,10 @@ if (process.env.NODE_ENV !== "test") {
     // In rare cases querying the public IP can fail (e.g. no network when
     // running offline).  Keep the default of "localhost" in that case so we
     // still generate valid URLs.
-    console.warn("Unable to determine public IPv4 address – defaulting to 'localhost'.", err);
+    console.warn(
+      "Unable to determine public IPv4 address – defaulting to 'localhost'.",
+      err,
+    );
   }
 }
 

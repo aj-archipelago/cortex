@@ -115,3 +115,19 @@ test('resolver uses correct model', (t) => {
     const model = resolver.model;
     t.is(model.type, 'APPTEK-TRANSLATE');
 });
+
+test('pathway has fallback pathway parameter', async (t) => {
+    // Import the actual pathway to test the new parameter
+    const pathway = await import('../pathways/translate_apptek.js');
+    
+    t.truthy(pathway.default.inputParameters.fallbackPathway);
+    t.is(pathway.default.inputParameters.fallbackPathway, 'translate_groq');
+});
+
+test('pathway has executePathway function', async (t) => {
+    // Import the actual pathway to test the executePathway function
+    const pathway = await import('../pathways/translate_apptek.js');
+    
+    t.truthy(pathway.default.executePathway);
+    t.is(typeof pathway.default.executePathway, 'function');
+});

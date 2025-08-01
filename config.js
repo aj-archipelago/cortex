@@ -464,7 +464,18 @@ var config = convict({
                 "maxTokenLength": 131072,
                 "maxReturnTokens": 4096,
                 "supportsStreaming": true
-            }
+            },
+            "apptek-translate": {
+                "type": "APPTEK-TRANSLATE",
+                "url": "{{APPTEK_API_ENDPOINT}}",
+                "headers": {
+                    "x-token": "{{APPTEK_API_KEY}}",
+                    "Accept": "application/json",
+                    "Content-Type": "text/plain"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 128000
+            },
         },
         env: 'CORTEX_MODELS'
     },
@@ -564,11 +575,17 @@ var config = convict({
         default: null,
         env: 'JINA_API_KEY'
     },
-    styleguideSystemPromptsUrl: {
+    apptekApiKey: {
         format: String,
         default: null,
-        env: 'STYLEGUIDE_SYSTEM_PROMPTS_URL'
+        env: 'APPTEK_API_KEY',
+        sensitive: true
     },
+    apptekApiEndpoint: {
+        format: String,
+        default: null,
+        env: 'APPTEK_API_ENDPOINT'
+    }
 });
 
 // Read in environment variables and set up service configuration
