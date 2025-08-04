@@ -105,7 +105,7 @@ export default {
   model: "oai-gpt4o",
   enableDuplicateRequests: false,
   timeout: 3600,
-  executePathway: async ({args}) => {
+  executePathway: async ({args, resolver) => {
     try {
       const { text, format = 'vtt' } = args;
       const parsed = parse(text, { format, preserveIndexes: true });
@@ -120,7 +120,7 @@ export default {
       logger.info(`Split subtitles into ${chunks.length} overlapping chunks`);
       
       // Translate all chunks in parallel
-      const chunkPromises = chunks.map(chunk => translateChunk(chunk, args));
+      const chunkPromises = chunks.map(chunk => translateChunk(chunk, {...args, format}));
       const translatedChunks = await Promise.all(chunkPromises);
       
       // Create a map of caption index to all its translations
