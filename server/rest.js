@@ -51,6 +51,8 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                     msg.content.map(item => JSON.stringify(item)) : 
                     msg.content
             }));
+        } else if (type === '[String]' && Array.isArray(value)) {
+            return value;
         } else {
             return value;
         }
@@ -80,6 +82,10 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                 }
             `;
 
+    // Debug: Log the variables being passed
+    console.log('DEBUG: REST endpoint variables:', JSON.stringify(variables, null, 2));
+    console.log('DEBUG: REST endpoint query:', query);
+    
     const result = await server.executeOperation({ query, variables });
 
     // if we're streaming and there are errors, we return a standard error code

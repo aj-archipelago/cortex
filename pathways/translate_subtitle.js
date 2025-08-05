@@ -37,7 +37,9 @@ export function selectBestTranslation(translations, startIndex, endIndex) {
     
     // For multiple translations, prefer the one whose identifier is closest to the middle
     // of the requested range
-    const targetValue = (Number(startIndex) + Number(endIndex)) / 2;
+    const startNum = Number(startIndex);
+    const endNum = Number(endIndex);
+    const targetValue = (isNaN(startNum) || isNaN(endNum)) ? 0 : (startNum + endNum) / 2;
     
     return translations.reduce((best, current) => {
       try {
@@ -82,7 +84,7 @@ export async function translateChunk(chunk, args, maxRetries = 3) {
       const content = match[1].trim();
 
       const parsed = parse(content, { preserveIndexes: true });
-      return parsed.cues;
+      return parsed.cues || [];
       
     } catch (e) {
       logger.error(`Error translating chunk ${chunk.startIndex}-${chunk.endIndex} (attempt ${attempt + 1}): ${e}`);
@@ -105,9 +107,11 @@ export default {
   model: "oai-gpt4o",
   enableDuplicateRequests: false,
   timeout: 3600,
-  executePathway: async ({args, resolver) => {
+  executePathway: async ({args, resolver}) => {
     try {
-      const { text, format = 'vtt' } = args;
+      const combinedArgs = { ...resolver?.pathway?.inputParameters, ...args };
+      const { text, format = 'vtt' } = combinedArgs;
+
       const parsed = parse(text, { format, preserveIndexes: true });
       const captions = parsed.cues;
   
@@ -120,13 +124,16 @@ export default {
       logger.info(`Split subtitles into ${chunks.length} overlapping chunks`);
       
       // Translate all chunks in parallel
-      const chunkPromises = chunks.map(chunk => translateChunk(chunk, {...args, format}));
+      const chunkPromises = chunks.map(chunk => translateChunk(chunk, combinedArgs));
       const translatedChunks = await Promise.all(chunkPromises);
       
       // Create a map of caption index to all its translations
       const translationMap = new Map();
       translatedChunks.flat().forEach(caption => {
-        const identifier = caption.identifier || caption.index;
+        // Skip null/undefined captions
+        if (!caption) return;
+        
+        const identifier = String(caption.identifier || caption.index || 'unknown');
         if (!translationMap.has(identifier)) {
           translationMap.set(identifier, []);
         }
@@ -135,10 +142,10 @@ export default {
       
       // Select best translation for each caption
       const finalCaptions = captions.map(caption => {
-        const identifier = caption.identifier || caption.index;
+        const identifier = String(caption.identifier || caption.index || 'unknown');
         const translations = translationMap.get(identifier) || [caption];
         const bestTranslation = selectBestTranslation(translations, identifier, identifier);
-        const text = bestTranslation?.text || caption?.text;
+        const text = bestTranslation?.text || caption?.text || '';
         return { ...caption, text };
       });
 

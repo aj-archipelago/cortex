@@ -704,10 +704,15 @@ const buildPathways = async (config) => {
                     Object.assign(pathways, subPathways);
                 } else if (file.name.endsWith('.js')) {
                     // Load individual pathway file
-                    const pathwayURL = pathToFileURL(fullPath).toString();
-                    const pathway = await import(pathwayURL).then(module => module.default || module);
-                    const pathwayName = path.basename(file.name, '.js');
-                    pathways[pathwayName] = pathway;
+                    try {
+                        const pathwayURL = pathToFileURL(fullPath).toString();
+                        const pathway = await import(pathwayURL).then(module => module.default || module);
+                        const pathwayName = path.basename(file.name, '.js');
+                        pathways[pathwayName] = pathway;
+                    } catch (pathwayError) {
+                        logger.error(`Error loading pathway file ${fullPath}: ${pathwayError.message}`);
+                        throw pathwayError; // Re-throw to be caught by outer catch block
+                    }
                 }
             }
         } catch (error) {

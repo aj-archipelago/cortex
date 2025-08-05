@@ -129,7 +129,17 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
 
             // Add sources configuration
             if (parameters.sources !== undefined) {
-                searchParameters.sources = parameters.sources;
+                // Convert string sources to objects with type property
+                if (Array.isArray(parameters.sources)) {
+                    searchParameters.sources = parameters.sources.map(source => {
+                        if (typeof source === 'string') {
+                            return { type: source };
+                        }
+                        return source;
+                    });
+                } else {
+                    searchParameters.sources = parameters.sources;
+                }
             }
 
             requestParameters.search_parameters = searchParameters;
