@@ -32,7 +32,7 @@ test('bing agent basic query', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    const result = response.body?.singleResult?.data?.bing_agent.result;
+    const result = JSON.parse(response.body?.singleResult?.data?.bing_agent.result).value;
     t.true(result && result.length > 0, 'Response should not be empty');
     t.true(result.toLowerCase().includes('paris'), 'Response should mention Paris');
 });
@@ -51,7 +51,7 @@ test('bing agent weather query', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    const result = response.body?.singleResult?.data?.bing_agent.result;
+    const result = JSON.parse(response.body?.singleResult?.data?.bing_agent.result).value;
     t.true(result.length > 50);
     t.true(result.toLowerCase().includes('weather') || 
            result.toLowerCase().includes('temperature') || 
@@ -72,7 +72,7 @@ test('bing agent news query', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    const result = response.body?.singleResult?.data?.bing_agent.result;
+    const result = JSON.parse(response.body?.singleResult?.data?.bing_agent.result).value;
     t.true(result.length > 50);
     t.true(result.toLowerCase().includes('technology') || 
            result.toLowerCase().includes('news') || 
@@ -93,7 +93,7 @@ test('bing agent sports query', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    const result = response.body?.singleResult?.data?.bing_agent.result;
+    const result = JSON.parse(response.body?.singleResult?.data?.bing_agent.result).value;
     t.true(result.length > 50);
     t.true(result.toLowerCase().includes('world cup') || 
            result.toLowerCase().includes('soccer') || 
@@ -114,7 +114,7 @@ test('bing agent population query', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    const result = response.body?.singleResult?.data?.bing_agent.result;
+    const result = JSON.parse(response.body?.singleResult?.data?.bing_agent.result).value;
     t.true(result.length > 50);
     t.true(result.toLowerCase().includes('tokyo') || 
            result.toLowerCase().includes('population') || 
@@ -137,7 +137,7 @@ test('bing agent timeout handling', async t => {
     });
 
     t.is(response.body?.singleResult?.errors, undefined);
-    const result = response.body?.singleResult?.data?.bing_agent.result;
+    const result = JSON.parse(response.body?.singleResult?.data?.bing_agent.result).value;
     t.true(result.length > 50);
     t.true(result.toLowerCase().includes('life') || 
            result.toLowerCase().includes('meaning') || 
