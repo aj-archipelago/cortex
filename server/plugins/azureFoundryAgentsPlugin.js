@@ -267,7 +267,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                     const textContent = message.content.find(c => c.type === 'text' && c.text && c.text.value);
                     if (textContent) {
                         logger.info(`[Azure Foundry Agent] Retrieved assistant message: ${textContent.text.value.substring(0, 100)}...`);
-                        return textContent.text.value;
+                        return JSON.stringify(textContent.text);
                     }
                 }
             }
@@ -298,7 +298,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 // This would typically be handled by polling for messages
                 return data;
             } else if (data.status === 'failed') {
-                logger.error(`Azure Foundry Agent run failed: ${data.lastError?.message || 'Unknown error'}`);
+                logger.error(`Azure Foundry Agent run failed: ${data.lastError?.message || data.last_error?.message || 'Unknown error'}`);
                 return null;
             } else {
                 // Still in progress
@@ -312,7 +312,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
             if (lastMessage && lastMessage.content && Array.isArray(lastMessage.content)) {
                 const textContent = lastMessage.content.find(c => c.type === 'text');
                 if (textContent && textContent.text && textContent.text.value) {
-                    return textContent.text.value;
+                    return JSON.stringify(textContent.text);
                 }
             }
         }
