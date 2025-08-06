@@ -4,6 +4,7 @@ import HandleBars from './lib/handleBars.js';
 import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
+import AzureAuthTokenHelper from './lib/azureAuthTokenHelper.js';
 import logger from './lib/logger.js';
 import PathwayManager from './lib/pathwayManager.js';
 import { readdir } from 'fs/promises';
@@ -126,6 +127,12 @@ var config = convict({
         format: String,
         default: null,
         env: 'GCP_SERVICE_ACCOUNT_KEY',
+        sensitive: true
+    },
+    azureServicePrincipalCredentials: {
+        format: String,
+        default: null,
+        env: 'AZURE_SERVICE_PRINCIPAL_CREDENTIALS',
         sensitive: true
     },
     models: {
@@ -282,6 +289,21 @@ var config = convict({
                 },
                 "requestsPerSecond": 10,
                 "maxTokenLength": 200000
+            },
+            "azure-bing-agent": {
+                "type": "AZURE-FOUNDRY-AGENTS",
+                "url": "https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry",
+                "agentId": "asst_pwiNrsjXR2xEBn2aRcYkdkkN",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "api-version": "2025-05-01"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 32768,
+                "maxReturnTokens": 4096,
+                "supportsStreaming": false
             },
             "runware-flux-schnell": {
                 "type": "RUNWARE-AI",
@@ -612,6 +634,11 @@ if (config.get('entityConstants') && defaultEntityConstants) {
 if (config.get('gcpServiceAccountKey')) {
     const gcpAuthTokenHelper = new GcpAuthTokenHelper(config.getProperties());
     config.set('gcpAuthTokenHelper', gcpAuthTokenHelper);
+}
+
+if (config.get('azureServicePrincipalCredentials')) {
+    const azureAuthTokenHelper = new AzureAuthTokenHelper(config.getProperties());
+    config.set('azureAuthTokenHelper', azureAuthTokenHelper);
 }
 
 // Load dynamic pathways from JSON file or cloud storage
