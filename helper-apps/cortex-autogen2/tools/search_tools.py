@@ -2,11 +2,28 @@
 Generic Web Search tool.
 """
 
+import logging
 import os
 import requests
 import json
 from typing import Dict, Any, List, Optional
 import asyncio # Import asyncio
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# try:
+# except ImportError:
+#     logging.warning("matplotlib.pyplot not found. Plotting functionality will be disabled.")
+#     plt = None
+
+# try:
+# except ImportError:
+#     logging.warning("pandas not found. CSV/DataFrame functionality may be limited.")
+#     pd = None
+
+BING_SEARCH_V7_ENDPOINT = os.getenv("AZURE_BING_API_ENDPOINT", "https://api.bing.microsoft.com/v7.0/search")
+BING_SUBSCRIPTION_KEY = os.getenv("AZURE_BING_KEY")
+
 
 async def bing_web_search(query: str, count: int = 5, response_filter: str = "Webpages") -> str:
     """
@@ -102,11 +119,6 @@ async def bing_combined_search(query: str, count: int = 5) -> str:
         JSON string with a list of combined search results.
     """
     return await bing_web_search(query, count, "Webpages,Images")
-
-
-import pandas as pd
-import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
 
 
 async def _perform_single_cognitive_search(

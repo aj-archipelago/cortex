@@ -14,10 +14,12 @@ def connect_redis() -> bool:
     """Check and ensure Redis connection is active - matches working version pattern"""
     global redis_client
     
+    redis_conn_string = os.getenv("REDIS_CONNECTION_STRING")
+
     # Initialize client if not exists
     if redis_client is None:
         try:
-            redis_client = redis.from_url(os.getenv("REDIS_CONNECTION_STRING"))
+            redis_client = redis.from_url(redis_conn_string)
         except Exception as e:
             logger.warning(f"Failed to create Redis client: {e}")
             return False
@@ -30,7 +32,7 @@ def connect_redis() -> bool:
         logger.warning(f"Redis connection error: {e}")
         try:
             # Try to reconnect
-            redis_client = redis.from_url(os.getenv("REDIS_CONNECTION_STRING"))
+            redis_client = redis.from_url(redis_conn_string)
             redis_client.ping()
             return True
         except Exception as reconnect_error:
@@ -42,7 +44,7 @@ def connect_redis() -> bool:
         if "Client must be connected" in str(e) or "closed" in str(e).lower():
             logger.info("Redis client was closed, attempting to create new connection...")
             try:
-                redis_client = redis.from_url(os.getenv("REDIS_CONNECTION_STRING"))
+                redis_client = redis.from_url(redis_conn_string)
                 redis_client.ping()
                 return True
             except Exception as reconnect_error:

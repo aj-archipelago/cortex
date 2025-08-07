@@ -22,7 +22,7 @@ When you find an answer, verify the answer carefully. Include verifiable evidenc
 async def get_agents(default_model_client, big_model_client, small_model_client):
     
     #code executor
-    work_dir = os.getenv("CORTEX_WORK_DIR", "/app/coding")
+    work_dir = os.getenv("CORTEX_WORK_DIR", "/home/site/wwwroot/coding")
     code_executor = LocalCommandLineCodeExecutor(work_dir=work_dir, timeout=300)
 
     #TOOLS

@@ -16,14 +16,9 @@ A robust, production-ready AI agent system powered by the AutoGen framework, des
 -   **Real-time Progress Updates**: Provides live updates on task progress, including summarized current activities.
 -   **Production-Ready & Scalable**: Engineered for reliable performance and capable of handling a continuous stream of tasks.
 
-## 🏗️ Architecture Overview
+## 🏗️ Updated Architecture Overview
 
-`Cortex AutoGen` operates around a central `SelectorGroupChat` that orchestrates a team of specialized agents. When a new task arrives via the Azure Queue, the `Planner Agent` formulates an initial strategy. Based on the task's requirements, the `SelectorGroupChat` intelligently routes the sub-tasks to the most appropriate agent(s).
-
-For example:
--   Data analysis tasks might involve the `Coder Agent`.
--   Any generated files are then handled by the `File Cloud Uploader Agent`, and the final polished output is prepared by the `Presenter Agent`.
-The `Terminator Agent` ensures that all conditions for task completion are met before signaling the end of the process.
+Cortex AutoGen now supports two deployment models (traditional worker and Azure Function App) with shared core logic in `task_processor.py` for better scalability. It uses a central `SelectorGroupChat` to orchestrate agents, processing tasks from Azure Queues while ensuring clean worker states by killing existing processes before starting new ones.
 
 ## 🔧 Tools & Capabilities
 
@@ -48,81 +43,27 @@ These tools enable agents to perform web research, data processing, file managem
 ## 🚀 Quick Start
 
 ### Prerequisites
+- Python 3.11+
+- Docker (for containerized deployment)
+- Azure Storage Account
+- Redis instance (for progress tracking)
+- API access for OpenAI/Cortex and Azure services
 
--   Python 3.11+
--   Docker (for containerized deployment)
--   Azure Storage Account
--   Redis instance (for progress tracking)
--   API access for OpenAI/Cortex (for LLM models)
--   API access for Azure Cognitive Search and Bing Search (if using these capabilities)
+### Installation and Running
 
-### Installation
-
-```bash
-git clone <repository-url>
-cd cortex-autogen2
-pip install -e .
-```
-
-### Configuration
-
-Copy `.env.example` to `.env` and fill in your credentials.
-```bash
-cp .env.example .env
-# Edit .env with your Azure, Redis, OpenAI/Cortex, Cognitive Search, and Bing Search credentials.
-```
-
-### Running the Worker
-
-**1. Clean up any existing workers (important to avoid conflicts):**
+1. **Activate Virtual Environment**: Always run commands within the `.venv` directory to manage dependencies.
+2. **Environment Setup**: Include the `.env` file for Docker commands to load environment variables.
+3. **Worker Management**: Before testing, kill existing workers with `pkill -f "python -m src.cortex_autogen2.main"`, verify with `ps aux | grep cortex_autogen2`, then start a fresh worker with `CONTINUOUS_MODE=false python -m src.cortex_autogen2.main &`.
+4. Clone and install:
    ```bash
-   pkill -f "python -m src.cortex_autogen2.main" || true
+   git clone <repository-url>
+   cd cortex-autogen2
+   poetry install  # Or pip install -r requirements.txt
    ```
-   *(This command stops any running Python processes related to `cortex_autogen2.main`.)*
-
-**2. Run the worker (choose one):**
-
-   **a) Using Docker (Recommended for Production/Local Development):**
-      ```bash
-      docker stop cortex-autogen2-worker || true && \
-      docker rm cortex-autogen2-worker || true && \
-      docker build -t cortex-autogen2 . && \
-      docker run --name cortex-autogen2-worker \
-                 --env-file .env \
-                 -e REDIS_CONNECTION_STRING="redis://host.docker.internal:6379" \
-                 -e CORTEX_API_BASE_URL="http://host.docker.internal:4000/v1" \
-                 cortex-autogen2
-      ```
-      *(This command builds the Docker image, removes any old container, and then runs a new container in the foreground, passing necessary environment variables. Note: `host.docker.internal` allows the container to access services running on the Docker host.)*
-
-   **b) Directly via Python (for local testing/development):**
-      ```bash
-      # Run a single task and exit
-      CONTINUOUS_MODE=false python -m src.cortex_autogen2.main
-
-      # Run continuously in the background (recommended for local development)
-      CONTINUOUS_MODE=true python -m src.cortex_autogen2.main &
-      ```
-      *(For background execution, use `&`. To view logs, remove `&` or check your shell's job control.)*
-
-### 3. Send a Task
-
-Use `send_task.py` to push tasks to the Azure Queue:
-
-```bash
-# Basic task
-python send_task.py "Generate a Python script to calculate the factorial of 15" --wait
-
-# Request an article using Cognitive Search and Bing
-python send_task.py "Write an Al Jazeera style article about the latest developments in AI ethics, including insights from academic papers (search Cognitive Index 'indexwires') and recent news (Bing search)." --wait
-
-# Query the Al Jazeera SQL database for article counts
-python send_task.py "How many published articles of type 'post' and 'video' were created in the last 30 days for Al Jazeera English (AJE)? Provide a daily breakdown and visualize it." --wait
-
-# Request a presentation
-python send_task.py "Create a visually stunning, detailed, and fun PowerPoint (.pptx) presentation about the most powerful Pokémon. The presentation should include: (1) an engaging cover slide, (2) individual slides for at least 8 of the most powerful Pokémon, each with vibrant images, key stats (type, abilities, base stats, signature moves), and fun facts, (3) a 'battle showdown' comparison slide using visuals and stats, (4) a conclusion slide. Output should be a downloadable .pptx file. Include references for images and data sources if possible." --wait
-```
-*(The `--wait` flag makes `send_task.py` wait for the worker to process and return the result.)*
+5. Send a test task:
+   ```bash
+   python send_task.py "Your test task here" --wait
+   ```
 
 ## 🔍 How to Verify Real Execution and Results
 
@@ -147,22 +88,31 @@ The `Cortex AutoGen` system is designed for verifiable execution. Here's how to 
 -   **File Storage**: Automatic upload to Azure Blob Storage with temporary SAS URLs.
 -   **Real-time Progress**: Updates are published via Redis for live monitoring.
 
-### 🛠️ Project Structure
+### 🛠️ Updated Project Structure
 
 ```
 cortex-autogen2/
-├── Dockerfile              # Docker container definition
-├── main.py                 # Main worker entry point and agent orchestration
-├── poetry.lock             # Poetry dependency lock file
-├── pyproject.toml          # Poetry project configuration
-├── README.md               # This documentation file
-├── send_task.py            # Script for manual task submission to the queue
-├── agents.py               # Agent definitions
-├── services/               # External service integrations (Azure Queue, Redis Publisher)
+├── Dockerfile  # For Azure Function App
+├── Dockerfile.worker  # For traditional worker
+├── docker-compose.yml  # Local development orchestration
+├── main.py  # Main worker entry point
+├── function_app.py  # Azure Function app configuration
+├── task_processor.py  # Shared task processing logic
+├── host.json                     # Azure Functions host configuration
+├── local.settings.json           # Local Azure Functions settings
+├── requirements.txt              # Python dependencies for Azure Functions
+├── deploy_container_app.sh       # Azure Container Apps deployment script
+├── run_local_container.sh        # Local container development script
+├── poetry.lock                   # Poetry dependency lock file
+├── pyproject.toml                # Poetry project configuration
+├── README.md                     # This documentation file
+├── send_task.py                  # Script for manual task submission to the queue
+├── agents.py                     # Agent definitions
+├── services/                     # External service integrations (Azure Queue, Redis Publisher)
 │   ├── __init__.py
 │   ├── azure_queue.py
 │   └── redis_publisher.py
-└── tools/                  # Agent tools
+└── tools/                        # Agent tools
     ├── __init__.py
     ├── azure_blob_tools.py
     ├── coding_tools.py
@@ -171,11 +121,32 @@ cortex-autogen2/
     └── search_tools.py
 ```
 
+## 🏗️ Architecture Improvements
+
+The project now supports two deployment models with shared core functionality:
+
+### **Core Module (`task_processor.py`)**
+- **Extracted Logic**: All task processing logic has been extracted into a reusable `TaskProcessor` class
+- **Shared Functionality**: Both worker and Azure Function App use the same core processing logic
+- **Clean Separation**: Model initialization, progress tracking, and agent orchestration are centralized
+- **Minimal Code**: Reduced duplication while maintaining full functionality
+
+### **Deployment Options**
+1. **Traditional Worker** (`main.py`): Continuous processing with persistent connections
+2. **Azure Function App** (`function_app.py`): Containerized, event-driven processing for Azure Container Apps
+
+### **Benefits**
+- **Scalability**: Azure Container Apps provide automatic scaling based on queue depth
+- **Cost Efficiency**: Pay-per-execution model for sporadic workloads
+- **Reliability**: Built-in retry logic and dead letter queue handling
+- **Maintenance**: Reduced operational overhead with managed infrastructure
+- **Containerization**: Full Docker support for consistent deployment
+
 ## ✅ System Status
 
 **Current Status**: ✅ **PRODUCTION READY**
 
-`Cortex AutoGen` is continuously evolving, with the latest enhancements focused on dynamic agent selection, advanced file handling, and specialized task execution. It has been rigorously tested to ensure reliable performance across diverse AI tasks.
+`Cortex AutoGen` is continuously evolving, with the latest enhancements focused on dynamic agent selection, advanced file handling, specialized task execution, and flexible deployment options. It has been rigorously tested to ensure reliable performance across diverse AI tasks.
 
 **Last Verified**: July 2024 with comprehensive tests across code execution, file generation/upload, database querying, web search, and article writing.
 

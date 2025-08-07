@@ -74,16 +74,15 @@ CONTINUOUS_MODE=false python -m src.cortex_autogen2.main
 - requestId: Same as messageId (used in Redis progress messages)
 """
 
-import asyncio
 import json
-import base64
 import uuid
 import argparse
-from azure.storage.queue.aio import QueueClient
+import base64
+from azure.storage.queue import QueueClient
 from dotenv import load_dotenv
 import os
 
-async def main():
+def main():
     """Sends a simple task to the Azure Queue."""
     load_dotenv()
     
@@ -108,11 +107,14 @@ async def main():
     
     message = json.dumps(task)
     
-    queue_client = QueueClient.from_connection_string(connection_string, queue_name)
+    # Encode message as Base64 to match Azure Functions MessageEncoding setting
+    encoded_message = base64.b64encode(message.encode('utf-8')).decode('utf-8')
     
-    async with queue_client:
-        await queue_client.send_message(message)
-        print(f"Task sent to queue '{queue_name}': {task}")
+    # Use synchronous client for instant execution
+    queue_client = QueueClient.from_connection_string(connection_string, queue_name)
+    queue_client.send_message(encoded_message)
+    print(f"Task sent to queue '{queue_name}': {task}")
+    print(f"Message encoded as Base64: {encoded_message[:50]}...")
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    main() 

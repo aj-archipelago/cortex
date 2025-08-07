@@ -1,41 +1,31 @@
-# Use an official Python runtime as a parent image
-FROM python:3.11-slim
+# Use the official Azure Functions Python base image
+FROM mcr.microsoft.com/azure-functions/python:4-python3.11
 
-# Set the working directory in the container
-WORKDIR /app
+# Set the working directory
+WORKDIR /home/site/wwwroot
 
-# Install system dependencies that might be needed
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    gcc \
+    build-essential \
     curl \
+    git \
+    libgirepository1.0-dev \
+    pkg-config \
+    libfreetype6-dev \
+    libpng-dev \
+    fontconfig \
     && rm -rf /var/lib/apt/lists/*
+RUN curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg \
+    && mv microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg \
+    && sh -c 'echo "deb [arch=amd64,arm64,armhf] https://packages.microsoft.com/repos/microsoft-debian-bullseye-prod bullseye main" > /etc/apt/sources.list.d/azure-cli.list' \
+    && apt-get update \
+    && apt-get install -y azure-functions-core-tools
 
-# Install poetry
-RUN pip install poetry
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Configure poetry: Don't create virtual env (we're already in container)
-RUN poetry config virtualenvs.create false
+# Copy application code
+COPY . .
+CMD ["func", "start", "--port", "80", "--verbose"]
 
-# Copy project descriptor files first (for better Docker layer caching)
-COPY pyproject.toml poetry.lock* ./
-
-# Create the coding directory inside the container
-RUN mkdir -p /app/coding
-
-# Create a minimal README.md if it's needed for build context
-RUN touch README.md
-
-# Copy the application's code before installing dependencies
-COPY . /app/src/cortex_autogen2
-
-# Install dependencies (including the current project)
-RUN poetry install --without dev --no-ansi --no-interaction
-
-# Install Playwright browser binaries
-RUN playwright install
-
-# Ensure Python can import our source package
-ENV PYTHONPATH="/app/src:/app/src/cortex_autogen2"
-
-# The command to run the application
-CMD ["python", "-m", "cortex_autogen2.main"] 
