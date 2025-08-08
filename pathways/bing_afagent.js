@@ -1,4 +1,4 @@
-// bing_agent.js
+// bing_afagent.js
 // Web search tool
 
 export default {

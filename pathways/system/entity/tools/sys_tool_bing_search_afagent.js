@@ -1,4 +1,4 @@
-// sys_tool_bing_search_agent.js
+// sys_tool_bing_search_afagent.js
 // Tool pathway that handles Bing web search functionality with minimal parsing
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import logger from '../../../../lib/logger.js';
@@ -12,14 +12,14 @@ export default {
         type: "function",
         icon: "🕸️",
         function: {
-            name: "SearchInternetBackup",
-            description: "This tool allows you to search sources on the internet by calling another agent that has Bing search access. Use this for current events, news, fact-checking, and information requiring citation. This is a backup tool for when the other internet search tools fail - it is slower so try to use the other tools first.",
+            name: "SearchInternet",
+            description: "This tool allows you to search sources on the internet by calling another agent that has Bing search access. Use this for current events, news, fact-checking, and information requiring citation.",
             parameters: {
                 type: "object",
                 properties: {
                     text: {
                         type: "string",
-                        description: "The complete prompt describing what you want to search for. This is going to an AI agent that has Bing search access - you can be as detailed or general as you want."
+                        description: "The complete natural language prompt describing what you want to search for. This is going to an AI agent that has Bing search access - you can be as detailed or general as you want."
                     },
                     userMessage: {
                         type: "string",
@@ -41,12 +41,21 @@ export default {
 
         try {
             // Call the Bing search pathway
-            //remove model from args as bing_agent has model in its own
+            //remove model from args as bing_afagent has model in its own
             const { model, ...restArgs } = args;
-            const rawResponse = await callPathway('bing_agent', { 
+            const rawResponse = await callPathway('bing_afagent', { 
                 ...restArgs,
             }, resolver);
-            const response = JSON.parse(rawResponse);
+            
+            // Add error handling for malformed JSON
+            let response;
+            try {
+                response = JSON.parse(rawResponse);
+            } catch (parseError) {
+                logger.error(`Failed to parse bing_afagent response as JSON: ${parseError.message}`);
+                logger.error(`Raw response: ${rawResponse}`);
+                throw new Error(`Invalid JSON response from bing_afagent: ${parseError.message}`);
+            }
 
             if (resolver.errors && resolver.errors.length > 0) {
                 const errorMessages = Array.isArray(resolver.errors) 
