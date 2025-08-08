@@ -1,3 +1,0 @@
-{
-  "azureServicePrincipalCredentials": "{\"tenant_id\":\"648085d9-6878-44a9-a76b-0223882f8268\",\"client_id\":\"8796f9a6-cd80-45dd-91b8-9ddf384ee42c\",\"client_secret\":\"your-client-secret-here\",\"scope\":\"https://ai.azure.com/.default\"}"
-} 
