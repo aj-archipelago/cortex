@@ -190,6 +190,36 @@ var config = convict({
                 },
                 "maxTokenLength": 8192,
             },
+            "oai-gpt5": {
+                "type": "OPENAI-REASONING-VISION",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "gpt-5"
+                },
+                "requestsPerSecond": 50,
+                "maxTokenLength": 1000000,
+                "maxReturnTokens": 16384,
+                "supportsStreaming": true
+            },
+            "oai-gpt5-mini": {
+                "type": "OPENAI-REASONING-VISION",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "gpt-5-mini"
+                },
+                "requestsPerSecond": 50,
+                "maxTokenLength": 1000000,
+                "maxReturnTokens": 16384,
+                "supportsStreaming": true
+            },
             "oai-gpt4o": {
                 "type": "OPENAI-VISION",
                 "url": "https://api.openai.com/v1/chat/completions",
