@@ -1,6 +1,7 @@
 // AzureFoundryAgentsPlugin.js
 import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
+import axios from 'axios';
 
 class AzureFoundryAgentsPlugin extends ModelPlugin {
     constructor(pathway, model) {
@@ -138,8 +139,6 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
         const pollingInterval = 1000; // 1 second
         let attempts = 0;
         
-        logger.info(`[Azure Foundry Agent] Starting to poll for run completion: ${runId}`);
-        
         while (attempts < maxPollingAttempts) {
             attempts++;
             
@@ -147,13 +146,6 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
             await new Promise(resolve => setTimeout(resolve, pollingInterval));
             
             try {
-                // Get the current run status
-                const runStatusRequest = new (cortexRequest.constructor)({ 
-                    pathwayResolver: cortexRequest.pathwayResolver 
-                });
-                runStatusRequest.url = this.constructAzureUrl(`/threads/${threadId}/runs/${runId}`);
-                runStatusRequest.method = 'GET';
-                runStatusRequest.params = { 'api-version': '2025-05-01' };
                 // Add authentication token if available
                 const azureAuthTokenHelper = this.config.get('azureAuthTokenHelper');
                 let authToken = null;
@@ -166,20 +158,21 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                     }
                 }
                 
-                runStatusRequest.headers = { 
-                    'Content-Type': 'application/json',
-                    ...this.model.headers,
-                    ...(authToken && { 'Authorization': `Bearer ${authToken}` })
-                };
-                
-                const runStatus = await this.executeRequest(runStatusRequest);
+                const pollUrl = this.constructAzureUrl(`/threads/${threadId}/runs/${runId}`);
+                const pollResponse = await axios.get(pollUrl, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...this.model.headers,
+                        ...(authToken && { 'Authorization': `Bearer ${authToken}` })
+                    },
+                    params: { 'api-version': '2025-05-01' }
+                });
+                const runStatus = pollResponse?.data;
                 
                 if (!runStatus) {
                     logger.warn(`[Azure Foundry Agent] No run status received for run: ${runId}`);
                     continue;
                 }
-                
-                logger.verbose(`[Azure Foundry Agent] Run ${runId} status: ${runStatus.status} (attempt ${attempts})`);
                 
                 // Check if run is completed
                 if (runStatus.status === 'completed') {
@@ -220,20 +213,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
 
     // Retrieve messages from the completed thread
     async retrieveMessages(threadId, cortexRequest) {
-        try {
-            logger.info(`[Azure Foundry Agent] Retrieving messages from thread: ${threadId}`);
-            
-            const messagesRequest = new (cortexRequest.constructor)({ 
-                pathwayResolver: cortexRequest.pathwayResolver 
-            });
-            messagesRequest.url = this.constructAzureUrl(`/threads/${threadId}/messages`);
-            messagesRequest.method = 'GET';
-            messagesRequest.params = { 'api-version': '2025-05-01', 'order': 'asc' };
-            messagesRequest.headers = { 
-                'Content-Type': 'application/json',
-                ...this.model.headers 
-            };
-            
+        try { 
             // Add authentication token if available
             const azureAuthTokenHelper = this.config.get('azureAuthTokenHelper');
             let authToken = null;
@@ -246,13 +226,16 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 }
             }
             
-            messagesRequest.headers = { 
-                'Content-Type': 'application/json',
-                ...this.model.headers,
-                ...(authToken && { 'Authorization': `Bearer ${authToken}` })
-            };
-            
-            const messagesResponse = await this.executeRequest(messagesRequest);
+            const messagesUrl = this.constructAzureUrl(`/threads/${threadId}/messages`);
+            const axiosResponse = await axios.get(messagesUrl, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...this.model.headers,
+                    ...(authToken && { 'Authorization': `Bearer ${authToken}` })
+                },
+                params: { 'api-version': '2025-05-01', order: 'asc' }
+            });
+            const messagesResponse = axiosResponse?.data;
             
             if (!messagesResponse || !messagesResponse.data) {
                 logger.warn(`[Azure Foundry Agent] No messages received from thread: ${threadId}`);
@@ -266,7 +249,6 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 if (message.role === 'assistant' && message.content && Array.isArray(message.content)) {
                     const textContent = message.content.find(c => c.type === 'text' && c.text && c.text.value);
                     if (textContent) {
-                        logger.info(`[Azure Foundry Agent] Retrieved assistant message: ${textContent.text.value.substring(0, 100)}...`);
                         return JSON.stringify(textContent.text);
                     }
                 }
@@ -311,8 +293,14 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
             const lastMessage = data.messages[data.messages.length - 1];
             if (lastMessage && lastMessage.content && Array.isArray(lastMessage.content)) {
                 const textContent = lastMessage.content.find(c => c.type === 'text');
-                if (textContent && textContent.text && textContent.text.value) {
-                    return JSON.stringify(textContent.text);
+                if (textContent && textContent.text) {
+                    // Support both object { value: string } and string shapes
+                    if (typeof textContent.text === 'string') {
+                        return textContent.text;
+                    }
+                    if (typeof textContent.text.value === 'string') {
+                        return textContent.text.value;
+                    }
                 }
             }
         }

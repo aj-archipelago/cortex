@@ -117,7 +117,6 @@ export default {
             const transformedData = transformToSearchResponse(response);
 
             resolver.tool = JSON.stringify({ toolUsed: "SearchInternetAgent2" });
-            logger.warn(JSON.stringify(transformedData, null, 2));
             
             // Return the full transformed text as the main result, and include search results for citation extraction
             return JSON.stringify({ 

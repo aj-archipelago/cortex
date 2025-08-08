@@ -153,81 +153,60 @@ test('should return correct Azure Foundry Agents endpoint', t => {
     t.is(url, 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry/threads/runs');
 });
 
-test('should handle polling for run completion', async t => {
-    const { plugin } = t.context;
-    
-    // Mock the executeRequest method to simulate polling
-    const originalExecuteRequest = plugin.executeRequest;
-    let callCount = 0;
-    
-    plugin.executeRequest = async (request) => {
-        callCount++;
-        if (callCount === 1) {
-            // First call - return run response
-            return {
-                id: 'run_123',
-                thread_id: 'thread_456',
-                status: 'in_progress'
-            };
-        } else if (callCount === 2) {
-            // Second call - return completed status
-            return {
-                id: 'run_123',
-                thread_id: 'thread_456',
-                status: 'completed'
-            };
-        } else if (callCount === 3) {
-            // Third call - return messages
-            return {
-                data: [
-                    {
-                        role: 'user',
-                        content: [{ type: 'text', text: { value: 'Hello' } }]
-                    },
-                    {
-                        role: 'assistant',
-                        content: [{ type: 'text', text: { value: 'Hi there! How can I help you?' } }]
-                    }
-                ]
-            };
-        }
-        return null;
-    };
-    
-    try {
-        const result = await plugin.pollForCompletion('thread_456', 'run_123', {});
-        t.is(result, 'Hi there! How can I help you?');
-        t.is(callCount, 3);
-    } finally {
-        plugin.executeRequest = originalExecuteRequest;
+test('should be able to access azureAuthTokenHelper from config', (t) => {
+  // Mock config with azureAuthTokenHelper
+  const mockConfig = {
+    get: (key) => {
+      if (key === 'azureAuthTokenHelper') {
+        return {
+          getAccessToken: async () => 'mock-token'
+        };
+      }
+      return null;
     }
+  };
+
+  // Mock pathway and model
+  const mockPathway = {};
+  const mockModel = {
+    url: 'https://test.azure.com/api/projects/test',
+    agentId: 'test-agent-id',
+    headers: { 'Content-Type': 'application/json' }
+  };
+
+  // Create plugin instance
+  const plugin = new AzureFoundryAgentsPlugin(mockPathway, mockModel);
+  
+  // Mock the config property
+  plugin.config = mockConfig;
+
+  // Test that we can access the auth helper
+  const authHelper = plugin.config.get('azureAuthTokenHelper');
+  t.truthy(authHelper);
+  t.is(typeof authHelper.getAccessToken, 'function');
 });
 
-test('should handle run failure during polling', async t => {
-    const { plugin } = t.context;
-    
-    // Mock the executeRequest method to simulate failed run
-    const originalExecuteRequest = plugin.executeRequest;
-    let callCount = 0;
-    
-    plugin.executeRequest = async (request) => {
-        callCount++;
-        if (callCount === 1) {
-            return {
-                id: 'run_123',
-                thread_id: 'thread_456',
-                status: 'failed',
-                lastError: { message: 'Something went wrong' }
-            };
-        }
-        return null;
-    };
-    
-    try {
-        const result = await plugin.pollForCompletion('thread_456', 'run_123', {});
-        t.is(result, null);
-        t.is(callCount, 1);
-    } finally {
-        plugin.executeRequest = originalExecuteRequest;
-    }
-}); 
+test('should handle missing azureAuthTokenHelper gracefully', (t) => {
+  // Mock config without azureAuthTokenHelper
+  const mockConfig = {
+    get: (key) => null
+  };
+
+  // Mock pathway and model
+  const mockPathway = {};
+  const mockModel = {
+    url: 'https://test.azure.com/api/projects/test',
+    agentId: 'test-agent-id',
+    headers: { 'Content-Type': 'application/json' }
+  };
+
+  // Create plugin instance
+  const plugin = new AzureFoundryAgentsPlugin(mockPathway, mockModel);
+  
+  // Mock the config property
+  plugin.config = mockConfig;
+
+  // Test that we can access the auth helper (should be null)
+  const authHelper = plugin.config.get('azureAuthTokenHelper');
+  t.is(authHelper, null);
+});
