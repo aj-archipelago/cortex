@@ -290,21 +290,6 @@ var config = convict({
                 "requestsPerSecond": 10,
                 "maxTokenLength": 200000
             },
-            "azure-bing-agent": {
-                "type": "AZURE-FOUNDRY-AGENTS",
-                "url": "https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry",
-                "agentId": "asst_pwiNrsjXR2xEBn2aRcYkdkkN",
-                "headers": {
-                    "Content-Type": "application/json"
-                },
-                "params": {
-                    "api-version": "2025-05-01"
-                },
-                "requestsPerSecond": 10,
-                "maxTokenLength": 32768,
-                "maxReturnTokens": 4096,
-                "supportsStreaming": false
-            },
             "runware-flux-schnell": {
                 "type": "RUNWARE-AI",
                 "url": "https://api.runware.ai/v1",

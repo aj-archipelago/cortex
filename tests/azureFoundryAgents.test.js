@@ -16,7 +16,7 @@ test.beforeEach(t => {
         name: 'azure-foundry-agents',
         type: 'AZURE-FOUNDRY-AGENTS',
         url: 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry',
-        agentId: 'asst_pwiNrsjXR2xEBn2aRcYkdkkN',
+        agentId: 'asst_testid',
         headers: {
             'Content-Type': 'application/json'
         },
@@ -32,7 +32,7 @@ test.beforeEach(t => {
 
 test('should initialize with correct agent ID and project URL', t => {
     const { plugin } = t.context;
-    t.is(plugin.agentId, 'asst_pwiNrsjXR2xEBn2aRcYkdkkN');
+    t.is(plugin.agentId, 'asst_testid');
     t.is(plugin.projectUrl, 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry');
 });
 
@@ -84,7 +84,7 @@ test('should create correct request parameters', t => {
 
     const result = plugin.getRequestParameters(text, parameters, prompt);
 
-    t.is(result.assistant_id, 'asst_pwiNrsjXR2xEBn2aRcYkdkkN');
+    t.is(result.assistant_id, 'asst_testid');
     t.deepEqual(result.thread.messages, [{ role: 'user', content: text }]);
     t.is(result.stream, false);
 });
