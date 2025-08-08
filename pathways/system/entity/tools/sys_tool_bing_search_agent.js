@@ -1,37 +1,32 @@
-// sys_tool_bing_search.js
-// Tool pathway that handles Bing web search functionality
+// sys_tool_bing_search_agent.js
+// Tool pathway that handles Bing web search functionality with minimal parsing
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import logger from '../../../../lib/logger.js';
 import { config } from '../../../../config.js';
 import { getSearchResultId } from '../../../../lib/util.js';
-import { parseJson } from '@aj-archipelago/cortex/server/parser.js';
 
 export default {
     prompt: [],
     timeout: 300,
     toolDefinition: { 
         type: "function",
-        icon: "🌐",
+        icon: "🕸️",
         function: {
-            name: "SearchInternetAgent",
-            description: "This tool allows you to search the internet and more. Use this for current events, news, fact-checking, and information requiring citation.",
+            name: "SearchInternetBackup",
+            description: "This tool allows you to search sources on the internet by calling another agent that has Bing search access. Use this for current events, news, fact-checking, and information requiring citation. This is a backup tool for when the other internet search tools fail - it is slower so try to use the other tools first.",
             parameters: {
                 type: "object",
                 properties: {
                     text: {
                         type: "string",
-                        description: "The complete query text to search."
-                    },
-                    systemPrompt: {
-                        type: "string",
-                        description: "A comprehensive prompt specifying the desired characteristics and constraints for search results, with a preference for intensive searches that yield extensive data, including aspects like quantity, data types, temporal relevance, source limitations, or required informational depth."
+                        description: "The complete prompt describing what you want to search for. This is going to an AI agent that has Bing search access - you can be as detailed or general as you want."
                     },
                     userMessage: {
                         type: "string",
                         description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["text", "systemPrompt", "userMessage"]
+                required: ["text", "userMessage"]
             }
         }
     },
@@ -60,88 +55,76 @@ export default {
                 return JSON.stringify({ _type: "SearchError", value: errorMessages });
             }
 
-            function transformResponse(response) {
-                const transformedResults = [];
-              
-                if (response.annotations && Array.isArray(response.annotations)) {
-                  // Extract content segments from the value string
-                  const valueText = response.value || '';
-                  
-                  // First, split the text into segments and map citations to them
-                  const segments = [];
-                  
-                  // Split by bullet points and paragraphs to get distinct content segments
-                  const parts = valueText.split(/(?=^- )/m).filter(part => part.trim());
-                  
-                  for (const part of parts) {
-                    const trimmedPart = part.trim();
-                    if (trimmedPart) {
-                      // Find all citations in this segment
-                      const citationPattern = /【\d+:\d+†source】/g;
-                      const citations = [];
-                      let match;
-                      
-                      while ((match = citationPattern.exec(trimmedPart)) !== null) {
-                        citations.push(match[0]);
-                      }
-                      
-                      // Remove all citation markers to get clean content
-                      const cleanContent = trimmedPart.replace(/【\d+:\d+†source】/g, '').trim();
-                      
-                      // Remove bullet point marker if present
-                      const finalContent = cleanContent.startsWith('- ') 
-                        ? cleanContent.substring(2).trim() 
-                        : cleanContent;
-                      
-                      if (finalContent && citations.length > 0) {
-                        segments.push({
-                          content: finalContent,
-                          citations: citations
-                        });
-                      }
+            // Transform response to match expected SearchResponse format
+            function transformToSearchResponse(response) {
+                let valueText = response.value || '';
+                const annotations = response.annotations || [];
+                
+                // Create a mapping from citation text to search result IDs
+                const citationToIdMap = new Map();
+                const citationPattern = /【\d+:\d+†source】/g;
+                
+                // Replace citation markers with search result IDs
+                valueText = valueText.replace(citationPattern, (match) => {
+                    if (!citationToIdMap.has(match)) {
+                        citationToIdMap.set(match, getSearchResultId());
                     }
-                  }
-                  
-                  // Now map annotations to their corresponding segments
-                  for (const annotation of response.annotations) {
+                    return `:cd_source[${citationToIdMap.get(match)}]`;
+                });
+                
+                // Transform annotations to search result objects
+                const searchResults = annotations.map(annotation => {
                     if (annotation.type === "url_citation" && annotation.url_citation) {
-                      const { url, title } = annotation.url_citation;
-                      const citationText = annotation.text;
-                      
-                      // Find the segment that contains this citation
-                      const matchingSegment = segments.find(segment => 
-                        segment.citations.includes(citationText)
-                      );
-                      
-                      const content = matchingSegment ? matchingSegment.content : title;
-                      
-                      transformedResults.push({
-                        searchResultId: getSearchResultId(),
-                        title: title,
-                        content: content,
-                        url: url
-                      });
+                        const citationText = annotation.text;
+                        const searchResultId = citationToIdMap.get(citationText) || getSearchResultId();
+                        
+                        return {
+                            searchResultId: searchResultId,
+                            title: annotation.url_citation.title || '',
+                            url: annotation.url_citation.url || '',
+                            content: annotation.url_citation.title || annotation.url_citation.url || '', // Individual result content
+                            path: '',
+                            wireid: '',
+                            source: '',
+                            slugline: '',
+                            date: ''
+                        };
                     }
-                  }
+                    return null;
+                }).filter(result => result !== null);
+                
+                // If no annotations, create a single search result with the content
+                if (searchResults.length === 0) {
+                    searchResults.push({
+                        searchResultId: getSearchResultId(),
+                        title: '',
+                        url: '',
+                        content: valueText, // Use the full transformed text as content
+                        path: '',
+                        wireid: '',
+                        source: '',
+                        slugline: '',
+                        date: ''
+                    });
                 }
-                return transformedResults;
+                
+                return {
+                    transformedText: valueText, // The full text with citations replaced
+                    searchResults: searchResults // Individual search results for citation extraction
+                };
             }
 
-              
+            const transformedData = transformToSearchResponse(response);
 
-
+            resolver.tool = JSON.stringify({ toolUsed: "SearchInternetAgent2" });
+            logger.warn(JSON.stringify(transformedData, null, 2));
             
-            const resultData = JSON.parse(await parseJson(response.value));
-            const results = resultData?.results || [];
-
-
-            //add a searchResultId to each result for annotation
-            results.forEach(result => {
-                result.searchResultId = getSearchResultId();
+            // Return the full transformed text as the main result, and include search results for citation extraction
+            return JSON.stringify({ 
+                _type: "SearchResponse", 
+                value: transformedData.searchResults,
+                text: transformedData.transformedText // The full transformed text with citations
             });
-
-            resolver.tool = JSON.stringify({ toolUsed: "SearchInternetAgent" });
-            return JSON.stringify({ _type: "SearchResponse", value: results });
         } catch (e) {
             logger.error(`Error in Bing search: ${e}`);
             throw e;
