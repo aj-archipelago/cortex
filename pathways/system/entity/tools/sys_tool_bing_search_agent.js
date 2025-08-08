@@ -4,6 +4,7 @@ import { callPathway } from '../../../../lib/pathwayTools.js';
 import logger from '../../../../lib/logger.js';
 import { config } from '../../../../config.js';
 import { getSearchResultId } from '../../../../lib/util.js';
+import { parseJson } from '@aj-archipelago/cortex/server/parser.js';
 
 export default {
     prompt: [],
@@ -21,12 +22,16 @@ export default {
                         type: "string",
                         description: "The complete query text to search."
                     },
+                    systemPrompt: {
+                        type: "string",
+                        description: "A comprehensive prompt specifying the desired characteristics and constraints for search results, with a preference for intensive searches that yield extensive data, including aspects like quantity, data types, temporal relevance, source limitations, or required informational depth."
+                    },
                     userMessage: {
                         type: "string",
                         description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["text", "userMessage"]
+                required: ["text", "systemPrompt", "userMessage"]
             }
         }
     },
@@ -123,26 +128,20 @@ export default {
             }
 
               
-            const transformedData = transformResponse(response);
+
+
             
-            // Fallback: if no transformed data, create a single element with full content
-            if (transformedData.length === 0 && response.value) {
-                //log warning
-                logger.warn(`No transformed data found for response: ${response.value}`);
-                
-                // Remove all citation markers from the full content
-                const cleanContent = response.value.replace(/【\d+:\d+†source】/g, '').trim();
-                
-                transformedData.push({
-                    searchResultId: getSearchResultId(),
-                    title: "Search Result",
-                    content: cleanContent,
-                    url: "" // No specific URL since this is the full response
-                });
-            }
+            const resultData = JSON.parse(await parseJson(response.value));
+            const results = resultData?.results || [];
+
+
+            //add a searchResultId to each result for annotation
+            results.forEach(result => {
+                result.searchResultId = getSearchResultId();
+            });
 
             resolver.tool = JSON.stringify({ toolUsed: "SearchInternetAgent" });
-            return JSON.stringify({ _type: "SearchResponse", value: transformedData });
+            return JSON.stringify({ _type: "SearchResponse", value: results });
         } catch (e) {
             logger.error(`Error in Bing search: ${e}`);
             throw e;
