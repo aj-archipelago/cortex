@@ -14,7 +14,7 @@
         },
         "azure-bing-agent": {
             "type": "AZURE-FOUNDRY-AGENTS",
-            "url": "hhttps://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry",
+            "url": "https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry",
             "agentId": "asst_assistantid",
             "headers": {
                 "Content-Type": "application/json"
