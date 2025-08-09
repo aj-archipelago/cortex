@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "cortex-autogen2"
+version = "0.1.0"
+description = "Multi-agent coding assistant using AutoGen"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+packages = [{include = "cortex_autogen2", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+autogen-agentchat = {extras = ["openai"], version = "^0.6.4"}
+python-dotenv = "^1.0.1"
+requests = "^2.32.3"
+redis = "^5.0.4"
+azure-storage-queue = "^12.10.1"
+azure-storage-blob = "^12.19.0"
+sqlalchemy = "^2.0.30"
+Pillow = "^11.0.0"
+pymysql = "^1.1.1"
+playwright = "^1.54.0"
+markitdown = "^0.1.2"
+docker = "^7.1.0"
+autogen-ext = {extras = ["docker"], version = "^0.6.4"}
+openai = "^1.97.1"
+tiktoken = "^0.9.0"
+aiofiles = "^24.1.0"
+pandas = "^2.3.1"
+matplotlib = "^3.10.3"
+aiohttp = "^3.12.14"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api" 

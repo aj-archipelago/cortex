@@ -45,12 +45,66 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         } else if (type === 'Int') {
             return parseInt(value, 10);
         } else if (type === '[MultiMessage]' && Array.isArray(value)) {
-            return value.map(msg => ({
-                ...msg,
-                content: Array.isArray(msg.content) ? 
-                    msg.content.map(item => JSON.stringify(item)) : 
-                    msg.content
+            return value.map(msg => {
+                // Special handling for messages with tool calls - don't convert content
+                if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+                    return {
+                        ...msg,
+                        content: msg.content || null // Keep content as-is for tool call messages, null if empty
+                    };
+                }
+
+                // Handle empty, null, or undefined content
+                if (msg.content === "" || msg.content === null || msg.content === undefined) {
+                    return {
+                        ...msg,
+                        content: msg.role === "assistant" && msg.tool_calls ? null : ""
+                    };
+                }
+
+                // Handle string content - leave as string for OpenAI API
+                if (typeof msg.content === 'string') {
+                    return {
+                        ...msg,
+                        content: msg.content
+                    };
+                }
+
+                // Handle array content - JSON.stringify each item as per original implementation
+                if (Array.isArray(msg.content)) {
+                    return {
+                        ...msg,
+                        content: msg.content.map(item => JSON.stringify(item))
+                    };
+                }
+
+                // For any other type, convert to string
+                return {
+                    ...msg,
+                    content: String(msg.content)
+                };
+            });
+        } else if (type === '[Tool]' && Array.isArray(value)) {
+            // Handle OpenAI tools parameter - stringify the parameters field
+            return value.map(tool => ({
+                ...tool,
+                function: tool.function ? {
+                    ...tool.function,
+                    parameters: typeof tool.function.parameters === 'object' ?
+                        JSON.stringify(tool.function.parameters) :
+                        tool.function.parameters
+                } : tool.function
             }));
+        } else if (type === '[Function]' && Array.isArray(value)) {
+            // Handle OpenAI functions parameter (legacy) - stringify the parameters field
+            return value.map(func => ({
+                ...func,
+                parameters: typeof func.parameters === 'object' ?
+                    JSON.stringify(func.parameters) :
+                    func.parameters
+            }));
+        } else if (type === '[Message]' && Array.isArray(value)) {
+            return value;
         } else {
             return value;
         }
@@ -76,6 +130,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                         contextId
                         previousResult
                         result
+                        tool
                     }
                 }
             `;
@@ -88,10 +143,17 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             return `[ERROR] ${result.body.singleResult.errors[0].message.split(';')[0]}`;
         }
     }
-    
+
     // otherwise errors can just be returned as a string
-    const resultText = result?.body?.singleResult?.data?.[name]?.result || result?.body?.singleResult?.errors?.[0]?.message || "";
-    return resultText;
+    let resultText = result?.body?.singleResult?.data?.[name]?.result || result?.body?.singleResult?.errors?.[0]?.message || "";
+    const toolData = result?.body?.singleResult?.data?.[name]?.tool;
+
+    // Ensure resultText is always a string for OpenAI API compatibility
+    if (typeof resultText !== 'string') {
+        resultText = JSON.stringify(resultText);
+    }
+
+    return { resultText, toolData };
 };
 
 const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
@@ -104,7 +166,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
     }
-    
+
     const finishStream = (res, jsonResponse) => {
         // Send the last partial token if it exists
         const lastTokens = chunkTextIntoTokens('', true, useSingleTokenStream);
@@ -118,7 +180,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         // If we haven't sent the stop message yet, do it now
         if (jsonResponse.choices?.[0]?.finish_reason !== "stop") {
             let jsonEndStream = JSON.parse(JSON.stringify(jsonResponse));
-    
+
             if (jsonEndStream.object === 'text_completion') {
                 jsonEndStream.choices[0].index = 0;
                 jsonEndStream.choices[0].finish_reason = "stop";
@@ -128,16 +190,16 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
                 jsonEndStream.choices[0].index = 0;
                 jsonEndStream.choices[0].delta = {};
             }
-    
+
             sendStreamData(jsonEndStream);
         }
-    
+
         sendStreamData('[DONE]');
         res.end();
     }
 
     const sendStreamData = (data) => {
-        const dataString = (data==='[DONE]') ? data : JSON.stringify(data);
+        const dataString = (data === '[DONE]') ? data : JSON.stringify(data);
 
         if (!res.writableEnded) {
             res.write(`data: ${dataString}\n\n`);
@@ -169,7 +231,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
     let subscription;
 
     subscription = pubsub.subscribe('REQUEST_PROGRESS', (data) => {
-        
+
         const safeUnsubscribe = async () => {
             if (subscription) {
                 try {
@@ -206,7 +268,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         if (data.requestProgress.requestId !== requestId) return;
 
         logger.debug(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
-        
+
         const { progress, data: progressData } = data.requestProgress;
 
         try {
@@ -265,7 +327,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
     resolver && resolver(args);
 
     return subscription;
-  
+
 }
 
 function buildRestEndpoints(pathways, app, server, config) {
@@ -285,11 +347,12 @@ function buildRestEndpoints(pathways, app, server, config) {
                     openAIChatModels[pathway.emulateOpenAIChatModel] = name;
                 }
                 if (pathway.emulateOpenAICompletionModel) {
-                        openAICompletionModels[pathway.emulateOpenAICompletionModel] = name;
+                    openAICompletionModels[pathway.emulateOpenAICompletionModel] = name;
                 }
             } else {
                 app.post(`/rest/${name}`, async (req, res) => {
-                    const resultText = await processRestRequest(server, req, pathway, name);
+                    const result = await processRestRequest(server, req, pathway, name);
+                    const resultText = typeof result === 'string' ? result : result.resultText;
                     res.send(resultText);
                 });
             }
@@ -320,7 +383,8 @@ function buildRestEndpoints(pathways, app, server, config) {
                 text: 'prompt'
             };
 
-            const resultText = await processRestRequest(server, req, pathway, pathwayName, parameterMap);
+            const result = await processRestRequest(server, req, pathway, pathwayName, parameterMap);
+            const resultText = typeof result === 'string' ? result : result.resultText;
 
             const jsonResponse = {
                 id: `cmpl`,
@@ -328,12 +392,12 @@ function buildRestEndpoints(pathways, app, server, config) {
                 created: Date.now(),
                 model: req.body.model,
                 choices: [
-                {
-                    text: resultText,
-                    index: 0,
-                    logprobs: null,
-                    finish_reason: "stop"
-                }
+                    {
+                        text: resultText,
+                        index: 0,
+                        logprobs: null,
+                        finish_reason: "stop"
+                    }
                 ],
             };
 
@@ -349,7 +413,7 @@ function buildRestEndpoints(pathways, app, server, config) {
                 res.json(jsonResponse);
             }
         });
-        
+
         app.post('/v1/chat/completions', async (req, res) => {
             const modelName = req.body.model || 'gpt-3.5-turbo';
             let pathwayName;
@@ -370,7 +434,30 @@ function buildRestEndpoints(pathways, app, server, config) {
 
             const pathway = pathways[pathwayName];
 
-            const resultText = await processRestRequest(server, req, pathway, pathwayName);
+            const result = await processRestRequest(server, req, pathway, pathwayName);
+            let resultText = typeof result === 'string' ? result : result.resultText;
+            const toolData = typeof result === 'object' ? result.toolData : null;
+
+            // Handle JSON parsing for different formats - clean up wrappers but keep as string
+            if (typeof resultText === 'string') {
+                // Handle JSON wrapped in code blocks - extract the clean JSON
+                if (resultText.startsWith('```json') && resultText.endsWith('```')) {
+                    try {
+                        const jsonContent = resultText.slice(8, -3).trim();
+                        // Parse to validate it's valid JSON, then stringify back to clean string
+                        const parsedJson = JSON.parse(jsonContent);
+                        resultText = JSON.stringify(parsedJson);
+                    } catch (e) {
+                        logger.warn(`Failed to parse resultText from code block as JSON: ${e.message}`);
+                    }
+                }
+                // Note: We don't auto-parse plain JSON strings since they might be intended as plain text
+            }
+
+            // Ensure resultText is always a string for OpenAI API compatibility
+            if (typeof resultText !== 'string') {
+                resultText = JSON.stringify(resultText);
+            }
 
             const jsonResponse = {
                 id: `chatcmpl`,
@@ -389,6 +476,19 @@ function buildRestEndpoints(pathways, app, server, config) {
                 ],
             };
 
+            // Handle tool calls if present
+            if (toolData) {
+                try {
+                    const toolJson = JSON.parse(toolData);
+                    if (toolJson.passthrough_tool_calls && Array.isArray(toolJson.passthrough_tool_calls)) {
+                        jsonResponse.choices[0].message.tool_calls = toolJson.passthrough_tool_calls;
+                        jsonResponse.choices[0].message.content = toolJson.content || null;
+                    }
+                } catch (e) {
+                    logger.warn(`Failed to parse tool data: ${e.message}`);
+                }
+            }
+
             // eslint-disable-next-line no-extra-boolean-cast
             if (Boolean(req.body.stream)) {
                 jsonResponse.id = `chatcmpl-${resultText}`;
@@ -406,9 +506,19 @@ function buildRestEndpoints(pathways, app, server, config) {
                 const requestId = uuidv4();
                 jsonResponse.id = `chatcmpl-${requestId}`;
 
+
+                // Always return OpenAI format for /v1/chat/completions endpoint
                 res.json(jsonResponse);
             }
 
+        });
+
+        // Alias /v1/messages to use the same logic as /v1/chat/completions
+        app.post('/v1/messages', (req, res) => {
+            // Forward to the chat completions endpoint logic
+            // Note: This is a workaround to allow /v1/messages to work like /v1/chat/completions
+            req.body.model = 'claude-3.7-sonnet';
+            app._router.handle({ ...req, url: '/v1/chat/completions', originalUrl: '/v1/messages' }, res);
         });
 
         app.get('/v1/models', async (req, res) => {
