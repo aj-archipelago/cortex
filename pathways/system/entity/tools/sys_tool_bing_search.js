@@ -61,7 +61,7 @@ export default {
                 const errorMessages = Array.isArray(resolver.errors) 
                     ? resolver.errors.map(err => err.message || err)
                     : [resolver.errors.message || resolver.errors];
-                return JSON.stringify({ _type: "SearchError", value: errorMessages });
+                return JSON.stringify({ _type: "SearchError", value: errorMessages, recoveryMessage: "This tool failed. You should try the backup tool for this function." });
             }
 
             const parsedResponse = JSON.parse(response);

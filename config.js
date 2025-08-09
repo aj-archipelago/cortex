@@ -4,6 +4,7 @@ import HandleBars from './lib/handleBars.js';
 import fs from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
+import AzureAuthTokenHelper from './lib/azureAuthTokenHelper.js';
 import logger from './lib/logger.js';
 import PathwayManager from './lib/pathwayManager.js';
 import { readdir } from 'fs/promises';
@@ -128,6 +129,12 @@ var config = convict({
         env: 'GCP_SERVICE_ACCOUNT_KEY',
         sensitive: true
     },
+    azureServicePrincipalCredentials: {
+        format: String,
+        default: null,
+        env: 'AZURE_SERVICE_PRINCIPAL_CREDENTIALS',
+        sensitive: true
+    },
     models: {
         format: Object,
         default: {
@@ -182,6 +189,36 @@ var config = convict({
                     "model": "text-embedding-ada-002"
                 },
                 "maxTokenLength": 8192,
+            },
+            "oai-gpt5": {
+                "type": "OPENAI-REASONING-VISION",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "gpt-5"
+                },
+                "requestsPerSecond": 50,
+                "maxTokenLength": 1000000,
+                "maxReturnTokens": 16384,
+                "supportsStreaming": true
+            },
+            "oai-gpt5-mini": {
+                "type": "OPENAI-REASONING-VISION",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "gpt-5-mini"
+                },
+                "requestsPerSecond": 50,
+                "maxTokenLength": 1000000,
+                "maxReturnTokens": 16384,
+                "supportsStreaming": true
             },
             "oai-gpt4o": {
                 "type": "OPENAI-VISION",
@@ -612,6 +649,11 @@ if (config.get('entityConstants') && defaultEntityConstants) {
 if (config.get('gcpServiceAccountKey')) {
     const gcpAuthTokenHelper = new GcpAuthTokenHelper(config.getProperties());
     config.set('gcpAuthTokenHelper', gcpAuthTokenHelper);
+}
+
+if (config.get('azureServicePrincipalCredentials')) {
+    const azureAuthTokenHelper = new AzureAuthTokenHelper(config.getProperties());
+    config.set('azureAuthTokenHelper', azureAuthTokenHelper);
 }
 
 // Load dynamic pathways from JSON file or cloud storage
