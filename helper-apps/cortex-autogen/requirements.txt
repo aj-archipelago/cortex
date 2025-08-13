@@ -1,7 +1,7 @@
 azure-storage-queue
 azure-functions
 azure-search-documents
-pyautogen==0.3.0
+ag2==0.3.0
 redis
 pymongo
 requests
