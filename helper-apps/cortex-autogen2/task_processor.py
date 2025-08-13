@@ -261,9 +261,16 @@ Generate only the progress update:"""
                     if isinstance(content, str):
                         try:
                             json_content = json.loads(content)
-                            if "download_url" in json_content and "blob_name" in json_content:
-                                uploaded_file_urls[json_content["blob_name"]] = json_content["download_url"]
-                                final_result_content.append(f"Uploaded file: [{json_content['blob_name']}]({json_content['download_url']})")
+                            if isinstance(json_content, dict):
+                                if "download_url" in json_content and "blob_name" in json_content:
+                                    uploaded_file_urls[json_content["blob_name"]] = json_content["download_url"]
+                                    final_result_content.append(f"Uploaded file: [{json_content['blob_name']}]({json_content['download_url']})")
+                            elif isinstance(json_content, list):
+                                for item in json_content:
+                                    if isinstance(item, dict) and "download_url" in item and "blob_name" in item:
+                                        uploaded_file_urls[item["blob_name"]] = item["download_url"]
+                                        final_result_content.append(f"Uploaded file: [{item['blob_name']}]({item['download_url']})")
+                            # otherwise, ignore scalars like numbers/strings
                         except json.JSONDecodeError:
                             pass
                     
@@ -282,14 +289,25 @@ Generate only the progress update:"""
                     deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf"}
                     candidate_dirs: List[str] = []
                     try:
-                        candidate_dirs.append(os.getenv("CORTEX_WORK_DIR", "/tmp/coding"))
+                        wd = os.getenv("CORTEX_WORK_DIR", "/tmp/coding")
+                        # In Azure Functions, prefer /tmp for write access
+                        if os.getenv("WEBSITE_INSTANCE_ID") and wd.startswith("/app/"):
+                            wd = "/tmp/coding"
+                        candidate_dirs.append(wd)
                     except Exception:
                         pass
                     candidate_dirs.append("/tmp/coding")
 
                     recent_files: List[str] = []
                     for d in candidate_dirs:
-                        if not d or not os.path.isdir(d):
+                        if not d:
+                            continue
+                        # Ensure directory exists if possible
+                        try:
+                            os.makedirs(d, exist_ok=True)
+                        except Exception:
+                            pass
+                        if not os.path.isdir(d):
                             continue
                         try:
                             for name in os.listdir(d):
