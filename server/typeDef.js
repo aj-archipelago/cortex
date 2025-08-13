@@ -1,4 +1,14 @@
-const getGraphQlType = (value) => {
+const getGraphQlType = (value, paramName) => {
+  // Special handling for tools parameter
+  if (paramName === 'tools' && Array.isArray(value)) {
+    return {type: '[Tool]'};
+  }
+  
+  // Special handling for functions parameter (legacy)
+  if (paramName === 'functions' && Array.isArray(value)) {
+    return {type: '[Function]'};
+  }
+  
   switch (typeof value) {
     case 'boolean':
       return {type: 'Boolean'};
@@ -29,10 +39,57 @@ const getGraphQlType = (value) => {
 };
 
 const getMessageTypeDefs = () => {
-  const messageType = `input Message { role: String, content: String, name: String }`;
-  const multiMessageType = `input MultiMessage { role: String, content: [String], name: String }`;
+  // Add tool call support for OpenAI function calling compatibility
+  const toolCallType = `input ToolCall { 
+    id: String
+    type: String
+    function: ToolCallFunction 
+  }`;
   
-  return `${messageType}\n\n${multiMessageType}`;
+  const toolCallFunctionType = `input ToolCallFunction {
+    name: String
+    arguments: String
+  }`;
+  
+  // Add tool definition types for OpenAI tools parameter
+  const toolType = `input Tool {
+    type: String
+    function: ToolFunction
+  }`;
+  
+  const toolFunctionType = `input ToolFunction {
+    name: String
+    description: String
+    parameters: String
+    strict: Boolean
+  }`;
+  
+  // Add function definition type for OpenAI functions parameter (legacy)
+  const functionType = `input Function {
+    name: String
+    description: String
+    parameters: String
+  }`;
+  
+  // Updated Message type with optional tool_calls and tool_call_id fields
+  const messageType = `input Message { 
+    role: String
+    content: String
+    name: String
+    tool_calls: [ToolCall]
+    tool_call_id: String
+  }`;
+  
+  // Updated MultiMessage type with optional tool_calls and tool_call_id fields  
+  const multiMessageType = `input MultiMessage { 
+    role: String
+    content: [String]
+    name: String
+    tool_calls: [ToolCall]
+    tool_call_id: String
+  }`;
+  
+  return `${toolFunctionType}\n\n${toolType}\n\n${functionType}\n\n${toolCallFunctionType}\n\n${toolCallType}\n\n${messageType}\n\n${multiMessageType}`;
 };
 
 const getPathwayTypeDef = (name, returnType) => {
@@ -67,7 +124,7 @@ const getPathwayTypeDefAndExtendQuery = (pathway) => {
 
   const paramsStr = Object.entries(params)
     .map(([key, value]) => {
-      const { type, defaultValue } = getGraphQlType(value);
+      const { type, defaultValue } = getGraphQlType(value, key);
       return `${key}: ${type} = ${defaultValue}`;
     })
     .join('\n');
@@ -75,7 +132,7 @@ const getPathwayTypeDefAndExtendQuery = (pathway) => {
   const restDefinition = Object.entries(params).map(([key, value]) => {
     return {
       name: key,
-      type: `${getGraphQlType(value).type}`,
+      type: `${getGraphQlType(value, key).type}`,
     };
   });
 
