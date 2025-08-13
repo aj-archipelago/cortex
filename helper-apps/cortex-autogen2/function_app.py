@@ -13,7 +13,8 @@ logging.getLogger().setLevel(logging.INFO)
 app = func.FunctionApp()
 
 connection_string = os.environ["AZURE_STORAGE_CONNECTION_STRING"]
-queue_name = os.environ.get("QUEUE_NAME", "autogen-message-queue")
+queue_name = os.environ.get("AZURE_QUEUE_NAME") or os.environ.get("QUEUE_NAME", "autogen-message-queue")
+logging.info(f"📦 Using Azure Storage Queue name: {queue_name}")
 queue_client = QueueClient.from_connection_string(connection_string, queue_name)
 
 redis_client = redis.from_url(os.environ['REDIS_CONNECTION_STRING'])

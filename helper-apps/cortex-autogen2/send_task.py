@@ -2,76 +2,42 @@
 """
 🚀 Cortex AutoGen Task Sender
 
-This script sends tasks to the Azure Queue for processing by the Cortex AutoGen worker.
+Send a task to the Azure Storage Queue for processing by the Cortex AutoGen worker.
 
-⚠️  CRITICAL: WORKER MANAGEMENT REQUIRED BEFORE TESTING
-================================================================================
-ALWAYS kill existing workers before starting new ones to prevent conflicts:
+CRITICAL: Clean worker state prevents conflicts
+----------------------------------------------
+1) Kill existing workers:
+   pkill -f "python -m src.cortex_autogen2.main" || true
+   pkill -f "python main.py" || true
 
-1. KILL EXISTING WORKERS:
-   pkill -f "python -m src.cortex_autogen2.main"
-   
-2. VERIFY NO WORKERS RUNNING:
-   ps aux | grep cortex_autogen2
-   (Should only show the grep command itself)
-   
-3. START FRESH WORKER:
+2) Start fresh worker (non-continuous) in background:
    CONTINUOUS_MODE=false python -m src.cortex_autogen2.main &
-   
-4. SEND TASK:
-   python send_task.py "Your task here" --wait --timeout 120
+   # or: CONTINUOUS_MODE=false python main.py &
 
-⚠️  Multiple workers can cause:
-- Task processing conflicts
-- Duplicate progress updates  
-- Queue message conflicts
-- Unpredictable behavior
+3) Send a task:
+   python send_task.py "Create a simple PDF about cats and upload it"
 
-ALWAYS ensure clean worker state before testing!
-================================================================================
+Why this order? Multiple workers can cause duplicate processing, queue conflicts, and noisy progress updates.
 
-📋 TWO-STEP WORKFLOW:
-1. SEND TASK: Use this script to send a task to the queue
-2. START WORKER: Run the worker to process the task
+Usage
+-----
+python send_task.py "<your task text>" [--queue <name>] [--connection <conn_str>]
 
-⚠️  IMPORTANT: You MUST send a task FIRST, then start the worker!
+Environment
+-----------
+- AZURE_STORAGE_CONNECTION_STRING (required if --connection not provided)
+- AZURE_QUEUE_NAME (default queue if --queue not provided)
+- .env is loaded automatically
 
-🔧 WORKER COMMANDS:
-- Continuous mode: python -m src.cortex_autogen2.main
-- Non-continuous mode: CONTINUOUS_MODE=false python -m src.cortex_autogen2.main
+Message format
+--------------
+- Base64-encoded JSON payload with a `content` field:
+  {"request_id": "<uuid>", "message_id": "<uuid>", "content": "<task text>"}
 
-📝 USAGE EXAMPLES:
-
-# RECOMMENDED WORKFLOW:
-# Step 0: Kill existing workers
-pkill -f "python -m src.cortex_autogen2.main"
-
-# Step 1: Start fresh worker
-CONTINUOUS_MODE=false python -m src.cortex_autogen2.main &
-
-# Step 2: Send task and wait
-python send_task.py "create a simple PDF about cats" --wait --timeout 120
-
-# Alternative: Send task first, then start worker manually
-python send_task.py "calculate 5 + 3"
-CONTINUOUS_MODE=false python -m src.cortex_autogen2.main
-
-💡 PRO TIPS:
-- Use --continuous=false for testing single tasks
-- Use --wait to automatically listen for the response
-- Tasks persist in the queue until processed
-- ALWAYS kill existing workers before starting new tests
-
-🔍 TECHNICAL DETAILS:
-- Task content uses "contextId", "message", and "keywords" (matches UI format)
-- Progress updates use Azure Queue's "messageId" as the "requestId" field
-- Base64 encodes the JSON payload (like the UI)
-- Redis channel: requestProgress
-
-📋 ID MAPPING:
-- contextId: Original task context ID (for reference)
-- messageId: Azure Queue message ID (used for progress updates as requestId)
-- requestId: Same as messageId (used in Redis progress messages)
+Notes
+-----
+- Tasks persist in the queue until a worker processes them.
+- Progress is published to Redis (see README for details).
 """
 
 import json
@@ -87,16 +53,35 @@ def main():
     load_dotenv()
     
     parser = argparse.ArgumentParser(description="Send a task to the AutoGen agent processor.")
-    parser.add_argument("task_prompt", type=str, nargs='?', default="list the files in the current directory",
-                        help="The prompt for the task to be executed.")
+    parser.add_argument(
+        "task_prompt",
+        type=str,
+        nargs='?',
+        default="list the files in the current directory",
+        help="The prompt for the task to be executed."
+    )
+    parser.add_argument(
+        "--queue",
+        dest="queue_name",
+        type=str,
+        default=os.getenv("AZURE_QUEUE_NAME", "autogen-test-message-queue"),
+        help="Azure Storage Queue name (overrides AZURE_QUEUE_NAME)."
+    )
+    parser.add_argument(
+        "--connection",
+        dest="connection_string",
+        type=str,
+        default=os.getenv("AZURE_STORAGE_CONNECTION_STRING"),
+        help="Azure Storage connection string (overrides AZURE_STORAGE_CONNECTION_STRING)."
+    )
     args = parser.parse_args()
 
-    connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-    queue_name = os.getenv("AZURE_QUEUE_NAME", "autogen-test-message-queue")
+    connection_string = args.connection_string
+    queue_name = args.queue_name
     print(f"Using queue: {queue_name}")
     
     if not connection_string:
-        print("Error: AZURE_STORAGE_CONNECTION_STRING is not set.")
+        print("Error: AZURE_STORAGE_CONNECTION_STRING is not set and --connection was not provided.")
         return
         
     task = {

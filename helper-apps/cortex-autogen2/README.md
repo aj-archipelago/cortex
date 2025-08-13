@@ -1,119 +1,144 @@
-# Cortex AutoGen: Advanced AI Agent System 🤖
+## Cortex AutoGen: Advanced AI Agent System 🤖
 
-A robust, production-ready AI agent system powered by the AutoGen framework, designed for complex task automation and intelligent problem-solving. `Cortex AutoGen` processes tasks from Azure Storage Queues, orchestrating a diverse team of specialized AI agents to deliver real, verifiable results.
+Multi-agent task automation with real code execution, Azure Storage Queue ingestion, Azure Blob uploads, and live progress via Redis.
 
-## ✨ Key Features
+### Highlights
+- **Selector-based orchestration** with `SelectorGroupChat`
+- **Agents**: coder, code executor, cloud file uploader, presenter, terminator
+- **Real execution** in a sandboxed working directory (`CORTEX_WORK_DIR`)
+- **Azure native**: Queue (ingress) + Blob (files)
+- **Live progress** published to Redis (`info`, `progress`, optional `data`)
 
--   **Dynamic Multi-Agent Orchestration**: Utilizes a `SelectorGroupChat` to dynamically select the most suitable agent(s) for each sub-task, enabling flexible and efficient workflows.
--   **Specialized Agent Team**: A comprehensive suite of agents, including:
-    -   **Planner Agent**: Devises strategic plans for complex tasks.
-    -   **Coder Agent**: Executes Python and shell scripts, performs computations, and creates local files.
-    -   **File Cloud Uploader Agent**: Manages secure uploads of generated files to Azure Blob Storage, providing public SAS URLs.
-    -   **Presenter Agent**: Formats and presents final results in professional Markdown, incorporating uploaded file URLs.
-    -   **Terminator Agent**: Monitors task completion and signals termination.
--   **Real Code Execution & File Generation**: Agents are capable of running actual code, generating diverse file types (e.g., Python scripts, PDFs, images, presentations), and handling complex data processing.
--   **Azure Integration**: Seamlessly integrates with Azure Storage Queue for task ingestion and Azure Blob Storage for file persistence.
--   **Real-time Progress Updates**: Provides live updates on task progress, including summarized current activities.
--   **Production-Ready & Scalable**: Engineered for reliable performance and capable of handling a continuous stream of tasks.
+### Architecture
+- Shared core in `task_processor.py` used by both the long-running worker (`main.py`) and the Azure Functions container (`function_app.py`).
+- Queue messages are Base64-encoded JSON; task text is read from `message` or `content`.
 
-## 🏗️ Updated Architecture Overview
-
-Cortex AutoGen now supports two deployment models (traditional worker and Azure Function App) with shared core logic in `task_processor.py` for better scalability. It uses a central `SelectorGroupChat` to orchestrate agents, processing tasks from Azure Queues while ensuring clean worker states by killing existing processes before starting new ones.
-
-## 🔧 Tools & Capabilities
-
-`Cortex AutoGen` provides a robust set of tools accessible to agents for task execution:
-
--   **Search Tools**:
-    -   Bing Web, News, and Image Search: Real-time information retrieval with recency filters.
-    -   Azure Cognitive Search: Specialized searches across Al Jazeera indexes (English, Arabic, Wires).
--   **Coding Tools**:
-    -   Code Execution: Runs Python scripts with persistent environments.
-    -   Shell Execution: Executes terminal commands for system operations.
--   **File Tools**:
-    -   File Creation/Reading: Manages local files intelligently across types.
-    -   File Listing/Info: Categorizes and analyzes files in the working directory.
--   **Download Tools**:
-    -   File Downloads: Retrieves files from URLs with progress tracking.
--   **Azure Blob Tools**:
-    -   File Uploads: Securely uploads files to Azure Blob Storage with SAS URLs.
-
-These tools enable agents to perform web research, data processing, file management, and more.
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.11+
-- Docker (for containerized deployment)
-- Azure Storage Account
-- Redis instance (for progress tracking)
-- API access for OpenAI/Cortex and Azure services
+- Redis instance
+- Azure Storage account (Queue + Blob)
+- Docker (optional, for containerized Azure Functions local run)
 
-### Installation and Running
+### 1) Set environment variables
+Create a `.env` in the project root:
 
-1. **Activate Virtual Environment**: Always run commands within the `.venv` directory to manage dependencies.
-2. **Environment Setup**: Include the `.env` file for Docker commands to load environment variables.
-3. **Worker Management**: Before testing, kill existing workers with `pkill -f "python -m src.cortex_autogen2.main"`, verify with `ps aux | grep cortex_autogen2`, then start a fresh worker with `CONTINUOUS_MODE=false python -m src.cortex_autogen2.main &`.
-4. Clone and install:
-   ```bash
-   git clone <repository-url>
-   cd cortex-autogen2
-   poetry install  # Or pip install -r requirements.txt
-   ```
-5. Send a test task:
-   ```bash
-   python send_task.py "Your test task here" --wait
-   ```
+```dotenv
+# Core
+AZURE_STORAGE_CONNECTION_STRING=...
+AZURE_QUEUE_NAME=autogen-test-message-queue         # used by worker (main.py)
+AZURE_BLOB_CONTAINER=autogentempfiles
+REDIS_CONNECTION_STRING=redis://localhost:6379
+REDIS_CHANNEL=requestProgress
 
-## 🔍 How to Verify Real Execution and Results
+# Models API
+CORTEX_API_KEY=...
+CORTEX_API_BASE_URL=http://host.docker.internal:4000/v1
 
-The `Cortex AutoGen` system is designed for verifiable execution. Here's how to confirm its capabilities:
+# Working directory for code execution (must be writable)
+CORTEX_WORK_DIR=/tmp/coding
 
-1.  **Code & Computation Verification**:
-    -   Request complex mathematical calculations (e.g., prime numbers, factorials, statistical analysis).
-    -   Ask for algorithms that require actual implementation and testing (e.g., sorting, data structure operations).
-    -   Review the computed output for accuracy.
+# Azure Functions variant uses QUEUE_NAME (not AZURE_QUEUE_NAME)
+QUEUE_NAME=autogen-test-message-queue
+```
 
-2.  **File & Data Verification**:
-    -   For any task involving file creation (PDFs, images, presentations), ensure the `Presenter Agent` provides a **real, working public URL** from the `File Cloud Uploader Agent`.
-    -   Download and verify the content of the generated files.
-    -   For database queries, check that the SQL results and visualizations accurately reflect the requested data.
+Keep secrets out of version control. You can also configure `local.settings.json` for local Functions.
 
-3.  **Content & Research Verification**:
-    -   Verify the accuracy and proper referencing of facts.
+### 2) Install dependencies
+- Using Poetry:
+```bash
+poetry install
+```
+- Or with pip:
+```bash
+python -m venv .venv && source .venv/bin/activate   # project uses .venv
+pip install -r requirements.txt
+```
 
-## ⚡ Performance & System Details
+### 3) Run the worker locally
+- Activate your virtualenv (`source .venv/bin/activate`) and ensure a clean worker state.
+- Recommended workflow (non-continuous, exits when queue is empty):
+```bash
+# Kill any previously running worker (module or script form)
+pkill -f "python -m src.cortex_autogen2.main" || true
+pkill -f "python main.py" || true
+CONTINUOUS_MODE=false python -m src.cortex_autogen2.main &
+# Alternative (direct script):
+# CONTINUOUS_MODE=false python main.py &
+```
+Tip: Use the module path variant if your repository layout exposes `src/cortex_autogen2` on `PYTHONPATH` (e.g., in a monorepo). Otherwise, run `python main.py` directly.
 
--   **Typical execution time**: Optimized for quick task completion.
--   **File Storage**: Automatic upload to Azure Blob Storage with temporary SAS URLs.
--   **Real-time Progress**: Updates are published via Redis for live monitoring.
+Then send a task:
+```bash
+python send_task.py "create a simple PDF about cats"
+```
 
-### 🛠️ Updated Project Structure
+Notes:
+- `CONTINUOUS_MODE=false` runs once and exits after the queue is empty.
+- Use background run `&` to keep logs visible in the current terminal.
 
+### 4) Run the worker in Docker (optional)
+Build and run the worker image using `Dockerfile.worker`:
+```bash
+docker build -f Dockerfile.worker -t cortex-autogen-worker .
+docker run --rm --env-file .env -e CORTEX_WORK_DIR=/app/coding --network host cortex-autogen-worker
+```
+
+### 5) Run the Azure Functions container locally (optional)
+Use Docker Compose and pass your `.env` so the container gets your variables:
+```bash
+docker compose --env-file .env up --build
+```
+This builds `Dockerfile` (Functions) and starts on port `7071` (mapped to container `80`).
+
+## Usage Details
+
+### Sending tasks
+`send_task.py` publishes a Base64-encoded JSON message with `content` to the queue defined by `AZURE_STORAGE_CONNECTION_STRING` and `AZURE_QUEUE_NAME` (or `QUEUE_NAME` for Functions).
+
+```bash
+python send_task.py "list the files in the current directory"
+# Override queue/connection if needed:
+python send_task.py "create a simple PDF about cats" --queue autogen-test-message-queue --connection "<AZURE_STORAGE_CONNECTION_STRING>"
+```
+
+Message format published to the queue (before Base64 encoding):
+```json
+{
+  "request_id": "<uuid>",
+  "message_id": "<uuid>",
+  "content": "<task text>"
+}
+```
+
+### Progress updates
+- Channel: set via `REDIS_CHANNEL` (recommend `requestProgress`)
+- Payload fields: `requestId`, `progress` (0-1), `info` (short status), optional `data` (final Markdown)
+- Final result publishes `progress=1.0` with `data` containing the Markdown for UI
+
+### Working directory
+- Code execution uses `CORTEX_WORK_DIR`. Defaults: `/home/site/wwwroot/coding` in Functions container; set to `/app/coding` in worker container; recommend `/tmp/coding` locally. Always use absolute paths within this directory.
+
+## Project Structure
 ```
 cortex-autogen2/
-├── Dockerfile  # For Azure Function App
-├── Dockerfile.worker  # For traditional worker
-├── docker-compose.yml  # Local development orchestration
-├── main.py  # Main worker entry point
-├── function_app.py  # Azure Function app configuration
-├── task_processor.py  # Shared task processing logic
-├── host.json                     # Azure Functions host configuration
-├── local.settings.json           # Local Azure Functions settings
-├── requirements.txt              # Python dependencies for Azure Functions
-├── deploy_container_app.sh       # Azure Container Apps deployment script
-├── run_local_container.sh        # Local container development script
-├── poetry.lock                   # Poetry dependency lock file
-├── pyproject.toml                # Poetry project configuration
-├── README.md                     # This documentation file
-├── send_task.py                  # Script for manual task submission to the queue
-├── agents.py                     # Agent definitions
-├── services/                     # External service integrations (Azure Queue, Redis Publisher)
-│   ├── __init__.py
+├── Dockerfile                  # Azure Functions container
+├── Dockerfile.worker           # Traditional worker container
+├── docker-compose.yml          # Local Functions container orchestrator
+├── main.py                     # Long-running worker
+├── function_app.py             # Azure Functions entry
+├── task_processor.py           # Shared processing logic
+├── host.json                   # Azure Functions host config
+├── local.settings.json         # Local Functions settings (do not commit secrets)
+├── requirements.txt            # Functions deps (pip)
+├── pyproject.toml, poetry.lock # Poetry project config
+├── send_task.py                # Queue task sender
+├── agents.py                   # Agent definitions
+├── services/
 │   ├── azure_queue.py
 │   └── redis_publisher.py
-└── tools/                        # Agent tools
-    ├── __init__.py
+└── tools/
     ├── azure_blob_tools.py
     ├── coding_tools.py
     ├── download_tools.py
@@ -121,46 +146,38 @@ cortex-autogen2/
     └── search_tools.py
 ```
 
-## 🏗️ Architecture Improvements
+## Environment variables reference
+| Name                           | Required | Default                         | Used by           | Description |
+|--------------------------------|----------|---------------------------------|-------------------|-------------|
+| `AZURE_STORAGE_CONNECTION_STRING` | Yes    | —                               | Worker/Functions  | Storage account connection string |
+| `AZURE_QUEUE_NAME`             | Yes (worker) | —                            | Worker            | Queue name for worker (`main.py`) |
+| `QUEUE_NAME`                   | Yes (Functions) | `autogen-message-queue`    | Functions         | Queue name for Functions (`function_app.py`) |
+| `AZURE_BLOB_CONTAINER`         | Yes      | —                               | Uploader tool     | Blob container for uploaded files |
+| `REDIS_CONNECTION_STRING`      | Yes      | —                               | Progress          | Redis connection string |
+| `REDIS_CHANNEL`                | Yes      | `requestProgress`               | Progress          | Redis pub/sub channel for progress |
+| `CORTEX_API_KEY`               | Yes      | —                               | Models            | API key for Cortex/OpenAI-style API |
+| `CORTEX_API_BASE_URL`          | No       | `http://host.docker.internal:4000/v1` | Models     | API base URL |
+| `CORTEX_WORK_DIR`              | No       | `/tmp/coding` or container path | Code executor     | Writable work dir for code execution |
 
-The project now supports two deployment models with shared core functionality:
+## Notes
+- Health endpoint referenced in `docker-compose.yml` is optional; if you add one, expose it under `/api/health` in the Functions app.
+- Do not commit `.env` or `local.settings.json` with secrets.
+ - On macOS, Docker's `network_mode: host` is not supported; remove it from `docker-compose.yml` if needed and rely on published ports and `host.docker.internal` for host access.
 
-### **Core Module (`task_processor.py`)**
-- **Extracted Logic**: All task processing logic has been extracted into a reusable `TaskProcessor` class
-- **Shared Functionality**: Both worker and Azure Function App use the same core processing logic
-- **Clean Separation**: Model initialization, progress tracking, and agent orchestration are centralized
-- **Minimal Code**: Reduced duplication while maintaining full functionality
+## Troubleshooting
+- No tasks processed: verify `AZURE_QUEUE_NAME`/`QUEUE_NAME` and that messages are Base64-encoded JSON with `content` or `message`.
+- No progress visible: ensure `REDIS_CONNECTION_STRING` and `REDIS_CHANNEL` (e.g., `requestProgress`) are set, and network access to Redis.
+- Container cannot reach host services: use `--network host` on macOS/Linux and `host.docker.internal` URLs inside containers.
 
-### **Deployment Options**
-1. **Traditional Worker** (`main.py`): Continuous processing with persistent connections
-2. **Azure Function App** (`function_app.py`): Containerized, event-driven processing for Azure Container Apps
+## Contributing
+- Open a PR with clear description and include documentation updates when applicable.
 
-### **Benefits**
-- **Scalability**: Azure Container Apps provide automatic scaling based on queue depth
-- **Cost Efficiency**: Pay-per-execution model for sporadic workloads
-- **Reliability**: Built-in retry logic and dead letter queue handling
-- **Maintenance**: Reduced operational overhead with managed infrastructure
-- **Containerization**: Full Docker support for consistent deployment
-
-## ✅ System Status
-
-**Current Status**: ✅ **PRODUCTION READY**
-
-`Cortex AutoGen` is continuously evolving, with the latest enhancements focused on dynamic agent selection, advanced file handling, specialized task execution, and flexible deployment options. It has been rigorously tested to ensure reliable performance across diverse AI tasks.
-
-**Last Verified**: July 2024 with comprehensive tests across code execution, file generation/upload, database querying, web search, and article writing.
-
-## 🤝 Contributing
-
-We welcome contributions to `Cortex AutoGen`! To get started:
-
-1. Fork the repository.
-2. Create a new branch for your feature or bug fix.
-3. Commit your changes with clear, descriptive messages.
-4. Push your branch and submit a pull request.
-
-Please include tests for new features and update documentation as needed. For major changes, open an issue first to discuss.
-
----
-
-Feel free to open issues or contribute to further enhance `Cortex AutoGen`! 
+## Examples
+- Send a research/report task:
+```bash
+python send_task.py "Summarize the latest trends in AI agent frameworks with references"
+```
+- Generate and upload a file:
+```bash
+python send_task.py "Create a simple PDF about cats with 3 bullet points and upload it"
+```

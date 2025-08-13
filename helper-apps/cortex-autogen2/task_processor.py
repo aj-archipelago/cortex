@@ -25,6 +25,7 @@ class TaskProcessor:
         self.o4_mini_model_client = None
         self.gpt41_model_client = None
         self.progress_tracker = None
+        self.final_progress_sent = False
         
     async def initialize(self):
         """Initialize model clients and services."""
@@ -188,111 +189,130 @@ Generate only the progress update:"""
         if summarized_content:
             await self.progress_tracker.publish_progress(task_id, percentage, summarized_content)
 
+    async def publish_final(self, task_id: str, message: str, data: Any = None) -> None:
+        """Publish a final 1.0 progress message once."""
+        if self.final_progress_sent:
+            return
+        try:
+            if self.progress_tracker:
+                final_data = message if data is None else data
+                await self.progress_tracker.publish_progress(task_id, 1.0, message, data=final_data)
+                self.final_progress_sent = True
+        except Exception as e:
+            logger.error(f"❌ Failed to publish final progress for task_id={task_id}: {e}")
+
     async def process_task(self, task_id: str, task_content: str) -> str:
         """Process a single task and return the final result."""
-        task_completed_percentage = 0.05
-        task = task_content
-        
-        # Send initial progress update
-        await self.progress_tracker.publish_progress(task_id, 0.05, "🚀 Starting your task...")
+        try:
+            task_completed_percentage = 0.05
+            task = task_content
 
-        termination = HandoffTermination(target="user") | TextMentionTermination("TERMINATE")
+            # Send initial progress update
+            await self.progress_tracker.publish_progress(task_id, 0.05, "🚀 Starting your task...")
 
-        agents, presenter_agent = await get_agents(
-            self.gpt41_model_client, 
-            self.o3_model_client, 
-            self.gpt41_model_client
-        )
-        
-        team = SelectorGroupChat(
-            participants=agents,
-            model_client=self.gpt41_model_client,
-            termination_condition=termination,
-            max_turns=10000
-        )
+            termination = HandoffTermination(target="user") | TextMentionTermination("TERMINATE")
 
-        messages = []
-        uploaded_file_urls = {}
-        final_result_content = []
-        
-        detailed_task = f"""
-        Accomplish and present your task to the user in a great way, Markdown, it ll be shown in a React app that supports markdown.
-        Task: 
-        {task}
-        """
-        
-        stream = team.run_stream(task=task)
-        async for message in stream:
-            messages.append(message)
-            source = message.source if hasattr(message, 'source') else None
-            content = message.content if hasattr(message, 'content') else None 
-            created_at = message.created_at if hasattr(message, 'created_at') else None
-            logger.info(f"\n\n#SOURCE: {source}\n#CONTENT: {content}\n#CREATED_AT: {created_at}\n")
+            agents, presenter_agent = await get_agents(
+                self.gpt41_model_client,
+                self.o3_model_client,
+                self.gpt41_model_client
+            )
+
+            team = SelectorGroupChat(
+                participants=agents,
+                model_client=self.gpt41_model_client,
+                termination_condition=termination,
+                max_turns=10000
+            )
+
+            messages = []
+            uploaded_file_urls = {}
+            final_result_content = []
+
+            detailed_task = f"""
+            Accomplish and present your task to the user in a great way, Markdown, it ll be shown in a React app that supports markdown.
+            Task: 
+            {task}
+            """
+
+            stream = team.run_stream(task=task)
+            async for message in stream:
+                messages.append(message)
+                source = message.source if hasattr(message, 'source') else None
+                content = message.content if hasattr(message, 'content') else None 
+                created_at = message.created_at if hasattr(message, 'created_at') else None
+                logger.info(f"\n\n#SOURCE: {source}\n#CONTENT: {content}\n#CREATED_AT: {created_at}\n")
+                
+                task_completed_percentage += 0.01
+                if task_completed_percentage >= 1.0:
+                    task_completed_percentage = 0.99
+                    
+                if content:
+                    processed_content_for_progress = content
+                    if message.type == "ToolCallExecutionEvent" and hasattr(message, 'content') and isinstance(message.content, list):
+                        error_contents = [res.content for res in message.content if hasattr(res, 'is_error') and res.is_error]
+                        if error_contents:
+                            processed_content_for_progress = "\n".join(error_contents)
+                        else:
+                            processed_content_for_progress = str(message.content)
+
+                    if isinstance(content, str):
+                        try:
+                            json_content = json.loads(content)
+                            if "download_url" in json_content and "blob_name" in json_content:
+                                uploaded_file_urls[json_content["blob_name"]] = json_content["download_url"]
+                                final_result_content.append(f"Uploaded file: [{json_content['blob_name']}]({json_content['download_url']})")
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    final_result_content.append(str(content))
+                    asyncio.create_task(self.handle_progress_update(task_id, task_completed_percentage, processed_content_for_progress, message.type, source))
+
+            await self.progress_tracker.publish_progress(task_id, 0.95, "✨ Finalizing your results...")
+
+            result_limited_to_fit = "\n".join(final_result_content)
+
+            presenter_task = f"""
+            Present the task result in a great way, Markdown, it'll be shown in a React app that supports markdown that doesn't have access to your local files.
+            Make sure to use all the info you have, do not miss any info.
+            Make sure to have images, videos, etc. users love them.
+            UI must be professional that is really important.
+
+            TASK: 
+
+            {task}
+
+            RAW_AGENT_COMMUNICATIONS:
+
+            {result_limited_to_fit}
+
+            UPLOADED_FILES_SAS_URLS:
+
+            {json.dumps(uploaded_file_urls, indent=2)}
+
+            **CRITICAL INSTRUCTION: Analyze the RAW_AGENT_COMMUNICATIONS above. Your ONLY goal is to extract and present the final, user-facing result requested in the TASK. Absolutely DO NOT include any code, internal agent thought processes, tool calls, technical logs, or descriptions of how the task was accomplished. Focus solely on delivering the ANSWER to the user's original request in a clear, professional, and visually appealing Markdown format. If the task was to fetch news headlines, present only the headlines. If it was to generate an image, present the image. If it was to create a file, indicate its content or provide its download URL. Remove all extraneous information.**
+            """
             
-            task_completed_percentage += 0.01
-            if task_completed_percentage >= 1.0:
-                task_completed_percentage = 0.99
-                
-            if content:
-                processed_content_for_progress = content
-                if message.type == "ToolCallExecutionEvent" and hasattr(message, 'content') and isinstance(message.content, list):
-                    error_contents = [res.content for res in message.content if hasattr(res, 'is_error') and res.is_error]
-                    if error_contents:
-                        processed_content_for_progress = "\n".join(error_contents)
-                    else:
-                        processed_content_for_progress = str(message.content)
+            presenter_stream = presenter_agent.run_stream(task=presenter_task)
+            presenter_messages = []
+            async for message in presenter_stream:
+                logger.info(f"#PRESENTER MESSAGE: {message.content if hasattr(message, 'content') else ''}")
+                presenter_messages.append(message)
 
-                if isinstance(content, str):
-                    try:
-                        json_content = json.loads(content)
-                        if "download_url" in json_content and "blob_name" in json_content:
-                            uploaded_file_urls[json_content["blob_name"]] = json_content["download_url"]
-                            final_result_content.append(f"Uploaded file: [{json_content['blob_name']}]({json_content['download_url']})")
-                    except json.JSONDecodeError:
-                        pass
-                
-                final_result_content.append(str(content))
-                asyncio.create_task(self.handle_progress_update(task_id, task_completed_percentage, processed_content_for_progress, message.type, source))
+            task_result = presenter_messages[-1]
+            last_message = task_result.messages[-1]
+            text_result = last_message.content if hasattr(last_message, 'content') else None
 
-        await self.progress_tracker.publish_progress(task_id, 0.95, "✨ Finalizing your results...")
-
-        result_limited_to_fit = "\n".join(final_result_content)
-
-        presenter_task = f"""
-        Present the task result in a great way, Markdown, it'll be shown in a React app that supports markdown that doesn't have access to your local files.
-        Make sure to use all the info you have, do not miss any info.
-        Make sure to have images, videos, etc. users love them.
-        UI must be professional that is really important.
-
-        TASK: 
-
-        {task}
-
-        RAW_AGENT_COMMUNICATIONS:
-
-        {result_limited_to_fit}
-
-        UPLOADED_FILES_SAS_URLS:
-
-        {json.dumps(uploaded_file_urls, indent=2)}
-
-        **CRITICAL INSTRUCTION: Analyze the RAW_AGENT_COMMUNICATIONS above. Your ONLY goal is to extract and present the final, user-facing result requested in the TASK. Absolutely DO NOT include any code, internal agent thought processes, tool calls, technical logs, or descriptions of how the task was accomplished. Focus solely on delivering the ANSWER to the user's original request in a clear, professional, and visually appealing Markdown format. If the task was to fetch news headlines, present only the headlines. If it was to generate an image, present the image. If it was to create a file, indicate its content or provide its download URL. Remove all extraneous information.**
-        """
-        
-        presenter_stream = presenter_agent.run_stream(task=presenter_task)
-        presenter_messages = []
-        async for message in presenter_stream:
-            logger.info(f"#PRESENTER MESSAGE: {message.content if hasattr(message, 'content') else ''}")
-            presenter_messages.append(message)
-
-        task_result = presenter_messages[-1]
-        last_message = task_result.messages[-1]
-        text_result = last_message.content if hasattr(last_message, 'content') else None
-
-        logger.info(f"🔍 TASK RESULT:\n{text_result}")
-        await self.progress_tracker.publish_progress(task_id, 1.0, "🎉 Your task is complete!", data=text_result)
-        
-        return text_result
+            logger.info(f"🔍 TASK RESULT:\n{text_result}")
+            final_data = text_result or "🎉 Your task is complete!"
+            await self.progress_tracker.publish_progress(task_id, 1.0, "🎉 Your task is complete!", data=final_data)
+            self.final_progress_sent = True
+            
+            return text_result
+        except Exception as e:
+            logger.error(f"❌ Error during process_task for {task_id}: {e}", exc_info=True)
+            await self.publish_final(task_id, "❌ We hit an issue while working on your request. Processing has ended.")
+            raise
 
     async def close(self):
         """Close all connections gracefully."""
@@ -332,13 +352,15 @@ async def process_queue_message(message_data: Dict[str, Any]) -> Optional[str]:
     """
     processor = TaskProcessor()
     try:
+        task_id = message_data.get("id")
         await processor.initialize()
         
-        task_id = message_data.get("id")
         raw_content = message_data.get("content") or message_data.get("message")
 
         if not raw_content:
             logger.error(f"❌ Message has no content: {message_data}")
+            # Ensure terminal progress on empty content
+            await processor.publish_final(task_id or "", "⚠️ Received an empty task. Processing has ended.")
             return None
 
         logger.debug(f"🔍 DEBUG: process_queue_message - Raw content received (first 100 chars): {raw_content[:100]}...")
@@ -354,11 +376,13 @@ async def process_queue_message(message_data: Dict[str, Any]) -> Optional[str]:
                 logger.debug(f"🔍 DEBUG: process_queue_message - Successfully JSON parsed raw content. Keys: {list(task_data.keys())}")
             except json.JSONDecodeError as e2:
                 logger.error(f"❌ Failed to parse message content as JSON after both attempts for message ID {task_id}: {e2}", exc_info=True)
+                await processor.publish_final(task_id or "", "❌ Invalid task format received. Processing has ended.")
                 return None
 
         task_content = task_data.get("message") or task_data.get("content")
         if not task_content:
             logger.error(f"❌ No valid task content (key 'message' or 'content') found in parsed data for message ID {task_id}: {task_data}")
+            await processor.publish_final(task_id or "", "⚠️ No actionable task content found. Processing has ended.")
             return None
 
         logger.debug(f"🔍 DEBUG: process_queue_message - Extracted task_content (first 100 chars): {task_content[:100]}...")
@@ -368,7 +392,14 @@ async def process_queue_message(message_data: Dict[str, Any]) -> Optional[str]:
         return result
         
     except Exception as e:
-        logger.error(f"❌ Error processing task: {e}")
+        logger.error(f"❌ Error processing task: {e}", exc_info=True)
+        # Try to ensure a final progress is published even if initialization or processing failed
+        try:
+            if processor.progress_tracker is None:
+                processor.progress_tracker = await get_redis_publisher()
+            await processor.publish_final(message_data.get("id") or "", "❌ Task ended due to an unexpected error.")
+        except Exception as publish_error:
+            logger.error(f"❌ Failed to publish final error progress in exception handler: {publish_error}")
         raise
     finally:
         await processor.close() 
