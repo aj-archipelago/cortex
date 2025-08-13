@@ -282,7 +282,7 @@ Generate only the progress update:"""
                     deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf"}
                     candidate_dirs: List[str] = []
                     try:
-                        candidate_dirs.append(os.getenv("CORTEX_WORK_DIR", "/app/coding"))
+                        candidate_dirs.append(os.getenv("CORTEX_WORK_DIR", "/tmp/coding"))
                     except Exception:
                         pass
                     candidate_dirs.append("/tmp/coding")
