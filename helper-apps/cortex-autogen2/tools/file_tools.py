@@ -203,13 +203,45 @@ async def download_image(url: str, filename: str, work_dir: Optional[str] = None
     
     try:
         import requests
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        
-        with open(file_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        
+        BROWSER_UA = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        )
+        session = requests.Session()
+        session.headers.update({"User-Agent": BROWSER_UA})
+
+        with session.get(url, stream=True, timeout=20, allow_redirects=True) as response:
+            response.raise_for_status()
+
+            content_type = (response.headers.get("Content-Type") or "").lower()
+
+            # Peek first few bytes to validate image magic if header is missing/misleading
+            first_chunk = next(response.iter_content(chunk_size=4096), b"")
+
+            def looks_like_image(buf: bytes) -> bool:
+                if not buf or len(buf) < 4:
+                    return False
+                sigs = [
+                    b"\x89PNG\r\n\x1a\n",  # PNG
+                    b"\xff\xd8\xff",        # JPEG
+                    b"GIF87a", b"GIF89a",    # GIF
+                    b"RIFF"                    # WEBP starts with RIFF
+                ]
+                return any(buf.startswith(sig) for sig in sigs)
+
+            if not (content_type.startswith("image/") or looks_like_image(first_chunk)):
+                logger.error(f"❌ URL did not return an image content-type: {content_type} for {url}")
+                return json.dumps({"status": "error", "message": f"Non-image content-type: {content_type}"})
+
+            # Write first chunk then stream the rest
+            with open(file_path, 'wb') as f:
+                if first_chunk:
+                    f.write(first_chunk)
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+
         logger.info(f"✅ Successfully downloaded image from {url} to {file_path}")
         return json.dumps({"status": "success", "file_path": file_path})
     except Exception as e:

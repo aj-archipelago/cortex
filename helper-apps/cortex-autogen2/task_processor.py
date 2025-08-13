@@ -2,7 +2,8 @@ import asyncio
 import json
 import base64
 import logging
-from typing import Optional, Dict, Any
+import os
+from typing import Optional, Dict, Any, List
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_core.models import ModelInfo # Import ModelInfo
 from autogen_agentchat.teams import SelectorGroupChat
@@ -11,6 +12,7 @@ from autogen_agentchat.conditions import TextMentionTermination, HandoffTerminat
 from services.azure_queue import get_queue_service
 from services.redis_publisher import get_redis_publisher
 from agents import get_agents
+from tools.azure_blob_tools import upload_file_to_azure_blob
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +272,58 @@ Generate only the progress update:"""
 
             await self.progress_tracker.publish_progress(task_id, 0.95, "✨ Finalizing your results...")
 
+            # Targeted auto-upload: if no URLs yet, opportunistically upload recent deliverables created in this run.
+            # Fast, non-recursive, and limited to known dirs and extensions.
+            try:
+                if not uploaded_file_urls:
+                    import time
+                    now = time.time()
+                    max_age_seconds = 15 * 60  # last 15 minutes
+                    deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf"}
+                    candidate_dirs: List[str] = []
+                    try:
+                        candidate_dirs.append(os.getenv("CORTEX_WORK_DIR", "/app/coding"))
+                    except Exception:
+                        pass
+                    candidate_dirs.append("/tmp/coding")
+
+                    recent_files: List[str] = []
+                    for d in candidate_dirs:
+                        if not d or not os.path.isdir(d):
+                            continue
+                        try:
+                            for name in os.listdir(d):
+                                fp = os.path.join(d, name)
+                                if not os.path.isfile(fp):
+                                    continue
+                                _, ext = os.path.splitext(name)
+                                if ext.lower() not in deliverable_exts:
+                                    continue
+                                try:
+                                    mtime = os.path.getmtime(fp)
+                                    if now - mtime <= max_age_seconds:
+                                        recent_files.append(fp)
+                                except Exception:
+                                    continue
+                        except Exception:
+                            continue
+
+                    # Sort newest first and cap to a few uploads to keep fast
+                    recent_files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+                    recent_files = recent_files[:5]
+
+                    for fp in recent_files:
+                        try:
+                            up_json = upload_file_to_azure_blob(fp, blob_name=None)
+                            up = json.loads(up_json)
+                            if "download_url" in up and "blob_name" in up:
+                                uploaded_file_urls[up["blob_name"]] = up["download_url"]
+                                final_result_content.append(f"Uploaded file: [{up['blob_name']}]({up['download_url']})")
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
             result_limited_to_fit = "\n".join(final_result_content)
 
             presenter_task = f"""
@@ -290,7 +344,7 @@ Generate only the progress update:"""
 
             {json.dumps(uploaded_file_urls, indent=2)}
 
-            **CRITICAL INSTRUCTION: Analyze the RAW_AGENT_COMMUNICATIONS above. Your ONLY goal is to extract and present the final, user-facing result requested in the TASK. Absolutely DO NOT include any code, internal agent thought processes, tool calls, technical logs, or descriptions of how the task was accomplished. Focus solely on delivering the ANSWER to the user's original request in a clear, professional, and visually appealing Markdown format. If the task was to fetch news headlines, present only the headlines. If it was to generate an image, present the image. If it was to create a file, indicate its content or provide its download URL. Remove all extraneous information.**
+            **CRITICAL INSTRUCTION: Analyze the RAW_AGENT_COMMUNICATIONS above. Your ONLY goal is to extract and present the final, user-facing result requested in the TASK. Absolutely DO NOT include any code, internal agent thought processes, tool calls, technical logs, or descriptions of how the task was accomplished. Focus solely on delivering the ANSWER to the user's original request in a clear, professional, and visually appealing Markdown format. If the task was to create a file, you MUST ONLY use download URLs found in UPLOADED_FILES_SAS_URLS. DO NOT fabricate, guess, or link to any external or placeholder URLs. If no uploaded URLs exist, say so and present the results without a download link. Remove all extraneous information.**
             """
             
             presenter_stream = presenter_agent.run_stream(task=presenter_task)
@@ -302,6 +356,17 @@ Generate only the progress update:"""
             task_result = presenter_messages[-1]
             last_message = task_result.messages[-1]
             text_result = last_message.content if hasattr(last_message, 'content') else None
+
+            # Safety check: if presenter fabricated an external link while uploaded_file_urls is empty, replace with explicit notice
+            try:
+                if not uploaded_file_urls and isinstance(text_result, str):
+                    # naive pattern for http links
+                    import re
+                    if re.search(r"https?://", text_result):
+                        logger.warning("Presenter output contains a link but no uploaded URLs exist. Rewriting to prevent hallucinated links.")
+                        text_result = re.sub(r"\(https?://[^)]+\)", "(Download not available)", text_result)
+            except Exception:
+                pass
 
             logger.info(f"🔍 TASK RESULT:\n{text_result}")
             final_data = text_result or "🎉 Your task is complete!"

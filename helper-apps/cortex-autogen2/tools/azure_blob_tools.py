@@ -5,10 +5,13 @@ Azure Blob Storage tools for uploading task files and generating SAS URLs.
 import os
 import json
 import logging
+import mimetypes
+import uuid
+import time
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs
-from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
-from azure.core.exceptions import AzureError
+from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions, ContentSettings
+from azure.core.exceptions import AzureError, ServiceResponseError
 
 logger = logging.getLogger(__name__)
 
@@ -80,35 +83,72 @@ class AzureBlobUploader:
 
     def generate_sas_url(self, blob_name: str) -> str:
         """Generates a 30-day read-only SAS URL for a specific blob."""
+        # Ensure blob_name has no leading slashes
+        clean_name = blob_name.lstrip('/')
         sas_token = generate_blob_sas(
             account_name=self.account_name,
             container_name=self.container_name,
-            blob_name=blob_name,
+            blob_name=clean_name,
             account_key=self.account_key,
             permission=BlobSasPermissions(read=True),
             expiry=datetime.utcnow() + timedelta(days=30)
         )
-        return f"https://{self.account_name}.blob.core.windows.net/{self.container_name}/{blob_name}?{sas_token}"
+        # Build URL using account name to avoid any emulator/devhost base_url leaks
+        return f"https://{self.account_name}.blob.core.windows.net/{self.container_name}/{clean_name}?{sas_token}"
 
     def upload_file(self, file_path: str, blob_name: str = None) -> dict:
-        """Uploads a local file and returns a dictionary with the SAS URL."""
+        """Uploads a local file and returns a dictionary with the SAS URL. Retries on transient errors."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
         if blob_name is None:
-            blob_name = os.path.basename(file_path)
+            original_base = os.path.basename(file_path)
+            name, ext = os.path.splitext(original_base)
+            # Prefix support for virtual folders
+            prefix = (os.getenv("AZURE_BLOB_PREFIX") or "").strip().strip("/")
+            # Decide uniqueness policy: default add timestamp+short id to avoid static overwrites
+            preserve = (os.getenv("PRESERVE_BLOB_FILENAME", "false").lower() in ("1", "true", "yes"))
+            if preserve:
+                final_name = original_base
+            else:
+                timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+                short_id = uuid.uuid4().hex[:8]
+                final_name = f"{name}__{timestamp}_{short_id}{ext}"
+            blob_name = f"{prefix}/{final_name}" if prefix else final_name
 
-        blob_client = self.blob_service_client.get_blob_client(container=self.container_name, blob=blob_name)
+        # Normalize any accidental leading slashes in blob path
+        normalized_blob_name = blob_name.lstrip("/")
+        blob_client = self.blob_service_client.get_blob_client(container=self.container_name, blob=normalized_blob_name)
+
+        # Detect content type for better browser handling
+        content_type, _ = mimetypes.guess_type(file_path)
+        if not content_type:
+            content_type = "application/octet-stream"
+        content_settings = ContentSettings(content_type=content_type)
+
+        # Hint SDK to use smaller single-put and block sizes to avoid timeouts on moderate networks
+        try:
+            if hasattr(blob_client, "_config"):
+                if hasattr(blob_client._config, "max_single_put_size"):
+                    blob_client._config.max_single_put_size = 4 * 1024 * 1024  # 4 MB
+                if hasattr(blob_client._config, "max_block_size"):
+                    blob_client._config.max_block_size = 4 * 1024 * 1024  # 4 MB
+        except Exception:
+            pass
+
+        # Simple upload; SDK will handle block uploads automatically for large blobs
         with open(file_path, "rb") as data:
-            blob_client.upload_blob(data, overwrite=True)
-        
-        logger.info(f"Uploaded file: {file_path} -> {blob_name}")
-        
-        sas_url = self.generate_sas_url(blob_name)
-        
+            blob_client.upload_blob(
+                data,
+                overwrite=True,
+                content_settings=content_settings,
+                max_concurrency=4,
+                timeout=900,
+            )
+        logger.info(f"Uploaded file: {file_path} -> {normalized_blob_name}")
+        sas_url = self.generate_sas_url(normalized_blob_name)
         if not _validate_sas_url(sas_url):
             raise Exception("Generated SAS URL failed validation.")
-        
         return {"blob_name": blob_name, "download_url": sas_url}
 
 # Keep a single function for external calls to use the singleton uploader
