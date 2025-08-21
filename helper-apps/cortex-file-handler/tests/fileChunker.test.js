@@ -306,3 +306,44 @@ test("memory usage during large file processing", async (t) => {
   // Cleanup
   await fs.rm(uniqueOutputPath, { recursive: true, force: true });
 });
+
+test("should chunk video files with .mp3 extension for transcription", async (t) => {
+  // Create a test video file (we'll use an MP3 file but rename it to simulate a video)
+  const testVideoFile = join(t.context.testDir, "test-video.mp4");
+  await fs.copyFile(t.context.testFile10s, testVideoFile);
+
+  const { chunkPromises, chunkOffsets, uniqueOutputPath, chunkBaseName } =
+    await splitMediaFile(testVideoFile, 5); // Use 5 second chunks for faster test
+
+  t.true(Array.isArray(chunkPromises), "Should return array of promises");
+  t.is(chunkPromises.length, 2, "Should create 2 chunks for 10s file with 5s chunks");
+  t.true(Array.isArray(chunkOffsets), "Should return array of offsets");
+  t.is(chunkOffsets.length, 2, "Should have 2 offsets");
+  t.truthy(uniqueOutputPath, "Should return unique output path");
+  
+  // Check that the chunk base name has .mp3 extension (not .mp4)
+  t.true(chunkBaseName.endsWith('.mp3'), "Chunk base name should end with .mp3 extension");
+  t.false(chunkBaseName.endsWith('.mp4'), "Chunk base name should not end with .mp4 extension");
+
+  // Process the chunks
+  const chunks = [];
+  for (const chunkPromise of chunkPromises) {
+    const chunkPath = await chunkPromise;
+    chunks.push(chunkPath);
+  }
+
+  // Verify all chunks have .mp3 extension
+  for (const chunkPath of chunks) {
+    t.true(chunkPath.endsWith('.mp3'), `Chunk path should end with .mp3: ${chunkPath}`);
+    t.false(chunkPath.endsWith('.mp4'), `Chunk path should not end with .mp4: ${chunkPath}`);
+  }
+
+  // Clean up
+  try {
+    if (uniqueOutputPath && existsSync(uniqueOutputPath)) {
+      await fs.rm(uniqueOutputPath, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.log("Error cleaning up test directory:", err);
+  }
+});

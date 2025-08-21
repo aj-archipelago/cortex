@@ -8,6 +8,7 @@ import { getSearchResultId } from '../../../../lib/util.js';
 export default {
     prompt: [],
     timeout: 300,
+    /* This tool is included for legacy reasons - as of August 2025, Azure has deprecated the Bing search API and replaced it with their Foundry Agents API.
     toolDefinition: { 
         type: "function",
         icon: "🌐",
@@ -42,6 +43,7 @@ export default {
             }
         }
     },
+    */
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
 
@@ -61,7 +63,7 @@ export default {
                 const errorMessages = Array.isArray(resolver.errors) 
                     ? resolver.errors.map(err => err.message || err)
                     : [resolver.errors.message || resolver.errors];
-                return JSON.stringify({ _type: "SearchError", value: errorMessages });
+                return JSON.stringify({ _type: "SearchError", value: errorMessages, recoveryMessage: "This tool failed. You should try the backup tool for this function." });
             }
 
             const parsedResponse = JSON.parse(response);

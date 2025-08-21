@@ -12,7 +12,7 @@ export default {
         icon: "🌎",
         function: {
             name: "FetchWebPageContentJina",
-            description: "This tool allows you to fetch and extract the text content from any webpage using the Jina API. This is a great fallback for web page content if you don't get a good enough response from your other browser tool.",
+            description: "This tool allows you to fetch and extract the text content from any webpage using the Jina API. This is a great backup tool for web page content if you don't get a good enough response from your other browser tool or are blocked by a website.",
             parameters: {
                 type: "object",
                 properties: {
