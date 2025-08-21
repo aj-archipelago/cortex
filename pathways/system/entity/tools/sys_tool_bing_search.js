@@ -8,6 +8,7 @@ import { getSearchResultId } from '../../../../lib/util.js';
 export default {
     prompt: [],
     timeout: 300,
+    /* This tool is included for legacy reasons - as of August 2025, Azure has deprecated the Bing search API and replaced it with their Foundry Agents API.
     toolDefinition: { 
         type: "function",
         icon: "🌐",
@@ -42,6 +43,7 @@ export default {
             }
         }
     },
+    */
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
 
