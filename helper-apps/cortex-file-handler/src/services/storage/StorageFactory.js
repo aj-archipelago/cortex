@@ -9,19 +9,29 @@ export class StorageFactory {
     this.providers = new Map();
   }
 
-  getPrimaryProvider() {
+  async getPrimaryProvider(containerName = null) {
     if (process.env.AZURE_STORAGE_CONNECTION_STRING) {
-      return this.getAzureProvider();
+      return await this.getAzureProvider(containerName);
     }
     return this.getLocalProvider();
   }
 
-  getAzureProvider() {
-    const key = "azure";
+  async getAzureProvider(containerName = null) {
+    // Use provided container name or default to first in whitelist
+    const { AZURE_STORAGE_CONTAINER_NAMES, DEFAULT_AZURE_STORAGE_CONTAINER_NAME, isValidContainerName } = await import("../blobHandler.js");
+    const finalContainerName = containerName || DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
+    
+    // Validate container name
+    if (!isValidContainerName(finalContainerName)) {
+      throw new Error(`Invalid container name '${finalContainerName}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`);
+    }
+    
+    // Create unique key for each container
+    const key = `azure-${finalContainerName}`;
     if (!this.providers.has(key)) {
       const provider = new AzureStorageProvider(
         process.env.AZURE_STORAGE_CONNECTION_STRING,
-        process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles",
+        finalContainerName,
       );
       this.providers.set(key, provider);
     }

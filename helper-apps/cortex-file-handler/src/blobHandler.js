@@ -65,9 +65,20 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
   }
 }
 
-export const AZURE_STORAGE_CONTAINER_NAME =
-  process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+// Parse comma-separated container names from environment variable
+const parseContainerNames = () => {
+  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+  return containerStr.split(',').map(name => name.trim());
+};
+
+export const AZURE_STORAGE_CONTAINER_NAMES = parseContainerNames();
+export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = AZURE_STORAGE_CONTAINER_NAMES[0];
 export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
+
+// Validate if a container name is allowed
+export const isValidContainerName = (containerName) => {
+  return AZURE_STORAGE_CONTAINER_NAMES.includes(containerName);
+};
 
 function isEncoded(str) {
   // Checks for any percent-encoded sequence
@@ -169,10 +180,18 @@ async function downloadFromGCS(gcsUrl, destinationPath) {
   }
 }
 
-export const getBlobClient = async () => {
+export const getBlobClient = async (containerName = null) => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  const containerName = AZURE_STORAGE_CONTAINER_NAME;
-  if (!connectionString || !containerName) {
+  const finalContainerName = containerName || DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
+  
+  // Validate container name is in whitelist
+  if (!isValidContainerName(finalContainerName)) {
+    throw new Error(
+      `Invalid container name '${finalContainerName}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`,
+    );
+  }
+  
+  if (!connectionString || !finalContainerName) {
     throw new Error(
       "Missing Azure Storage connection string or container name environment variable",
     );
@@ -187,13 +206,13 @@ export const getBlobClient = async () => {
     await blobServiceClient.setProperties(serviceProperties);
   }
 
-  const containerClient = blobServiceClient.getContainerClient(containerName);
+  const containerClient = blobServiceClient.getContainerClient(finalContainerName);
 
   return { blobServiceClient, containerClient };
 };
 
-async function saveFileToBlob(chunkPath, requestId, filename = null) {
-  const { containerClient } = await getBlobClient();
+async function saveFileToBlob(chunkPath, requestId, filename = null, containerName = null) {
+  const { containerClient } = await getBlobClient(containerName);
   // Use provided filename or generate LLM-friendly naming
   let blobName;
   if (filename) {
@@ -248,9 +267,9 @@ const generateSASToken = (
 };
 
 //deletes blob that has the requestId
-async function deleteBlob(requestId) {
+async function deleteBlob(requestId, containerName = null) {
   if (!requestId) throw new Error("Missing requestId parameter");
-  const { containerClient } = await getBlobClient();
+  const { containerClient } = await getBlobClient(containerName);
   // List all blobs in the container
   const blobs = containerClient.listBlobsFlat();
 
@@ -280,6 +299,7 @@ function uploadBlob(
   saveToLocal = false,
   filePath = null,
   hash = null,
+  containerName = null,
 ) {
   return new Promise((resolve, reject) => {
     (async () => {
@@ -426,6 +446,7 @@ function uploadBlob(
                 context,
                 uploadName,
                 azureStream,
+                containerName,
               ).catch(async (err) => {
                 cloudUploadError = err;
                 // Fallback: try from disk if available
@@ -435,7 +456,7 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToAzureStorage(context, uploadName, diskStream);
+                  return saveToAzureStorage(context, uploadName, diskStream, containerName);
                 }
                 throw err;
               });
@@ -674,8 +695,8 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
 }
 
 // Helper function to handle Azure blob storage
-async function saveToAzureStorage(context, encodedFilename, file) {
-  const { containerClient } = await getBlobClient();
+async function saveToAzureStorage(context, encodedFilename, file, containerName = null) {
+  const { containerClient } = await getBlobClient(containerName);
   const contentType = mime.lookup(encodedFilename);
 
   // Create a safe blob name that is URI-encoded once (no double encoding)
@@ -731,6 +752,7 @@ async function uploadFile(
   filename,
   resolve,
   hash = null,
+  containerName = null,
 ) {
   try {
     if (!file) {
@@ -791,6 +813,7 @@ async function uploadFile(
           context,
           uploadName,
           createOptimizedReadStream(uploadPath),
+          containerName,
         );
     storagePromises.push(
       primaryPromise.then((url) => {
@@ -900,7 +923,7 @@ async function uploadFile(
     context.log("Error in upload process:", error);
     if (body.url) {
       try {
-        await cleanup(context, [body.url]);
+        await cleanup(context, [body.url], containerName);
       } catch (cleanupError) {
         context.log("Error during cleanup after failure:", cleanupError);
       }
@@ -920,8 +943,8 @@ async function streamToBuffer(stream) {
 }
 
 // Function to delete files that haven't been used in more than a month
-async function cleanup(context, urls = null) {
-  const { containerClient } = await getBlobClient();
+async function cleanup(context, urls = null, containerName = null) {
+  const { containerClient } = await getBlobClient(containerName);
   const cleanedURLs = [];
 
   if (!urls) {
