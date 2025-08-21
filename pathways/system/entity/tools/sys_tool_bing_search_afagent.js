@@ -10,10 +10,10 @@ export default {
     timeout: 300,
     toolDefinition: { 
         type: "function",
-        icon: "🕸️",
+        icon: "🌐",
         function: {
-            name: "SearchInternetBackup",
-            description: "This tool allows you to search sources on the internet by calling another agent that has Bing search access. Use this for current events, news, fact-checking, and information requiring citation. This is a backup tool for when the other internet search tools fail - it is slower so try to use the other tools first and always call this tool in parallel if you have several searches to do.",
+            name: "SearchInternet",
+            description: "This tool allows you to search sources on the internet by calling another agent that has Bing search access. Use this for current events, news, fact-checking, and information requiring citation. Always call this tool in parallel rather than serially if you have several searches to do as it will be faster.",
             parameters: {
                 type: "object",
                 properties: {
