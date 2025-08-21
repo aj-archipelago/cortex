@@ -513,6 +513,7 @@ function buildRestEndpoints(pathways, app, server, config) {
 
         });
 
+        /*
         // Alias /v1/messages to use the same logic as /v1/chat/completions
         app.post('/v1/messages', (req, res) => {
             // Forward to the chat completions endpoint logic
@@ -520,6 +521,7 @@ function buildRestEndpoints(pathways, app, server, config) {
             req.body.model = 'claude-3.7-sonnet';
             app._router.handle({ ...req, url: '/v1/chat/completions', originalUrl: '/v1/messages' }, res);
         });
+        */
 
         app.get('/v1/models', async (req, res) => {
             const openAIModels = { ...openAIChatModels, ...openAICompletionModels };
