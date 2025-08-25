@@ -352,93 +352,6 @@ class PathwayResolver {
         logger.error(error);
     }
 
-    // Convert Message format tools to OpenAI function calling format
-    convertToolsToOpenAIFormat(tools) {
-        return tools.map(tool => {
-            // If tool is already in OpenAI format, return as is
-            if (tool.type === 'function' && tool.function) {
-                return tool;
-            }
-            
-            // If tool is in Message format, convert it to OpenAI format
-            if (tool.role === 'tool' && tool.content) {
-                try {
-                    // Try to parse the content as JSON (for complex tool definitions)
-                    const toolDefinition = JSON.parse(tool.content);
-                    
-                    // If it's a full function definition, use it
-                    if (toolDefinition.name && toolDefinition.description) {
-                        return {
-                            type: 'function',
-                            function: {
-                                name: toolDefinition.name,
-                                description: toolDefinition.description,
-                                parameters: toolDefinition.parameters || {
-                                    type: 'object',
-                                    properties: {},
-                                    required: []
-                                }
-                            }
-                        };
-                    }
-                } catch (e) {
-                    // If parsing fails, treat content as a simple tool name
-                }
-                
-                // For simple tool names, create a basic function definition
-                const toolName = tool.name || tool.content;
-                return {
-                    type: 'function',
-                    function: {
-                        name: toolName,
-                        description: `Execute ${toolName}`,
-                        parameters: {
-                            type: 'object',
-                            properties: {},
-                            required: []
-                        }
-                    }
-                };
-            }
-            
-            // Return the tool as is if it doesn't match expected formats
-            return tool;
-        });
-    }
-
-    // Clean messages by removing tool_calls that might cause issues
-    // tool_calls are preserved in GraphQL schema for compatibility but filtered for model execution
-    cleanMessagesForModel(messages) {
-        if (!Array.isArray(messages)) {
-            return messages;
-        }
-        
-        return messages.filter(message => {
-            // Filter out tool response messages (role: "tool") as they cause GraphQL schema issues
-            if (message && typeof message === 'object' && message.role === 'tool') {
-                return false;
-            }
-            // Filter out messages with null or undefined content
-            if (message && typeof message === 'object' && (message.content === null || message.content === undefined)) {
-                return false;
-            }
-            return true;
-        }).map(message => {
-            if (message && typeof message === 'object') {
-                // Create a copy without tool_calls for model execution
-                const { tool_calls, ...cleanMessage } = message;
-                
-                // Ensure content is always a string or array of strings, never null
-                if (cleanMessage.content === null || cleanMessage.content === undefined) {
-                    cleanMessage.content = "";
-                }
-                
-                return cleanMessage;
-            }
-            return message;
-        });
-    }
-
     // Here we choose how to handle long input - either summarize or chunk
     processInputText(text) {
         let chunkTokenLength = 0;
@@ -595,19 +508,8 @@ class PathwayResolver {
 
         // If this text is empty, skip applying the prompt as it will likely be a nonsensical result
         if (!/^\s*$/.test(text) || parameters?.file || parameters?.inputVector || this?.modelName.includes('cognitive')) {
-            // Convert Message format tools to OpenAI format for passthrough tool calling
-            const processedParameters = { ...parameters };
-            if (parameters.tools && Array.isArray(parameters.tools)) {
-                processedParameters.tools = this.convertToolsToOpenAIFormat(parameters.tools);
-            }
-            
-            // Clean messages to remove tool_calls that might cause model execution issues
-            if (parameters.messages && Array.isArray(parameters.messages)) {
-                processedParameters.messages = this.cleanMessagesForModel(parameters.messages);
-            }
-            
             result = await this.modelExecutor.execute(text, { 
-                ...processedParameters, 
+                ...parameters, 
                 ...this.savedContext,
                 memorySelf: this.memorySelf,
                 memoryDirectives: this.memoryDirectives,
@@ -615,17 +517,6 @@ class PathwayResolver {
                 memoryUser: this.memoryUser,
                 memoryContext: this.memoryContext
             }, prompt, this);
-            
-            // Handle passthrough tool calls - if result contains tool_calls, populate the tool field
-            if (result && typeof result === 'object' && result.tool_calls) {
-                this.tool = JSON.stringify({
-                    passthrough_tool_calls: result.tool_calls,
-                    role: result.role,
-                    content: result.content
-                });
-                // For passthrough tools, return the tool calls as the result
-                result = result;
-            }
         } else {
             result = text;
         }
