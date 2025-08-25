@@ -1,0 +1,20 @@
+services:
+  cortex-autogen-function:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+    ports:
+      - "7071:80"
+    environment:
+      - CORTEX_API_BASE_URL=http://host.docker.internal:4000/v1
+      - REDIS_CONNECTION_STRING=redis://host.docker.internal:6379
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    network_mode: host
