@@ -483,6 +483,21 @@ var config = convict({
                 "requestsPerSecond": 10,
                 "maxTokenLength": 128000
             },
+            "azure-bing-agent": {
+                "type": "AZURE-FOUNDRY-AGENTS",
+                "url": "{{azureFoundryAgentUrl}}",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "api-version": "2025-05-01",
+                    "assistant_id": "{{azureFoundryAgentId}}"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 32768,
+                "maxReturnTokens": 4096,
+                "supportsStreaming": false
+            }
         },
         env: 'CORTEX_MODELS'
     },
@@ -592,6 +607,16 @@ var config = convict({
         format: String,
         default: null,
         env: 'APPTEK_API_ENDPOINT'
+    },
+    azureFoundryAgentUrl: {
+        format: String,
+        default: null,
+        env: 'AZURE_FOUNDRY_AGENT_URL'
+    },
+    azureFoundryAgentId: {
+        format: String,
+        default: null,
+        env: 'AZURE_FOUNDRY_AGENT_ID'
     }
 });
 
