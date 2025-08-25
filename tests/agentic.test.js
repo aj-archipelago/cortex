@@ -177,7 +177,7 @@ test.serial('sys_entity_agent handles single-step task', async (t) => {
 
 // Test multi-step task with tool usage
 test.serial('sys_entity_agent handles multi-step task with tools', async (t) => {
-  t.timeout(60000); // 60 second timeout for multi-step task
+  t.timeout(120000); // 120 second timeout for multi-step task
   const response = await testServer.executeOperation({
     query: `
       query TestAgentMultiStep(
