@@ -121,6 +121,124 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         return acc;
     }, {});
 
+    // For REST endpoints emulating OpenAI, ensure messages[].content are arrays of strings
+    if (pathway?.emulateOpenAIChatModel || pathway?.emulateOpenAICompletionModel) {
+        if (variables.messages && Array.isArray(variables.messages)) {
+            variables.messages = variables.messages.map(m => {
+                if (!m || typeof m !== 'object') return m;
+                const c = m.content;
+                if (Array.isArray(c)) {
+                    const normalized = c.map(item => {
+                        if (typeof item === 'string') return item;
+                        if (item && typeof item === 'object') {
+                            if (item.type === 'text' && typeof item.text === 'string') return item.text;
+                            if (item.content && typeof item.content === 'string') return item.content;
+                            return JSON.stringify(item);
+                        }
+                        return String(item);
+                    });
+                    return { ...m, content: normalized };
+                }
+                if (c && typeof c === 'object') {
+                    if (c.type === 'text' && typeof c.text === 'string') return { ...m, content: [c.text] };
+                    if (c.content && typeof c.content === 'string') return { ...m, content: [c.content] };
+                    return { ...m, content: [JSON.stringify(c)] };
+                }
+                if (c === null || c === undefined) return { ...m, content: [] };
+                return m;
+            });
+        }
+    }
+
+    // Helpers for parsing tool/function parameters that may have been stringified
+    const parseToolsParameter = (toolsParam) => {
+        if (!toolsParam || !Array.isArray(toolsParam)) return toolsParam;
+        return toolsParam.map(tool => {
+            if (tool && typeof tool === 'object' && tool.function && typeof tool.function.parameters === 'string') {
+                try {
+                    return { ...tool, function: { ...tool.function, parameters: JSON.parse(tool.function.parameters) } };
+                } catch (e) {
+                    logger.warn(`Failed to parse tool function parameters: ${e.message}`);
+                    return tool;
+                }
+            }
+            return tool;
+        });
+    };
+
+    const parseFunctionsParameter = (functionsParam) => {
+        if (!functionsParam || !Array.isArray(functionsParam)) return functionsParam;
+        return functionsParam.map(func => {
+            if (func && typeof func === 'object' && func.parameters && typeof func.parameters === 'string') {
+                try {
+                    return { ...func, parameters: JSON.parse(func.parameters) };
+                } catch (e) {
+                    logger.warn(`Failed to parse function parameters: ${e.message}`);
+                    return func;
+                }
+            }
+            return func;
+        });
+    };
+
+    // Minimal message parsing for reasoning pathways: convert system->developer and stringify complex content
+    const parseContentForReasoning = (content) => {
+        if (typeof content === 'string') return [{ type: 'text', text: content }];
+        if (Array.isArray(content)) return content.flat().map(item => ({ type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) }));
+        return [{ type: 'text', text: content == null ? '' : String(content) }];
+    };
+
+    const tryParseMessagesForReasoning = (messages) => {
+        if (!Array.isArray(messages)) return messages;
+        return messages.map(m => {
+            if (m.role === 'system') return { ...m, role: 'developer', content: parseContentForReasoning(m.content) };
+            if (m.role === 'user' || m.role === 'assistant') return { ...m, content: parseContentForReasoning(m.content) };
+            return m;
+        });
+    };
+
+    // Minimal vision parsing: attempt to parse array items as JSON and normalize image entries
+    const safeJsonParse = (v) => {
+        try { return JSON.parse(v); } catch { return v; }
+    };
+
+    const tryParseMessagesForVision = async (messages) => {
+        if (!Array.isArray(messages)) return messages;
+        return await Promise.all(messages.map(async (m) => {
+            try {
+                if (Array.isArray(m.content)) {
+                    const flat = m.content.flat();
+                    const parsed = await Promise.all(flat.map(async item => {
+                        const p = safeJsonParse(item);
+                        if (p && typeof p === 'object' && (p.type === 'image' || p.type === 'image_url')) {
+                            const url = p.url || p.image_url?.url;
+                            if (url) return { type: 'image_url', image_url: { url } };
+                        }
+                        return typeof p === 'string' ? { type: 'text', text: p } : p;
+                    }));
+                    return { ...m, content: parsed };
+                }
+            } catch (e) {
+                return m;
+            }
+            return m;
+        }));
+    };
+
+    // Normalize known parameters before GraphQL execution
+    if (variables.tools) variables.tools = parseToolsParameter(variables.tools);
+    if (variables.functions) variables.functions = parseFunctionsParameter(variables.functions);
+    if (variables.messages) {
+        // Apply pathway-specific parsing first
+        if (name && name.toLowerCase().includes('reason')) {
+            variables.messages = tryParseMessagesForReasoning(variables.messages);
+        } else if ((pathway && pathway.isMultiModal) || (name && name.toLowerCase().includes('vision'))) {
+            variables.messages = await tryParseMessagesForVision(variables.messages);
+        }
+
+        // No coercion of message.content into typed objects here — keep GraphQL variables as strings/arrays
+    }
+
     const variableParams = fieldVariableDefs.map(({ name, type }) => `$${name}: ${type}`).join(', ');
     const queryArgs = fieldVariableDefs.map(({ name }) => `${name}: $${name}`).join(', ');
 
@@ -418,6 +536,52 @@ function buildRestEndpoints(pathways, app, server, config) {
             const modelName = req.body.model || 'gpt-3.5-turbo';
             let pathwayName;
 
+            // Normalize incoming OpenAI-style messages so downstream plugins and outgoing
+            // requests always receive content as arrays of typed objects when possible.
+            const normalizeIncomingMessages = (messages) => {
+                if (!Array.isArray(messages)) return messages;
+                return messages.map((m) => {
+                    if (!m || typeof m !== 'object') return m;
+                    const content = m.content;
+
+                    const normalizeItem = (item) => {
+                        if (item === null || item === undefined) return { type: 'text', text: '' };
+                        if (typeof item === 'string') {
+                            // try parse JSON that may contain typed object
+                            try {
+                                const p = JSON.parse(item);
+                                if (p && typeof p === 'object') {
+                                    if (p.type) return p;
+                                    if (p.content || p.text) return { type: 'text', text: p.content ?? p.text };
+                                    return { type: 'text', text: JSON.stringify(p) };
+                                }
+                            } catch (e) {
+                                // not JSON
+                            }
+                            return { type: 'text', text: item };
+                        }
+                        if (typeof item === 'object') {
+                            if (item.type) return item;
+                            if (item.content || item.text) return { type: 'text', text: item.content ?? item.text };
+                            return { type: 'text', text: JSON.stringify(item) };
+                        }
+                        return { type: 'text', text: String(item) };
+                    };
+
+                    if (Array.isArray(content)) {
+                        return { ...m, content: content.map(normalizeItem) };
+                    }
+
+                    if (typeof content === 'string') return { ...m, content: [normalizeItem(content)] };
+                    if (typeof content === 'object' && content !== null) return { ...m, content: [normalizeItem(content)] };
+                    return { ...m, content: [] };
+                });
+            };
+
+            if (req.body && req.body.messages) {
+                req.body.messages = normalizeIncomingMessages(req.body.messages);
+            }
+
             if (modelName.startsWith('ollama-')) {
                 pathwayName = 'sys_ollama_chat';
                 req.body.ollamaModel = modelName.replace('ollama-', '');
@@ -482,7 +646,8 @@ function buildRestEndpoints(pathways, app, server, config) {
                     const toolJson = JSON.parse(toolData);
                     if (toolJson.passthrough_tool_calls && Array.isArray(toolJson.passthrough_tool_calls)) {
                         jsonResponse.choices[0].message.tool_calls = toolJson.passthrough_tool_calls;
-                        jsonResponse.choices[0].message.content = toolJson.content || null;
+                        // Ensure content is a string to avoid sending raw objects to model endpoints
+                        jsonResponse.choices[0].message.content = (typeof toolJson.content === 'string') ? toolJson.content : JSON.stringify(toolJson.content || '');
                     }
                 } catch (e) {
                     logger.warn(`Failed to parse tool data: ${e.message}`);
