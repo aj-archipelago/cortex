@@ -85,24 +85,34 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                 };
             });
         } else if (type === '[Tool]' && Array.isArray(value)) {
-            // Handle OpenAI tools parameter - stringify the parameters field
-            return value.map(tool => ({
-                ...tool,
-                function: tool.function ? {
-                    ...tool.function,
-                    parameters: typeof tool.function.parameters === 'object' ?
-                        JSON.stringify(tool.function.parameters) :
-                        tool.function.parameters
-                } : tool.function
-            }));
+            // Handle OpenAI tools parameter - accept stringified tool entries and stringify the parameters field
+            return value.map(tool => {
+                if (typeof tool === 'string') {
+                    try { return JSON.parse(tool); } catch (e) { return tool; }
+                }
+                return {
+                    ...tool,
+                    function: tool.function ? {
+                        ...tool.function,
+                        parameters: typeof tool.function.parameters === 'object' ?
+                            JSON.stringify(tool.function.parameters) :
+                            tool.function.parameters
+                    } : tool.function
+                };
+            });
         } else if (type === '[Function]' && Array.isArray(value)) {
-            // Handle OpenAI functions parameter (legacy) - stringify the parameters field
-            return value.map(func => ({
-                ...func,
-                parameters: typeof func.parameters === 'object' ?
-                    JSON.stringify(func.parameters) :
-                    func.parameters
-            }));
+            // Handle OpenAI functions parameter (legacy) - accept stringified entries and stringify the parameters field
+            return value.map(func => {
+                if (typeof func === 'string') {
+                    try { return JSON.parse(func); } catch (e) { return func; }
+                }
+                return {
+                    ...func,
+                    parameters: typeof func.parameters === 'object' ?
+                        JSON.stringify(func.parameters) :
+                        func.parameters
+                };
+            });
         } else if (type === '[Message]' && Array.isArray(value)) {
             return value;
         } else {
@@ -150,10 +160,48 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         }
     }
 
+    // Minimal synchronous helper: ensure messages[].content are arrays of typed objects for OpenAI emulation
+    const ensureMessagesTypedForOpenAI = (messages) => {
+        if (!Array.isArray(messages)) return messages;
+        const normalizeItem = (item) => {
+            if (item === null || item === undefined) return { type: 'text', text: '' };
+            if (typeof item === 'string') {
+                try {
+                    const p = JSON.parse(item);
+                    if (p && typeof p === 'object') {
+                        if (p.type) return p;
+                        if (p.content || p.text) return { type: 'text', text: p.content ?? p.text };
+                        return { type: 'text', text: JSON.stringify(p) };
+                    }
+                } catch (e) { }
+                return { type: 'text', text: item };
+            }
+            if (typeof item === 'object') {
+                if (item.type) return item;
+                if (item.content || item.text) return { type: 'text', text: item.content ?? item.text };
+                return { type: 'text', text: JSON.stringify(item) };
+            }
+            return { type: 'text', text: String(item) };
+        };
+
+        return messages.map((m) => {
+            if (!m || typeof m !== 'object') return m;
+            const content = m.content;
+            if (Array.isArray(content)) return { ...m, content: content.map(normalizeItem) };
+            if (typeof content === 'string') return { ...m, content: [normalizeItem(content)] };
+            if (typeof content === 'object' && content !== null) return { ...m, content: [normalizeItem(content)] };
+            return { ...m, content: [] };
+        });
+    };
+
     // Helpers for parsing tool/function parameters that may have been stringified
     const parseToolsParameter = (toolsParam) => {
         if (!toolsParam || !Array.isArray(toolsParam)) return toolsParam;
         return toolsParam.map(tool => {
+            // Accept stringified tool entries
+            if (typeof tool === 'string') {
+                try { tool = JSON.parse(tool); } catch (e) { return tool; }
+            }
             if (tool && typeof tool === 'object' && tool.function && typeof tool.function.parameters === 'string') {
                 try {
                     return { ...tool, function: { ...tool.function, parameters: JSON.parse(tool.function.parameters) } };
@@ -169,6 +217,10 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
     const parseFunctionsParameter = (functionsParam) => {
         if (!functionsParam || !Array.isArray(functionsParam)) return functionsParam;
         return functionsParam.map(func => {
+            // Accept stringified function entries
+            if (typeof func === 'string') {
+                try { func = JSON.parse(func); } catch (e) { return func; }
+            }
             if (func && typeof func === 'object' && func.parameters && typeof func.parameters === 'string') {
                 try {
                     return { ...func, parameters: JSON.parse(func.parameters) };
