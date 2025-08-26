@@ -53,6 +53,7 @@ async function CortexFileHandler(context, req) {
     hash,
     checkHash,
     clearHash,
+    shortLivedMinutes,
     fetch,
     load,
     restore,
@@ -63,6 +64,7 @@ async function CortexFileHandler(context, req) {
   const shouldSave = save === true || save === "true";
   const shouldCheckHash = checkHash === true || checkHash === "true";
   const shouldClearHash = clearHash === true || clearHash === "true";
+  const shortLivedDuration = parseInt(shortLivedMinutes) || 5; // Default to 5 minutes
   const shouldFetchRemote = fetch || load || restore;
 
   // Validate container name if provided
@@ -394,6 +396,54 @@ async function CortexFileHandler(context, req) {
           hash: hashResult.hash,
           timestamp: new Date().toISOString(),
         };
+
+        // Always generate short-lived URL for checkHash operations
+        try {
+          // Extract blob name from the stored URL to generate new SAS token
+          let blobName;
+          try {
+            const url = new URL(hashResult.url);
+            // Extract blob name from the URL path (remove leading slash)
+            blobName = url.pathname.substring(1);
+            // If there's a container prefix, remove it
+            const containerName = storageService.primaryProvider.containerName;
+            if (blobName.startsWith(containerName + '/')) {
+              blobName = blobName.substring(containerName.length + 1);
+            }
+          } catch (urlError) {
+            context.log(`Error parsing URL for short-lived generation: ${urlError}`);
+          }
+
+          // Generate short-lived SAS token
+          if (blobName && storageService.primaryProvider.generateShortLivedSASToken) {
+            const { containerClient } = await storageService.primaryProvider.getBlobClient();
+            const sasToken = storageService.primaryProvider.generateShortLivedSASToken(
+              containerClient, 
+              blobName, 
+              shortLivedDuration
+            );
+            
+            // Construct new URL with short-lived SAS token
+            const baseUrl = hashResult.url.split('?')[0]; // Remove existing SAS token
+            const shortLivedUrl = `${baseUrl}?${sasToken}`;
+            
+            // Add short-lived URL to response
+            response.shortLivedUrl = shortLivedUrl;
+            response.expiresInMinutes = shortLivedDuration;
+            
+            context.log(`Generated short-lived URL for hash: ${hash} (expires in ${shortLivedDuration} minutes)`);
+          } else {
+            // Fallback for storage providers that don't support short-lived tokens
+            response.shortLivedUrl = hashResult.url;
+            response.expiresInMinutes = shortLivedDuration;
+            context.log(`Storage provider doesn't support short-lived tokens, using original URL`);
+          }
+        } catch (error) {
+          context.log(`Error generating short-lived URL: ${error}`);
+          // Provide fallback even on error
+          response.shortLivedUrl = hashResult.url;
+          response.expiresInMinutes = shortLivedDuration;
+        }
 
         // Ensure converted version exists and is synced across storage providers
         try {

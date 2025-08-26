@@ -243,7 +243,7 @@ async function saveFileToBlob(chunkPath, requestId, filename = null, containerNa
 const generateSASToken = (
   containerClient,
   blobName,
-  expiryTimeSeconds = parseInt(SAS_TOKEN_LIFE_DAYS) * 24 * 60 * 60,
+  options = {},
 ) => {
   const { accountName, accountKey } = containerClient.credential;
   const sharedKeyCredential = new StorageSharedKeyCredential(
@@ -251,12 +251,29 @@ const generateSASToken = (
     accountKey,
   );
 
+  // Support custom duration: minutes, hours, or fall back to default
+  let expirationTime;
+  if (options.minutes) {
+    expirationTime = new Date(new Date().valueOf() + options.minutes * 60 * 1000);
+  } else if (options.hours) {
+    expirationTime = new Date(new Date().valueOf() + options.hours * 60 * 60 * 1000);
+  } else if (options.days) {
+    expirationTime = new Date(new Date().valueOf() + options.days * 24 * 60 * 60 * 1000);
+  } else if (options.expiryTimeSeconds !== undefined) {
+    // Legacy support for existing parameter
+    expirationTime = new Date(new Date().valueOf() + options.expiryTimeSeconds * 1000);
+  } else {
+    // Default to SAS_TOKEN_LIFE_DAYS environment variable
+    const defaultExpirySeconds = parseInt(SAS_TOKEN_LIFE_DAYS) * 24 * 60 * 60;
+    expirationTime = new Date(new Date().valueOf() + defaultExpirySeconds * 1000);
+  }
+
   const sasOptions = {
     containerName: containerClient.containerName,
     blobName: blobName,
-    permissions: "r", // Read permission
+    permissions: options.permissions || "r", // Read permission
     startsOn: new Date(),
-    expiresOn: new Date(new Date().valueOf() + expiryTimeSeconds * 1000),
+    expiresOn: expirationTime,
   };
 
   const sasToken = generateBlobSASQueryParameters(
@@ -264,6 +281,10 @@ const generateSASToken = (
     sharedKeyCredential,
   ).toString();
   return sasToken;
+};
+
+const generateShortLivedSASToken = (containerClient, blobName, minutes = 5) => {
+  return generateSASToken(containerClient, blobName, { minutes });
 };
 
 //deletes blob that has the requestId
@@ -1177,4 +1198,5 @@ export {
   gcs,
   uploadChunkToGCS,
   downloadFromGCS,
+  generateShortLivedSASToken,
 };
