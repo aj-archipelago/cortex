@@ -209,10 +209,33 @@ test("successfully downloads file from URL", async (t) => {
 
 // Test error handling for invalid URLs in download
 test("handles invalid URLs in download gracefully", async (t) => {
-  const invalidUrl = "https://invalid-url-that-does-not-exist.com/test.mp3";
+  const invalidUrl = "http://localhost:12345/nonexistent.mp3"; // Port unlikely to be in use
   const outputPath = join(os.tmpdir(), "should-not-exist.mp3");
 
-  await t.throwsAsync(async () => downloadFile(invalidUrl, outputPath));
+  try {
+    await downloadFile(invalidUrl, outputPath);
+    t.fail("Expected downloadFile to throw an error for invalid URL");
+  } catch (error) {
+    t.truthy(error);
+    // Accept various network error types including URL parsing errors
+    const isValidError = 
+      error.code === 'ENOTFOUND' || 
+      error.code === 'ECONNREFUSED' ||
+      error.code === 'ENETUNREACH' ||
+      error.code === 'ETIMEDOUT' ||
+      error.code === 'ERR_INVALID_URL' ||
+      error.message.includes('ENOTFOUND') || 
+      error.message.includes('ECONNREFUSED') ||
+      error.message.includes('ENETUNREACH') ||
+      error.message.includes('ETIMEDOUT') ||
+      error.message.includes('Invalid URL') ||
+      error.message.includes('Network Error') || 
+      error.message.includes('Request failed') ||
+      error.message.includes('getaddrinfo') ||
+      error.message.includes('connect ECONNREFUSED');
+    
+    t.true(isValidError, `Expected network error but got: ${error.code} - ${error.message}`);
+  }
 });
 
 // Helper to format duration nicely

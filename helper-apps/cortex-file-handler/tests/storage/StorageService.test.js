@@ -48,18 +48,28 @@ test("should upload file to backup storage", async (t) => {
   const service = new StorageService(factory);
   const provider = service.getBackupProvider();
   if (!provider) {
-    t.log("GCS not configured, skipping test");
+    t.log("Backup provider not configured, skipping test");
     t.pass();
     return;
   }
-  const testContent = "test content";
-  const buffer = Buffer.from(testContent);
+  
+  try {
+    const testContent = "test content";
+    const buffer = Buffer.from(testContent);
 
-  const result = await service.uploadFileToBackup(buffer, "test.txt");
-  t.truthy(result.url);
+    const result = await service.uploadFileToBackup(buffer, "test.txt");
+    t.truthy(result.url);
 
-  // Cleanup
-  await service.deleteFileFromBackup(result.url);
+    // Cleanup
+    await service.deleteFileFromBackup(result.url);
+  } catch (error) {
+    if (error.message === "Backup provider not configured") {
+      t.log("Backup provider not configured, skipping test");
+      t.pass();
+    } else {
+      throw error;
+    }
+  }
 });
 
 test("should download file from primary storage", async (t) => {
@@ -84,30 +94,40 @@ test("should download file from backup storage", async (t) => {
   const service = new StorageService(factory);
   const provider = service.getBackupProvider();
   if (!provider) {
-    t.log("GCS not configured, skipping test");
+    t.log("Backup provider not configured, skipping test");
     t.pass();
     return;
   }
-  const testContent = "test content";
-  const buffer = Buffer.from(testContent);
-
-  // Upload first
-  const uploadResult = await service.uploadFileToBackup(buffer, "test.txt");
-
-  // Create temp file for download
-  const tempFile = path.join(os.tmpdir(), "test-download.txt");
+  
   try {
-    // Download
-    await service.downloadFileFromBackup(uploadResult.url, tempFile);
-    const downloadedContent = await fs.promises.readFile(tempFile);
-    t.deepEqual(downloadedContent, buffer);
+    const testContent = "test content";
+    const buffer = Buffer.from(testContent);
 
-    // Cleanup
-    await service.deleteFileFromBackup(uploadResult.url);
-  } finally {
-    // Cleanup temp file
-    if (fs.existsSync(tempFile)) {
-      fs.unlinkSync(tempFile);
+    // Upload first
+    const uploadResult = await service.uploadFileToBackup(buffer, "test.txt");
+
+    // Create temp file for download
+    const tempFile = path.join(os.tmpdir(), "test-download.txt");
+    try {
+      // Download
+      await service.downloadFileFromBackup(uploadResult.url, tempFile);
+      const downloadedContent = await fs.promises.readFile(tempFile);
+      t.deepEqual(downloadedContent, buffer);
+
+      // Cleanup
+      await service.deleteFileFromBackup(uploadResult.url);
+    } finally {
+      // Cleanup temp file
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+    }
+  } catch (error) {
+    if (error.message === "Backup provider not configured") {
+      t.log("Backup provider not configured, skipping test");
+      t.pass();
+    } else {
+      throw error;
     }
   }
 });

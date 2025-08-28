@@ -5,6 +5,7 @@ import test from 'ava';
 import serverFactory from '../index.js';
 import { createClient } from 'graphql-ws';
 import ws from 'ws';
+import { config } from '../config.js';
 
 let testServer;
 let wsClient;
@@ -17,7 +18,7 @@ test.before(async () => {
 
   // Create WebSocket client for subscriptions
   wsClient = createClient({
-    url: 'ws://localhost:4000/graphql',
+    url: `ws://localhost:${config.get('PORT') || 4000}/graphql`,
     webSocketImpl: ws,
     retryAttempts: 3,
     connectionParams: {},
