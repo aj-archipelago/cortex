@@ -349,7 +349,8 @@ function uploadBlob(
             );
             resolve(result);
           } catch (error) {
-            const err = new Error("Error processing file upload.");
+            console.error("Error in uploadFile (local file path):", error);
+            const err = new Error(`Error processing file upload: ${error.message}`);
             err.status = 500;
             throw err;
           }
@@ -664,6 +665,8 @@ function uploadBlob(
               context.res = { status: 200, body: result };
               resolve(result);
             } catch (err) {
+              console.error("Error in main busboy processing:", err);
+              console.error("Stack trace:", err.stack);
               errorOccurred = true;
               reject(err);
             } finally {
@@ -719,10 +722,10 @@ function uploadBlob(
           }
         }
       } catch (error) {
-        // Only log unexpected errors
-        if (error.message !== "No file provided in request") {
-          context.log("Error processing file upload:", error);
-        }
+        // Always log errors with full details for debugging
+        console.error("Top-level error processing file upload:", error);
+        console.error("Error stack trace:", error.stack);
+        context.log("Error processing file upload:", error);
         const err = new Error(error.message || "Error processing file upload.");
         err.status = error.status || 500;
         reject(err);

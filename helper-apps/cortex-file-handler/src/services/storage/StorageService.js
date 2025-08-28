@@ -7,17 +7,30 @@ import { generateShortId } from "../../utils/filenameUtils.js";
 export class StorageService {
   constructor(factory) {
     this.factory = factory || new StorageFactory();
-    this.primaryProvider = this.factory.getPrimaryProvider();
-    this.backupProvider = this.factory.getGCSProvider();
+    this.primaryProvider = null;
+    this.backupProvider = null;
+    this._initialized = false;
   }
 
-  getPrimaryProvider() {
+  async _initialize() {
+    if (!this._initialized) {
+      this.primaryProvider = await this.factory.getPrimaryProvider();
+      this.backupProvider = this.factory.getGCSProvider();
+      this._initialized = true;
+    }
+  }
+
+  async getPrimaryProvider() {
+    await this._initialize();
     return this.primaryProvider;
   }
 
-  getBackupProvider() {
+  async getBackupProvider() {
+    await this._initialize();
     return this.backupProvider;
   }
+
+
 
   async uploadFile(...args) {
     /*
@@ -25,6 +38,8 @@ export class StorageService {
             1) uploadFile(buffer, filename)
             2) uploadFile(context, filePath, requestId, hash?) – legacy internal use
         */
+
+    await this._initialize();
 
     // Shape (buffer, filename)
     if (
@@ -166,6 +181,8 @@ export class StorageService {
   }
 
   async deleteFiles(requestId) {
+    await this._initialize();
+    
     if (!requestId) {
       throw new Error("Missing requestId parameter");
     }
@@ -201,6 +218,8 @@ export class StorageService {
   }
 
   async fileExists(url) {
+    await this._initialize();
+    
     if (!url) {
       return false;
     }
@@ -219,6 +238,8 @@ export class StorageService {
   }
 
   async cleanup(urls) {
+    await this._initialize();
+    
     if (!urls || !urls.length) return;
 
     const results = [];

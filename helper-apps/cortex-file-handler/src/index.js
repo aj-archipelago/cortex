@@ -94,7 +94,8 @@ async function CortexFileHandler(context, req) {
   cleanupInactive(context);
 
   // Initialize services
-  const storageService = new StorageService(null, null);
+  const storageService = new StorageService();
+  await storageService._initialize(); // Ensure providers are initialized
   const conversionService = new FileConversionService(
     context,
     storageService.primaryProvider.constructor.name === "AzureStorageProvider",
