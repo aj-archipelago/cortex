@@ -8,10 +8,9 @@ import { moveFileToPublicFolder } from "../localFileHandler.js";
 import { v4 as uuidv4 } from "uuid";
 
 export class FileConversionService extends ConversionService {
-  constructor(context, useAzure = true, containerName = null) {
+  constructor(context, useAzure = true) {
     super(context);
     this.useAzure = useAzure;
-    this.containerName = containerName;
   }
 
   async _getFileStoreMap(key) {
@@ -40,7 +39,7 @@ export class FileConversionService extends ConversionService {
 
     let fileUrl;
     if (this.useAzure) {
-      const savedBlob = await saveFileToBlob(filePath, reqId, filename, this.containerName);
+      const savedBlob = await saveFileToBlob(filePath, reqId, filename);
       fileUrl = savedBlob.url;
     } else {
       fileUrl = await moveFileToPublicFolder(filePath, reqId);

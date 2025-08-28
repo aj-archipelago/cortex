@@ -5,23 +5,10 @@ import fs from "fs";
 import { generateShortId } from "../../utils/filenameUtils.js";
 
 export class StorageService {
-  constructor(factory, containerName = null) {
+  constructor(factory) {
     this.factory = factory || new StorageFactory();
-    this.containerName = containerName;
-    this._initPromise = this._initialize(containerName);
-  }
-
-  async _initialize(containerName) {
-    this.primaryProvider = await this.factory.getPrimaryProvider(containerName);
+    this.primaryProvider = this.factory.getPrimaryProvider();
     this.backupProvider = this.factory.getGCSProvider();
-  }
-
-  async ensureInitialized() {
-    await this._initPromise;
-  }
-
-  getPrimaryProvider() {
-    return this.primaryProvider;
   }
 
   getBackupProvider() {

@@ -320,7 +320,6 @@ function uploadBlob(
   saveToLocal = false,
   filePath = null,
   hash = null,
-  containerName = null,
 ) {
   return new Promise((resolve, reject) => {
     (async () => {
@@ -367,6 +366,16 @@ function uploadBlob(
               requestId = value;
             } else if (fieldname === "hash") {
               hash = value;
+            } else if (fieldname === "container") {
+              // Validate container name if provided
+              if (value && !isValidContainerName(value)) {
+                errorOccurred = true;
+                const err = new Error(`Invalid container name '${value}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`);
+                err.status = 400;
+                reject(err);
+                return;
+              }
+              containerName = value;
             }
           });
 

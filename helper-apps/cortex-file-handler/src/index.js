@@ -67,20 +67,7 @@ async function CortexFileHandler(context, req) {
   const shortLivedDuration = parseInt(shortLivedMinutes) || 5; // Default to 5 minutes
   const shouldFetchRemote = fetch || load || restore;
 
-  // Validate container name if provided
-  let validatedContainer = null;
-  if (container) {
-    const { isValidContainerName } = await import("./blobHandler.js");
-    if (!isValidContainerName(container)) {
-      const { AZURE_STORAGE_CONTAINER_NAMES } = await import("./blobHandler.js");
-      context.res = {
-        status: 400,
-        body: `Invalid container name '${container}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`,
-      };
-      return;
-    }
-    validatedContainer = container;
-  }
+
 
   const operation = shouldSave
     ? "save"
@@ -107,12 +94,12 @@ async function CortexFileHandler(context, req) {
   cleanupInactive(context);
 
   // Initialize services
-  const storageService = new StorageService(null, validatedContainer);
+  const storageService = new StorageService(null, null);
   await storageService.ensureInitialized();
   const conversionService = new FileConversionService(
     context,
     storageService.primaryProvider.constructor.name === "AzureStorageProvider",
-    validatedContainer,
+    null,
   );
 
   // Validate URL for document processing and media chunking operations
@@ -496,7 +483,7 @@ async function CortexFileHandler(context, req) {
       storageService.primaryProvider.constructor.name ===
       "LocalStorageProvider";
     // Use uploadBlob to handle multipart/form-data
-    const result = await uploadBlob(context, req, saveToLocal, null, hash, validatedContainer);
+    const result = await uploadBlob(context, req, saveToLocal, null, hash);
     if (result?.hash && context?.res?.body) {
       await setFileStoreMap(result.hash, context.res.body);
     }
