@@ -11,6 +11,10 @@ export class StorageService {
     this.backupProvider = this.factory.getGCSProvider();
   }
 
+  getPrimaryProvider() {
+    return this.primaryProvider;
+  }
+
   getBackupProvider() {
     return this.backupProvider;
   }

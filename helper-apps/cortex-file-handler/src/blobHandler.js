@@ -183,14 +183,14 @@ async function downloadFromGCS(gcsUrl, destinationPath) {
 export const getBlobClient = async (containerName = null) => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   const finalContainerName = containerName || DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
-  
+
   // Validate container name is in whitelist
   if (!isValidContainerName(finalContainerName)) {
     throw new Error(
       `Invalid container name '${finalContainerName}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`,
     );
   }
-  
+
   if (!connectionString || !finalContainerName) {
     throw new Error(
       "Missing Azure Storage connection string or container name environment variable",
@@ -283,10 +283,6 @@ const generateSASToken = (
   return sasToken;
 };
 
-const generateShortLivedSASToken = (containerClient, blobName, minutes = 5) => {
-  return generateSASToken(containerClient, blobName, { minutes });
-};
-
 //deletes blob that has the requestId
 async function deleteBlob(requestId, containerName = null) {
   if (!requestId) throw new Error("Missing requestId parameter");
@@ -325,7 +321,9 @@ function uploadBlob(
     (async () => {
       try {
         let requestId = uuidv4();
+        let containerName = null;
         const body = {};
+        const fields = {}; // Buffer for all fields
 
         // If filePath is given, we are dealing with local file and not form-data
         if (filePath) {
@@ -356,10 +354,10 @@ function uploadBlob(
             throw err;
           }
         } else {
-          // Otherwise, continue working with form-data
           const busboy = Busboy({ headers: req.headers });
           let hasFile = false;
           let errorOccurred = false;
+
 
           busboy.on("field", (fieldname, value) => {
             if (fieldname === "requestId") {
@@ -367,7 +365,6 @@ function uploadBlob(
             } else if (fieldname === "hash") {
               hash = value;
             } else if (fieldname === "container") {
-              // Validate container name if provided
               if (value && !isValidContainerName(value)) {
                 errorOccurred = true;
                 const err = new Error(`Invalid container name '${value}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`);
@@ -377,11 +374,35 @@ function uploadBlob(
               }
               containerName = value;
             }
+            fields[fieldname] = value; // Store all fields
           });
 
           busboy.on("file", async (fieldname, file, info) => {
             if (errorOccurred) return;
+            
             hasFile = true;
+
+            // Validate file
+            if (!info.filename || info.filename.trim() === "") {
+              errorOccurred = true;
+              const err = new Error("Invalid file: missing filename");
+              err.status = 400;
+              reject(err);
+              return;
+            }
+
+            // Simple approach: small delay to allow container field to be processed
+            console.log("File received, giving fields time to process...");
+            await new Promise(resolve => setTimeout(resolve, 20));
+            console.log("Processing file with containerName:", containerName);
+            
+            if (errorOccurred) return; // Check again after waiting
+
+            await processFile(fieldname, file, info);
+          });
+
+          const processFile = async (fieldname, file, info) => {
+            if (errorOccurred) return;
 
             // Validate file
             if (!info.filename || info.filename.trim() === "") {
@@ -651,7 +672,7 @@ function uploadBlob(
                 fs.rmSync(tempDir, { recursive: true, force: true });
               }
             }
-          });
+          };
 
           busboy.on("error", (error) => {
             if (errorOccurred) return;
@@ -662,7 +683,6 @@ function uploadBlob(
           });
 
           busboy.on("finish", () => {
-            if (errorOccurred) return;
             if (!hasFile) {
               errorOccurred = true;
               const err = new Error("No file provided in request");
@@ -740,6 +760,7 @@ async function saveToAzureStorage(context, encodedFilename, file, containerName 
   };
 
   const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+  console.log("Uploading to container:", containerName || "default");
   context.log(`Uploading to Azure... ${blobName}`);
   await blockBlobClient.uploadStream(file, undefined, undefined, options);
   const sasToken = generateSASToken(containerClient, blobName);
@@ -834,17 +855,17 @@ async function uploadFile(
     context.log("Starting primary storage upload...");
     const primaryPromise = saveToLocal
       ? saveToLocalStorage(
-          context,
-          requestId,
-          uploadName,
-          createOptimizedReadStream(uploadPath),
-        )
+        context,
+        requestId,
+        uploadName,
+        createOptimizedReadStream(uploadPath),
+      )
       : saveToAzureStorage(
-          context,
-          uploadName,
-          createOptimizedReadStream(uploadPath),
-          containerName,
-        );
+        context,
+        uploadName,
+        createOptimizedReadStream(uploadPath),
+        containerName,
+      );
     storagePromises.push(
       primaryPromise.then((url) => {
         context.log("Primary storage upload completed");
@@ -1148,11 +1169,11 @@ async function deleteGCS(blobName) {
       errors: error.errors,
       response: error.response
         ? {
-            status: error.response.status,
-            statusText: error.response.statusText,
-            data: error.response.data,
-            headers: error.response.headers,
-          }
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data,
+          headers: error.response.headers,
+        }
         : null,
     });
     // Don't throw the error - we want to continue with cleanup even if GCS deletion fails
@@ -1207,5 +1228,4 @@ export {
   gcs,
   uploadChunkToGCS,
   downloadFromGCS,
-  generateShortLivedSASToken,
 };
