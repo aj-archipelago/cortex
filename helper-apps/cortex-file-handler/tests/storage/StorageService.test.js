@@ -194,3 +194,156 @@ test("should handle delete file by hash when file not found", async (t) => {
     t.true(error.message.includes("not found"));
   }
 });
+
+test("should handle delete file by hash with missing hash parameter", async (t) => {
+  const factory = new StorageFactory();
+  const service = new StorageService(factory);
+
+  try {
+    await service.deleteFileByHash("");
+    t.fail("Should have thrown an error for empty hash");
+  } catch (error) {
+    t.true(error.message.includes("Missing hash parameter"));
+  }
+
+  try {
+    await service.deleteFileByHash(null);
+    t.fail("Should have thrown an error for null hash");
+  } catch (error) {
+    t.true(error.message.includes("Missing hash parameter"));
+  }
+
+  try {
+    await service.deleteFileByHash(undefined);
+    t.fail("Should have thrown an error for undefined hash");
+  } catch (error) {
+    t.true(error.message.includes("Missing hash parameter"));
+  }
+});
+
+test("should delete file by hash with backup storage", async (t) => {
+  const factory = new StorageFactory();
+  const service = new StorageService(factory);
+  const testContent = "test content for backup deletion";
+  const buffer = Buffer.from(testContent);
+  const testHash = "test-hash-backup-456";
+
+  try {
+    // Upload file first
+    const uploadResult = await service.uploadFile(buffer, "test-backup-delete.txt");
+    t.truthy(uploadResult.url);
+
+    // Store file info in Redis map with backup URL
+    const fileInfo = {
+      url: uploadResult.url,
+      gcs: "gs://test-bucket/test-backup-file.txt", // Mock backup URL
+      filename: "test-backup-delete.txt",
+      hash: testHash,
+      timestamp: new Date().toISOString()
+    };
+    await setFileStoreMap(testHash, fileInfo);
+
+    // Delete file by hash
+    const deleteResult = await service.deleteFileByHash(testHash);
+    t.truthy(deleteResult);
+    t.is(deleteResult.hash, testHash);
+    t.is(deleteResult.filename, "test-backup-delete.txt");
+    t.truthy(deleteResult.deleted);
+    t.true(Array.isArray(deleteResult.deleted));
+
+    // Should have attempted both primary and backup deletion
+    const deletionResults = deleteResult.deleted;
+    t.true(deletionResults.length >= 1, "Should have at least primary deletion result");
+
+    // Verify file is removed from Redis map
+    const removedInfo = await getFileStoreMap(testHash);
+    t.falsy(removedInfo);
+
+  } catch (error) {
+    // Cleanup in case of error
+    try {
+      await removeFromFileStoreMap(testHash);
+    } catch (cleanupError) {
+      // Ignore cleanup errors
+    }
+    throw error;
+  }
+});
+
+test("should handle delete file by hash when Redis map is corrupted", async (t) => {
+  const factory = new StorageFactory();
+  const service = new StorageService(factory);
+  const testHash = "test-hash-corrupted-789";
+
+  try {
+    // Store corrupted data in Redis map
+    const corruptedInfo = {
+      // Missing required fields like url
+      corrupted: true,
+      timestamp: new Date().toISOString()
+    };
+    await setFileStoreMap(testHash, corruptedInfo);
+
+    // Delete file by hash should handle corrupted data gracefully
+    const deleteResult = await service.deleteFileByHash(testHash);
+    t.truthy(deleteResult);
+    t.is(deleteResult.hash, testHash);
+    t.truthy(deleteResult.deleted);
+    t.true(Array.isArray(deleteResult.deleted));
+
+    // Should have removed the corrupted entry from Redis
+    const removedInfo = await getFileStoreMap(testHash);
+    t.falsy(removedInfo);
+
+  } catch (error) {
+    // Cleanup in case of error
+    try {
+      await removeFromFileStoreMap(testHash);
+    } catch (cleanupError) {
+      // Ignore cleanup errors
+    }
+    throw error;
+  }
+});
+
+test("should handle delete file by hash with empty URL in Redis", async (t) => {
+  const factory = new StorageFactory();
+  const service = new StorageService(factory);
+  const testHash = "test-hash-empty-url-654";
+
+  try {
+    // Store file info in Redis map with empty/null URL
+    const fileInfo = {
+      url: null,
+      filename: "test-empty-url-delete.txt",
+      hash: testHash,
+      timestamp: new Date().toISOString()
+    };
+    await setFileStoreMap(testHash, fileInfo);
+
+    // Verify the hash exists in Redis before deletion (skip lazy cleanup)
+    const storedInfo = await getFileStoreMap(testHash, true);
+    t.truthy(storedInfo, "Hash should exist in Redis before deletion");
+
+    // Delete file by hash - should handle missing URL gracefully
+    const deleteResult = await service.deleteFileByHash(testHash);
+    t.truthy(deleteResult);
+    t.is(deleteResult.hash, testHash);
+    t.is(deleteResult.filename, "test-empty-url-delete.txt");
+    t.truthy(deleteResult.deleted);
+    t.true(Array.isArray(deleteResult.deleted));
+
+    // Should still remove from Redis map even if no actual file to delete
+    const removedInfo = await getFileStoreMap(testHash);
+    t.falsy(removedInfo);
+
+  } catch (error) {
+    // Cleanup in case of error
+    try {
+      await removeFromFileStoreMap(testHash);
+    } catch (cleanupError) {
+      // Ignore cleanup errors
+    }
+    throw error;
+  }
+});
