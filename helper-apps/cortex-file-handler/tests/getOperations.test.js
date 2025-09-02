@@ -227,31 +227,20 @@ test.serial("should fetch remote file", async (t) => {
   const requestId = uuidv4();
   const remoteUrl = "https://example.com/test.txt";
 
-  try {
-    const response = await axios.get(baseUrl, {
-      params: {
-        fetch: remoteUrl,
-        requestId,
-      },
-      validateStatus: (status) => true,
-    });
+  const response = await axios.get(baseUrl, {
+    params: {
+      fetch: remoteUrl,
+      requestId,
+    },
+    validateStatus: (status) => true,
+  });
 
-    t.is(response.status, 400, "Should reject invalid URL");
-    t.is(
-      response.data,
-      "Invalid or inaccessible URL",
-      "Should return correct error message",
-    );
-  } catch (error) {
-    // Handle network errors gracefully - this is acceptable for this test
-    t.true(
-      error.code === 'ECONNRESET' || 
-      error.code === 'ENOTFOUND' || 
-      error.message.includes('socket hang up') ||
-      error.message.includes('Network Error'),
-      "Network error is acceptable for this test"
-    );
-  }
+  t.is(response.status, 400, "Should reject invalid URL");
+  t.is(
+    response.data,
+    "Invalid or inaccessible URL",
+    "Should return correct error message",
+  );
 });
 
 // Test: Redis caching behavior for remote files

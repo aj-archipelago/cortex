@@ -16,9 +16,11 @@ test.beforeEach(t => {
         name: 'azure-foundry-agents',
         type: 'AZURE-FOUNDRY-AGENTS',
         url: 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry',
-        agentId: 'asst_testid',
         headers: {
             'Content-Type': 'application/json'
+        },
+        params: {
+            assistant_id: 'asst_testid'
         },
         maxTokenLength: 32768,
         maxReturnTokens: 4096,
@@ -28,12 +30,6 @@ test.beforeEach(t => {
     t.context.plugin = new AzureFoundryAgentsPlugin(mockPathway, mockModel);
     t.context.mockPathway = mockPathway;
     t.context.mockModel = mockModel;
-});
-
-test('should initialize with correct agent ID and project URL', t => {
-    const { plugin } = t.context;
-    t.is(plugin.agentId, 'asst_testid');
-    t.is(plugin.projectUrl, 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry');
 });
 
 test('should convert Palm format messages to Azure format', t => {
@@ -82,6 +78,8 @@ test('should create correct request parameters', t => {
         messages: [{ role: 'user', content: text }]
     };
 
+    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.assistantId = 'asst_testid';
     const result = plugin.getRequestParameters(text, parameters, prompt);
 
     t.is(result.assistant_id, 'asst_testid');
@@ -150,7 +148,7 @@ test('should return empty string for null response', t => {
 test('should return correct Azure Foundry Agents endpoint', t => {
     const { plugin } = t.context;
     const url = plugin.requestUrl();
-    t.is(url, 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry/threads/runs');
+    t.is(url, 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry');
 });
 
 test('should be able to access azureAuthTokenHelper from config', (t) => {

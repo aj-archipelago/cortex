@@ -4,10 +4,8 @@ import test from 'ava';
 import got from 'got';
 import axios from 'axios';
 import serverFactory from '../index.js';
-import { config } from '../config.js';
 
-// Define getApiBase() function to get port dynamically
-const getApiBase = () => `http://localhost:${config.get('PORT') || 4000}/v1`;
+const API_BASE = `http://localhost:${process.env.CORTEX_PORT}/v1`;
 
 let testServer;
 
@@ -25,14 +23,14 @@ test.after.always('cleanup', async () => {
 });
 
 test('GET /models', async (t) => {
-  const response = await got(`${getApiBase()}/models`, { responseType: 'json' });
+  const response = await got(`${API_BASE}/models`, { responseType: 'json' });
   t.is(response.statusCode, 200);
   t.is(response.body.object, 'list');
   t.true(Array.isArray(response.body.data));
 });
 
 test('POST /completions', async (t) => {
-  const response = await got.post(`${getApiBase()}/completions`, {
+  const response = await got.post(`${API_BASE}/completions`, {
     json: {
       model: 'gpt-3.5-turbo',
       prompt: 'Word to your motha!',
@@ -48,7 +46,7 @@ test('POST /completions', async (t) => {
 
 
 test('POST /chat/completions', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [{ role: 'user', content: 'Hello!' }],
@@ -63,7 +61,7 @@ test('POST /chat/completions', async (t) => {
 });
 
 test('POST /chat/completions with multimodal content', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [{
@@ -142,7 +140,7 @@ test('POST SSE: /v1/completions should send a series of events and a [DONE] even
         stream: true,
     };
     
-    const url = getApiBase();
+    const url = `http://localhost:${process.env.CORTEX_PORT}/v1`;
     
     const completionsAssertions = (t, messageJson) => {
         t.truthy(messageJson.id);
@@ -165,7 +163,7 @@ test('POST SSE: /v1/chat/completions should send a series of events and a [DONE]
         stream: true,
     };
     
-    const url = getApiBase();
+    const url = `http://localhost:${process.env.CORTEX_PORT}/v1`;
     
     const chatCompletionsAssertions = (t, messageJson) => {
         t.truthy(messageJson.id);
@@ -198,7 +196,7 @@ test('POST SSE: /v1/chat/completions with multimodal content should send a serie
         stream: true,
     };
     
-    const url = getApiBase();
+    const url = `http://localhost:${process.env.CORTEX_PORT}/v1`;
     
     const multimodalChatCompletionsAssertions = (t, messageJson) => {
         t.truthy(messageJson.id);
@@ -213,7 +211,7 @@ test('POST SSE: /v1/chat/completions with multimodal content should send a serie
 });  
 
 test('POST /chat/completions should handle multimodal content for non-multimodal model', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [{
@@ -273,7 +271,7 @@ test('POST SSE: /v1/chat/completions should handle streaming multimodal content 
   };
 
   await connectToSSEEndpoint(
-    getApiBase(),
+    `http://localhost:${process.env.CORTEX_PORT}/v1`,
     '/chat/completions',
     payload,
     t,
@@ -282,7 +280,7 @@ test('POST SSE: /v1/chat/completions should handle streaming multimodal content 
 });
 
 test('POST /chat/completions should handle malformed multimodal content', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [{
@@ -310,7 +308,7 @@ test('POST /chat/completions should handle malformed multimodal content', async 
 });
 
 test('POST /chat/completions should handle invalid image data', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [{
@@ -340,7 +338,7 @@ test('POST /chat/completions should handle invalid image data', async (t) => {
 });  
 
 test('POST /completions should handle model parameters', async (t) => {
-  const response = await got.post(`${getApiBase()}/completions`, {
+  const response = await got.post(`${API_BASE}/completions`, {
     json: {
       model: 'gpt-3.5-turbo',
       prompt: 'Say this is a test',
@@ -361,7 +359,7 @@ test('POST /completions should handle model parameters', async (t) => {
 });
 
 test('POST /chat/completions should handle function calling', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [{ role: 'user', content: 'What is the weather in Boston?' }],
@@ -401,7 +399,7 @@ test('POST /chat/completions should handle function calling', async (t) => {
 });
 
 test('POST /chat/completions should validate response format', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [{ role: 'user', content: 'Hello!' }],
@@ -426,7 +424,7 @@ test('POST /chat/completions should validate response format', async (t) => {
 });
 
 test('POST /chat/completions should handle system messages', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [
@@ -446,7 +444,7 @@ test('POST /chat/completions should handle system messages', async (t) => {
 
 test('POST /chat/completions should handle errors gracefully', async (t) => {
   const error = await t.throwsAsync(
-    () => got.post(`${getApiBase()}/chat/completions`, {
+    () => got.post(`${API_BASE}/chat/completions`, {
       json: {
         // Missing required model field
         messages: [{ role: 'user', content: 'Hello!' }],
@@ -459,7 +457,7 @@ test('POST /chat/completions should handle errors gracefully', async (t) => {
 });
 
 test('POST /chat/completions should handle token limits', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [{ 
@@ -479,7 +477,7 @@ test('POST /chat/completions should handle token limits', async (t) => {
 });  
 
 test('POST /chat/completions should return complete responses from gpt-4o', async (t) => {
-  const response = await got.post(`${getApiBase()}/chat/completions`, {
+  const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4o',
       messages: [
@@ -523,7 +521,7 @@ test('POST /chat/completions should handle array content properly', async (t) =>
     // First, check if the API server is running and get available models
     let modelToUse = '*'; // Default fallback model
     try {
-      const modelsResponse = await got(`${getApiBase()}/models`, { responseType: 'json' });
+      const modelsResponse = await got(`${API_BASE}/models`, { responseType: 'json' });
       if (modelsResponse.body && modelsResponse.body.data && modelsResponse.body.data.length > 0) {
         const models = modelsResponse.body.data.map(model => model.id);
         
@@ -566,7 +564,7 @@ test('POST /chat/completions should handle array content properly', async (t) =>
     }
     
     // Make a direct HTTP request to the REST API
-    const response = await axios.post(`${getApiBase()}/chat/completions`, {
+    const response = await axios.post(`${API_BASE}/chat/completions`, {
       model: modelToUse,
       messages: [
         {
