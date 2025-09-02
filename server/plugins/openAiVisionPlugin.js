@@ -135,15 +135,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
 
         requestParameters.messages = await this.tryParseMessages(requestParameters.messages);
 
-        // Add tools support if provided in parameters
-        if (parameters.tools) {
-            requestParameters.tools = parameters.tools;
-        }
-
-        if (parameters.tool_choice) {
-            requestParameters.tool_choice = parameters.tool_choice;
-        }
-
         const modelMaxReturnTokens = this.getModelMaxReturnTokens();
         const maxTokensPrompt = this.promptParameters.max_tokens;
         const maxTokensModel = this.getModelMaxTokenLength() * (1 - this.getPromptTokenRatio());

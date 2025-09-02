@@ -45,31 +45,35 @@ class OpenAIChatPlugin extends ModelPlugin {
     // Set up parameters specific to the OpenAI Chat API
     getRequestParameters(text, parameters, prompt) {
         const { modelPromptText, modelPromptMessages, tokenLength, modelPrompt } = this.getCompiledPrompt(text, parameters, prompt);
-        const { stream } = parameters;
-    
+        let { stream, tools } = parameters;
+
+        if (typeof tools === 'string') {
+            tools = JSON.parse(tools);
+        }
+
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxPromptTokens();
-    
+
         let requestMessages = modelPromptMessages || [{ "role": "user", "content": modelPromptText }];
         
         // Check if the messages are in Palm format and convert them to OpenAI format if necessary
         const isPalmFormat = requestMessages.some(message => 'author' in message);
         if (isPalmFormat) {
             const context = modelPrompt.context || '';
-            const examples = modelPrompt.examples || [];
-            requestMessages = this.convertPalmToOpenAIMessages(context, examples, modelPromptMessages);
+            requestMessages = requestMessages.map(message => ({
+                role: message.author === 'user' ? 'user' : 'assistant',
+                content: message.content
+            }));
+            if (context) {
+                requestMessages.unshift({ role: 'system', content: context });
+            }
         }
-    
-        // Check if the token length exceeds the model's max token length
-        if (tokenLength > modelTargetTokenLength && this.promptParameters?.manageTokenLength) {
-            // Remove older messages until the token length is within the model's limit
-            requestMessages = this.truncateMessagesToTargetLength(requestMessages, modelTargetTokenLength);
-        }
-    
+
         const requestParameters = {
         messages: requestMessages,
         temperature: this.temperature ?? 0.7,
         ...(stream !== undefined ? { stream } : {}),
+        ...(tools && tools.length > 0 ? { tools, tool_choice: parameters.tool_choice || 'auto' } : {}),
         };
     
         return requestParameters;

@@ -67,6 +67,15 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         return acc;
     }, {});
 
+    // Add tools to variables if they exist in the request
+    if (req.body.tools) {
+        variables.tools = JSON.stringify(req.body.tools);
+    }
+    
+    if (req.body.tool_choice) {
+        variables.tool_choice = req.body.tool_choice;
+    }
+
     const variableParams = fieldVariableDefs.map(({ name, type }) => `$${name}: ${type}`).join(', ');
     const queryArgs = fieldVariableDefs.map(({ name }) => `${name}: $${name}`).join(', ');
 
@@ -156,6 +165,16 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         return jsonResponse;
     }
 
+    const fillJsonResponseWithToolCalls = (jsonResponse, toolCalls, finishReason) => {
+        jsonResponse.choices[0].finish_reason = finishReason;
+        if (jsonResponse.object === 'text_completion') {
+            // Handle text completion tool calls if needed
+        } else {
+            jsonResponse.choices[0].delta.tool_calls = toolCalls;
+        }
+        return jsonResponse;
+    }
+
     startStream(res);
 
     // If the requestId is an error message, we can't continue
@@ -189,6 +208,21 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
                 safeUnsubscribe();
                 finishStream(res, jsonResponse);
                 return;
+            }
+
+            // Check if this is a tool call response
+            try {
+                const parsedData = JSON.parse(stringData);
+                if (parsedData.tool_calls) {
+                    // Send tool calls as a single chunk
+                    fillJsonResponseWithToolCalls(jsonResponse, parsedData.tool_calls, "tool_calls");
+                    sendStreamData(jsonResponse);
+                    safeUnsubscribe();
+                    finishStream(res, jsonResponse);
+                    return;
+                }
+            } catch (e) {
+                // Not JSON, treat as regular text
             }
 
             chunkTextIntoTokens(stringData, false, useSingleTokenStream).forEach(token => {
@@ -232,6 +266,13 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
                 content = messageJson.candidates[0].content.parts[0].text;
             } else if (messageJson.content) {
                 content = messageJson.content?.[0]?.text || '';
+            } else if (messageJson.tool_calls) {
+                // Handle tool calls in streaming
+                fillJsonResponseWithToolCalls(jsonResponse, messageJson.tool_calls, "tool_calls");
+                sendStreamData(jsonResponse);
+                safeUnsubscribe();
+                finishStream(res, jsonResponse);
+                return;
             } else {
                 content = messageJson;
             }
@@ -372,6 +413,22 @@ function buildRestEndpoints(pathways, app, server, config) {
 
             const resultText = await processRestRequest(server, req, pathway, pathwayName);
 
+            // Parse tool calls if they exist in the response
+            let messageContent = resultText;
+            let toolCalls = null;
+            let finishReason = 'stop';
+
+            try {
+                const parsedResponse = JSON.parse(resultText);
+                if (parsedResponse.tool_calls) {
+                    toolCalls = parsedResponse.tool_calls;
+                    messageContent = parsedResponse.content || null;
+                    finishReason = 'tool_calls';
+                }
+            } catch (e) {
+                // If parsing fails, treat as regular text response
+            }
+
             const jsonResponse = {
                 id: `chatcmpl`,
                 object: "chat.completion",
@@ -381,10 +438,11 @@ function buildRestEndpoints(pathways, app, server, config) {
                     {
                         message: {
                             role: "assistant",
-                            content: resultText
+                            content: messageContent,
+                            ...(toolCalls && { tool_calls: toolCalls })
                         },
                         index: 0,
-                        finish_reason: "stop"
+                        finish_reason: finishReason
                     }
                 ],
             };
@@ -392,16 +450,41 @@ function buildRestEndpoints(pathways, app, server, config) {
             // eslint-disable-next-line no-extra-boolean-cast
             if (Boolean(req.body.stream)) {
                 jsonResponse.id = `chatcmpl-${resultText}`;
-                jsonResponse.choices[0] = {
-                    delta: {
-                        role: "assistant",
-                        content: resultText
-                    },
-                    finish_reason: null
+                
+                if (toolCalls) {
+                    // For tool calls in streaming, send the tool calls as a single chunk
+                    jsonResponse.choices[0] = {
+                        delta: {
+                            role: "assistant",
+                            tool_calls: toolCalls
+                        },
+                        finish_reason: "tool_calls"
+                    }
+                    
+                    jsonResponse.object = "chat.completion.chunk";
+                    
+                    // Send tool calls immediately
+                    res.write(`data: ${JSON.stringify(jsonResponse)}\n\n`);
+                    res.write('data: [DONE]\n\n');
+                    res.end();
+                } else {
+                    // For regular content streaming, we need to process the content through the streaming pipeline
+                    // Set the initial response with content
+                    jsonResponse.choices[0] = {
+                        delta: {
+                            role: "assistant",
+                            content: messageContent
+                        },
+                        finish_reason: "stop"
+                    }
+                    
+                    jsonResponse.object = "chat.completion.chunk";
+                    
+                    // Send content immediately since finish_reason is 'stop'
+                    res.write(`data: ${JSON.stringify(jsonResponse)}\n\n`);
+                    res.write('data: [DONE]\n\n');
+                    res.end();
                 }
-                jsonResponse.object = "chat.completion.chunk";
-
-                processIncomingStream(resultText, res, jsonResponse, pathway);
             } else {
                 const requestId = uuidv4();
                 jsonResponse.id = `chatcmpl-${requestId}`;
