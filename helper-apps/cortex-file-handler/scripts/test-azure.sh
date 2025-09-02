@@ -18,7 +18,11 @@ node scripts/setup-azure-container.js
 
 # Run the tests
 echo "Running tests..."
-node -r dotenv/config node_modules/ava/entrypoints/cli.mjs "$@"
+echo "🔍 Starting AVA test runner..."
+echo "📋 Test files to run:"
+find tests -name "*.test.js" | head -10
+echo "⚡ Executing AVA..."
+timeout 300s node -r dotenv/config node_modules/ava/entrypoints/cli.mjs "$@" --verbose
 
 # Store test result
 TEST_RESULT=$?
