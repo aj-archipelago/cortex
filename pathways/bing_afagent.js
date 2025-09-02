@@ -4,6 +4,7 @@
 export default {
     inputParameters: {
         text: ``,
+        tool_choice: 'auto'
     },
     timeout: 400,
     enableDuplicateRequests: false,

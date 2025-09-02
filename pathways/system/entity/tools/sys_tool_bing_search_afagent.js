@@ -43,7 +43,7 @@ export default {
             // Call the Bing search pathway
             //remove model from args as bing_afagent has model in its own
             const { model, ...restArgs } = args;
-            const rawResponse = await callPathway('bing_afagent', { 
+            const rawResponse = await callPathway('bing_afagent', { tool_choice: 'auto',
                 ...restArgs,
             }, resolver);
             
