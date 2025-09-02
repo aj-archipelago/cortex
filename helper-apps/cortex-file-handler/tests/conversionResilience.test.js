@@ -8,7 +8,7 @@ import XLSX from "xlsx";
 import { port } from "../src/start.js";
 import { gcs, GCS_BUCKETNAME } from "../src/blobHandler.js";
 import { getFileStoreMap, setFileStoreMap } from "../src/redis.js";
-import { cleanupHashAndFile } from "./testUtils.helper.js";
+import { cleanupHashAndFile, startTestServer, stopTestServer } from "./testUtils.helper.js";
 import { gcsUrlExists } from "../src/blobHandler.js";
 
 const baseUrl = `http://localhost:${port}/api/CortexFileHandler`;
@@ -47,13 +47,18 @@ function isGcsConfigured() {
   return !!gcs;
 }
 
+// Ensure server is ready before tests
 test.before(async (t) => {
+  await startTestServer();
   const dir = path.join(fs.mkdtempSync(path.join(process.cwd(), "conv-test-")));
   t.context.tmpDir = dir;
 });
 
 test.after.always(async (t) => {
-  fs.rmSync(t.context.tmpDir, { recursive: true, force: true });
+  await stopTestServer();
+  if (t.context?.tmpDir) {
+    fs.rmSync(t.context.tmpDir, { recursive: true, force: true });
+  }
 });
 
 // 1. Remote-URL upload path should still return converted info

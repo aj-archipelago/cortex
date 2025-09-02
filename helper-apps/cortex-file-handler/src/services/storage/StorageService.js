@@ -7,17 +7,30 @@ import { generateShortId } from "../../utils/filenameUtils.js";
 export class StorageService {
   constructor(factory) {
     this.factory = factory || new StorageFactory();
-    this.primaryProvider = this.factory.getPrimaryProvider();
-    this.backupProvider = this.factory.getGCSProvider();
+    this.primaryProvider = null;
+    this.backupProvider = null;
+    this._initialized = false;
   }
 
-  getPrimaryProvider() {
+  async _initialize() {
+    if (!this._initialized) {
+      this.primaryProvider = await this.factory.getPrimaryProvider();
+      this.backupProvider = this.factory.getGCSProvider();
+      this._initialized = true;
+    }
+  }
+
+  async getPrimaryProvider() {
+    await this._initialize();
     return this.primaryProvider;
   }
 
-  getBackupProvider() {
+  async getBackupProvider() {
+    await this._initialize();
     return this.backupProvider;
   }
+
+
 
   async uploadFile(...args) {
     /*
@@ -25,6 +38,8 @@ export class StorageService {
             1) uploadFile(buffer, filename)
             2) uploadFile(context, filePath, requestId, hash?) – legacy internal use
         */
+
+    await this._initialize();
 
     // Shape (buffer, filename)
     if (
@@ -56,6 +71,8 @@ export class StorageService {
   }
 
   async uploadFileToBackup(fileOrBuffer, filename) {
+    await this._initialize();
+    
     if (!this.backupProvider) {
       throw new Error("Backup provider not configured");
     }
@@ -86,6 +103,8 @@ export class StorageService {
   }
 
   async downloadFile(url, destinationPath = null) {
+    await this._initialize();
+    
     const useBackup = url.startsWith("gs://");
 
     if (useBackup && !this.backupProvider) {
@@ -119,6 +138,8 @@ export class StorageService {
   }
 
   async deleteFile(url) {
+    await this._initialize();
+    
     if (typeof this.primaryProvider.deleteFile === "function") {
       return await this.primaryProvider.deleteFile(url);
     }
@@ -127,6 +148,8 @@ export class StorageService {
   }
 
   async deleteFileFromBackup(url) {
+    await this._initialize();
+    
     if (!this.backupProvider) {
       throw new Error("Backup provider not configured");
     }
@@ -137,7 +160,71 @@ export class StorageService {
     return await this.backupProvider.deleteFiles([url]);
   }
 
+  /**
+   * Delete a single file by its hash from both primary and backup storage
+   * @param {string} hash - The hash of the file to delete
+   * @returns {Promise<Object>} Object containing deletion results and file info
+   */
+  async deleteFileByHash(hash) {
+    await this._initialize();
+    
+    if (!hash) {
+      throw new Error("Missing hash parameter");
+    }
+
+    const results = [];
+
+    // Get file information from Redis map
+    const { getFileStoreMap, removeFromFileStoreMap } = await import("../../redis.js");
+    const hashResult = await getFileStoreMap(hash);
+    
+    if (!hashResult) {
+      throw new Error(`File with hash ${hash} not found`);
+    }
+
+    // Delete from primary storage
+    if (hashResult.url) {
+      try {
+        const primaryResult = await this.deleteFile(hashResult.url);
+        if (primaryResult) {
+          results.push({ provider: 'primary', result: primaryResult });
+        }
+      } catch (error) {
+        console.error(`Error deleting file from primary storage:`, error);
+        results.push({ provider: 'primary', error: error.message });
+      }
+    }
+
+    // Delete from backup storage (GCS)
+    if (hashResult.gcs && this.backupProvider) {
+      try {
+        const backupResult = await this.deleteFileFromBackup(hashResult.gcs);
+        if (backupResult) {
+          results.push({ provider: 'backup', result: backupResult });
+        }
+      } catch (error) {
+        console.error(`Error deleting file from backup storage:`, error);
+        results.push({ provider: 'backup', error: error.message });
+      }
+    }
+
+    // Remove from Redis map
+    try {
+      await removeFromFileStoreMap(hash);
+    } catch (error) {
+      console.error(`Error removing hash from Redis map:`, error);
+    }
+
+    return {
+      hash,
+      deleted: results,
+      filename: hashResult.filename
+    };
+  }
+
   async uploadFileWithProviders(context, filePath, requestId, hash = null) {
+    await this._initialize();
+    
     // Generate filename once to ensure both providers use the same name
     const fileExtension = path.extname(filePath);
     const shortId = generateShortId();
@@ -166,6 +253,8 @@ export class StorageService {
   }
 
   async deleteFiles(requestId) {
+    await this._initialize();
+    
     if (!requestId) {
       throw new Error("Missing requestId parameter");
     }
@@ -201,6 +290,8 @@ export class StorageService {
   }
 
   async fileExists(url) {
+    await this._initialize();
+    
     if (!url) {
       return false;
     }
@@ -219,6 +310,8 @@ export class StorageService {
   }
 
   async cleanup(urls) {
+    await this._initialize();
+    
     if (!urls || !urls.length) return;
 
     const results = [];
@@ -251,6 +344,8 @@ export class StorageService {
   }
 
   async ensureGCSUpload(context, existingFile) {
+    await this._initialize();
+    
     if (
       !this.backupProvider ||
       !existingFile.url ||
@@ -293,6 +388,8 @@ export class StorageService {
   }
 
   async downloadFileFromBackup(url, destinationPath = null) {
+    await this._initialize();
+    
     if (!this.backupProvider) {
       throw new Error("Backup provider not configured");
     }

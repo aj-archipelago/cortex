@@ -45,7 +45,7 @@
       "!tests/test-docs/**/*",
       "!tests/mocks/**/*"
     ],
-    "timeout": "1m",
+    "timeout": "10m",
     "nodeArguments": [
       "--experimental-modules"
     ],

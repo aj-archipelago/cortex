@@ -37,14 +37,16 @@ async function cleanupTempDirectories() {
   }
 }
 
-// Setup periodic cleanup
-setInterval(async () => {
-  try {
-    await cleanupTempDirectories();
-  } catch (err) {
-    console.error("Error during periodic cleanup:", err);
-  }
-}, CLEANUP_INTERVAL_MS);
+// Setup periodic cleanup (only in production, not during tests)
+if (process.env.NODE_ENV !== 'test') {
+  setInterval(async () => {
+    try {
+      await cleanupTempDirectories();
+    } catch (err) {
+      console.error("Error during periodic cleanup:", err);
+    }
+  }, CLEANUP_INTERVAL_MS);
+}
 
 // Process a single chunk with streaming and progress tracking
 async function processChunk(inputPath, outputFileName, start, duration) {
