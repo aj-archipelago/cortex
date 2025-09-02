@@ -4,6 +4,9 @@ import { LocalStorageProvider } from "./LocalStorageProvider.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
+// Import blob handler constants at module level to avoid repeated dynamic imports
+const { AZURE_STORAGE_CONTAINER_NAMES, DEFAULT_AZURE_STORAGE_CONTAINER_NAME, isValidContainerName } = await import("../../blobHandler.js");
+
 export class StorageFactory {
   constructor() {
     this.providers = new Map();
@@ -18,7 +21,6 @@ export class StorageFactory {
 
   async getAzureProvider(containerName = null) {
     // Use provided container name or default to first in whitelist
-    const { AZURE_STORAGE_CONTAINER_NAMES, DEFAULT_AZURE_STORAGE_CONTAINER_NAME, isValidContainerName } = await import("../../blobHandler.js");
     const finalContainerName = containerName || DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
     
     // Validate container name
