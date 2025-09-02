@@ -175,7 +175,7 @@ export class StorageService {
     const results = [];
 
     // Get file information from Redis map
-    const { getFileStoreMap, removeFromFileStoreMap } = await import("../redis.js");
+    const { getFileStoreMap, removeFromFileStoreMap } = await import("../../redis.js");
     const hashResult = await getFileStoreMap(hash);
     
     if (!hashResult) {
