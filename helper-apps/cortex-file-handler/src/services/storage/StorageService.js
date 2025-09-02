@@ -71,6 +71,8 @@ export class StorageService {
   }
 
   async uploadFileToBackup(fileOrBuffer, filename) {
+    await this._initialize();
+    
     if (!this.backupProvider) {
       throw new Error("Backup provider not configured");
     }
@@ -101,6 +103,8 @@ export class StorageService {
   }
 
   async downloadFile(url, destinationPath = null) {
+    await this._initialize();
+    
     const useBackup = url.startsWith("gs://");
 
     if (useBackup && !this.backupProvider) {
@@ -134,6 +138,8 @@ export class StorageService {
   }
 
   async deleteFile(url) {
+    await this._initialize();
+    
     if (typeof this.primaryProvider.deleteFile === "function") {
       return await this.primaryProvider.deleteFile(url);
     }
@@ -142,6 +148,8 @@ export class StorageService {
   }
 
   async deleteFileFromBackup(url) {
+    await this._initialize();
+    
     if (!this.backupProvider) {
       throw new Error("Backup provider not configured");
     }
@@ -153,6 +161,8 @@ export class StorageService {
   }
 
   async uploadFileWithProviders(context, filePath, requestId, hash = null) {
+    await this._initialize();
+    
     // Generate filename once to ensure both providers use the same name
     const fileExtension = path.extname(filePath);
     const shortId = generateShortId();
@@ -272,6 +282,8 @@ export class StorageService {
   }
 
   async ensureGCSUpload(context, existingFile) {
+    await this._initialize();
+    
     if (
       !this.backupProvider ||
       !existingFile.url ||
@@ -314,6 +326,8 @@ export class StorageService {
   }
 
   async downloadFileFromBackup(url, destinationPath = null) {
+    await this._initialize();
+    
     if (!this.backupProvider) {
       throw new Error("Backup provider not configured");
     }
