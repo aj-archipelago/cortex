@@ -35,14 +35,23 @@ function isBase64(str) {
 }
 
 const { SAS_TOKEN_LIFE_DAYS = 30 } = process.env;
-const GCP_SERVICE_ACCOUNT_KEY =
-  process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
-  process.env.GCP_SERVICE_ACCOUNT_KEY ||
-  "{}";
-const GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY)
-  ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, "base64").toString())
-  : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
-const { project_id: GCP_PROJECT_ID } = GCP_SERVICE_ACCOUNT;
+let GCP_SERVICE_ACCOUNT;
+let GCP_PROJECT_ID;
+
+try {
+  const GCP_SERVICE_ACCOUNT_KEY =
+    process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
+    process.env.GCP_SERVICE_ACCOUNT_KEY ||
+    "{}";
+  GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY)
+    ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, "base64").toString())
+    : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
+  GCP_PROJECT_ID = GCP_SERVICE_ACCOUNT.project_id;
+} catch (error) {
+  console.warn("Error parsing GCP service account credentials, GCS will not be used:", error.message);
+  GCP_SERVICE_ACCOUNT = {};
+  GCP_PROJECT_ID = null;
+}
 
 let gcs;
 if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {

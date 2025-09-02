@@ -160,6 +160,40 @@ export class AzureStorageProvider extends StorageProvider {
     return result;
   }
 
+  async deleteFile(url) {
+    if (!url) throw new Error("Missing URL parameter");
+
+    try {
+      const { containerClient } = await this.getBlobClient();
+      
+      // Extract blob name from URL
+      const urlObj = new URL(url);
+      let blobName = urlObj.pathname.substring(1); // Remove leading slash
+      
+      // Remove container name prefix if present
+      if (blobName.startsWith(this.containerName + '/')) {
+        blobName = blobName.substring(this.containerName.length + 1);
+      }
+      
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      
+      try {
+        await blockBlobClient.delete();
+        return blobName;
+      } catch (error) {
+        if (error.statusCode === 404) {
+          console.warn(`Azure blob not found during delete: ${blobName}`);
+          return null;
+        } else {
+          throw error;
+        }
+      }
+    } catch (error) {
+      console.error("Error deleting Azure blob:", error);
+      throw error;
+    }
+  }
+
   async fileExists(url) {
     try {
       // First attempt a lightweight HEAD request

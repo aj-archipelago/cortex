@@ -15,17 +15,21 @@ import { publicIpv4 } from "public-ip";
 // a test run.
 
 let ipAddress = "localhost";
-if (process.env.NODE_ENV !== "test") {
-  try {
-    ipAddress = await publicIpv4();
-  } catch (err) {
-    // In rare cases querying the public IP can fail (e.g. no network when
-    // running offline).  Keep the default of "localhost" in that case so we
-    // still generate valid URLs.
-    console.warn(
-      "Unable to determine public IPv4 address – defaulting to 'localhost'.",
-      err,
-    );
+
+// Initialize IP address asynchronously (only for non-test environments)
+async function initializeIpAddress() {
+  if (process.env.NODE_ENV !== "test") {
+    try {
+      ipAddress = await publicIpv4();
+    } catch (err) {
+      // In rare cases querying the public IP can fail (e.g. no network when
+      // running offline).  Keep the default of "localhost" in that case so we
+      // still generate valid URLs.
+      console.warn(
+        "Unable to determine public IPv4 address – defaulting to 'localhost'.",
+        err,
+      );
+    }
   }
 }
 
@@ -82,10 +86,16 @@ app.all("/api/MediaFileChunker", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(
-    `Cortex File Handler v${version} running on port ${port} (includes legacy MediaFileChunker endpoint)`,
-  );
-});
+// Only start the server if this module is being run directly (not imported for tests)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  initializeIpAddress().then(() => {
+    app.listen(port, () => {
+      console.log(
+        `Cortex File Handler v${version} running on port ${port} (includes legacy MediaFileChunker endpoint)`,
+      );
+    });
+  });
+}
+// For tests, we'll keep ipAddress as "localhost" by default - no need to initialize
 
-export { port, publicFolder, ipAddress };
+export { port, publicFolder, ipAddress, app };

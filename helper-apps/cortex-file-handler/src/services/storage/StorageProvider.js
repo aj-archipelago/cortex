@@ -25,6 +25,15 @@ export class StorageProvider {
   }
 
   /**
+   * Delete a single file by its URL
+   * @param {string} url - The URL of the file to delete
+   * @returns {Promise<string|null>} The deleted file path/name or null if not found
+   */
+  async deleteFile(url) {
+    throw new Error("Method not implemented");
+  }
+
+  /**
    * Check if a file exists at the given URL
    * @param {string} url - The URL to check
    * @returns {Promise<boolean>} Whether the file exists

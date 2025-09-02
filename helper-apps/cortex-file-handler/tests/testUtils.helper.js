@@ -64,7 +64,11 @@ export function getFolderNameFromUrl(url) {
 // Helper function to create a test media (audio) file of specified duration using ffmpeg
 export async function createTestMediaFile(filepath, durationSeconds = 10) {
   try {
-    console.log(`Creating test file: ${filepath} (${durationSeconds}s)`);
+    console.log(`🎵 Creating test file: ${filepath} (${durationSeconds}s)`);
+    console.log(`⏱️  Starting ffmpeg command for ${durationSeconds}s file...`);
+    
+    const startTime = Date.now();
+    
     // Generate silence using ffmpeg (mono, 44.1kHz)
     execSync(
       `ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t ${durationSeconds} -q:a 9 -acodec libmp3lame "${filepath}"`,
@@ -73,16 +77,20 @@ export async function createTestMediaFile(filepath, durationSeconds = 10) {
       },
     );
 
+    const endTime = Date.now();
+    console.log(`⏱️  ffmpeg completed in ${(endTime - startTime) / 1000}s`);
+
     // Verify the file was created and has content
+    console.log(`🔍 Verifying file: ${filepath}`);
     const stats = await fs.stat(filepath);
     if (stats.size === 0) {
       throw new Error("Generated file is empty");
     }
     console.log(
-      `Successfully created ${filepath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`,
+      `✅ Successfully created ${filepath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`,
     );
   } catch (error) {
-    console.error(`Error creating test file ${filepath}:`, error.message);
+    console.error(`❌ Error creating test file ${filepath}:`, error.message);
     if (error.stderr) console.error("ffmpeg error:", error.stderr.toString());
     throw error;
   }

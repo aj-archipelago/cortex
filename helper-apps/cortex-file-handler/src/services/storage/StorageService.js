@@ -160,6 +160,68 @@ export class StorageService {
     return await this.backupProvider.deleteFiles([url]);
   }
 
+  /**
+   * Delete a single file by its hash from both primary and backup storage
+   * @param {string} hash - The hash of the file to delete
+   * @returns {Promise<Object>} Object containing deletion results and file info
+   */
+  async deleteFileByHash(hash) {
+    await this._initialize();
+    
+    if (!hash) {
+      throw new Error("Missing hash parameter");
+    }
+
+    const results = [];
+
+    // Get file information from Redis map
+    const { getFileStoreMap, removeFromFileStoreMap } = await import("../redis.js");
+    const hashResult = await getFileStoreMap(hash);
+    
+    if (!hashResult) {
+      throw new Error(`File with hash ${hash} not found`);
+    }
+
+    // Delete from primary storage
+    if (hashResult.url) {
+      try {
+        const primaryResult = await this.deleteFile(hashResult.url);
+        if (primaryResult) {
+          results.push({ provider: 'primary', result: primaryResult });
+        }
+      } catch (error) {
+        console.error(`Error deleting file from primary storage:`, error);
+        results.push({ provider: 'primary', error: error.message });
+      }
+    }
+
+    // Delete from backup storage (GCS)
+    if (hashResult.gcs && this.backupProvider) {
+      try {
+        const backupResult = await this.deleteFileFromBackup(hashResult.gcs);
+        if (backupResult) {
+          results.push({ provider: 'backup', result: backupResult });
+        }
+      } catch (error) {
+        console.error(`Error deleting file from backup storage:`, error);
+        results.push({ provider: 'backup', error: error.message });
+      }
+    }
+
+    // Remove from Redis map
+    try {
+      await removeFromFileStoreMap(hash);
+    } catch (error) {
+      console.error(`Error removing hash from Redis map:`, error);
+    }
+
+    return {
+      hash,
+      deleted: results,
+      filename: hashResult.filename
+    };
+  }
+
   async uploadFileWithProviders(context, filePath, requestId, hash = null) {
     await this._initialize();
     

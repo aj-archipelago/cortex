@@ -131,13 +131,39 @@ async function CortexFileHandler(context, req) {
   }
 
   // Clean up files when request delete which means processing marked completed
+  // Supports two modes:
+  // 1. Delete multiple files by requestId (existing behavior)
+  // 2. Delete single file by hash (new behavior)
   if (operation === "delete") {
     const deleteRequestId = req.query.requestId || requestId;
     const deleteHash = req.query.hash || hash;
+    
+    // If only hash is provided, delete single file by hash
+    if (deleteHash && !deleteRequestId) {
+      try {
+        const deleted = await storageService.deleteFileByHash(deleteHash);
+        context.res = {
+          status: 200,
+          body: { 
+            message: `File with hash ${deleteHash} deleted successfully`,
+            deleted 
+          },
+        };
+        return;
+      } catch (error) {
+        context.res = {
+          status: 404,
+          body: { error: error.message },
+        };
+        return;
+      }
+    }
+    
+    // If requestId is provided, use the existing multi-file delete flow
     if (!deleteRequestId) {
       context.res = {
         status: 400,
-        body: "Please pass a requestId on the query string",
+        body: "Please pass either a requestId or hash on the query string",
       };
       return;
     }

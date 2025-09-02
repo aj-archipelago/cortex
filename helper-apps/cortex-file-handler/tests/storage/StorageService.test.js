@@ -1,6 +1,7 @@
 import test from "ava";
 import { StorageService } from "../../src/services/storage/StorageService.js";
 import { StorageFactory } from "../../src/services/storage/StorageFactory.js";
+import { getFileStoreMap, setFileStoreMap, removeFromFileStoreMap } from "../../src/redis.js";
 import path from "path";
 import os from "os";
 import fs from "fs";
@@ -129,5 +130,67 @@ test("should download file from backup storage", async (t) => {
     } else {
       throw error;
     }
+  }
+});
+
+test("should delete file by hash", async (t) => {
+  const factory = new StorageFactory();
+  const service = new StorageService(factory);
+  const testContent = "test content for hash deletion";
+  const buffer = Buffer.from(testContent);
+  const testHash = "test-hash-123";
+
+  try {
+    // Upload file first
+    const uploadResult = await service.uploadFile(buffer, "test-hash-delete.txt");
+    t.truthy(uploadResult.url);
+
+    // Store file info in Redis map
+    const fileInfo = {
+      url: uploadResult.url,
+      filename: "test-hash-delete.txt",
+      hash: testHash,
+      timestamp: new Date().toISOString()
+    };
+    await setFileStoreMap(testHash, fileInfo);
+
+    // Verify file exists in map
+    const storedInfo = await getFileStoreMap(testHash);
+    t.truthy(storedInfo);
+    t.is(storedInfo.url, uploadResult.url);
+
+    // Delete file by hash
+    const deleteResult = await service.deleteFileByHash(testHash);
+    t.truthy(deleteResult);
+    t.is(deleteResult.hash, testHash);
+    t.is(deleteResult.filename, "test-hash-delete.txt");
+    t.truthy(deleteResult.deleted);
+    t.true(Array.isArray(deleteResult.deleted));
+
+    // Verify file is removed from Redis map
+    const removedInfo = await getFileStoreMap(testHash);
+    t.falsy(removedInfo);
+
+  } catch (error) {
+    // Cleanup in case of error
+    try {
+      await removeFromFileStoreMap(testHash);
+    } catch (cleanupError) {
+      // Ignore cleanup errors
+    }
+    throw error;
+  }
+});
+
+test("should handle delete file by hash when file not found", async (t) => {
+  const factory = new StorageFactory();
+  const service = new StorageService(factory);
+  const nonExistentHash = "non-existent-hash-456";
+
+  try {
+    await service.deleteFileByHash(nonExistentHash);
+    t.fail("Should have thrown an error for non-existent hash");
+  } catch (error) {
+    t.true(error.message.includes("not found"));
   }
 });
