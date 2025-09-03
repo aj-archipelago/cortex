@@ -1,6 +1,50 @@
 import redis from "ioredis";
+
 const connectionString = process.env["REDIS_CONNECTION_STRING"];
-const client = redis.createClient(connectionString);
+
+// Create a mock client for test environment when Redis is not configured
+const createMockClient = () => {
+  const store = new Map();
+  const hashMap = new Map();
+  
+  return {
+    connected: false,
+    async connect() { return Promise.resolve(); },
+    async publish() { return Promise.resolve(); },
+    async hgetall(hashName) { 
+      const hash = hashMap.get(hashName);
+      return hash ? Object.fromEntries(hash) : {};
+    },
+    async hset(hashName, key, value) { 
+      if (!hashMap.has(hashName)) {
+        hashMap.set(hashName, new Map());
+      }
+      hashMap.get(hashName).set(key, value);
+      return Promise.resolve();
+    },
+    async hget(hashName, key) { 
+      const hash = hashMap.get(hashName);
+      return hash ? hash.get(key) || null : null;
+    },
+    async hdel(hashName, key) { 
+      const hash = hashMap.get(hashName);
+      if (hash && hash.has(key)) {
+        hash.delete(key);
+        return 1;
+      }
+      return 0;
+    },
+  };
+};
+
+// Only create real Redis client if connection string is provided
+let client;
+if (connectionString && process.env.NODE_ENV !== 'test') {
+  client = redis.createClient(connectionString);
+} else {
+  console.log('Using mock Redis client for tests or missing connection string');
+  client = createMockClient();
+}
 
 const channel = "requestProgress";
 
@@ -222,4 +266,5 @@ export {
   removeFromFileStoreMap,
   cleanupRedisFileStoreMap,
   cleanupRedisFileStoreMapAge,
+  client,
 };

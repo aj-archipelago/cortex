@@ -9,11 +9,7 @@ import { CONVERTED_EXTENSIONS } from "../constants.js";
 import { v4 as uuidv4 } from "uuid";
 import { sanitizeFilename, generateShortId } from "../utils/filenameUtils.js";
 
-const MARKITDOWN_CONVERT_URL = process.env.MARKITDOWN_CONVERT_URL;
-
-if (!MARKITDOWN_CONVERT_URL) {
-  throw new Error("MARKITDOWN_CONVERT_URL is not set");
-}
+const MARKITDOWN_CONVERT_URL = process.env.MARKITDOWN_CONVERT_URL || null;
 
 export class ConversionService {
   constructor(context) {
@@ -257,6 +253,9 @@ export class ConversionService {
 
   async _convertToMarkdown(fileUrl) {
     try {
+      if (!MARKITDOWN_CONVERT_URL) {
+        throw new Error("MARKITDOWN_CONVERT_URL is not set");
+      }
       const apiUrl = `${MARKITDOWN_CONVERT_URL}${encodeURIComponent(fileUrl)}`;
       const response = await axios.get(apiUrl);
       return response.data.markdown || "";

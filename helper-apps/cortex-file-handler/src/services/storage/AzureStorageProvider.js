@@ -43,27 +43,64 @@ export class AzureStorageProvider extends StorageProvider {
     return { blobServiceClient, containerClient };
   }
 
-  generateSASToken(containerClient, blobName) {
-    const { accountName, accountKey } = containerClient.credential;
+  generateSASToken(containerClient, blobName, options = {}) {
+    // Handle Azurite (development storage) credentials
+    let accountName, accountKey;
+    
+    // Note: Debug logging removed for production
+    
+    if (containerClient.credential && containerClient.credential.accountName) {
+      // Regular Azure Storage credentials
+      accountName = containerClient.credential.accountName;
+      
+      // Handle Buffer case (Azurite) vs string case (real Azure)
+      if (Buffer.isBuffer(containerClient.credential.accountKey)) {
+        accountKey = containerClient.credential.accountKey.toString('base64');
+      } else {
+        accountKey = containerClient.credential.accountKey;
+      }
+    } else {
+      // Azurite development storage fallback
+      accountName = "devstoreaccount1";
+      accountKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
+    }
+    
     const sharedKeyCredential = new StorageSharedKeyCredential(
       accountName,
       accountKey,
     );
 
+    // Support custom duration: minutes, hours, or fall back to default days
+    let expirationTime;
+    if (options.minutes) {
+      expirationTime = new Date(new Date().valueOf() + options.minutes * 60 * 1000);
+    } else if (options.hours) {
+      expirationTime = new Date(new Date().valueOf() + options.hours * 60 * 60 * 1000);
+    } else if (options.days) {
+      expirationTime = new Date(new Date().valueOf() + options.days * 24 * 60 * 60 * 1000);
+    } else {
+      // Default to configured sasTokenLifeDays
+      expirationTime = new Date(
+        new Date().valueOf() + this.sasTokenLifeDays * 24 * 60 * 60 * 1000,
+      );
+    }
+
     const sasOptions = {
       containerName: containerClient.containerName,
       blobName: blobName,
-      permissions: "r",
+      permissions: options.permissions || "r",
       startsOn: new Date(),
-      expiresOn: new Date(
-        new Date().valueOf() + this.sasTokenLifeDays * 24 * 60 * 60 * 1000,
-      ),
+      expiresOn: expirationTime,
     };
 
     return generateBlobSASQueryParameters(
       sasOptions,
       sharedKeyCredential,
     ).toString();
+  }
+
+  generateShortLivedSASToken(containerClient, blobName, minutes = 5) {
+    return this.generateSASToken(containerClient, blobName, { minutes });
   }
 
   async uploadFile(context, filePath, requestId, hash = null, filename = null) {
@@ -121,6 +158,40 @@ export class AzureStorageProvider extends StorageProvider {
     }
 
     return result;
+  }
+
+  async deleteFile(url) {
+    if (!url) throw new Error("Missing URL parameter");
+
+    try {
+      const { containerClient } = await this.getBlobClient();
+      
+      // Extract blob name from URL
+      const urlObj = new URL(url);
+      let blobName = urlObj.pathname.substring(1); // Remove leading slash
+      
+      // Remove container name prefix if present
+      if (blobName.startsWith(this.containerName + '/')) {
+        blobName = blobName.substring(this.containerName.length + 1);
+      }
+      
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+      
+      try {
+        await blockBlobClient.delete();
+        return blobName;
+      } catch (error) {
+        if (error.statusCode === 404) {
+          console.warn(`Azure blob not found during delete: ${blobName}`);
+          return null;
+        } else {
+          throw error;
+        }
+      }
+    } catch (error) {
+      console.error("Error deleting Azure blob:", error);
+      throw error;
+    }
   }
 
   async fileExists(url) {
