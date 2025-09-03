@@ -31,29 +31,15 @@ class OpenAIReasoningPlugin extends OpenAIChatPlugin {
             return [{ type: 'text', text: content }];
         }
         if (Array.isArray(content)) {
-            // Flatten content if it's a nested array
-            const flatContent = content.flat();
-            return flatContent.map(item => {
+            return content.map(item => {
                 if (typeof item === 'string') {
                     return { type: 'text', text: item };
                 }
-                if (typeof item === 'object' && item !== null) {
-                    // If item already has type, return as-is
-                    if (item.type) {
-                        return { type: item.type, text: item.text || '' };
-                    }
-                    // Otherwise treat as text
-                    return { type: 'text', text: JSON.stringify(item) };
-                }
-                return { type: 'text', text: String(item) };
+                const { type, text } = item;
+                return { type, text: text || '' };
             });
         }
-        // Handle null, undefined, or empty content
-        if (content === null || content === undefined || content === '') {
-            return [{ type: 'text', text: '' }];
-        }
-        // Fallback for any other type
-        return [{ type: 'text', text: String(content) }];
+        return [];
     }
 
     getRequestParameters(text, parameters, prompt) {

@@ -45,7 +45,7 @@ class OpenAIChatPlugin extends ModelPlugin {
     // Set up parameters specific to the OpenAI Chat API
     getRequestParameters(text, parameters, prompt) {
         const { modelPromptText, modelPromptMessages, tokenLength, modelPrompt } = this.getCompiledPrompt(text, parameters, prompt);
-        const { stream, tools, tool_choice, functions, function_call } = parameters;
+        const { stream } = parameters;
     
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxPromptTokens();
@@ -65,69 +65,12 @@ class OpenAIChatPlugin extends ModelPlugin {
             // Remove older messages until the token length is within the model's limit
             requestMessages = this.truncateMessagesToTargetLength(requestMessages, modelTargetTokenLength);
         }
-
-        // Helper function to convert stringified parameters back to objects
-        const parseToolsParameter = (toolsParam) => {
-            if (!toolsParam || !Array.isArray(toolsParam)) return toolsParam;
-            
-            return toolsParam.map(tool => {
-                if (typeof tool === 'object' && tool.function && typeof tool.function.parameters === 'string') {
-                    try {
-                        return {
-                            ...tool,
-                            function: {
-                                ...tool.function,
-                                parameters: JSON.parse(tool.function.parameters)
-                            }
-                        };
-                    } catch (e) {
-                        logger.warn(`Failed to parse tool function parameters: ${e.message}`);
-                        return tool;
-                    }
-                }
-                return tool;
-            });
-        };
-
-        // Helper function to convert stringified function parameters back to objects
-        const parseFunctionsParameter = (functionsParam) => {
-            if (!functionsParam || !Array.isArray(functionsParam)) return functionsParam;
-            
-            return functionsParam.map(func => {
-                if (typeof func === 'object' && func.parameters && typeof func.parameters === 'string') {
-                    try {
-                        return {
-                            ...func,
-                            parameters: JSON.parse(func.parameters)
-                        };
-                    } catch (e) {
-                        logger.warn(`Failed to parse function parameters: ${e.message}`);
-                        return func;
-                    }
-                }
-                return func;
-            });
-        };
     
         const requestParameters = {
-            messages: requestMessages,
-            temperature: this.temperature ?? 0.7,
-            ...(stream !== undefined ? { stream } : {}),
+        messages: requestMessages,
+        temperature: this.temperature ?? 0.7,
+        ...(stream !== undefined ? { stream } : {}),
         };
-
-        // Add tools parameters if they exist, converting stringified parameters back to objects
-        if (tools && Array.isArray(tools) && tools.length > 0) {
-            requestParameters.tools = parseToolsParameter(tools);
-        }
-        if (tool_choice) {
-            requestParameters.tool_choice = tool_choice;
-        }
-        if (functions && Array.isArray(functions) && functions.length > 0) {
-            requestParameters.functions = parseFunctionsParameter(functions);
-        }
-        if (function_call) {
-            requestParameters.function_call = function_call;
-        }
     
         return requestParameters;
     }

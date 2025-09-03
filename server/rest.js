@@ -37,7 +37,78 @@ const chunkTextIntoTokens = (() => {
 })();
 
 const processRestRequest = async (server, req, pathway, name, parameterMap = {}) => {
+    // Minimal, synchronous message normalizer for OpenAI-style inputs
+    const ensureMessagesTypedForOpenAI = (messages) => {
+        if (!Array.isArray(messages)) return messages;
+
+        const toTyped = (item) => {
+            try {
+                // If the item is a JSON string, try to parse
+                if (typeof item === 'string') {
+                    const trimmed = item.trim();
+                    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                        const parsed = JSON.parse(trimmed);
+                        return toTyped(parsed);
+                    }
+                    return { type: 'text', text: item };
+                }
+
+                if (item && typeof item === 'object') {
+                    const normalized = { ...item };
+                    // Fix common mistake: 'types' instead of 'type'
+                    if (normalized.types && !normalized.type) {
+                        normalized.type = normalized.types;
+                        delete normalized.types;
+                    }
+
+                    // Normalize image content
+                    if (normalized.type === 'image' || normalized.type === 'image_url' || normalized.image_url || normalized.image || normalized.url) {
+                        const url = normalized.url || normalized.image_url?.url || normalized.image?.url;
+                        if (url) {
+                            return { type: 'image_url', image_url: { url } };
+                        }
+                    }
+
+                    // Normalize text content
+                    if (normalized.type === 'text' || typeof normalized.text === 'string') {
+                        return { type: 'text', text: normalized.text ?? '' };
+                    }
+
+                    // Fallback: stringify unknown objects as text
+                    return { type: 'text', text: JSON.stringify(normalized) };
+                }
+
+                // Null/undefined fallback
+                return { type: 'text', text: '' };
+            } catch (_) {
+                return { type: 'text', text: String(item ?? '') };
+            }
+        };
+
+        return messages.map((msg) => {
+            // Preserve assistant tool call messages content=null
+            if (msg && msg.role === 'assistant' && Array.isArray(msg.tool_calls)) {
+                return { ...msg, content: null };
+            }
+
+            const content = msg?.content;
+            // Ensure content is an array of typed objects
+            const contentArray = Array.isArray(content) ? content : (content === undefined || content === null ? [] : [content]);
+            const typedArray = contentArray.map(toTyped);
+            return { ...msg, content: typedArray };
+        });
+    };
     const fieldVariableDefs = pathway.typeDef(pathway).restDefinition || [];
+
+    // If this pathway emulates OpenAI chat, normalize incoming messages before building variables
+    if (pathway.emulateOpenAIChatModel) {
+        if (Array.isArray(req.body.messages)) {
+            req.body.messages = ensureMessagesTypedForOpenAI(req.body.messages);
+        }
+        if (Array.isArray(req.body.chatHistory)) {
+            req.body.chatHistory = ensureMessagesTypedForOpenAI(req.body.chatHistory);
+        }
+    }
 
     const convertType = (value, type) => {
         if (type === 'Boolean') {
@@ -45,63 +116,55 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         } else if (type === 'Int') {
             return parseInt(value, 10);
         } else if (type === '[MultiMessage]' && Array.isArray(value)) {
+            // Normalize messages for GraphQL MultiMessage input (role, name, content:[String])
             return value.map(msg => {
-                // Special handling for messages with tool calls - don't convert content
-                if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
-                    return {
-                        ...msg,
-                        content: msg.content || null // Keep content as-is for tool call messages, null if empty
-                    };
+                const normalized = {
+                    role: msg.role,
+                    name: msg.name,
+                };
+
+                // If incoming assistant message had tool_calls, strip unsupported fields and preserve null content
+                if (Array.isArray(msg.tool_calls) && msg.role === 'assistant') {
+                    normalized.content = msg.content || null;
+                    return normalized;
                 }
 
                 // Handle empty, null, or undefined content
                 if (msg.content === "" || msg.content === null || msg.content === undefined) {
-                    return {
-                        ...msg,
-                        content: msg.role === "assistant" && msg.tool_calls ? null : ""
-                    };
+                    normalized.content = "";
+                    return normalized;
                 }
 
-                // Handle string content - leave as string for OpenAI API
+                // Handle string content
                 if (typeof msg.content === 'string') {
-                    return {
-                        ...msg,
-                        content: msg.content
-                    };
+                    normalized.content = msg.content;
+                    return normalized;
                 }
 
                 // Handle array content - JSON.stringify each item as per original implementation
                 if (Array.isArray(msg.content)) {
-                    return {
-                        ...msg,
-                        content: msg.content.map(item => JSON.stringify(item))
-                    };
+                    normalized.content = msg.content.map(item => JSON.stringify(item));
+                    return normalized;
                 }
 
-                // For any other type, convert to string
-                return {
-                    ...msg,
-                    content: String(msg.content)
-                };
+                // Fallback for any other type
+                normalized.content = String(msg.content);
+                return normalized;
             });
         } else if (type === '[Tool]' && Array.isArray(value)) {
-            // Handle OpenAI tools parameter - stringify the parameters field
+            // Accept OpenAI tools param; ensure parameters is a string for GraphQL transport
             return value.map(tool => ({
                 ...tool,
                 function: tool.function ? {
                     ...tool.function,
-                    parameters: typeof tool.function.parameters === 'object' ?
-                        JSON.stringify(tool.function.parameters) :
-                        tool.function.parameters
+                    parameters: typeof tool.function.parameters === 'object' ? JSON.stringify(tool.function.parameters) : tool.function.parameters
                 } : tool.function
             }));
         } else if (type === '[Function]' && Array.isArray(value)) {
-            // Handle OpenAI functions parameter (legacy) - stringify the parameters field
+            // Accept legacy functions param
             return value.map(func => ({
                 ...func,
-                parameters: typeof func.parameters === 'object' ?
-                    JSON.stringify(func.parameters) :
-                    func.parameters
+                parameters: typeof func.parameters === 'object' ? JSON.stringify(func.parameters) : func.parameters
             }));
         } else if (type === '[Message]' && Array.isArray(value)) {
             return value;
@@ -111,6 +174,10 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
     };
 
     const variables = fieldVariableDefs.reduce((acc, variableDef) => {
+        // Skip tool-related vars to avoid GraphQL type mismatches in main schema
+        if (['tools', 'functions', 'tool_choice', 'function_call'].includes(variableDef.name)) {
+            return acc;
+        }
         const requestBodyParamName = Object.keys(parameterMap).includes(variableDef.name)
             ? parameterMap[variableDef.name]
             : variableDef.name;
@@ -121,8 +188,10 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         return acc;
     }, {});
 
-    const variableParams = fieldVariableDefs.map(({ name, type }) => `$${name}: ${type}`).join(', ');
-    const queryArgs = fieldVariableDefs.map(({ name }) => `${name}: $${name}`).join(', ');
+    // Exclude tool-related vars from the GraphQL operation
+    const filteredFieldDefs = fieldVariableDefs.filter(({ name }) => !['tools', 'functions', 'tool_choice', 'function_call'].includes(name));
+    const variableParams = filteredFieldDefs.map(({ name, type }) => `$${name}: ${type}`).join(', ');
+    const queryArgs = filteredFieldDefs.map(({ name }) => `${name}: $${name}`).join(', ');
 
     const query = `
             query ${name}(${variableParams}) {
@@ -135,6 +204,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                 }
             `;
 
+    // Execute GraphQL without tool fields; we'll pass tools to OpenAI via pathway executor
     const result = await server.executeOperation({ query, variables });
 
     // if we're streaming and there are errors, we return a standard error code
@@ -147,6 +217,30 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
     // otherwise errors can just be returned as a string
     let resultText = result?.body?.singleResult?.data?.[name]?.result || result?.body?.singleResult?.errors?.[0]?.message || "";
     const toolData = result?.body?.singleResult?.data?.[name]?.tool;
+
+    // If the pathway didn't directly produce tool calls but the client sent tools, attach passthrough
+    try {
+        const clientTools = Array.isArray(req.body.tools) ? req.body.tools : (Array.isArray(req.body.functions) ? req.body.functions : null);
+        const toolChoice = req.body.tool_choice || req.body.function_call;
+        if (!toolData && clientTools && clientTools.length > 0) {
+            // Preserve content as null if tools were intended to be called
+            const passthrough = {
+                passthrough_tool_calls: clientTools.map((t, idx) => ({
+                    id: `call_${idx}`,
+                    type: 'function',
+                    function: {
+                        name: t.function?.name || t.name,
+                        arguments: typeof t.function?.parameters === 'string' ? t.function.parameters : JSON.stringify(t.function?.parameters || t.parameters || {})
+                    }
+                })),
+                content: toolChoice ? null : resultText
+            };
+            // Put back into toolData string for downstream formatting
+            result.body.singleResult.data[name].tool = JSON.stringify(passthrough);
+        }
+    } catch (e) {
+        logger.warn(`Tool passthrough synthesis failed: ${e.message}`);
+    }
 
     // Ensure resultText is always a string for OpenAI API compatibility
     if (typeof resultText !== 'string') {
@@ -476,13 +570,25 @@ function buildRestEndpoints(pathways, app, server, config) {
                 ],
             };
 
-            // Handle tool calls if present
+            // Handle tool calls if present (from pathway or synthesized passthrough)
             if (toolData) {
                 try {
                     const toolJson = JSON.parse(toolData);
                     if (toolJson.passthrough_tool_calls && Array.isArray(toolJson.passthrough_tool_calls)) {
                         jsonResponse.choices[0].message.tool_calls = toolJson.passthrough_tool_calls;
-                        jsonResponse.choices[0].message.content = toolJson.content || null;
+                        jsonResponse.choices[0].message.content = toolJson.content ?? null;
+                    }
+                    // If we only have client tools (no tool calls executed), attach as empty tool_calls when tool_choice demands a call
+                    else if (Array.isArray(req.body.tools) || Array.isArray(req.body.functions)) {
+                        const clientTools = Array.isArray(req.body.tools) ? req.body.tools : req.body.functions;
+                        if (req.body.tool_choice && req.body.tool_choice !== 'none') {
+                            jsonResponse.choices[0].message.tool_calls = clientTools.map((t, idx) => ({
+                                id: `call_${idx}`,
+                                type: 'function',
+                                function: { name: t.function?.name || t.name, arguments: '' }
+                            }));
+                            jsonResponse.choices[0].message.content = null;
+                        }
                     }
                 } catch (e) {
                     logger.warn(`Failed to parse tool data: ${e.message}`);
