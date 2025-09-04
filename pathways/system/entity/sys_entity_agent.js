@@ -237,7 +237,7 @@ export default {
 
         if(entityConfig?.files && entityConfig?.files.length > 0) {
             //get last user message if not create one to add files to
-            const lastUserMessage = args.chatHistory.filter(message => message.role === "user").slice(-1)[0];
+            let lastUserMessage = args.chatHistory.filter(message => message.role === "user").slice(-1)[0];
             if(!lastUserMessage) {
                 lastUserMessage = {
                     role: "user",
@@ -252,16 +252,14 @@ export default {
             }
 
             //add files to the last user message content
-            lastUserMessage.content.push(...entityConfig?.files.map(file => (
-                JSON.stringify({
+            lastUserMessage.content.push(...entityConfig?.files.map(file => ({
                     type: "image_url",
                     gcs: file?.gcs,
                     url: file?.url,
                     image_url: { url: file?.url },
                     originalFilename: file?.name
                 })
-            )));
-
+            ));
         }
 
         // Kick off the memory lookup required pathway in parallel - this takes like 500ms so we want to start it early
