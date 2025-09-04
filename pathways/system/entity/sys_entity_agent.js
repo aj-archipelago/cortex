@@ -235,6 +235,35 @@ export default {
             args.chatHistory = [];
         }
 
+        if(entityConfig?.files && entityConfig?.files.length > 0) {
+            //get last user message if not create one to add files to
+            const lastUserMessage = args.chatHistory.filter(message => message.role === "user").slice(-1)[0];
+            if(!lastUserMessage) {
+                lastUserMessage = {
+                    role: "user",
+                    content: []
+                };
+                args.chatHistory.unshift(lastUserMessage);
+            }
+
+            //if last user message content is not array then convert to array
+            if(!Array.isArray(lastUserMessage.content)) {
+                lastUserMessage.content = [lastUserMessage.content];
+            }
+
+            //add files to the last user message content
+            lastUserMessage.content.push(...entityConfig?.files.map(file => (
+                JSON.stringify({
+                    type: "image_url",
+                    gcs: file?.gcs,
+                    url: file?.url,
+                    image_url: { url: file?.url },
+                    originalFilename: file?.name
+                })
+            )));
+
+        }
+
         // Kick off the memory lookup required pathway in parallel - this takes like 500ms so we want to start it early
         let memoryLookupRequiredPromise = null;
         if (entityUseMemory) {
