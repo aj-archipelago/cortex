@@ -248,7 +248,7 @@ export default {
 
             //if last user message content is not array then convert to array
             if(!Array.isArray(lastUserMessage.content)) {
-                lastUserMessage.content = [lastUserMessage.content];
+                lastUserMessage.content = lastUserMessage.content ? [lastUserMessage.content] : [];
             }
 
             //add files to the last user message content
