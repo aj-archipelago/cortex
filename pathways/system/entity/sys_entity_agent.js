@@ -243,7 +243,7 @@ export default {
                     role: "user",
                     content: []
                 };
-                args.chatHistory.unshift(lastUserMessage);
+                args.chatHistory.push(lastUserMessage);
             }
 
             //if last user message content is not array then convert to array
