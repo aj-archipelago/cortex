@@ -223,7 +223,7 @@ async function CortexFileHandler(context, req) {
 
       // For remote files, we don't need a requestId folder structure since it's just a single file
       // Pass empty string to store the file directly in the root
-      const res = await storageService.uploadFile(context, filename, '');
+      const res = await storageService.uploadFile(context, filename, '', null, null, container);
 
       //Update Redis (using hash as the key)
       await setFileStoreMap(remoteUrl, res);
@@ -355,6 +355,9 @@ async function CortexFileHandler(context, req) {
               context,
               downloadedFile,
               hash,
+              null,
+              null,
+              container,
             );
 
             // Update the hash result with the new primary storage URL
@@ -509,7 +512,7 @@ async function CortexFileHandler(context, req) {
       storageService.primaryProvider.constructor.name ===
       "LocalStorageProvider";
     // Use uploadBlob to handle multipart/form-data
-    const result = await uploadBlob(context, req, saveToLocal, null, hash);
+    const result = await uploadBlob(context, req, saveToLocal, null, hash, container);
     if (result?.hash && context?.res?.body) {
       await setFileStoreMap(result.hash, context.res.body);
     }
@@ -673,6 +676,7 @@ async function CortexFileHandler(context, req) {
           requestId,
           null,
           chunkFilename,
+          container,
         );
 
         const chunkOffset = chunkOffsets[index];

@@ -325,12 +325,13 @@ function uploadBlob(
   saveToLocal = false,
   filePath = null,
   hash = null,
+  containerParam = null,
 ) {
   return new Promise((resolve, reject) => {
     (async () => {
       try {
         let requestId = uuidv4();
-        let containerName = null;
+        let containerName = containerParam;
         const body = {};
         const fields = {}; // Buffer for all fields
 
@@ -355,6 +356,7 @@ function uploadBlob(
               uploadName, // Use the LLM-friendly filename
               resolve,
               hash,
+              containerName,
             );
             resolve(result);
           } catch (error) {
