@@ -62,15 +62,17 @@ class OpenAIChatPlugin extends ModelPlugin {
         
         // Check if the messages are in Palm format and convert them to OpenAI format if necessary
         const isPalmFormat = requestMessages.some(message => 'author' in message);
+
         if (isPalmFormat) {
             const context = modelPrompt.context || '';
-            requestMessages = requestMessages.map(message => ({
-                role: message.author === 'user' ? 'user' : 'assistant',
-                content: message.content
-            }));
-            if (context) {
-                requestMessages.unshift({ role: 'system', content: context });
-            }
+            const examples = modelPrompt.examples || [];
+            requestMessages = this.convertPalmToOpenAIMessages(context, examples, modelPromptMessages);
+        }
+    
+        // Check if the token length exceeds the model's max token length
+        if (tokenLength > modelTargetTokenLength && this.promptParameters?.manageTokenLength) {
+            // Remove older messages until the token length is within the model's limit
+            requestMessages = this.truncateMessagesToTargetLength(requestMessages, modelTargetTokenLength);
         }
 
         const requestParameters = {
