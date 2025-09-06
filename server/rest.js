@@ -36,6 +36,100 @@ const chunkTextIntoTokens = (() => {
     };
 })();
 
+// Helper functions to reduce code duplication
+const resolveModelName = (modelName, openAIChatModels, openAICompletionModels, isChat = false) => {
+    if (modelName.startsWith('ollama-')) {
+        const pathwayName = isChat ? 'sys_ollama_chat' : 'sys_ollama_completion';
+        return { pathwayName, isOllama: true };
+    } else {
+        const modelMap = isChat ? openAIChatModels : openAICompletionModels;
+        const pathwayName = modelMap[modelName] || modelMap['*'];
+        return { pathwayName, isOllama: false };
+    }
+};
+
+const handleModelNotFound = (res, modelName) => {
+    res.status(404).json({
+        error: `Model ${modelName} not found.`,
+    });
+};
+
+const extractResponseData = (pathwayResponse) => {
+    if (typeof pathwayResponse === 'string') {
+        return { resultText: pathwayResponse, toolData: null };
+    }
+    return {
+        resultText: pathwayResponse.result || "",
+        toolData: pathwayResponse.tool || null
+    };
+};
+
+const parseToolCalls = (toolData, resultText) => {
+    let messageContent = resultText;
+    let toolCalls = null;
+    let functionCall = null;
+    let finishReason = 'stop';
+
+    // First check if we have tool data from the pathway response
+    if (toolData) {
+        try {
+            const parsedToolData = typeof toolData === 'string' ? JSON.parse(toolData) : toolData;
+            
+            if (parsedToolData.tool_calls) {
+                toolCalls = parsedToolData.tool_calls;
+                finishReason = 'tool_calls';
+            } else if (parsedToolData.function_call) {
+                functionCall = parsedToolData.function_call;
+                finishReason = 'function_call';
+            }
+        } catch (e) {
+            // If parsing tool data fails, continue with regular parsing
+        }
+    }
+
+    // If no tool data found, try parsing the result text as before for backward compatibility
+    if (!toolCalls && !functionCall) {
+        try {
+            const parsedResponse = JSON.parse(resultText);
+            
+            // Check if this is a tool calls response
+            if (parsedResponse.role === 'assistant' && parsedResponse.hasOwnProperty('tool_calls')) {
+                if (parsedResponse.tool_calls) {
+                    toolCalls = parsedResponse.tool_calls;
+                    messageContent = parsedResponse.content || "";
+                    finishReason = 'tool_calls';
+                }
+            } else if (parsedResponse.tool_calls) {
+                toolCalls = parsedResponse.tool_calls;
+                messageContent = parsedResponse.content || "";
+                finishReason = 'tool_calls';
+            }
+            // Check if this is a legacy function call response
+            else if (parsedResponse.role === 'assistant' && parsedResponse.hasOwnProperty('function_call')) {
+                if (parsedResponse.function_call) {
+                    functionCall = parsedResponse.function_call;
+                    messageContent = parsedResponse.content || "";
+                    finishReason = 'function_call';
+                }
+            } else if (parsedResponse.function_call) {
+                functionCall = parsedResponse.function_call;
+                messageContent = parsedResponse.content || "";
+                finishReason = 'function_call';
+            }
+        } catch (e) {
+            // If parsing fails, treat as regular text response
+            messageContent = resultText;
+        }
+    }
+
+    return { messageContent, toolCalls, functionCall, finishReason };
+};
+
+const generateResponseId = (prefix) => {
+    const requestId = uuidv4();
+    return `${prefix}-${requestId}`;
+};
+
 const processRestRequest = async (server, req, pathway, name, parameterMap = {}) => {
     const fieldVariableDefs = pathway.typeDef(pathway).restDefinition || [];
 
@@ -75,6 +169,11 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
     if (req.body.tool_choice) {
         variables.tool_choice = req.body.tool_choice;
     }
+    
+    // Add functions to variables if they exist in the request (legacy function calling)
+    if (req.body.functions) {
+        variables.functions = JSON.stringify(req.body.functions);
+    }
 
     const variableParams = fieldVariableDefs.map(({ name, type }) => `$${name}: ${type}`).join(', ');
     const queryArgs = fieldVariableDefs.map(({ name }) => `${name}: $${name}`).join(', ');
@@ -85,6 +184,10 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                         contextId
                         previousResult
                         result
+                        tool
+                        warnings
+                        errors
+                        debug
                     }
                 }
             `;
@@ -98,9 +201,25 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         }
     }
     
-    // otherwise errors can just be returned as a string
-    const resultText = result?.body?.singleResult?.data?.[name]?.result || result?.body?.singleResult?.errors?.[0]?.message || "";
-    return resultText;
+    // For non-streaming, return both result and tool fields
+    const pathwayData = result?.body?.singleResult?.data?.[name];
+    if (pathwayData) {
+        return {
+            result: pathwayData.result || "",
+            tool: pathwayData.tool || null,
+            errors: pathwayData.errors || null,
+            warnings: pathwayData.warnings || null
+        };
+    }
+    
+    // If no pathway data, return error message
+    const errorMessage = result?.body?.singleResult?.errors?.[0]?.message || "";
+    return {
+        result: errorMessage,
+        tool: null,
+        errors: errorMessage ? [errorMessage] : null,
+        warnings: null
+    };
 };
 
 const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
@@ -159,6 +278,10 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         if (jsonResponse.object === 'text_completion') {
             jsonResponse.choices[0].text = inputText;
         } else {
+            // Ensure delta object exists
+            if (!jsonResponse.choices[0].delta) {
+                jsonResponse.choices[0].delta = {};
+            }
             jsonResponse.choices[0].delta.content = inputText;
         }
 
@@ -170,6 +293,10 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
         if (jsonResponse.object === 'text_completion') {
             // Handle text completion tool calls if needed
         } else {
+            // Ensure delta object exists
+            if (!jsonResponse.choices[0].delta) {
+                jsonResponse.choices[0].delta = {};
+            }
             jsonResponse.choices[0].delta.tool_calls = toolCalls;
         }
         return jsonResponse;
@@ -258,6 +385,68 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
                 return;
             }
 
+            // Check if this is a streaming event with tool calls
+            if (messageJson.choices && messageJson.choices[0] && messageJson.choices[0].delta) {
+                const delta = messageJson.choices[0].delta;
+                const finishReason = messageJson.choices[0].finish_reason;
+                
+                // Handle tool calls in streaming events
+                if (delta.tool_calls) {
+                    fillJsonResponseWithToolCalls(jsonResponse, delta.tool_calls, finishReason || "tool_calls");
+                    sendStreamData(jsonResponse);
+                    
+                    if (finishReason === "tool_calls") {
+        
+                        safeUnsubscribe();
+                        finishStream(res, jsonResponse);
+                    }
+                    return;
+                }
+                
+                // Handle the case where we get an empty delta with finish_reason: "tool_calls"
+                if (finishReason === "tool_calls" && Object.keys(delta).length === 0) {
+    
+                    safeUnsubscribe();
+                    finishStream(res, jsonResponse);
+                    return;
+                }
+                
+                // Handle function calls in streaming events
+                if (delta.function_call) {
+                    // Ensure delta object exists
+                    if (!jsonResponse.choices[0].delta) {
+                        jsonResponse.choices[0].delta = {};
+                    }
+                    jsonResponse.choices[0].delta.function_call = delta.function_call;
+                    jsonResponse.choices[0].finish_reason = finishReason || "function_call";
+                    sendStreamData(jsonResponse);
+                    
+                    if (finishReason === "function_call") {
+                        safeUnsubscribe();
+                        finishStream(res, jsonResponse);
+                    }
+                    return;
+                }
+                
+                // Handle regular content in streaming events
+                if (delta.content !== undefined) {
+                    if (delta.content === null) {
+                        // Skip null content chunks
+                        return;
+                    }
+                    chunkTextIntoTokens(delta.content, false, useSingleTokenStream).forEach(token => {
+                        fillJsonResponse(jsonResponse, token, null);
+                        sendStreamData(jsonResponse);
+                    });
+                    
+                    if (finishReason === "stop") {
+                        safeUnsubscribe();
+                        finishStream(res, jsonResponse);
+                    }
+                    return;
+                }
+            }
+
             let content = '';
             if (messageJson.choices) {
                 const { text, delta } = messageJson.choices[0];
@@ -330,7 +519,8 @@ function buildRestEndpoints(pathways, app, server, config) {
                 }
             } else {
                 app.post(`/rest/${name}`, async (req, res) => {
-                    const resultText = await processRestRequest(server, req, pathway, name);
+                    const pathwayResponse = await processRestRequest(server, req, pathway, name);
+                    const { resultText } = extractResponseData(pathwayResponse);
                     res.send(resultText);
                 });
             }
@@ -339,29 +529,21 @@ function buildRestEndpoints(pathways, app, server, config) {
         // Create OpenAI compatible endpoints
         app.post('/v1/completions', async (req, res) => {
             const modelName = req.body.model || 'gpt-3.5-turbo';
-            let pathwayName;
-
-            if (modelName.startsWith('ollama-')) {
-                pathwayName = 'sys_ollama_completion';
-                req.body.ollamaModel = modelName.replace('ollama-', '');
-            } else {
-                pathwayName = openAICompletionModels[modelName] || openAICompletionModels['*'];
-            }
+            const { pathwayName, isOllama } = resolveModelName(modelName, openAIChatModels, openAICompletionModels, false);
 
             if (!pathwayName) {
-                res.status(404).json({
-                    error: `Model ${modelName} not found.`,
-                });
+                handleModelNotFound(res, modelName);
                 return;
             }
 
+            if (isOllama) {
+                req.body.ollamaModel = modelName.replace('ollama-', '');
+            }
+
             const pathway = pathways[pathwayName];
-
-            const parameterMap = {
-                text: 'prompt'
-            };
-
-            const resultText = await processRestRequest(server, req, pathway, pathwayName, parameterMap);
+            const parameterMap = { text: 'prompt' };
+            const pathwayResponse = await processRestRequest(server, req, pathway, pathwayName, parameterMap);
+            const { resultText } = extractResponseData(pathwayResponse);
 
             const jsonResponse = {
                 id: `cmpl`,
@@ -382,56 +564,34 @@ function buildRestEndpoints(pathways, app, server, config) {
             if (Boolean(req.body.stream)) {
                 jsonResponse.id = `cmpl-${resultText}`;
                 jsonResponse.choices[0].finish_reason = null;
-
                 processIncomingStream(resultText, res, jsonResponse, pathway);
             } else {
-                const requestId = uuidv4();
-                jsonResponse.id = `cmpl-${requestId}`;
+                jsonResponse.id = generateResponseId('cmpl');
                 res.json(jsonResponse);
             }
         });
         
         app.post('/v1/chat/completions', async (req, res) => {
             const modelName = req.body.model || 'gpt-3.5-turbo';
-            let pathwayName;
-
-            if (modelName.startsWith('ollama-')) {
-                pathwayName = 'sys_ollama_chat';
-                req.body.ollamaModel = modelName.replace('ollama-', '');
-            } else {
-                pathwayName = openAIChatModels[modelName] || openAIChatModels['*'];
-            }
+            const { pathwayName, isOllama } = resolveModelName(modelName, openAIChatModels, openAICompletionModels, true);
 
             if (!pathwayName) {
-                res.status(404).json({
-                    error: `Model ${modelName} not found.`,
-                });
+                handleModelNotFound(res, modelName);
                 return;
             }
 
-            const pathway = pathways[pathwayName];
-
-            const resultText = await processRestRequest(server, req, pathway, pathwayName);
-
-            // Parse tool calls if they exist in the response
-            let messageContent = resultText;
-            let toolCalls = null;
-            let finishReason = 'stop';
-
-            try {
-                const parsedResponse = JSON.parse(resultText);
-                if (parsedResponse.tool_calls) {
-                    toolCalls = parsedResponse.tool_calls;
-                    messageContent = parsedResponse.content || null;
-                    finishReason = 'tool_calls';
-                }
-            } catch (e) {
-                // If parsing fails, treat as regular text response
+            if (isOllama) {
+                req.body.ollamaModel = modelName.replace('ollama-', '');
             }
+
+            const pathway = pathways[pathwayName];
+            const pathwayResponse = await processRestRequest(server, req, pathway, pathwayName);
+            const { resultText, toolData } = extractResponseData(pathwayResponse);
+            const { messageContent, toolCalls, functionCall, finishReason } = parseToolCalls(toolData, resultText);
 
             const jsonResponse = {
                 id: `chatcmpl`,
-                object: "chat.completion",
+                object: Boolean(req.body.stream) ? "chat.completion.chunk" : "chat.completion",
                 created: Date.now(),
                 model: req.body.model,
                 choices: [
@@ -439,7 +599,8 @@ function buildRestEndpoints(pathways, app, server, config) {
                         message: {
                             role: "assistant",
                             content: messageContent,
-                            ...(toolCalls && { tool_calls: toolCalls })
+                            ...(toolCalls && { tool_calls: toolCalls }),
+                            ...(functionCall && { function_call: functionCall })
                         },
                         index: 0,
                         finish_reason: finishReason
@@ -450,48 +611,12 @@ function buildRestEndpoints(pathways, app, server, config) {
             // eslint-disable-next-line no-extra-boolean-cast
             if (Boolean(req.body.stream)) {
                 jsonResponse.id = `chatcmpl-${resultText}`;
-                
-                if (toolCalls) {
-                    // For tool calls in streaming, send the tool calls as a single chunk
-                    jsonResponse.choices[0] = {
-                        delta: {
-                            role: "assistant",
-                            tool_calls: toolCalls
-                        },
-                        finish_reason: "tool_calls"
-                    }
-                    
-                    jsonResponse.object = "chat.completion.chunk";
-                    
-                    // Send tool calls immediately
-                    res.write(`data: ${JSON.stringify(jsonResponse)}\n\n`);
-                    res.write('data: [DONE]\n\n');
-                    res.end();
-                } else {
-                    // For regular content streaming, we need to process the content through the streaming pipeline
-                    // Set the initial response with content
-                    jsonResponse.choices[0] = {
-                        delta: {
-                            role: "assistant",
-                            content: messageContent
-                        },
-                        finish_reason: "stop"
-                    }
-                    
-                    jsonResponse.object = "chat.completion.chunk";
-                    
-                    // Send content immediately since finish_reason is 'stop'
-                    res.write(`data: ${JSON.stringify(jsonResponse)}\n\n`);
-                    res.write('data: [DONE]\n\n');
-                    res.end();
-                }
+                jsonResponse.choices[0].finish_reason = null;
+                processIncomingStream(resultText, res, jsonResponse, pathway);
             } else {
-                const requestId = uuidv4();
-                jsonResponse.id = `chatcmpl-${requestId}`;
-
+                jsonResponse.id = generateResponseId('chatcmpl');
                 res.json(jsonResponse);
             }
-
         });
 
         app.get('/v1/models', async (req, res) => {

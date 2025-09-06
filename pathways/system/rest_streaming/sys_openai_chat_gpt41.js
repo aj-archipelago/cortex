@@ -11,6 +11,7 @@ export default {
     ],
     inputParameters: {
         messages: [{role: '', content: []}],
+        functions: '',
         tools: '',
         tool_choice: 'auto',
     },

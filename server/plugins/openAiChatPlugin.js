@@ -45,10 +45,14 @@ class OpenAIChatPlugin extends ModelPlugin {
     // Set up parameters specific to the OpenAI Chat API
     getRequestParameters(text, parameters, prompt) {
         const { modelPromptText, modelPromptMessages, tokenLength, modelPrompt } = this.getCompiledPrompt(text, parameters, prompt);
-        let { stream, tools } = parameters;
+        let { stream, tools, functions } = parameters;
 
         if (typeof tools === 'string') {
             tools = JSON.parse(tools);
+        }
+        
+        if (typeof functions === 'string') {
+            functions = JSON.parse(functions);
         }
 
         // Define the model's max token length
@@ -74,6 +78,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         temperature: this.temperature ?? 0.7,
         ...(stream !== undefined ? { stream } : {}),
         ...(tools && tools.length > 0 ? { tools, tool_choice: parameters.tool_choice || 'auto' } : {}),
+        ...(functions && functions.length > 0 ? { functions } : {}),
         };
     
         return requestParameters;
@@ -86,7 +91,13 @@ class OpenAIChatPlugin extends ModelPlugin {
         cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
         cortexRequest.params = {}; // query params
 
-        return this.executeRequest(cortexRequest);
+        const parsedResponse = await this.executeRequest(cortexRequest);
+
+        if (typeof parsedResponse === 'object' && (parsedResponse.tool_calls || parsedResponse.function_call)) {
+            cortexRequest.pathwayResolver.tool = JSON.stringify({tool_calls: parsedResponse.tool_calls, function_call: parsedResponse.function_call});
+        }
+
+        return parsedResponse;
     }
 
     // Parse the response from the OpenAI Chat API
@@ -102,9 +113,16 @@ class OpenAIChatPlugin extends ModelPlugin {
             return choices;
         }
 
-        // otherwise, return the first choice
-        const messageResult = choices[0].message && choices[0].message.content && choices[0].message.content.trim();
-        return messageResult ?? null;
+        const message = choices[0].message;
+        if (!message) {
+            return null;
+        }
+
+        if (message.tool_calls || message.function_call) {
+            return message;
+        }
+
+        return message.content || "";
     }
 
     // Override the logging function to display the messages and responses
@@ -139,11 +157,15 @@ class OpenAIChatPlugin extends ModelPlugin {
     
         if (stream) {
             logger.info(`[response received as an SSE stream]`);
-        } else {
-            const responseText = this.parseResponse(responseData);
-            const { length, units } = this.getLength(responseText);
-            logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${this.shortenContent(responseText)}`);
+        } else {           
+            if (typeof responseData === 'string') {
+                const { length, units } = this.getLength(responseData);
+                logger.info(`[response received containing ${length} ${units}]`);
+                logger.verbose(`${this.shortenContent(responseData)}`);
+            } else {
+                logger.info(`[response received containing object]`);
+                logger.verbose(`${JSON.stringify(responseData)}`);
+            }
         }
 
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);

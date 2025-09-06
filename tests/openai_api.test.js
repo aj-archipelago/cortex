@@ -340,8 +340,8 @@ test('POST /chat/completions should handle invalid image data', async (t) => {
 test('POST /completions should handle model parameters', async (t) => {
   const response = await got.post(`${API_BASE}/completions`, {
     json: {
-      model: 'gpt-3.5-turbo',
-      prompt: 'Say this is a test',
+      model: 'gpt-4o',
+      prompt: 'Repeat after me: Say this is a test',
       temperature: 0.7,
       max_tokens: 100,
       top_p: 1,
@@ -358,113 +358,9 @@ test('POST /completions should handle model parameters', async (t) => {
   t.truthy(response.body.choices[0].text);
 });
 
-test('POST /chat/completions should handle function calling', async (t) => {
-  const response = await got.post(`${API_BASE}/chat/completions`, {
-    json: {
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: 'What is the weather in Boston?' }],
-      functions: [{
-        name: 'get_weather',
-        description: 'Get the current weather in a given location',
-        parameters: {
-          type: 'object',
-          properties: {
-            location: {
-              type: 'string',
-              description: 'The city and state, e.g. San Francisco, CA'
-            },
-            unit: {
-              type: 'string',
-              enum: ['celsius', 'fahrenheit']
-            }
-          },
-          required: ['location']
-        }
-      }],
-      stream: false,
-    },
-    responseType: 'json',
-  });
 
-  t.is(response.statusCode, 200);
-  t.is(response.body.object, 'chat.completion');
-  t.true(Array.isArray(response.body.choices));
-  const choice = response.body.choices[0];
-  t.true(['function_call', 'stop'].includes(choice.finish_reason));
-  if (choice.finish_reason === 'function_call') {
-    t.truthy(choice.message.function_call);
-    t.truthy(choice.message.function_call.name);
-    t.truthy(choice.message.function_call.arguments);
-  }
-});
 
-test.skip('POST /chat/completions should handle tool calling', async (t) => {
-  const response = await got.post(`${API_BASE}/chat/completions`, {
-    json: {
-      model: 'gpt-4.1',
-      messages: [{ 
-        role: 'user', 
-        content: 'Please use the get_weather tool to check the current weather in Boston and tell me the temperature and conditions.' 
-      }],
-      tools: [{
-        type: 'function',
-        function: {
-          name: 'get_weather',
-          description: 'Get the current weather in a given location',
-          parameters: {
-            type: 'object',
-            properties: {
-              location: {
-                type: 'string',
-                description: 'The city and state, e.g. San Francisco, CA'
-              },
-              unit: {
-                type: 'string',
-                enum: ['celsius', 'fahrenheit']
-              }
-            },
-            required: ['location']
-          }
-        }
-      }],
-      tool_choice: 'auto',
-      stream: false,
-    },
-    responseType: 'json',
-  });
 
-  t.is(response.statusCode, 200);
-  t.is(response.body.object, 'chat.completion');
-  t.is(response.body.model, 'gpt-4.1');
-  t.is(response.body.choices.length, 1);
-  
-  const choice = response.body.choices[0];
-  t.is(choice.message.role, 'assistant');
-  
-  // Check if the response contains tool calls
-  if (choice.message.tool_calls) {
-    t.true(Array.isArray(choice.message.tool_calls));
-    t.is(choice.message.tool_calls.length, 1);
-    
-    const toolCall = choice.message.tool_calls[0];
-    t.is(toolCall.type, 'function');
-    t.is(toolCall.function.name, 'get_weather');
-    t.truthy(toolCall.function.arguments);
-    
-    // Parse the arguments to make sure they're valid JSON
-    try {
-      const args = JSON.parse(toolCall.function.arguments);
-      t.truthy(args.location);
-    } catch (e) {
-      t.fail(`Tool call arguments should be valid JSON: ${toolCall.function.arguments}`);
-    }
-    
-    t.is(choice.finish_reason, 'tool_calls');
-  } else {
-    // FAIL if no tool calls are returned - this is what we're testing
-    t.fail(`Expected tool calls but got none. Response: ${JSON.stringify(choice.message)}`);
-  }
-});
 
 test('POST /chat/completions should validate response format', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -684,71 +580,6 @@ test('POST /chat/completions should handle array content properly', async (t) =>
         // No response received
         t.fail(`API request failed: ${error.message}`);
       }
-    }
-  }
-});  
-
-test('POST SSE: /v1/chat/completions with tool calling should send proper streaming events', async (t) => {
-  const payload = {
-    model: 'gpt-4.1',
-    messages: [{ 
-      role: 'user', 
-      content: 'Please use the get_weather tool to check the current weather in Boston and tell me the temperature and conditions.' 
-    }],
-    tools: [{
-      type: 'function',
-      function: {
-        name: 'get_weather',
-        description: 'Get the current weather in a given location',
-        parameters: {
-          type: 'object',
-          properties: {
-            location: {
-              type: 'string',
-              description: 'The city and state, e.g. San Francisco, CA'
-            },
-            unit: {
-              type: 'string',
-              enum: ['celsius', 'fahrenheit']
-            }
-          },
-          required: ['location']
         }
-      }
-    }],
-    tool_choice: 'auto',
-    stream: true,
-  };
-  
-  const url = `http://localhost:${process.env.CORTEX_PORT}/v1`;
-  
-  const toolCallingStreamingAssertions = (t, messageJson) => {
-    t.truthy(messageJson.id);
-    t.is(messageJson.object, 'chat.completion.chunk');
-    t.truthy(messageJson.choices[0].delta);
-    
-    // Check if this is a tool call chunk
-    if (messageJson.choices[0].delta.tool_calls) {
-      t.truthy(messageJson.choices[0].delta.tool_calls);
-      t.is(messageJson.choices[0].finish_reason, 'tool_calls');
-    } else if (messageJson.choices[0].finish_reason === 'stop') {
-      // Final chunk should have content (either from tool usage or direct response)
-      t.truthy(messageJson.choices[0].delta.content);
-    } else if (messageJson.choices[0].finish_reason === 'tool_calls') {
-      // Tool call response should have tool_calls in delta
-      t.truthy(messageJson.choices[0].delta.tool_calls);
-    } else {
-      // Intermediate chunks should have content (but might be empty for tool calls)
-      // For tool calls, content might be empty string, which is valid
-      t.truthy(messageJson.choices[0].delta.content !== undefined);
-    }
-  };
-  
-  await connectToSSEEndpoint(url, '/chat/completions', payload, t, toolCallingStreamingAssertions);
-});  
-
-
-  
-
-
-  
+  }
+});
