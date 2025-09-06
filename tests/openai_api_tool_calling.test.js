@@ -262,3 +262,82 @@ test('POST SSE: /v1/chat/completions with tool calling should send proper stream
   // For tool calls, we don't expect a final chunk with stop finish_reason
   // The final chunk should have finish_reason: "tool_calls"
 });
+
+test('POST SSE: /v1/chat/completions with tool calling should send proper streaming events with reasoning model', async (t) => {
+  const payload = {
+    model: 'o3-mini',
+    messages: [{ 
+      role: 'user', 
+      content: 'I need to know the weather in Boston. You MUST use the get_weather tool to get this information. Do not respond without calling the tool first.' 
+    }],
+    tools: [{
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        description: 'Get the current weather in a given location',
+        parameters: {
+          type: 'object',
+          properties: {
+            location: {
+              type: 'string',
+              description: 'The city and state, e.g. San Francisco, CA'
+            },
+            unit: {
+              type: 'string',
+              enum: ['celsius', 'fahrenheit']
+            }
+          },
+          required: ['location']
+        }
+      }
+    }],
+    tool_choice: 'auto',
+    stream: true,
+  };
+  
+  const url = `http://localhost:${process.env.CORTEX_PORT}/v1`;
+  
+  let toolCallDetected = false;
+  let finalChunkReceived = false;
+  
+  const toolCallingStreamingAssertions = (t, messageJson) => {
+    t.truthy(messageJson.id);
+    t.is(messageJson.object, 'chat.completion.chunk');
+    t.truthy(messageJson.choices[0].delta);
+    
+    const delta = messageJson.choices[0].delta;
+    const finishReason = messageJson.choices[0].finish_reason;
+    
+    // Check if this is a tool call chunk
+    if (delta.tool_calls) {
+      toolCallDetected = true;
+      t.truthy(delta.tool_calls);
+      
+      // Only check finish_reason on the final chunk
+      if (finishReason === 'tool_calls') {
+        // This is the final tool call chunk
+        finalChunkReceived = true;
+      }
+      
+      // Validate tool call structure
+      const toolCall = delta.tool_calls[0];
+      if (toolCall && toolCall.function && toolCall.function.name) {
+        t.is(toolCall.function.name, 'get_weather', 'Expected get_weather tool call');
+      }
+    } else if (finishReason === 'stop') {
+      finalChunkReceived = true;
+      // Final chunk for tool calls might have empty delta, which is valid
+    } else if (finishReason === 'tool_calls') {
+      // Final chunk with tool_calls finish reason but no tool_calls in delta
+      toolCallDetected = true;
+      finalChunkReceived = true;
+    }
+  };
+  
+  await connectToSSEEndpoint(url, '/chat/completions', payload, t, toolCallingStreamingAssertions);
+  
+  // CRITICAL: Verify that tool calls were actually detected in the stream
+  t.true(toolCallDetected, 'Expected tool calls to be detected in the streaming response but none were found');
+  // For tool calls, we don't expect a final chunk with stop finish_reason
+  // The final chunk should have finish_reason: "tool_calls"
+});
