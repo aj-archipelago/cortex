@@ -153,6 +153,64 @@ export class GCSStorageProvider extends StorageProvider {
     }
   }
 
+  async deleteFile(url) {
+    if (!url) throw new Error("Missing URL parameter");
+
+    try {
+      if (!url.startsWith("gs://")) {
+        throw new Error("Invalid GCS URL format");
+      }
+
+      const unencodedUrl = this.ensureUnencodedGcsUrl(url);
+      const urlParts = unencodedUrl.replace("gs://", "").split("/");
+      const bucketName = urlParts[0];
+      const fileName = urlParts.slice(1).join("/");
+
+      if (process.env.STORAGE_EMULATOR_HOST) {
+        // When using the emulator, use raw REST API
+        try {
+          const response = await axios.delete(
+            `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${bucketName}/o/${encodeURIComponent(fileName)}`,
+            {
+              validateStatus: (status) => status === 200 || status === 404,
+            }
+          );
+          
+          if (response.status === 200) {
+            return fileName;
+          } else if (response.status === 404) {
+            console.warn(`GCS file not found during delete: ${fileName}`);
+            return null;
+          }
+        } catch (error) {
+          if (error.response?.status === 404) {
+            console.warn(`GCS file not found during delete: ${fileName}`);
+            return null;
+          }
+          throw error;
+        }
+      } else {
+        // Real GCS - use client library
+        const bucket = this.storage.bucket(bucketName);
+        const file = bucket.file(fileName);
+        
+        try {
+          await file.delete();
+          return fileName;
+        } catch (error) {
+          if (error.code === 404) {
+            console.warn(`GCS file not found during delete: ${fileName}`);
+            return null;
+          }
+          throw error;
+        }
+      }
+    } catch (error) {
+      console.error("Error deleting GCS file:", error);
+      throw error;
+    }
+  }
+
   async fileExists(url) {
     try {
       if (!url || !url.startsWith("gs://")) {

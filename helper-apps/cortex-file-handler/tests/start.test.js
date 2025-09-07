@@ -15,6 +15,8 @@ import { port, publicFolder, ipAddress } from "../src/start.js";
 import {
   cleanupHashAndFile,
   getFolderNameFromUrl,
+  startTestServer,
+  stopTestServer,
 } from "./testUtils.helper.js";
 
 // Add these helper functions at the top after imports
@@ -103,18 +105,12 @@ async function uploadFile(file, requestId, hash = null) {
 
 // Ensure server is ready before tests
 test.before(async (t) => {
-  // Wait for server to be ready
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await startTestServer();
+});
 
-  // Verify server is responding
-  try {
-    await axios.get(`http://localhost:${port}/files`);
-  } catch (error) {
-    // 404 is fine, it means server is running but directory is empty
-    if (error.response?.status !== 404) {
-      throw new Error("Server not ready");
-    }
-  }
+// Clean up server after tests
+test.after.always(async () => {
+  await stopTestServer();
 });
 
 // Configuration Tests
@@ -365,7 +361,7 @@ test.serial("should validate requestId for delete operation", async (t) => {
   t.is(response.status, 400, "Should return 400 for missing requestId");
   t.is(
     response.data,
-    "Please pass a requestId on the query string",
+    "Please pass either a requestId or hash on the query string",
     "Should return proper error message",
   );
 });

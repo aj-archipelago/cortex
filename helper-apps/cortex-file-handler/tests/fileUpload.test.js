@@ -10,6 +10,9 @@ import { gcs } from "../src/blobHandler.js";
 import {
   cleanupHashAndFile,
   getFolderNameFromUrl,
+  startTestServer,
+  stopTestServer,
+  setupTestDirectory,
 } from "./testUtils.helper.js";
 import XLSX from "xlsx";
 
@@ -78,17 +81,20 @@ async function fetchFileContent(url) {
   return Buffer.from(response.data);
 }
 
-// Setup: Create test directory
+// Setup: Create test directory and start server
 test.before(async (t) => {
-  const testDir = path.join(__dirname, "test-files");
-  await fs.promises.mkdir(testDir, { recursive: true });
-  t.context = { testDir };
+  await startTestServer();
+  await setupTestDirectory(t);
 });
 
 // Cleanup
 test.after.always(async (t) => {
+  await stopTestServer();
+
   // Clean up test directory
-  await fs.promises.rm(t.context.testDir, { recursive: true, force: true });
+  if (t.context?.testDir) {
+    await fs.promises.rm(t.context.testDir, { recursive: true, force: true });
+  }
 
   // Clean up any remaining files in the files directory
   const filesDir = path.join(__dirname, "..", "files");

@@ -43,6 +43,11 @@ The Cortex File Handler is a service that processes files through various operat
   - `hash` (optional): Unique identifier for the file
   - `checkHash` (optional): Check if hash exists
   - `clearHash` (optional): Remove hash from storage
+  - `generateShortLived` (optional): Generate a short-lived URL for an existing hash
+    - Requires `hash` parameter
+    - Generates a new SAS token with short expiration time
+    - Returns a temporary URL for secure sharing
+  - `shortLivedMinutes` (optional): Duration in minutes for short-lived URLs (default: 5)
   - `fetch`/`load`/`restore` (optional): URL to fetch remote file (these are aliases - any of the three parameters will trigger the same remote file processing behavior)
     - Does not require `requestId`
     - Uses Redis caching
@@ -73,6 +78,12 @@ The Cortex File Handler is a service that processes files through various operat
     - Updates Redis timestamp on subsequent requests
     - Truncates filenames longer than 200 characters
     - Ensures correct file extension based on content type
+  - For checkHash (`checkHash=true`):
+    - Requires valid `hash` parameter
+    - Checks if file exists in storage and restores if needed
+    - Always generates new SAS token with short expiration (default: 5 minutes)
+    - Returns file information with temporary URL and expiration information
+    - Updates Redis timestamp
 
 ### DELETE
 
@@ -171,6 +182,36 @@ The Cortex File Handler is a service that processes files through various operat
   - After 1 hour of inactivity
   - After successful processing
   - On error conditions
+
+## Usage Examples
+
+### Check Hash (Always Returns Short-Lived URL)
+
+```bash
+# Check hash with 5-minute short-lived URL (default)
+GET /file-handler?hash=abc123&checkHash=true
+
+# Check hash with 10-minute short-lived URL
+GET /file-handler?hash=abc123&checkHash=true&shortLivedMinutes=10
+```
+
+**Response (always includes short-lived URL):**
+```json
+{
+  "message": "File 'document.pdf' uploaded successfully.",
+  "filename": "document.pdf",
+  "url": "https://storage.blob.core.windows.net/container/file.pdf?original-sas-token",
+  "gcs": "gs://bucket/file.pdf",
+  "hash": "abc123",
+  "shortLivedUrl": "https://storage.blob.core.windows.net/container/file.pdf?sv=2023-11-03&se=2024-01-15T10%3A15%3A00Z&sr=b&sp=r&sig=...",
+  "expiresInMinutes": 5,
+  "timestamp": "2024-01-15T10:10:00.000Z",
+  "converted": {
+    "url": "https://storage.blob.core.windows.net/container/converted.pdf",
+    "gcs": "gs://bucket/converted.pdf"
+  }
+}
+```
 
 ## Error Handling
 
