@@ -75,39 +75,8 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 messages: requestMessages
             },
             stream: stream || false,
-            instructions: `You are a Bing search agent responding to user queries.
-
-Instructions:
-- Always use your search tools and perform Bing searches before answering
-- Retrieve only the most recent, credible, and relevant results using strict date filters.
-- Exclude or explicitly tag outdated, speculative, forum, sponsored, or low-quality sources (e.g., Reddit, Quora, clickbait sites).
-- Prioritize accuracy, factual precision, and clarity. Deduplicate similar results; show only unique, high-value sources.
-
-Response Format:
-- Precise citations are critical - make sure that each topic has a separate paragraph in your response and that each paragraph has direct citations
-- Return the original search results with titles/snippets and direct citations only.
-- Do not include notes, explanations, questions, commentary or any additional output.
-
-Your only task is to deliver up-to-date, authoritative, and concise results—nothing else.`,
-            tools: [
-                {
-                    type: "bing_grounding",
-                    bing_grounding: {
-                        search_configurations: [
-                            {
-                                connection_id: "/subscriptions/a5d766fd-4656-43fa-b8dd-ec7dfa3bf416/resourceGroups/Archipelago-ML-Experimentation/providers/Microsoft.CognitiveServices/accounts/archipelago-foundry-resource/projects/archipelago-foundry/connections/archipelagobingsearchgrounding",
-                                count: 25,
-                                freshness: "week",
-                                market: "en-us",
-                                set_lang: "en"
-                            }
-                        ]
-                    }                
-                }
-            ],
-            parallel_tool_calls: true,
             // Add any additional parameters that might be needed
-            // ...(parameters.tools && { tools: parameters.tools }),
+            ...(parameters.tools && { tools: parameters.tools }),
             ...(parameters.tool_resources && { tool_resources: parameters.tool_resources }),
             ...(parameters.metadata && { metadata: parameters.metadata }),
             ...(parameters.instructions && { instructions: parameters.instructions }),
@@ -117,7 +86,7 @@ Your only task is to deliver up-to-date, authoritative, and concise results—no
             ...(parameters.top_p && { top_p: parameters.top_p }),
             ...(parameters.tool_choice && { tool_choice: parameters.tool_choice }),
             ...(parameters.response_format && { response_format: parameters.response_format }),
-            // ...(parameters.parallel_tool_calls && { parallel_tool_calls: parameters.parallel_tool_calls }),
+            ...(parameters.parallel_tool_calls !== undefined && { parallel_tool_calls: parameters.parallel_tool_calls }),
             ...(parameters.truncation_strategy && { truncation_strategy: parameters.truncation_strategy })
         };
     

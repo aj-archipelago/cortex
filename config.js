@@ -617,6 +617,11 @@ var config = convict({
         format: String,
         default: null,
         env: 'AZURE_FOUNDRY_AGENT_ID'
+    },
+    azureFoundryBingSearchConnectionId: {
+        format: String,
+        default: null,
+        env: 'AZURE_FOUNDRY_BING_SEARCH_CONNECTION_ID'
     }
 });
 
