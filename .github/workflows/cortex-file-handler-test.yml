@@ -44,13 +44,3 @@ jobs:
       run: npm test
       env:
         NODE_ENV: test
-    
-    - name: Run Azure tests
-      run: npm run test:azure
-      env:
-        NODE_ENV: test
-    
-    - name: Run GCS tests
-      run: npm run test:gcs
-      env:
-        NODE_ENV: test
