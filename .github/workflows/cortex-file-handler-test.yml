@@ -40,6 +40,9 @@ jobs:
     - name: Install dependencies
       run: npm ci
     
+    - name: Install Azurite
+      run: npm install -g azurite
+    
     - name: Setup Azure test environment
       run: cp .env.test.azure.sample .env.test.azure
     
