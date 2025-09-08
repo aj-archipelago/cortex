@@ -46,14 +46,6 @@ function validateEnvironment() {
   const errors = [];
   const warnings = [];
 
-  // Check if .env.test.azure exists
-  if (!existsSync('.env.test.azure')) {
-    errors.push('❌ .env.test.azure file not found');
-    hasErrors = true;
-  } else {
-    console.log('✅ .env.test.azure file found');
-  }
-
   // Validate each required environment variable
   for (const [varName, config] of Object.entries(REQUIRED_ENV_VARS)) {
     const value = process.env[varName];
