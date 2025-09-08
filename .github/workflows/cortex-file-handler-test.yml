@@ -40,6 +40,12 @@ jobs:
     - name: Install dependencies
       run: npm ci
     
+    - name: Setup Azure test environment
+      run: cp .env.test.azure.sample .env.test.azure
+    
+    - name: Run Azure tests
+      run: npm run test:azure
+    
     - name: Run tests
       run: npm test
       env:
