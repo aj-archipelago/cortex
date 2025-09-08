@@ -200,15 +200,16 @@ async function CortexFileHandler(context, req) {
         return;
       }
 
-      // Check if file already exists (using hash as the key)
-      const exists = await getFileStoreMap(remoteUrl);
+      // Check if file already exists (using hash or URL as the key)
+      const cacheKey = hash || remoteUrl;
+      const exists = await getFileStoreMap(cacheKey);
       if (exists) {
         context.res = {
           status: 200,
           body: exists,
         };
         //update redis timestamp with current time
-        await setFileStoreMap(remoteUrl, exists);
+        await setFileStoreMap(cacheKey, exists);
         return;
       }
 
@@ -225,8 +226,8 @@ async function CortexFileHandler(context, req) {
       // Pass empty string to store the file directly in the root
       const res = await storageService.uploadFile(context, filename, '', null, null, container);
 
-      //Update Redis (using hash as the key)
-      await setFileStoreMap(remoteUrl, res);
+      //Update Redis (using hash or URL as the key)
+      await setFileStoreMap(cacheKey, res);
 
       // Return the file URL
       context.res = {
@@ -420,12 +421,24 @@ async function CortexFileHandler(context, req) {
           try {
             const url = new URL(hashResult.url);
             // Extract blob name from the URL path (remove leading slash)
-            blobName = url.pathname.substring(1);
-            // If there's a container prefix, remove it
+            let path = url.pathname.substring(1);
+            
+            // For Azurite URLs, the path includes account name: devstoreaccount1/container/blob
+            // For real Azure URLs, the path is: container/blob
             const containerName = storageService.primaryProvider.containerName;
-            if (blobName.startsWith(containerName + '/')) {
-              blobName = blobName.substring(containerName.length + 1);
+            
+            // Check if this is an Azurite URL (contains devstoreaccount1)
+            if (path.startsWith('devstoreaccount1/')) {
+              path = path.substring('devstoreaccount1/'.length); // Remove account prefix
             }
+            
+            // Now remove container prefix if it exists
+            if (path.startsWith(containerName + '/')) {
+              blobName = path.substring(containerName.length + 1);
+            } else {
+              blobName = path;
+            }
+            
           } catch (urlError) {
             context.log(`Error parsing URL for short-lived generation: ${urlError}`);
           }
