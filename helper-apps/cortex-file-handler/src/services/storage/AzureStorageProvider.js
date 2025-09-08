@@ -7,6 +7,7 @@ import fs from "fs";
 import path from "path";
 
 import { StorageProvider } from "./StorageProvider.js";
+import { AZURITE_ACCOUNT_NAME } from "../../constants.js";
 import {
   generateShortId,
   generateBlobName,
@@ -61,7 +62,7 @@ export class AzureStorageProvider extends StorageProvider {
       }
     } else {
       // Azurite development storage fallback
-      accountName = "devstoreaccount1";
+      accountName = AZURITE_ACCOUNT_NAME;
       accountKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
     }
     

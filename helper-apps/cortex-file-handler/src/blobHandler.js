@@ -21,7 +21,7 @@ import {
   generateBlobName,
 } from "./utils/filenameUtils.js";
 import { publicFolder, port, ipAddress } from "./start.js";
-import { CONVERTED_EXTENSIONS } from "./constants.js";
+import { CONVERTED_EXTENSIONS, AZURITE_ACCOUNT_NAME } from "./constants.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 
 const pipeline = promisify(_pipeline);
@@ -269,7 +269,7 @@ const generateSASToken = (
     }
   } else {
     // Azurite development storage fallback
-    accountName = "devstoreaccount1";
+    accountName = AZURITE_ACCOUNT_NAME;
     accountKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
   }
   

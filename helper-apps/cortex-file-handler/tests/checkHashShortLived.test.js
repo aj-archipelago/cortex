@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
 import { port } from "../src/start.js";
+import { AZURITE_ACCOUNT_NAME } from "../src/constants.js";
 import { 
   cleanupHashAndFile, 
   createTestMediaFile, 
@@ -223,7 +224,7 @@ test.serial("checkHash shortLivedUrl should be accessible", async (t) => {
 
     // Verify the shortLivedUrl is accessible
     // Skip this test for Azure emulator as it may have network issues
-    if (isAzureConfigured() && !checkResponse.data.shortLivedUrl.includes('devstoreaccount1')) {
+    if (isAzureConfigured() && !checkResponse.data.shortLivedUrl.includes(AZURITE_ACCOUNT_NAME)) {
       // Test with real Azure storage
       const fileResponse = await axios.get(checkResponse.data.shortLivedUrl, {
         validateStatus: (status) => true,
@@ -358,7 +359,7 @@ test.serial("checkHash should handle fallback when SAS token generation is not s
     }
 
     // Verify the shortLivedUrl is accessible regardless of storage provider
-    if (isAzureConfigured() && !checkResponse.data.shortLivedUrl.includes('devstoreaccount1')) {
+    if (isAzureConfigured() && !checkResponse.data.shortLivedUrl.includes(AZURITE_ACCOUNT_NAME)) {
       // Test with real Azure storage
       const fileResponse = await axios.get(checkResponse.data.shortLivedUrl, {
         validateStatus: (status) => true,

@@ -129,3 +129,6 @@ export const CONVERTED_EXTENSIONS = [
   ".ppt",
   ".pptx",
 ];
+
+// Azure Storage constants
+export const AZURITE_ACCOUNT_NAME = "devstoreaccount1";
