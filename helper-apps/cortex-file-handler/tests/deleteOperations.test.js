@@ -106,6 +106,9 @@ test.serial("should delete file by hash successfully", async (t) => {
     const hashCheckAfter = await checkHashExists(testHash);
     t.is(hashCheckAfter.status, 404, "Hash should not exist after deletion");
 
+    // Wait a moment for deletion to propagate
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
     // Verify file URL is no longer accessible
     const fileResponse = await axios.get(uploadResponse.data.url, {
       validateStatus: (status) => true,
@@ -128,8 +131,8 @@ test.serial("should return 404 when deleting non-existent hash", async (t) => {
 
   const deleteResponse = await deleteFileByHash(nonExistentHash);
   t.is(deleteResponse.status, 404, "Should return 404 for non-existent hash");
-  t.truthy(deleteResponse.data.error, "Should have error message");
-  t.true(deleteResponse.data.error.includes("not found"), "Error should indicate file not found");
+  t.truthy(deleteResponse.data, "Should have error message");
+  t.true(deleteResponse.data.includes("not found"), "Error should indicate file not found");
 });
 
 test.serial("should return 400 when hash parameter is missing", async (t) => {
@@ -165,6 +168,7 @@ test.serial("should delete file with both primary and backup storage", async (t)
     // Should have at least primary storage deletion
     const deletionDetails = deleteResponse.data.deleted.deleted;
     t.true(Array.isArray(deletionDetails), "Deletion details should be an array");
+    t.true(deletionDetails.length >= 1, "Should have at least primary deletion result");
     const primaryDeletion = deletionDetails.find(d => d.provider === 'primary');
     t.truthy(primaryDeletion, "Should have primary storage deletion");
     

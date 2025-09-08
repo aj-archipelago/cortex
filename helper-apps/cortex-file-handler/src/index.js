@@ -153,7 +153,7 @@ async function CortexFileHandler(context, req) {
       } catch (error) {
         context.res = {
           status: 404,
-          body: { error: error.message },
+          body: error.message,
         };
         return;
       }

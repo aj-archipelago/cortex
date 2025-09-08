@@ -34,6 +34,21 @@ const createMockClient = () => {
       }
       return 0;
     },
+    async eval(script, numKeys, ...args) {
+      // Mock implementation for atomic get-and-delete operation
+      if (script.includes('hget') && script.includes('hdel')) {
+        const hashName = args[0];
+        const key = args[1];
+        const hash = hashMap.get(hashName);
+        if (hash && hash.has(key)) {
+          const value = hash.get(key);
+          hash.delete(key);
+          return value;
+        }
+        return null;
+      }
+      throw new Error('Mock eval only supports atomic get-and-delete');
+    },
   };
 };
 
@@ -197,6 +212,41 @@ const removeFromFileStoreMap = async (key) => {
   }
 };
 
+// Atomic function to get and remove key from "FileStoreMap" hash map
+// This ensures only one deletion operation can succeed for the same hash
+const getAndRemoveFromFileStoreMap = async (key) => {
+  try {
+    // Use a Lua script for atomic get-and-delete operation
+    const luaScript = `
+      local value = redis.call('hget', KEYS[1], ARGV[1])
+      if value then
+        redis.call('hdel', KEYS[1], ARGV[1])
+        return value
+      else
+        return nil
+      end
+    `;
+    
+    const result = await client.eval(luaScript, 1, "FileStoreMap", key);
+    
+    if (result) {
+      console.log(`The key ${key} was found and removed atomically`);
+      try {
+        return JSON.parse(result);
+      } catch (error) {
+        console.error(`Error parsing JSON for key ${key}: ${error}`);
+        return result;
+      }
+    } else {
+      console.log(`The key ${key} does not exist`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`Error in atomic get-and-remove for key ${key}: ${error}`);
+    throw error;
+  }
+};
+
 const cleanupRedisFileStoreMap = async (nDays = 1) => {
   const cleaned = [];
   try {
@@ -264,6 +314,7 @@ export {
   setFileStoreMap,
   getFileStoreMap,
   removeFromFileStoreMap,
+  getAndRemoveFromFileStoreMap,
   cleanupRedisFileStoreMap,
   cleanupRedisFileStoreMapAge,
   client,

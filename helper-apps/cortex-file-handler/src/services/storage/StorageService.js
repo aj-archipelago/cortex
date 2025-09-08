@@ -174,9 +174,10 @@ export class StorageService {
 
     const results = [];
 
-    // Get file information from Redis map
-    const { getFileStoreMap, removeFromFileStoreMap } = await import("../../redis.js");
-    const hashResult = await getFileStoreMap(hash);
+    // Atomically get and remove file information from Redis map
+    // This ensures only one deletion operation can succeed for the same hash
+    const { getAndRemoveFromFileStoreMap } = await import("../../redis.js");
+    const hashResult = await getAndRemoveFromFileStoreMap(hash);
     
     if (!hashResult) {
       throw new Error(`File with hash ${hash} not found`);
@@ -208,12 +209,8 @@ export class StorageService {
       }
     }
 
-    // Remove from Redis map
-    try {
-      await removeFromFileStoreMap(hash);
-    } catch (error) {
-      console.error(`Error removing hash from Redis map:`, error);
-    }
+    // Note: Hash was already removed from Redis atomically at the beginning
+    // No need to remove again
 
     return {
       hash,
