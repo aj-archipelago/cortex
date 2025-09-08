@@ -12,7 +12,21 @@
             "requestsPerSecond": 10,
             "maxTokenLength": 2000
         },
-
+        "azure-bing-agent": {
+            "type": "AZURE-FOUNDRY-AGENTS",
+            "url": "https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry",
+            "agentId": "asst_assistantid",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "api-version": "2025-05-01"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 32768,
+            "maxReturnTokens": 4096,
+            "supportsStreaming": false
+        },
         "gemini-pro-chat": {
             "type": "GEMINI-CHAT",
             "url": "https://us-central1-aiplatform.googleapis.com/v1/projects/project-id/locations/us-central1/publishers/google/models/gemini-pro:streamGenerateContent",

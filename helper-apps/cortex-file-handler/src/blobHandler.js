@@ -35,14 +35,23 @@ function isBase64(str) {
 }
 
 const { SAS_TOKEN_LIFE_DAYS = 30 } = process.env;
-const GCP_SERVICE_ACCOUNT_KEY =
-  process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
-  process.env.GCP_SERVICE_ACCOUNT_KEY ||
-  "{}";
-const GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY)
-  ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, "base64").toString())
-  : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
-const { project_id: GCP_PROJECT_ID } = GCP_SERVICE_ACCOUNT;
+let GCP_SERVICE_ACCOUNT;
+let GCP_PROJECT_ID;
+
+try {
+  const GCP_SERVICE_ACCOUNT_KEY =
+    process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
+    process.env.GCP_SERVICE_ACCOUNT_KEY ||
+    "{}";
+  GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY)
+    ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, "base64").toString())
+    : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
+  GCP_PROJECT_ID = GCP_SERVICE_ACCOUNT.project_id;
+} catch (error) {
+  console.warn("Error parsing GCP service account credentials, GCS will not be used:", error.message);
+  GCP_SERVICE_ACCOUNT = {};
+  GCP_PROJECT_ID = null;
+}
 
 let gcs;
 if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
@@ -65,9 +74,20 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
   }
 }
 
-export const AZURE_STORAGE_CONTAINER_NAME =
-  process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+// Parse comma-separated container names from environment variable
+const parseContainerNames = () => {
+  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+  return containerStr.split(',').map(name => name.trim());
+};
+
+export const AZURE_STORAGE_CONTAINER_NAMES = parseContainerNames();
+export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = AZURE_STORAGE_CONTAINER_NAMES[0];
 export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
+
+// Validate if a container name is allowed
+export const isValidContainerName = (containerName) => {
+  return AZURE_STORAGE_CONTAINER_NAMES.includes(containerName);
+};
 
 function isEncoded(str) {
   // Checks for any percent-encoded sequence
@@ -169,10 +189,18 @@ async function downloadFromGCS(gcsUrl, destinationPath) {
   }
 }
 
-export const getBlobClient = async () => {
+export const getBlobClient = async (containerName = null) => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  const containerName = AZURE_STORAGE_CONTAINER_NAME;
-  if (!connectionString || !containerName) {
+  const finalContainerName = containerName || DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
+
+  // Validate container name is in whitelist
+  if (!isValidContainerName(finalContainerName)) {
+    throw new Error(
+      `Invalid container name '${finalContainerName}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`,
+    );
+  }
+
+  if (!connectionString || !finalContainerName) {
     throw new Error(
       "Missing Azure Storage connection string or container name environment variable",
     );
@@ -187,13 +215,13 @@ export const getBlobClient = async () => {
     await blobServiceClient.setProperties(serviceProperties);
   }
 
-  const containerClient = blobServiceClient.getContainerClient(containerName);
+  const containerClient = blobServiceClient.getContainerClient(finalContainerName);
 
   return { blobServiceClient, containerClient };
 };
 
-async function saveFileToBlob(chunkPath, requestId, filename = null) {
-  const { containerClient } = await getBlobClient();
+async function saveFileToBlob(chunkPath, requestId, filename = null, containerName = null) {
+  const { containerClient } = await getBlobClient(containerName);
   // Use provided filename or generate LLM-friendly naming
   let blobName;
   if (filename) {
@@ -224,7 +252,7 @@ async function saveFileToBlob(chunkPath, requestId, filename = null) {
 const generateSASToken = (
   containerClient,
   blobName,
-  expiryTimeSeconds = parseInt(SAS_TOKEN_LIFE_DAYS) * 24 * 60 * 60,
+  options = {},
 ) => {
   const { accountName, accountKey } = containerClient.credential;
   const sharedKeyCredential = new StorageSharedKeyCredential(
@@ -232,12 +260,29 @@ const generateSASToken = (
     accountKey,
   );
 
+  // Support custom duration: minutes, hours, or fall back to default
+  let expirationTime;
+  if (options.minutes) {
+    expirationTime = new Date(new Date().valueOf() + options.minutes * 60 * 1000);
+  } else if (options.hours) {
+    expirationTime = new Date(new Date().valueOf() + options.hours * 60 * 60 * 1000);
+  } else if (options.days) {
+    expirationTime = new Date(new Date().valueOf() + options.days * 24 * 60 * 60 * 1000);
+  } else if (options.expiryTimeSeconds !== undefined) {
+    // Legacy support for existing parameter
+    expirationTime = new Date(new Date().valueOf() + options.expiryTimeSeconds * 1000);
+  } else {
+    // Default to SAS_TOKEN_LIFE_DAYS environment variable
+    const defaultExpirySeconds = parseInt(SAS_TOKEN_LIFE_DAYS) * 24 * 60 * 60;
+    expirationTime = new Date(new Date().valueOf() + defaultExpirySeconds * 1000);
+  }
+
   const sasOptions = {
     containerName: containerClient.containerName,
     blobName: blobName,
-    permissions: "r", // Read permission
+    permissions: options.permissions || "r", // Read permission
     startsOn: new Date(),
-    expiresOn: new Date(new Date().valueOf() + expiryTimeSeconds * 1000),
+    expiresOn: expirationTime,
   };
 
   const sasToken = generateBlobSASQueryParameters(
@@ -248,9 +293,9 @@ const generateSASToken = (
 };
 
 //deletes blob that has the requestId
-async function deleteBlob(requestId) {
+async function deleteBlob(requestId, containerName = null) {
   if (!requestId) throw new Error("Missing requestId parameter");
-  const { containerClient } = await getBlobClient();
+  const { containerClient } = await getBlobClient(containerName);
   // List all blobs in the container
   const blobs = containerClient.listBlobsFlat();
 
@@ -280,12 +325,15 @@ function uploadBlob(
   saveToLocal = false,
   filePath = null,
   hash = null,
+  containerParam = null,
 ) {
   return new Promise((resolve, reject) => {
     (async () => {
       try {
         let requestId = uuidv4();
+        let containerName = containerParam;
         const body = {};
+        const fields = {}; // Buffer for all fields
 
         // If filePath is given, we are dealing with local file and not form-data
         if (filePath) {
@@ -308,30 +356,65 @@ function uploadBlob(
               uploadName, // Use the LLM-friendly filename
               resolve,
               hash,
+              containerName,
             );
             resolve(result);
           } catch (error) {
-            const err = new Error("Error processing file upload.");
+            console.error("Error in uploadFile (local file path):", error);
+            const err = new Error(`Error processing file upload: ${error.message}`);
             err.status = 500;
             throw err;
           }
         } else {
-          // Otherwise, continue working with form-data
           const busboy = Busboy({ headers: req.headers });
           let hasFile = false;
           let errorOccurred = false;
+
 
           busboy.on("field", (fieldname, value) => {
             if (fieldname === "requestId") {
               requestId = value;
             } else if (fieldname === "hash") {
               hash = value;
+            } else if (fieldname === "container") {
+              if (value && !isValidContainerName(value)) {
+                errorOccurred = true;
+                const err = new Error(`Invalid container name '${value}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`);
+                err.status = 400;
+                reject(err);
+                return;
+              }
+              containerName = value;
             }
+            fields[fieldname] = value; // Store all fields
           });
 
           busboy.on("file", async (fieldname, file, info) => {
             if (errorOccurred) return;
+            
             hasFile = true;
+
+            // Validate file
+            if (!info.filename || info.filename.trim() === "") {
+              errorOccurred = true;
+              const err = new Error("Invalid file: missing filename");
+              err.status = 400;
+              reject(err);
+              return;
+            }
+
+            // Simple approach: small delay to allow container field to be processed
+            console.log("File received, giving fields time to process...");
+            await new Promise(resolve => setTimeout(resolve, 20));
+            console.log("Processing file with containerName:", containerName);
+            
+            if (errorOccurred) return; // Check again after waiting
+
+            await processFile(fieldname, file, info);
+          });
+
+          const processFile = async (fieldname, file, info) => {
+            if (errorOccurred) return;
 
             // Validate file
             if (!info.filename || info.filename.trim() === "") {
@@ -426,6 +509,7 @@ function uploadBlob(
                 context,
                 uploadName,
                 azureStream,
+                containerName,
               ).catch(async (err) => {
                 cloudUploadError = err;
                 // Fallback: try from disk if available
@@ -435,7 +519,7 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToAzureStorage(context, uploadName, diskStream);
+                  return saveToAzureStorage(context, uploadName, diskStream, containerName);
                 }
                 throw err;
               });
@@ -592,6 +676,8 @@ function uploadBlob(
               context.res = { status: 200, body: result };
               resolve(result);
             } catch (err) {
+              console.error("Error in main busboy processing:", err);
+              console.error("Stack trace:", err.stack);
               errorOccurred = true;
               reject(err);
             } finally {
@@ -600,7 +686,7 @@ function uploadBlob(
                 fs.rmSync(tempDir, { recursive: true, force: true });
               }
             }
-          });
+          };
 
           busboy.on("error", (error) => {
             if (errorOccurred) return;
@@ -611,7 +697,6 @@ function uploadBlob(
           });
 
           busboy.on("finish", () => {
-            if (errorOccurred) return;
             if (!hasFile) {
               errorOccurred = true;
               const err = new Error("No file provided in request");
@@ -648,10 +733,10 @@ function uploadBlob(
           }
         }
       } catch (error) {
-        // Only log unexpected errors
-        if (error.message !== "No file provided in request") {
-          context.log("Error processing file upload:", error);
-        }
+        // Always log errors with full details for debugging
+        console.error("Top-level error processing file upload:", error);
+        console.error("Error stack trace:", error.stack);
+        context.log("Error processing file upload:", error);
         const err = new Error(error.message || "Error processing file upload.");
         err.status = error.status || 500;
         reject(err);
@@ -674,8 +759,8 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
 }
 
 // Helper function to handle Azure blob storage
-async function saveToAzureStorage(context, encodedFilename, file) {
-  const { containerClient } = await getBlobClient();
+async function saveToAzureStorage(context, encodedFilename, file, containerName = null) {
+  const { containerClient } = await getBlobClient(containerName);
   const contentType = mime.lookup(encodedFilename);
 
   // Create a safe blob name that is URI-encoded once (no double encoding)
@@ -689,6 +774,7 @@ async function saveToAzureStorage(context, encodedFilename, file) {
   };
 
   const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+  console.log("Uploading to container:", containerName || "default");
   context.log(`Uploading to Azure... ${blobName}`);
   await blockBlobClient.uploadStream(file, undefined, undefined, options);
   const sasToken = generateSASToken(containerClient, blobName);
@@ -731,6 +817,7 @@ async function uploadFile(
   filename,
   resolve,
   hash = null,
+  containerName = null,
 ) {
   try {
     if (!file) {
@@ -782,16 +869,17 @@ async function uploadFile(
     context.log("Starting primary storage upload...");
     const primaryPromise = saveToLocal
       ? saveToLocalStorage(
-          context,
-          requestId,
-          uploadName,
-          createOptimizedReadStream(uploadPath),
-        )
+        context,
+        requestId,
+        uploadName,
+        createOptimizedReadStream(uploadPath),
+      )
       : saveToAzureStorage(
-          context,
-          uploadName,
-          createOptimizedReadStream(uploadPath),
-        );
+        context,
+        uploadName,
+        createOptimizedReadStream(uploadPath),
+        containerName,
+      );
     storagePromises.push(
       primaryPromise.then((url) => {
         context.log("Primary storage upload completed");
@@ -900,7 +988,7 @@ async function uploadFile(
     context.log("Error in upload process:", error);
     if (body.url) {
       try {
-        await cleanup(context, [body.url]);
+        await cleanup(context, [body.url], containerName);
       } catch (cleanupError) {
         context.log("Error during cleanup after failure:", cleanupError);
       }
@@ -920,8 +1008,8 @@ async function streamToBuffer(stream) {
 }
 
 // Function to delete files that haven't been used in more than a month
-async function cleanup(context, urls = null) {
-  const { containerClient } = await getBlobClient();
+async function cleanup(context, urls = null, containerName = null) {
+  const { containerClient } = await getBlobClient(containerName);
   const cleanedURLs = [];
 
   if (!urls) {
@@ -1095,11 +1183,11 @@ async function deleteGCS(blobName) {
       errors: error.errors,
       response: error.response
         ? {
-            status: error.response.status,
-            statusText: error.response.statusText,
-            data: error.response.data,
-            headers: error.response.headers,
-          }
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data,
+          headers: error.response.headers,
+        }
         : null,
     });
     // Don't throw the error - we want to continue with cleanup even if GCS deletion fails

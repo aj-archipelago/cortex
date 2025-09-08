@@ -9,6 +9,9 @@ import { port } from "../src/start.js";
 import {
   cleanupHashAndFile,
   getFolderNameFromUrl,
+  startTestServer,
+  stopTestServer,
+  setupTestDirectory,
 } from "./testUtils.helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -55,11 +58,15 @@ async function uploadFile(filePath, requestId = null, hash = null) {
   return response;
 }
 
-// Setup: Create test directory
+// Setup: Create test directory and start server
 test.before(async (t) => {
-  const testDir = path.join(__dirname, "test-files");
-  await fs.promises.mkdir(testDir, { recursive: true });
-  t.context = { testDir };
+  await startTestServer();
+  await setupTestDirectory(t);
+});
+
+// Clean up server after tests
+test.after.always(async () => {
+  await stopTestServer();
 });
 
 // Test: Upload with hash and verify Redis storage

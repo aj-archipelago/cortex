@@ -7,6 +7,7 @@ import axios from "axios";
 
 import { uploadBlob } from "../src/blobHandler.js";
 import { urlExists } from "../src/helper.js";
+import { port } from "../src/start.js";
 import {
   setFileStoreMap,
   getFileStoreMap,
@@ -14,6 +15,7 @@ import {
   cleanupRedisFileStoreMapAge,
 } from "../src/redis.js";
 import { StorageService } from "../src/services/storage/StorageService.js";
+import { startTestServer, stopTestServer } from "./testUtils.helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 
@@ -75,18 +77,26 @@ function getRequestIdFromUploadResult(uploadResult) {
   return uploadResult.hash || "test-request-id";
 }
 
+// Ensure server is ready before tests
 test.before(async () => {
-  // Ensure Redis is connected
-  const { connectClient } = await import("../src/redis.js");
-  await connectClient();
+  // Start the server with Redis connection setup
+  await startTestServer({
+    beforeReady: async () => {
+      // Ensure Redis is connected
+      const { connectClient } = await import("../src/redis.js");
+      await connectClient();
+    }
+  });
 });
 
 test.after(async () => {
-  // Clean up any remaining test entries
-  const testKeys = [
-    "test-lazy-cleanup",
-    "test-age-cleanup",
-    "test-old-entry",
+  // Clean up server with cleanup logic
+  await stopTestServer(async () => {
+    // Clean up any remaining test entries
+    const testKeys = [
+      "test-lazy-cleanup",
+      "test-age-cleanup",
+      "test-old-entry",
     "test-missing-file",
     "test-gcs-backup",
     "test-recent-entry",
@@ -125,6 +135,7 @@ test.after(async () => {
   } catch (error) {
     console.error("Error cleaning up test files:", error);
   }
+  });
 });
 
 test("lazy cleanup should remove cache entry when file is missing", async (t) => {
@@ -510,22 +521,13 @@ test("cleanup should handle entries without timestamps gracefully", async (t) =>
     console.log(`Storing entry without timestamp:`, entryWithoutTimestamp);
 
     // Store directly in Redis to avoid timestamp being added
-    const redis = await import("ioredis");
-    const connectionString = process.env["REDIS_CONNECTION_STRING"];
-    const client = redis.default.createClient(connectionString);
-
-    try {
-      if (client.status !== "ready" && client.status !== "connecting") {
-        await client.connect();
-      }
-      await client.hset(
-        "FileStoreMap",
-        hash,
-        JSON.stringify(entryWithoutTimestamp),
-      );
-    } finally {
-      await client.disconnect();
-    }
+    const { client } = await import("../src/redis.js");
+    
+    await client.hset(
+      "FileStoreMap",
+      hash,
+      JSON.stringify(entryWithoutTimestamp),
+    );
 
     // Verify it exists initially
     const initialResult = await getFileStoreMap(hash, true);
@@ -566,37 +568,29 @@ test("cleanup should handle malformed entries gracefully", async (t) => {
 
     // Store the hash in Redis with malformed data
     const malformedKey = "test-malformed";
-    const redis = await import("ioredis");
-    const connectionString = process.env["REDIS_CONNECTION_STRING"];
-    const client = redis.default.createClient(connectionString);
+    const { client } = await import("../src/redis.js");
 
-    try {
-      // Don't try to connect if already connected
-      if (client.status !== "ready" && client.status !== "connecting") {
-        await client.connect();
-      }
-      await client.hset("FileStoreMap", malformedKey, "this is not json");
+    await client.hset("FileStoreMap", malformedKey, "this is not json");
 
-      // Verify malformed entry exists
-      const initialResult = await getFileStoreMap(malformedKey, true);
-      t.truthy(initialResult, "Malformed entry should exist initially");
+    // Verify malformed entry exists
+    const initialResult = await getFileStoreMap(malformedKey, true);
+    t.truthy(initialResult, "Malformed entry should exist initially");
 
-      // Run age-based cleanup - should not crash
-      const cleaned = await cleanupRedisFileStoreMapAge(7, 10);
+    // Run age-based cleanup - should not crash
+    const cleaned = await cleanupRedisFileStoreMapAge(7, 10);
 
-      // Malformed entry should not be cleaned up (no timestamp)
-      const cleanedHash = cleaned.find(
-        (entry) => entry.hash === "test-malformed",
-      );
-      t.falsy(cleanedHash, "Malformed entry should not be cleaned up");
+    // Malformed entry should not be cleaned up (no timestamp)
+    const cleanedHash = cleaned.find(
+      (entry) => entry.hash === "test-malformed",
+    );
+    t.falsy(cleanedHash, "Malformed entry should not be cleaned up");
 
-      // Verify the entry still exists
-      const resultAfterCleanup = await getFileStoreMap(malformedKey, true);
-      t.truthy(resultAfterCleanup, "Malformed entry should still exist");
-    } finally {
-      await removeFromFileStoreMap(malformedKey);
-      await client.disconnect();
-    }
+    // Verify the entry still exists
+    const resultAfterCleanup = await getFileStoreMap(malformedKey, true);
+    t.truthy(resultAfterCleanup, "Malformed entry should still exist");
+    
+    // Cleanup
+    await removeFromFileStoreMap(malformedKey);
   } finally {
     cleanupTestFile(testFile);
   }

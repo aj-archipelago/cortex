@@ -53,16 +53,21 @@ async function CortexFileHandler(context, req) {
     hash,
     checkHash,
     clearHash,
+    shortLivedMinutes,
     fetch,
     load,
     restore,
+    container,
   } = req.body?.params || req.query;
 
   // Normalize boolean parameters
   const shouldSave = save === true || save === "true";
   const shouldCheckHash = checkHash === true || checkHash === "true";
   const shouldClearHash = clearHash === true || clearHash === "true";
+  const shortLivedDuration = parseInt(shortLivedMinutes) || 5; // Default to 5 minutes
   const shouldFetchRemote = fetch || load || restore;
+
+
 
   const operation = shouldSave
     ? "save"
@@ -90,9 +95,11 @@ async function CortexFileHandler(context, req) {
 
   // Initialize services
   const storageService = new StorageService();
+  await storageService._initialize(); // Ensure providers are initialized
   const conversionService = new FileConversionService(
     context,
     storageService.primaryProvider.constructor.name === "AzureStorageProvider",
+    null,
   );
 
   // Validate URL for document processing and media chunking operations
@@ -124,13 +131,39 @@ async function CortexFileHandler(context, req) {
   }
 
   // Clean up files when request delete which means processing marked completed
+  // Supports two modes:
+  // 1. Delete multiple files by requestId (existing behavior)
+  // 2. Delete single file by hash (new behavior)
   if (operation === "delete") {
     const deleteRequestId = req.query.requestId || requestId;
     const deleteHash = req.query.hash || hash;
+    
+    // If only hash is provided, delete single file by hash
+    if (deleteHash && !deleteRequestId) {
+      try {
+        const deleted = await storageService.deleteFileByHash(deleteHash);
+        context.res = {
+          status: 200,
+          body: { 
+            message: `File with hash ${deleteHash} deleted successfully`,
+            deleted 
+          },
+        };
+        return;
+      } catch (error) {
+        context.res = {
+          status: 404,
+          body: { error: error.message },
+        };
+        return;
+      }
+    }
+    
+    // If requestId is provided, use the existing multi-file delete flow
     if (!deleteRequestId) {
       context.res = {
         status: 400,
-        body: "Please pass a requestId on the query string",
+        body: "Please pass either a requestId or hash on the query string",
       };
       return;
     }
@@ -190,7 +223,7 @@ async function CortexFileHandler(context, req) {
 
       // For remote files, we don't need a requestId folder structure since it's just a single file
       // Pass empty string to store the file directly in the root
-      const res = await storageService.uploadFile(context, filename, '');
+      const res = await storageService.uploadFile(context, filename, '', null, null, container);
 
       //Update Redis (using hash as the key)
       await setFileStoreMap(remoteUrl, res);
@@ -322,6 +355,9 @@ async function CortexFileHandler(context, req) {
               context,
               downloadedFile,
               hash,
+              null,
+              null,
+              container,
             );
 
             // Update the hash result with the new primary storage URL
@@ -377,6 +413,54 @@ async function CortexFileHandler(context, req) {
           timestamp: new Date().toISOString(),
         };
 
+        // Always generate short-lived URL for checkHash operations
+        try {
+          // Extract blob name from the stored URL to generate new SAS token
+          let blobName;
+          try {
+            const url = new URL(hashResult.url);
+            // Extract blob name from the URL path (remove leading slash)
+            blobName = url.pathname.substring(1);
+            // If there's a container prefix, remove it
+            const containerName = storageService.primaryProvider.containerName;
+            if (blobName.startsWith(containerName + '/')) {
+              blobName = blobName.substring(containerName.length + 1);
+            }
+          } catch (urlError) {
+            context.log(`Error parsing URL for short-lived generation: ${urlError}`);
+          }
+
+          // Generate short-lived SAS token
+          if (blobName && storageService.primaryProvider.generateShortLivedSASToken) {
+            const { containerClient } = await storageService.primaryProvider.getBlobClient();
+            const sasToken = storageService.primaryProvider.generateShortLivedSASToken(
+              containerClient, 
+              blobName, 
+              shortLivedDuration
+            );
+            
+            // Construct new URL with short-lived SAS token
+            const baseUrl = hashResult.url.split('?')[0]; // Remove existing SAS token
+            const shortLivedUrl = `${baseUrl}?${sasToken}`;
+            
+            // Add short-lived URL to response
+            response.shortLivedUrl = shortLivedUrl;
+            response.expiresInMinutes = shortLivedDuration;
+            
+            context.log(`Generated short-lived URL for hash: ${hash} (expires in ${shortLivedDuration} minutes)`);
+          } else {
+            // Fallback for storage providers that don't support short-lived tokens
+            response.shortLivedUrl = hashResult.url;
+            response.expiresInMinutes = shortLivedDuration;
+            context.log(`Storage provider doesn't support short-lived tokens, using original URL`);
+          }
+        } catch (error) {
+          context.log(`Error generating short-lived URL: ${error}`);
+          // Provide fallback even on error
+          response.shortLivedUrl = hashResult.url;
+          response.expiresInMinutes = shortLivedDuration;
+        }
+
         // Ensure converted version exists and is synced across storage providers
         try {
           hashResult = await conversionService.ensureConvertedVersion(
@@ -428,7 +512,7 @@ async function CortexFileHandler(context, req) {
       storageService.primaryProvider.constructor.name ===
       "LocalStorageProvider";
     // Use uploadBlob to handle multipart/form-data
-    const result = await uploadBlob(context, req, saveToLocal, null, hash);
+    const result = await uploadBlob(context, req, saveToLocal, null, hash, container);
     if (result?.hash && context?.res?.body) {
       await setFileStoreMap(result.hash, context.res.body);
     }
@@ -592,6 +676,7 @@ async function CortexFileHandler(context, req) {
           requestId,
           null,
           chunkFilename,
+          container,
         );
 
         const chunkOffset = chunkOffsets[index];

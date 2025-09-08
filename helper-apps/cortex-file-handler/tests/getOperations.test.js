@@ -7,7 +7,7 @@ import axios from "axios";
 import FormData from "form-data";
 import XLSX from "xlsx";
 import { port } from "../src/start.js";
-import { cleanupHashAndFile, createTestMediaFile } from "./testUtils.helper.js";
+import { cleanupHashAndFile, createTestMediaFile, startTestServer, stopTestServer, setupTestDirectory } from "./testUtils.helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,11 +49,15 @@ async function uploadFile(filePath, requestId = null, hash = null) {
   return response;
 }
 
-// Setup: Create test directory
+// Setup: Create test directory and start server
 test.before(async (t) => {
-  const testDir = path.join(__dirname, "test-files");
-  await fs.promises.mkdir(testDir, { recursive: true });
-  t.context = { testDir };
+  await startTestServer();
+  await setupTestDirectory(t);
+});
+
+// Clean up server after tests
+test.after.always(async () => {
+  await stopTestServer();
 });
 
 // Test: Document processing with save=true

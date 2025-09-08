@@ -124,9 +124,9 @@ class Gemini15ChatPlugin extends ModelPlugin {
             topP: parameters.topP || 0.95,
             topK: parameters.topK || 40,
         },
-        safety_settings: geminiSafetySettings || undefined,
-        systemInstruction: system,
-        tools: geminiTools || undefined
+        ...(geminiSafetySettings ? {safety_settings: geminiSafetySettings} : {}),
+        ...(system ? {systemInstruction: system} : {}),
+        ...(geminiTools ? {tools: geminiTools} : {})
         };
     
         return requestParameters;

@@ -4,24 +4,44 @@ import { LocalStorageProvider } from "./LocalStorageProvider.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
+// Lazy-load blob handler constants to avoid blocking module import
+let blobHandlerConstants = null;
+async function getBlobHandlerConstants() {
+  if (!blobHandlerConstants) {
+    blobHandlerConstants = await import("../../blobHandler.js");
+  }
+  return blobHandlerConstants;
+}
+
 export class StorageFactory {
   constructor() {
     this.providers = new Map();
   }
 
-  getPrimaryProvider() {
+  async getPrimaryProvider(containerName = null) {
     if (process.env.AZURE_STORAGE_CONNECTION_STRING) {
-      return this.getAzureProvider();
+      return await this.getAzureProvider(containerName);
     }
     return this.getLocalProvider();
   }
 
-  getAzureProvider() {
-    const key = "azure";
+  async getAzureProvider(containerName = null) {
+    const { AZURE_STORAGE_CONTAINER_NAMES, DEFAULT_AZURE_STORAGE_CONTAINER_NAME, isValidContainerName } = await getBlobHandlerConstants();
+    
+    // Use provided container name or default to first in whitelist
+    const finalContainerName = containerName || DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
+    
+    // Validate container name
+    if (!isValidContainerName(finalContainerName)) {
+      throw new Error(`Invalid container name '${finalContainerName}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`);
+    }
+    
+    // Create unique key for each container
+    const key = `azure-${finalContainerName}`;
     if (!this.providers.has(key)) {
       const provider = new AzureStorageProvider(
         process.env.AZURE_STORAGE_CONNECTION_STRING,
-        process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles",
+        finalContainerName,
       );
       this.providers.set(key, provider);
     }
