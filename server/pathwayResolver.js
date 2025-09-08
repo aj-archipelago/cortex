@@ -508,19 +508,15 @@ class PathwayResolver {
 
         // If this text is empty, skip applying the prompt as it will likely be a nonsensical result
         if (!/^\s*$/.test(text) || parameters?.file || parameters?.inputVector || this?.modelName.includes('cognitive')) {
-            // Merge pathway configuration parameters with request parameters
-            const mergedParameters = { 
-                ...this.pathway,  // Include pathway configuration (search_mode, return_citations, etc.)
-                ...parameters,    // Override with request parameters
+            result = await this.modelExecutor.execute(text, { 
+                ...parameters, 
                 ...this.savedContext,
                 memorySelf: this.memorySelf,
                 memoryDirectives: this.memoryDirectives,
                 memoryTopics: this.memoryTopics,
                 memoryUser: this.memoryUser,
                 memoryContext: this.memoryContext
-            };
-            
-            result = await this.modelExecutor.execute(text, mergedParameters, prompt, this);
+            }, prompt, this);
         } else {
             result = text;
         }
