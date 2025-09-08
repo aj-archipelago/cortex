@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import axios from "axios";
 import FormData from "form-data";
 import XLSX from "xlsx";
+import nock from "nock";
 import { port } from "../src/start.js";
 import { cleanupHashAndFile, createTestMediaFile, startTestServer, stopTestServer, setupTestDirectory } from "./testUtils.helper.js";
 
@@ -251,28 +252,57 @@ test.serial("should fetch remote file", async (t) => {
 test.serial("should cache remote files in Redis", async (t) => {
   const requestId = uuidv4();
   const hash = "test-cache-" + uuidv4();
+  const testContent = "This is test content for caching";
+  const testUrl = "https://test-server.example.com/test.txt";
 
-  // First request should cache the file
-  const firstResponse = await axios.get(baseUrl, {
-    params: {
-      fetch: "https://example.com/test.txt",
-      requestId,
-      hash,
-      timeout: 10000,
-    },
-    validateStatus: (status) => true,
-  });
+  // Mock the external HTTP requests (HEAD for validation and GET for fetching)
+  // We need multiple HEAD mocks because each request validates the URL
+  const scope = nock("https://test-server.example.com")
+    .persist() // Allow the mocks to be reused
+    .head("/test.txt")
+    .reply(200, "", {
+      "Content-Type": "text/plain",
+      "Content-Length": testContent.length.toString(),
+    })
+    .get("/test.txt")
+    .reply(200, testContent, {
+      "Content-Type": "text/plain",
+      "Content-Length": testContent.length.toString(),
+    });
 
-  // Second request should return cached result
-  const secondResponse = await axios.get(baseUrl, {
-    params: {
-      hash,
-      checkHash: true,
-    },
-    validateStatus: (status) => true,
-  });
+  try {
+    // First request should fetch and cache the file with hash
+    const firstResponse = await axios.get(baseUrl, {
+      params: {
+        fetch: testUrl,
+        requestId,
+        hash,
+        timeout: 10000,
+      },
+      validateStatus: (status) => true,
+    });
 
-  t.is(secondResponse.status, 404, "Should return 404 for invalid URL");
+    t.is(firstResponse.status, 200, "Should successfully fetch and cache remote file");
+    t.truthy(firstResponse.data.url, "Should return file URL");
+
+    // Second request should return cached result using hash
+    const secondResponse = await axios.get(baseUrl, {
+      params: {
+        hash,
+        checkHash: true,
+      },
+      validateStatus: (status) => true,
+    });
+
+    t.is(secondResponse.status, 200, "Should return cached file from Redis");
+    t.truthy(secondResponse.data.url, "Should return cached file URL");
+    
+    // Cleanup
+    await cleanupHashAndFile(hash, secondResponse.data.url, baseUrl);
+  } finally {
+    // Clean up nock
+    nock.cleanAll();
+  }
 });
 
 // Test: Error cases for invalid URLs
