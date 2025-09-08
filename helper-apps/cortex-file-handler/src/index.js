@@ -3,7 +3,7 @@ import os from "os";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 
-import { DOC_EXTENSIONS } from "./constants.js";
+import { DOC_EXTENSIONS, AZURITE_ACCOUNT_NAME } from "./constants.js";
 import { easyChunker } from "./docHelper.js";
 import { downloadFile, splitMediaFile } from "./fileChunker.js";
 import { ensureEncoded, ensureFileExtension, urlExists } from "./helper.js";
@@ -427,9 +427,9 @@ async function CortexFileHandler(context, req) {
             // For real Azure URLs, the path is: container/blob
             const containerName = storageService.primaryProvider.containerName;
             
-            // Check if this is an Azurite URL (contains devstoreaccount1)
-            if (path.startsWith('devstoreaccount1/')) {
-              path = path.substring('devstoreaccount1/'.length); // Remove account prefix
+    // Check if this is an Azurite URL (contains devstoreaccount1)
+    if (path.startsWith(`${AZURITE_ACCOUNT_NAME}/`)) {
+      path = path.substring(`${AZURITE_ACCOUNT_NAME}/`.length); // Remove account prefix
             }
             
             // Now remove container prefix if it exists
