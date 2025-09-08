@@ -90,6 +90,10 @@ test("converts Excel to CSV successfully", async (t) => {
 
 // Test document conversion with MarkItDown API
 test("converts document to markdown via MarkItDown API", async (t) => {
+  // Set the environment variable for the test
+  const originalEnv = process.env.MARKITDOWN_CONVERT_URL;
+  process.env.MARKITDOWN_CONVERT_URL = "http://localhost:8080/convert?url=";
+  
   // Mock axios.get for MarkItDown API
   const originalAxiosGet = axios.get;
   axios.get = async (url) => {
@@ -118,8 +122,13 @@ test("converts document to markdown via MarkItDown API", async (t) => {
   t.true(content.includes("# Test Document"));
   t.true(content.includes("This is a test document converted to markdown"));
 
-  // Restore original axios.get
+  // Restore original axios.get and environment variable
   axios.get = originalAxiosGet;
+  if (originalEnv) {
+    process.env.MARKITDOWN_CONVERT_URL = originalEnv;
+  } else {
+    delete process.env.MARKITDOWN_CONVERT_URL;
+  }
 });
 
 // Test error handling for missing original URL

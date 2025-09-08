@@ -31,7 +31,7 @@ function shouldUseLocalStorage() {
 }
 const __dirname = path.dirname(__filename);
 
-const baseUrl = "http://localhost:7072/api/CortexFileHandler";
+const baseUrl = `http://localhost:${port}/api/CortexFileHandler`;
 
 // Helper function to create a test file
 async function createTestFile(content, extension = "txt") {

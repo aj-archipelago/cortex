@@ -253,10 +253,11 @@ export class ConversionService {
 
   async _convertToMarkdown(fileUrl) {
     try {
-      if (!MARKITDOWN_CONVERT_URL) {
+      const markitdownUrl = process.env.MARKITDOWN_CONVERT_URL;
+      if (!markitdownUrl) {
         throw new Error("MARKITDOWN_CONVERT_URL is not set");
       }
-      const apiUrl = `${MARKITDOWN_CONVERT_URL}${encodeURIComponent(fileUrl)}`;
+      const apiUrl = `${markitdownUrl}${encodeURIComponent(fileUrl)}`;
       const response = await axios.get(apiUrl);
       return response.data.markdown || "";
     } catch (err) {
