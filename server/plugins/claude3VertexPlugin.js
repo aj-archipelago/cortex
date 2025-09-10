@@ -273,6 +273,10 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     requestParameters.messages = modifiedMessages;
 
     // Convert OpenAI tools format to Claude format if present
+    if (typeof parameters.tools === 'string') {
+      parameters.tools = JSON.parse(parameters.tools);
+    }
+    
     if (parameters.tools) {
       requestParameters.tools = parameters.tools.map(tool => {
         if (tool.type === 'function') {

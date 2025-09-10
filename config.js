@@ -295,6 +295,21 @@ var config = convict({
                 "maxReturnTokens": 100000,
                 "supportsStreaming": false
             },
+            "oai-o3": {
+                "type": "OPENAI-REASONING",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "o3"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 200000,
+                "maxReturnTokens": 100000,
+                "supportsStreaming": true
+            },
             "oai-o3-mini": {
                 "type": "OPENAI-REASONING",
                 "url": "https://api.openai.com/v1/chat/completions",
@@ -308,7 +323,7 @@ var config = convict({
                 "requestsPerSecond": 10,
                 "maxTokenLength": 200000,
                 "maxReturnTokens": 100000,
-                "supportsStreaming": false
+                "supportsStreaming": true
             },
             "azure-bing": {
                 "type": "AZURE-BING",

@@ -1,5 +1,4 @@
-// sys_openai_chat.js
-// override handler for gpt-3.5-turbo
+// sys_openai_chat_gpt41.js
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -11,12 +10,13 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{role: '', content: []}],
+        functions: '',
         tools: '',
         tool_choice: 'auto',
-        functions: '',
     },
-    model: 'oai-gpt4o',
+    model: 'oai-gpt41',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-4o',
+    emulateOpenAIChatModel: 'gpt-4.1',
+    enableDuplicateRequests: false,
 }
