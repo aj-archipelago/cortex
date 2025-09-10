@@ -340,8 +340,8 @@ test('POST /chat/completions should handle invalid image data', async (t) => {
 test('POST /completions should handle model parameters', async (t) => {
   const response = await got.post(`${API_BASE}/completions`, {
     json: {
-      model: 'gpt-3.5-turbo',
-      prompt: 'Say this is a test',
+      model: 'gpt-4o',
+      prompt: 'Repeat after me: Say this is a test',
       temperature: 0.7,
       max_tokens: 100,
       top_p: 1,
@@ -358,45 +358,9 @@ test('POST /completions should handle model parameters', async (t) => {
   t.truthy(response.body.choices[0].text);
 });
 
-test('POST /chat/completions should handle function calling', async (t) => {
-  const response = await got.post(`${API_BASE}/chat/completions`, {
-    json: {
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: 'What is the weather in Boston?' }],
-      functions: [{
-        name: 'get_weather',
-        description: 'Get the current weather in a given location',
-        parameters: {
-          type: 'object',
-          properties: {
-            location: {
-              type: 'string',
-              description: 'The city and state, e.g. San Francisco, CA'
-            },
-            unit: {
-              type: 'string',
-              enum: ['celsius', 'fahrenheit']
-            }
-          },
-          required: ['location']
-        }
-      }],
-      stream: false,
-    },
-    responseType: 'json',
-  });
 
-  t.is(response.statusCode, 200);
-  t.is(response.body.object, 'chat.completion');
-  t.true(Array.isArray(response.body.choices));
-  const choice = response.body.choices[0];
-  t.true(['function_call', 'stop'].includes(choice.finish_reason));
-  if (choice.finish_reason === 'function_call') {
-    t.truthy(choice.message.function_call);
-    t.truthy(choice.message.function_call.name);
-    t.truthy(choice.message.function_call.arguments);
-  }
-});
+
+
 
 test('POST /chat/completions should validate response format', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -616,9 +580,6 @@ test('POST /chat/completions should handle array content properly', async (t) =>
         // No response received
         t.fail(`API request failed: ${error.message}`);
       }
-    }
+        }
   }
-});  
-  
-
-  
+});

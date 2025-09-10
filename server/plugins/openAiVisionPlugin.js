@@ -113,16 +113,14 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         }
         if (stream) {
             logger.info(`[response received as an SSE stream]`);
-        } else {
-            const parsedResponse = this.parseResponse(responseData);
-            
-            if (typeof parsedResponse === 'string') {
-                const { length, units } = this.getLength(parsedResponse);
+        } else {           
+            if (typeof responseData === 'string') {
+                const { length, units } = this.getLength(responseData);
                 logger.info(`[response received containing ${length} ${units}]`);
-                logger.verbose(`${this.shortenContent(parsedResponse)}`);
+                logger.verbose(`${this.shortenContent(responseData)}`);
             } else {
                 logger.info(`[response received containing object]`);
-                logger.verbose(`${JSON.stringify(parsedResponse)}`);
+                logger.verbose(`${JSON.stringify(responseData)}`);
             }
         }
 
@@ -134,15 +132,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         const requestParameters = super.getRequestParameters(text, parameters, prompt);
 
         requestParameters.messages = await this.tryParseMessages(requestParameters.messages);
-
-        // Add tools support if provided in parameters
-        if (parameters.tools) {
-            requestParameters.tools = parameters.tools;
-        }
-
-        if (parameters.tool_choice) {
-            requestParameters.tool_choice = parameters.tool_choice;
-        }
 
         const modelMaxReturnTokens = this.getModelMaxReturnTokens();
         const maxTokensPrompt = this.promptParameters.max_tokens;
@@ -168,7 +157,13 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         cortexRequest.params = {}; // query params
         cortexRequest.stream = stream;
 
-        return this.executeRequest(cortexRequest);
+        const parsedResponse = await this.executeRequest(cortexRequest);
+
+        if (typeof parsedResponse === 'object' && (parsedResponse.tool_calls || parsedResponse.function_call)) {
+            cortexRequest.pathwayResolver.tool = JSON.stringify({tool_calls: parsedResponse.tool_calls, function_call: parsedResponse.function_call});
+        }
+
+        return parsedResponse;
     }
 
     // Override parseResponse to handle tool calls
@@ -184,16 +179,13 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             return choices;
         }
 
-        const choice = choices[0];
-        const message = choice.message;
+        const message = choices[0].message;
+        if (!message) {
+            return null;
+        }
 
-        // Handle tool calls in the response
-        if (message.tool_calls) {
-            return {
-                role: message.role,
-                content: message.content || "",
-                tool_calls: message.tool_calls
-            };
+        if (message.tool_calls || message.function_call) {
+            return message;
         }
 
         return message.content || "";
