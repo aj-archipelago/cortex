@@ -9,8 +9,6 @@ export default {
         async: false, // switch to enable async mode
         contextId: ``, // used to identify the context of the request,
         stream: false, // switch to enable stream mode
-        tools: [], // array of tool definitions in OpenAI format
-        tool_choice: "auto", // "auto", "none", or specific tool choice
     },
     inputParameters: {},
     typeDef,
