@@ -659,6 +659,8 @@ function uploadBlob(
                       await conversionService._saveConvertedFile(
                         conversion.convertedPath,
                         requestId,
+                        null,
+                        containerName,
                       );
 
                     // Optionally save to GCS
@@ -960,6 +962,8 @@ async function uploadFile(
             await conversionService._saveConvertedFile(
               conversion.convertedPath,
               requestId,
+              null,
+              containerName,
             );
           context.log("Converted file saved to primary storage");
 
