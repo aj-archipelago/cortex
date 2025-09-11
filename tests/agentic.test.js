@@ -17,7 +17,7 @@ test.before(async () => {
 
   // Create WebSocket client for subscriptions
   wsClient = createClient({
-    url: 'ws://localhost:4000/graphql',
+    url: `ws://localhost:${process.env.CORTEX_PORT || 4000}/graphql`,
     webSocketImpl: ws,
     retryAttempts: 3,
     connectionParams: {},
@@ -75,7 +75,7 @@ test.after.always('cleanup', async () => {
 // Helper function to collect subscription events
 async function collectSubscriptionEvents(subscription, timeout = 30000) {
   const events = [];
-  
+
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       if (events.length > 0) {
@@ -134,17 +134,17 @@ test.serial('sys_entity_agent handles single-step task', async (t) => {
         }
       }
     `,
-    variables: { 
+    variables: {
       text: 'What is the current time?',
-      chatHistory: [{ 
-        role: "user", 
-        content: ["What is the current time?"] 
+      chatHistory: [{
+        role: "user",
+        content: ["What is the current time?"]
       }]
     }
   });
 
   console.log('Single-step Agent Response:', JSON.stringify(response, null, 2));
-  
+
   // Check for successful response
   t.falsy(response.body?.singleResult?.errors, 'Should not have GraphQL errors');
   const requestId = response.body?.singleResult?.data?.sys_entity_agent?.result;
@@ -169,7 +169,7 @@ test.serial('sys_entity_agent handles single-step task', async (t) => {
   t.true(events.length > 0, 'Should have received events');
 
   // Verify we got a completion event
-  const completionEvent = events.find(event => 
+  const completionEvent = events.find(event =>
     event.data.requestProgress.progress === 1
   );
   t.truthy(completionEvent, 'Should have received a completion event');
@@ -197,17 +197,17 @@ test.serial('sys_entity_agent handles multi-step task with tools', async (t) => 
         }
       }
     `,
-    variables: { 
+    variables: {
       text: 'Research the latest developments in renewable energy and summarize the key trends.',
-      chatHistory: [{ 
-        role: "user", 
-        content: ["Research the latest developments in renewable energy and summarize the key trends."] 
+      chatHistory: [{
+        role: "user",
+        content: ["Research the latest developments in renewable energy and summarize the key trends."]
       }]
     }
   });
 
   console.log('Multi-step Agent Response:', JSON.stringify(response, null, 2));
-  
+
   // Check for successful response
   t.falsy(response.body?.singleResult?.errors, 'Should not have GraphQL errors');
   const requestId = response.body?.singleResult?.data?.sys_entity_agent?.result;
@@ -232,7 +232,7 @@ test.serial('sys_entity_agent handles multi-step task with tools', async (t) => 
   t.true(events.length > 0, 'Should have received events');
 
   // Verify we got a completion event
-  const completionEvent = events.find(event => 
+  const completionEvent = events.find(event =>
     event.data.requestProgress.progress === 1
   );
   t.truthy(completionEvent, 'Should have received a completion event');

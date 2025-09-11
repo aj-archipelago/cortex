@@ -17,7 +17,7 @@ test.before(async () => {
 
   // Create WebSocket client for subscriptions
   wsClient = createClient({
-    url: 'ws://localhost:4000/graphql',
+    url: `ws://localhost:${process.env.CORTEX_PORT || 4000}/graphql`,
     webSocketImpl: ws,
     retryAttempts: 3,
     connectionParams: {},
@@ -80,9 +80,9 @@ async function createSubscription(query, variables) {
       variables
     },
     {
-      next: () => {},
+      next: () => { },
       error: (error) => console.error('Subscription error:', error),
-      complete: () => {}
+      complete: () => { }
     }
   );
 }
@@ -94,7 +94,7 @@ async function collectSubscriptionEvents(subscription, timeout = 30000, options 
 
   return new Promise((resolve, reject) => {
     let timeoutId;
-    
+
     const checkAndResolve = () => {
       if (!requireCompletion && events.length >= minEvents) {
         clearTimeout(timeoutId);
@@ -121,7 +121,7 @@ async function collectSubscriptionEvents(subscription, timeout = 30000, options 
       {
         next: (event) => {
           events.push(event);
-          
+
           // Check for completion or minimum events
           if (requireCompletion && event?.data?.requestProgress?.progress === 1) {
             clearTimeout(timeoutId);
@@ -150,7 +150,7 @@ function validateProgressMessage(t, progress, requestId = null) {
   t.truthy(progress, 'progress field should exist');
   t.truthy(progress.requestId, 'requestId field should exist');
   t.truthy(progress.progress !== undefined, 'progress value should exist');
-  
+
   if (requestId) {
     t.is(progress.requestId, requestId, 'Request ID should match throughout');
   }
@@ -187,7 +187,7 @@ test.serial('Request progress messages have string data and info fields', async 
         }
       }
     `,
-    variables: { 
+    variables: {
       text: 'Generate a long response to test streaming'
     }
   });
@@ -220,7 +220,7 @@ test.serial('Request progress messages have string data and info fields', async 
   for (const event of events) {
     console.log('Processing event:', JSON.stringify(event, null, 2));
     const progress = event.data.requestProgress;
-    
+
     validateProgressMessage(t, progress, requestId);
   }
 });
@@ -239,7 +239,7 @@ test.serial('sys_entity_start streaming works correctly', async (t) => {
         }
       }
     `,
-    variables: { 
+    variables: {
       text: 'Tell me about the history of Al Jazeera',
       chatHistory: [{ role: "user", content: ["Tell me about the history of Al Jazeera"] }],
       stream: true
@@ -281,7 +281,7 @@ test.serial('sys_entity_start streaming works correctly', async (t) => {
     if (progress.data) {
       const parsed = JSON.parse(progress.data);
       t.true(
-        typeof parsed === 'string' || 
+        typeof parsed === 'string' ||
         typeof parsed === 'object',
         'Data should be either a string or an object'
       );
@@ -313,7 +313,7 @@ test.serial('Translate pathway handles chunked async processing correctly', asyn
         }
       }
     `,
-    variables: { 
+    variables: {
       text: longText,
       to: 'Spanish'
     }
@@ -353,7 +353,7 @@ test.serial('Translate pathway handles chunked async processing correctly', asyn
   for (const event of events) {
     console.log('Processing event:', JSON.stringify(event, null, 2));
     const progress = event.data.requestProgress;
-    
+
     validateProgressMessage(t, progress, requestId);
 
     // Verify progress increases
