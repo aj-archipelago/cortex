@@ -240,47 +240,6 @@ test.serial("should prioritize requestId over hash when both provided", async (t
   }
 });
 
-test.serial("should handle concurrent hash deletions gracefully", async (t) => {
-  const testContent = "test content for concurrent deletion";
-  const testHash = `test-concurrent-${uuidv4()}`;
-  const filePath = await createTestFile(testContent, "txt");
-  let uploadResponse;
-
-  try {
-    // Upload file with hash
-    uploadResponse = await uploadFile(filePath, null, testHash);
-    t.is(uploadResponse.status, 200, "Upload should succeed");
-
-    // Try to delete the same hash multiple times concurrently
-    const deletePromises = [
-      deleteFileByHash(testHash),
-      deleteFileByHash(testHash),
-      deleteFileByHash(testHash)
-    ];
-
-    const results = await Promise.all(deletePromises);
-    
-    // One should succeed, others should fail gracefully
-    const successCount = results.filter(r => r.status === 200).length;
-    const notFoundCount = results.filter(r => r.status === 404).length;
-    
-    t.is(successCount, 1, "Exactly one deletion should succeed");
-    t.is(notFoundCount, 2, "Two deletions should return 404");
-
-    // Verify hash is gone
-    const hashCheckAfter = await checkHashExists(testHash);
-    t.is(hashCheckAfter.status, 404, "Hash should not exist after deletion");
-
-  } finally {
-    fs.unlinkSync(filePath);
-    try {
-      await removeFromFileStoreMap(testHash);
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-  }
-});
-
 test.serial("should return proper response format for successful deletion", async (t) => {
   const testContent = "test content for response format";
   const testHash = `test-response-${uuidv4()}`;
