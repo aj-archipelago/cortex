@@ -21,7 +21,7 @@ import {
   generateBlobName,
 } from "./utils/filenameUtils.js";
 import { publicFolder, port, ipAddress } from "./start.js";
-import { CONVERTED_EXTENSIONS } from "./constants.js";
+import { CONVERTED_EXTENSIONS, AZURITE_ACCOUNT_NAME } from "./constants.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 
 const pipeline = promisify(_pipeline);
@@ -254,7 +254,25 @@ const generateSASToken = (
   blobName,
   options = {},
 ) => {
-  const { accountName, accountKey } = containerClient.credential;
+  // Handle Azurite (development storage) credentials with fallback
+  let accountName, accountKey;
+  
+  if (containerClient.credential && containerClient.credential.accountName) {
+    // Regular Azure Storage credentials
+    accountName = containerClient.credential.accountName;
+    
+    // Handle Buffer case (Azurite) vs string case (real Azure)
+    if (Buffer.isBuffer(containerClient.credential.accountKey)) {
+      accountKey = containerClient.credential.accountKey.toString('base64');
+    } else {
+      accountKey = containerClient.credential.accountKey;
+    }
+  } else {
+    // Azurite development storage fallback
+    accountName = AZURITE_ACCOUNT_NAME;
+    accountKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
+  }
+  
   const sharedKeyCredential = new StorageSharedKeyCredential(
     accountName,
     accountKey,

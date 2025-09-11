@@ -1,5 +1,27 @@
 #!/bin/bash
 
+# Check if Docker is available
+if ! command -v docker &> /dev/null; then
+    echo "❌ Error: Docker is not installed or not available in PATH"
+    echo "   Please install Docker to run this test script"
+    exit 1
+fi
+
+# Check if Docker daemon is running
+if ! docker info &> /dev/null; then
+    echo "❌ Error: Docker daemon is not running"
+    echo "   Please start Docker and try again"
+    exit 1
+fi
+
+# Validate environment variables first - fail fast if missing
+echo "🔍 Validating environment configuration..."
+DOTENV_CONFIG_PATH=.env.test.gcs NODE_ENV=test node -r dotenv/config scripts/validate-env.js
+if [ $? -ne 0 ]; then
+    echo "❌ Environment validation failed. Exiting."
+    exit 1
+fi
+
 # Exit on error
 set -e
 
@@ -42,8 +64,8 @@ fi
 
 # Create containers
 echo "Setting up test containers..."
-node scripts/setup-test-containers.js
+DOTENV_CONFIG_PATH=.env.test.gcs NODE_ENV=test node -r dotenv/config scripts/setup-test-containers.js
 
 # Run the tests
 echo "Running tests..."
-node -r dotenv/config node_modules/ava/entrypoints/cli.mjs "$@" 
+DOTENV_CONFIG_PATH=.env.test.gcs NODE_ENV=test node -r dotenv/config node_modules/ava/entrypoints/cli.mjs "$@" 

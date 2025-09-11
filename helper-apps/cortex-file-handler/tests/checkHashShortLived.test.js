@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
 
 import { port } from "../src/start.js";
+import { AZURITE_ACCOUNT_NAME } from "../src/constants.js";
 import { 
   cleanupHashAndFile, 
   createTestMediaFile, 
@@ -69,7 +70,12 @@ async function checkHash(hash, shortLivedMinutes = null) {
 // Helper to check if Azure is configured (real Azure, not local emulator)
 function isAzureConfigured() {
   return process.env.AZURE_STORAGE_CONNECTION_STRING && 
-         !process.env.AZURE_STORAGE_CONNECTION_STRING.includes("devstoreaccount1");
+         !process.env.AZURE_STORAGE_CONNECTION_STRING.includes("UseDevelopmentStorage=true");
+}
+
+// Helper to check if using Azure storage provider (including Azurite emulator)
+function isUsingAzureStorage() {
+  return process.env.AZURE_STORAGE_CONNECTION_STRING;
 }
 
 // Helper to check if GCS is configured
@@ -111,8 +117,8 @@ test.serial("checkHash should always return shortLivedUrl", async (t) => {
     t.is(checkResponse.data.expiresInMinutes, 5, "Default expiration should be 5 minutes");
 
     // Verify shortLivedUrl behavior based on storage provider
-    if (isAzureConfigured()) {
-      // With Azure, shortLivedUrl should be different from original URL
+    if (isUsingAzureStorage()) {
+      // With Azure (including Azurite), shortLivedUrl should be different from original URL
       t.not(
         checkResponse.data.shortLivedUrl,
         checkResponse.data.url,
@@ -218,7 +224,7 @@ test.serial("checkHash shortLivedUrl should be accessible", async (t) => {
 
     // Verify the shortLivedUrl is accessible
     // Skip this test for Azure emulator as it may have network issues
-    if (isAzureConfigured() && !checkResponse.data.shortLivedUrl.includes('devstoreaccount1')) {
+    if (isAzureConfigured() && !checkResponse.data.shortLivedUrl.includes(AZURITE_ACCOUNT_NAME)) {
       // Test with real Azure storage
       const fileResponse = await axios.get(checkResponse.data.shortLivedUrl, {
         validateStatus: (status) => true,
@@ -283,8 +289,8 @@ test.serial("checkHash should return consistent response structure", async (t) =
     }
 
     // shortLivedUrl behavior depends on storage provider
-    if (isAzureConfigured()) {
-      // With Azure storage, different expiration times should result in different SAS tokens
+    if (isUsingAzureStorage()) {
+      // With Azure storage (including Azurite), different expiration times should result in different SAS tokens
       t.not(
         checkResponse1.data.shortLivedUrl,
         checkResponse2.data.shortLivedUrl,
@@ -330,8 +336,8 @@ test.serial("checkHash should handle fallback when SAS token generation is not s
     t.truthy(checkResponse.data.shortLivedUrl, "Response should include shortLivedUrl");
     t.truthy(checkResponse.data.expiresInMinutes, "Response should include expiresInMinutes");
 
-    if (isAzureConfigured()) {
-      // When Azure is configured, shortLivedUrl should be different from original URL
+    if (isUsingAzureStorage()) {
+      // When Azure is configured (including Azurite), shortLivedUrl should be different from original URL
       t.not(
         checkResponse.data.shortLivedUrl,
         checkResponse.data.url,
@@ -353,7 +359,7 @@ test.serial("checkHash should handle fallback when SAS token generation is not s
     }
 
     // Verify the shortLivedUrl is accessible regardless of storage provider
-    if (isAzureConfigured() && !checkResponse.data.shortLivedUrl.includes('devstoreaccount1')) {
+    if (isAzureConfigured() && !checkResponse.data.shortLivedUrl.includes(AZURITE_ACCOUNT_NAME)) {
       // Test with real Azure storage
       const fileResponse = await axios.get(checkResponse.data.shortLivedUrl, {
         validateStatus: (status) => true,

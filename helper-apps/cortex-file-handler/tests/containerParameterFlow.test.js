@@ -208,9 +208,9 @@ test("uploadBlob should reject invalid container names in form data", async (t) 
     });
 
     t.is(response.status, 400);
-    t.truthy(response.data.message || response.data.error);
+    t.truthy(response.data);
     t.true(
-      (response.data.message || response.data.error || "").includes("Invalid container name")
+      response.data.includes("Invalid container name")
     );
   } finally {
     // Cleanup test file
