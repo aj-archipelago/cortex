@@ -154,3 +154,45 @@ test("correctly detects file extensions", (t) => {
   t.false(service.needsConversion("test.txt"));
   t.false(service.needsConversion("test.json"));
 });
+
+// Test _saveConvertedFile method signature and container parameter handling
+test("_saveConvertedFile accepts container parameter", async (t) => {
+  const service = new FileConversionService(mockContext, false); // Use local storage for testing
+  
+  // Create a test file
+  const testFile = join(t.context.testDir, "container-param-test.txt");
+  await fs.writeFile(testFile, "Test content for container parameter");
+  
+  // Test that the method accepts all parameters without throwing
+  const result = await service._saveConvertedFile(
+    testFile,
+    "test-request-id",
+    "test-filename.txt",
+    "test-container"
+  );
+  
+  t.truthy(result);
+  t.truthy(result.url);
+  t.true(typeof result.url === 'string');
+});
+
+// Test ensureConvertedVersion method signature with container parameter
+test("ensureConvertedVersion accepts container parameter", async (t) => {
+  const service = new FileConversionService(mockContext, false);
+  
+  // Mock file info object
+  const fileInfo = {
+    url: "http://example.com/test.txt", // Non-convertible file
+    gcs: "gs://bucket/test.txt"
+  };
+  
+  // Test that the method accepts container parameter without throwing
+  const result = await service.ensureConvertedVersion(
+    fileInfo,
+    "test-request-id",
+    "test-container"
+  );
+  
+  t.truthy(result);
+  t.is(result.url, fileInfo.url); // Should return original for non-convertible file
+});

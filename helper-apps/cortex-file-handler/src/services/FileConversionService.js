@@ -33,13 +33,13 @@ export class FileConversionService extends ConversionService {
     return downloadFile(url, destination);
   }
 
-  async _saveConvertedFile(filePath, requestId, filename = null) {
+  async _saveConvertedFile(filePath, requestId, filename = null, containerName = null) {
     // Generate a fallback requestId if none supplied (e.g. during checkHash calls)
     const reqId = requestId || uuidv4();
 
     let fileUrl;
     if (this.useAzure) {
-      const savedBlob = await saveFileToBlob(filePath, reqId, filename);
+      const savedBlob = await saveFileToBlob(filePath, reqId, filename, containerName);
       fileUrl = savedBlob.url;
     } else {
       fileUrl = await moveFileToPublicFolder(filePath, reqId);

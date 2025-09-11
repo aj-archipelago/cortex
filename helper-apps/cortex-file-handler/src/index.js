@@ -479,6 +479,7 @@ async function CortexFileHandler(context, req) {
           hashResult = await conversionService.ensureConvertedVersion(
             hashResult,
             requestId,
+            container,
           );
         } catch (error) {
           context.log(`Error ensuring converted version: ${error}`);
@@ -593,6 +594,8 @@ async function CortexFileHandler(context, req) {
               await conversionService._saveConvertedFile(
                 conversion.convertedPath,
                 requestId,
+                null,
+                container,
               );
 
             // Return the converted file URL
@@ -608,6 +611,8 @@ async function CortexFileHandler(context, req) {
             const saveResult = await conversionService._saveConvertedFile(
               downloadedFile,
               requestId,
+              null,
+              container,
             );
 
             // Return the original file URL

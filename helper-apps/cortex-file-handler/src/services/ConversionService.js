@@ -96,9 +96,10 @@ export class ConversionService {
    * Ensures a file has both original and converted versions
    * @param {Object} fileInfo - Information about the file
    * @param {string} requestId - Request ID for storage
+   * @param {string} containerName - Optional container name for storage
    * @returns {Promise<Object>} - Updated file info with conversion if needed
    */
-  async ensureConvertedVersion(fileInfo, requestId) {
+  async ensureConvertedVersion(fileInfo, requestId, containerName = null) {
     const { url, gcs } = fileInfo;
     // Remove any query parameters before extension check
     const extension = path.extname(url.split("?")[0]).toLowerCase();
@@ -158,6 +159,8 @@ export class ConversionService {
         const convertedSaveResult = await this._saveConvertedFile(
           conversion.convertedPath,
           requestId,
+          null,
+          containerName,
         );
         if (!convertedSaveResult) {
           throw new Error("Failed to save converted file to primary storage");
@@ -302,7 +305,7 @@ export class ConversionService {
     throw new Error("Method _downloadFile must be implemented");
   }
 
-  async _saveConvertedFile(filePath, requestId) {
+  async _saveConvertedFile(filePath, requestId, filename = null, containerName = null) {
     throw new Error("Method _saveConvertedFile must be implemented");
   }
 
