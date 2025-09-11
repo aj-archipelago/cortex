@@ -24,6 +24,22 @@ export default {
                     userMessage: {
                         type: "string",
                         description: "A user-friendly message that describes what you're doing with this tool"
+                    },
+                    count: {
+                        type: "integer",
+                        description: "Number of search results to return (default: 25, minimum: 1, maximum: 50)",
+                    },
+                    freshness: {
+                        type: "string",
+                        description: "Time filter for search results in Bing freshness format (e.g., 'day', 'week', 'month', 'year', or an explicit date range 'YYYY-MM-DD..YYYY-MM-DD' or single date 'YYYY-MM-DD')",
+                    },
+                    market: {
+                        type: "string",
+                        description: "Market/locale for search results (e.g., 'en-us', 'en-gb')",
+                    },
+                    set_lang: {
+                        type: "string",
+                        description: "Language for search results (e.g., 'en', 'es', 'fr')",
                     }
                 },
                 required: ["text", "userMessage"]
@@ -43,8 +59,18 @@ export default {
             // Call the Bing search pathway
             //remove model from args as bing_afagent has model in its own
             const { model, ...restArgs } = args;
+            
+            // Extract search parameters and pass them through
+            const searchParams = {};
+            if (args.count !== undefined) searchParams.count = args.count;
+            if (args.freshness !== undefined) searchParams.freshness = args.freshness;
+            if (args.market !== undefined) searchParams.market = args.market;
+            if (args.set_lang !== undefined) searchParams.set_lang = args.set_lang;
+            
             const rawResponse = await callPathway('bing_afagent', { 
+                tool_choice: 'auto',
                 ...restArgs,
+                ...searchParams
             }, resolver);
             
             // Add error handling for malformed JSON

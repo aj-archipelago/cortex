@@ -87,6 +87,141 @@ test('should create correct request parameters', t => {
     t.is(result.stream, false);
 });
 
+test('should use custom instructions from parameters', t => {
+    const { plugin } = t.context;
+    const text = 'Hello, can you help me?';
+    const customInstructions = 'You are a specialized search agent.';
+    const parameters = { 
+        stream: false,
+        instructions: customInstructions
+    };
+    const prompt = {
+        context: 'You are helpful.',
+        examples: [],
+        messages: [{ role: 'user', content: text }]
+    };
+
+    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.assistantId = 'asst_testid';
+    const result = plugin.getRequestParameters(text, parameters, prompt);
+
+    t.is(result.instructions, customInstructions);
+});
+
+test('should use custom tools from parameters', t => {
+    const { plugin } = t.context;
+    const text = 'Hello, can you help me?';
+    const customTools = [
+        {
+            type: "bing_grounding",
+            bing_grounding: {
+                search_configurations: [
+                    {
+                        connection_id: "test-connection-id",
+                        count: 10,
+                        freshness: "day",
+                        market: "en-us",
+                        set_lang: "en"
+                    }
+                ]
+            }
+        }
+    ];
+    const parameters = { 
+        stream: false,
+        tools: customTools
+    };
+    const prompt = {
+        context: 'You are helpful.',
+        examples: [],
+        messages: [{ role: 'user', content: text }]
+    };
+
+    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.assistantId = 'asst_testid';
+    const result = plugin.getRequestParameters(text, parameters, prompt);
+
+    t.deepEqual(result.tools, customTools);
+});
+
+test('should use custom parallel_tool_calls from parameters', t => {
+    const { plugin } = t.context;
+    const text = 'Hello, can you help me?';
+    const parameters = { 
+        stream: false,
+        parallel_tool_calls: false
+    };
+    const prompt = {
+        context: 'You are helpful.',
+        examples: [],
+        messages: [{ role: 'user', content: text }]
+    };
+
+    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.assistantId = 'asst_testid';
+    const result = plugin.getRequestParameters(text, parameters, prompt);
+
+    t.is(result.parallel_tool_calls, false);
+});
+
+test('should not include tools or parallel_tool_calls when not provided', t => {
+    const { plugin } = t.context;
+    const text = 'Hello, can you help me?';
+    const parameters = { stream: false };
+    const prompt = {
+        context: 'You are helpful.',
+        examples: [],
+        messages: [{ role: 'user', content: text }]
+    };
+
+    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.assistantId = 'asst_testid';
+    const result = plugin.getRequestParameters(text, parameters, prompt);
+
+    t.falsy(result.tools);
+    t.falsy(result.parallel_tool_calls);
+});
+
+test('should handle Bing grounding tools with custom search parameters', t => {
+    const { plugin } = t.context;
+    const text = 'Hello, can you help me?';
+    const customTools = [
+        {
+            type: "bing_grounding",
+            bing_grounding: {
+                search_configurations: [
+                    {
+                        connection_id: "test-connection-id",
+                        count: 10,
+                        freshness: "day",
+                        market: "en-gb",
+                        set_lang: "en"
+                    }
+                ]
+            }
+        }
+    ];
+    const parameters = { 
+        stream: false,
+        tools: customTools
+    };
+    const prompt = {
+        context: 'You are helpful.',
+        examples: [],
+        messages: [{ role: 'user', content: text }]
+    };
+
+    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.assistantId = 'asst_testid';
+    const result = plugin.getRequestParameters(text, parameters, prompt);
+
+    t.deepEqual(result.tools, customTools);
+    t.is(result.tools[0].bing_grounding.search_configurations[0].count, 10);
+    t.is(result.tools[0].bing_grounding.search_configurations[0].freshness, "day");
+    t.is(result.tools[0].bing_grounding.search_configurations[0].market, "en-gb");
+    t.is(result.tools[0].bing_grounding.search_configurations[0].set_lang, "en");
+});
+
 test('should parse completed run response', t => {
     const { plugin } = t.context;
     const mockResponse = {

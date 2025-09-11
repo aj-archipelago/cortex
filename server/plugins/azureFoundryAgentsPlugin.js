@@ -86,7 +86,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
             ...(parameters.top_p && { top_p: parameters.top_p }),
             ...(parameters.tool_choice && { tool_choice: parameters.tool_choice }),
             ...(parameters.response_format && { response_format: parameters.response_format }),
-            ...(parameters.parallel_tool_calls && { parallel_tool_calls: parameters.parallel_tool_calls }),
+            ...(parameters.parallel_tool_calls !== undefined && { parallel_tool_calls: parameters.parallel_tool_calls }),
             ...(parameters.truncation_strategy && { truncation_strategy: parameters.truncation_strategy })
         };
     
