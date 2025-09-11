@@ -174,10 +174,13 @@ export class StorageService {
 
     const results = [];
 
-    // Atomically get and remove file information from Redis map
-    // This ensures only one deletion operation can succeed for the same hash
-    const { getAndRemoveFromFileStoreMap } = await import("../../redis.js");
-    const hashResult = await getAndRemoveFromFileStoreMap(hash);
+    // Get and remove file information from Redis map (non-atomic operations)
+    const { getFileStoreMap, removeFromFileStoreMap } = await import("../../redis.js");
+    const hashResult = await getFileStoreMap(hash);
+    
+    if (hashResult) {
+      await removeFromFileStoreMap(hash);
+    }
     
     if (!hashResult) {
       throw new Error(`File with hash ${hash} not found`);
