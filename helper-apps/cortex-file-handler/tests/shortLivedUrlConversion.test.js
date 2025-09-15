@@ -18,6 +18,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const baseUrl = `http://localhost:${port}/api/CortexFileHandler`;
 
+// Helper function to extract file extension from URL
+function getFileExtensionFromUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    const lastDotIndex = pathname.lastIndexOf('.');
+    if (lastDotIndex !== -1 && lastDotIndex < pathname.length - 1) {
+      return pathname.substring(lastDotIndex);
+    }
+  } catch (error) {
+    console.log("Error parsing extension from URL:", error);
+  }
+  return null;
+}
+
 // Helper function to upload files
 async function uploadFile(filePath, requestId = null, hash = null) {
   const form = new FormData();
@@ -89,8 +104,8 @@ test.serial(
       convertedUrl = uploadResponse.data.converted.url;
 
       // Verify the original file is .xlsx and converted file is .csv
-      t.true(uploadedUrl.endsWith('.xlsx'), "Original URL should point to .xlsx file");
-      t.true(convertedUrl.endsWith('.csv'), "Converted URL should point to .csv file");
+      t.is(getFileExtensionFromUrl(uploadedUrl), '.xlsx', "Original URL should point to .xlsx file");
+      t.is(getFileExtensionFromUrl(convertedUrl), '.csv', "Converted URL should point to .csv file");
 
       // 2. Give Redis a moment to persist
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -168,7 +183,7 @@ test.serial(
       t.falsy(uploadResponse.data.converted, "Upload response should NOT contain converted info for .txt files");
 
       uploadedUrl = uploadResponse.data.url;
-      t.true(uploadedUrl.endsWith('.txt'), "Original URL should point to .txt file");
+      t.is(getFileExtensionFromUrl(uploadedUrl), '.txt', "Original URL should point to .txt file");
 
       // 2. Give Redis a moment to persist
       await new Promise((resolve) => setTimeout(resolve, 1000));
