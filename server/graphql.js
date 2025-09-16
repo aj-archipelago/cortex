@@ -13,6 +13,7 @@ import Keyv from 'keyv';
 import { WebSocketServer } from 'ws';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import responseCachePlugin from '@apollo/server-plugin-response-cache';
+import { GraphQLScalarType, GraphQLError } from 'graphql';
 import { KeyvAdapter } from '@apollo/utils.keyvadapter';
 import cors from 'cors';
 import { buildModels, buildPathways } from '../config.js';
@@ -54,6 +55,8 @@ const getTypedefs = (pathways, pathwayManager) => {
     const defaultTypeDefs = `#graphql
     ${getMessageTypeDefs()}
 
+    scalar JSONValue
+
     enum CacheControlScope {
         PUBLIC
         PRIVATE
@@ -73,7 +76,7 @@ const getTypedefs = (pathways, pathwayManager) => {
         cancelRequest(requestId: String!): Boolean
     }
 
-    ${getPathwayTypeDef('ExecuteWorkspace', 'String')}
+    ${getPathwayTypeDef('ExecuteWorkspace', 'JSONValue')}
     
     extend type Query {
         executeWorkspace(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): ExecuteWorkspace
@@ -118,8 +121,13 @@ const getResolvers = (config, pathways, pathwayManager) => {
     const pathwayManagerResolvers = pathwayManager?.getResolvers() || {};
 
     const executeWorkspaceResolver = async (_, args, contextValue, info) => {
-        const { userId, pathwayName, ...pathwayArgs } = args;
+        const { userId, pathwayName, useParallelPromptProcessing, ...pathwayArgs } = args;
         const userPathway = await pathwayManager.getPathway(userId, pathwayName);
+        
+        // Apply useParallelPromptProcessing parameter if provided
+        if (typeof useParallelPromptProcessing === 'boolean') {
+            userPathway.useParallelPromptProcessing = useParallelPromptProcessing;
+        }
         
         contextValue.pathway = userPathway;
         contextValue.config = config;
@@ -128,7 +136,34 @@ const getResolvers = (config, pathways, pathwayManager) => {
         return result;
     };
 
+    // JSONValue scalar type resolver
+    const JSONValue = new GraphQLScalarType({
+        name: 'JSONValue',
+        description: 'A JSON value that can be a string, number, boolean, array, or object',
+        serialize: value => value, // value sent to the client
+        parseValue: value => value, // value from the client variables
+        parseLiteral: ast => {
+            // value from the client query
+            if (ast.kind === 'StringValue' || ast.kind === 'BooleanValue' || 
+                ast.kind === 'IntValue' || ast.kind === 'FloatValue') {
+                return ast.value;
+            }
+            if (ast.kind === 'ListValue') {
+                return ast.values.map(v => JSONValue.parseLiteral(v));
+            }
+            if (ast.kind === 'ObjectValue') {
+                const obj = {};
+                ast.fields.forEach(field => {
+                    obj[field.name.value] = JSONValue.parseLiteral(field.value);
+                });
+                return obj;
+            }
+            return null;
+        }
+    });
+
     const resolvers = {
+        JSONValue,
         Query: {
             ...resolverFunctions,
             executeWorkspace: executeWorkspaceResolver
