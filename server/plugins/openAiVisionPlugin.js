@@ -32,28 +32,50 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                 }
 
                 if (Array.isArray(message.content)) {
+                    const processedContent = await Promise.all(message.content.map(async item => {
+                        const parsedItem = safeJsonParse(item);
+
+                        if (typeof parsedItem === 'string') {
+                            return { type: 'text', text: parsedItem };
+                        }
+
+                        if (typeof parsedItem === 'object' && parsedItem !== null) {
+                            // Handle both 'image' and 'image_url' types
+                            if (parsedItem.type === 'image' || parsedItem.type === 'image_url') {
+                                const url = parsedItem.url || parsedItem.image_url?.url;
+                                if (url && await this.validateImageUrl(url)) {
+                                    return { type: 'image_url', image_url: { url } };
+                                }
+                                return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
+                            }
+                        }
+                        
+                        // Handle null or undefined parsedItem - return null to be filtered out later
+                        if (parsedItem === null || parsedItem === undefined) {
+                            // Only convert to text if the original item was a string
+                            if (typeof item === 'string' && item.trim() !== '') {
+                                return { type: 'text', text: item };
+                            }
+                            return null; // Will be filtered out
+                        }
+                        
+                        return parsedItem;
+                    }));
+
+                    // Filter out any null/undefined items and ensure we have at least some content
+                    const filteredContent = processedContent.filter(item => item !== null && item !== undefined);
+                    
                     return {
                         ...message,
-                        content: await Promise.all(message.content.map(async item => {
-                            const parsedItem = safeJsonParse(item);
+                        content: filteredContent.length > 0 ? filteredContent : [{ type: 'text', text: '' }]
+                    };
+                }
 
-                            if (typeof parsedItem === 'string') {
-                                return { type: 'text', text: parsedItem };
-                            }
-
-                            if (typeof parsedItem === 'object' && parsedItem !== null) {
-                                // Handle both 'image' and 'image_url' types
-                                if (parsedItem.type === 'image' || parsedItem.type === 'image_url') {
-                                    const url = parsedItem.url || parsedItem.image_url?.url;
-                                    if (url && await this.validateImageUrl(url)) {
-                                        return { type: 'image_url', image_url: { url } };
-                                    }
-                                    return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
-                                }
-                            }
-                            
-                            return parsedItem;
-                        }))
+                // Ensure non-array content is never null
+                if (message.content === null || message.content === undefined) {
+                    return {
+                        ...message,
+                        content: ''
                     };
                 }
             } catch (e) {

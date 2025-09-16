@@ -167,7 +167,28 @@ prompt: [
 ]
 ```
 
-If a prompt is an array, the individual prompts in the array will be executed sequentially by the Cortex prompt execution engine. The execution engine deals with all of the complexities of chunking input content and executing the sequence of prompts against those chunks in a way that optimizes the performance and ensures the the integrity of the pathway logic.
+If a prompt is an array, the individual prompts in the array will be executed sequentially by default by the Cortex prompt execution engine. However, you can enable parallel execution of prompts by setting `useParallelPromptProcessing: true` in your pathway configuration. When parallel processing is enabled, all prompts execute simultaneously on the input text and return an array containing the result of each prompt execution.
+
+**Sequential Execution (default):** Each prompt receives the result of the previous prompt as `{{previousResult}}`, allowing for complex multi-step processing pipelines.
+
+**Parallel Execution:** All prompts execute simultaneously on the original input text. No `{{previousResult}}` is available since prompts run in parallel. The pathway returns an array of results, with each element corresponding to one prompt's output.
+
+Example of a pathway with parallel prompt processing:
+
+```js
+export default {
+    useParallelPromptProcessing: true,
+    prompt: [
+        'Summarize this text: {{text}}',
+        'Extract key entities from: {{text}}',
+        'Identify the sentiment of: {{text}}'
+    ]
+}
+```
+
+This pathway would execute all three prompts simultaneously and return an array like `['Summary text...', 'Entity1, Entity2...', 'Positive sentiment']`.
+
+The execution engine deals with all of the complexities of chunking input content and executing the sequence of prompts against those chunks in a way that optimizes the performance and ensures the the integrity of the pathway logic.
 
 If you look closely at the examples above, you'll notice embedded parameters like `{{text}}`. In Cortex, all prompt strings are actually [Handlebars](https://handlebarsjs.com/) templates. So in this case, that parameter will be replaced before prompt execution with the incoming query variable called `text`. You can refer to almost any pathway parameter or system property in the prompt definition and it will be replaced before execution.
 ### Parameters
@@ -409,6 +430,7 @@ Each pathway can define the following properties (with defaults from basePathway
 - `inputFormat`: Format of the input ('text' or 'html'). Affects input chunking behavior. Default: 'text'
 - `useInputChunking`: Enable splitting input into multiple chunks to meet context window size. Default: true
 - `useParallelChunkProcessing`: Enable parallel processing of chunks. Default: false
+- `useParallelPromptProcessing`: Enable parallel processing of prompts when prompt is an array. When enabled, all prompts execute simultaneously on the input text and return an array of results. Default: false
 - `joinChunksWith`: String to join result chunks with when chunking is enabled. Default: '\n\n'
 - `useInputSummarization`: Summarize input instead of chunking. Default: false
 - `truncateFromFront`: Truncate from the front of input instead of the back. Default: false
@@ -807,6 +829,15 @@ mutation PutPathway($name: String!, $pathway: PathwayInput!, $userId: String!, $
 }
 ```
 
+The `PathwayInput` type supports the following fields:
+- `prompt`: Array of prompt strings (required)
+- `systemPrompt`: System prompt for the pathway
+- `inputParameters`: Additional input parameters as a JSON object
+- `model`: Model to use for execution
+- `enableCache`: Whether to enable caching
+- `displayName`: Human-readable name for the pathway
+- `useParallelPromptProcessing`: Enable parallel execution of prompts (default: false)
+
 2. Deleting a pathway:
 
 ```graphql
@@ -818,12 +849,14 @@ mutation DeletePathway($name: String!, $userId: String!, $secret: String!, $key:
 3. Executing a dynamic pathway:
 
 ```graphql
-query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String!) {
-  executeWorkspace(userId: $userId, pathwayName: $pathwayName, text: $text) {
+query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String!, $useParallelPromptProcessing: Boolean) {
+  executeWorkspace(userId: $userId, pathwayName: $pathwayName, text: $text, useParallelPromptProcessing: $useParallelPromptProcessing) {
     result
   }
 }
 ```
+
+The `useParallelPromptProcessing` parameter enables parallel execution of prompts when the pathway contains an array of prompts. When set to `true`, all prompts execute simultaneously and the `result` field returns an array of results (one per prompt). When `false` or omitted, prompts execute sequentially and `result` returns a single string value.
 
 ### Security
 
