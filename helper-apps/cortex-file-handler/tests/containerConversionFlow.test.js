@@ -64,8 +64,16 @@ function getContainerFromUrl(url) {
     
     // For Azure URLs, container is typically the first segment after the account
     // Format: https://account.blob.core.windows.net/container/blob...
+    // For Azurite (local emulator), format is: http://127.0.0.1:10000/devstoreaccount1/container/blob...
     if (pathSegments.length > 0) {
-      return pathSegments[0];
+      // Check if this is an Azurite URL (localhost with devstoreaccount1)
+      if (urlObj.hostname === '127.0.0.1' && pathSegments[0] === 'devstoreaccount1') {
+        // For Azurite, container is the second segment
+        return pathSegments.length > 1 ? pathSegments[1] : null;
+      } else {
+        // For production Azure, container is the first segment
+        return pathSegments[0];
+      }
     }
   } catch (error) {
     console.log("Error parsing container from URL:", error);
