@@ -53,7 +53,7 @@ const getPathwayTypeDefAndExtendQuery = (pathway) => {
   const fields = format ? format.match(/\b(\w+)\b/g) : null;
   const fieldsStr = !fields ? `` : fields.map((f) => `${f}: String`).join('\n    ');
 
-  const typeName = fields ? `${objName}Result` : `JSONValue`;
+  const typeName = fields ? `${objName}Result` : `String`;
 
   const type = fields ? `type ${typeName} {
     ${fieldsStr}
@@ -91,7 +91,7 @@ const typeDef = (pathway) => {
   return getPathwayTypeDefAndExtendQuery(pathway);
 };
 
-const userPathwayInputParameters = `text: String, useParallelPromptProcessing: Boolean`;
+const userPathwayInputParameters = `text: String`;
 
 
 export {

@@ -17,7 +17,6 @@ export default {
     inputFormat: 'text', // string - 'text' or 'html' - changes the behavior of the input chunking
     useInputChunking: true, // true or false - enables input to be split into multiple chunks to meet context window size
     useParallelChunkProcessing: false, // true or false - enables parallel processing of chunks
-    useParallelPromptProcessing: false, // true or false - enables parallel processing of prompts when prompt is an array
     joinChunksWith: '\n\n', // string - the string to join result chunks with when useInputChunking is 'true'
     useInputSummarization: false, // true or false - instead of chunking, summarize the input and act on the summary    
     truncateFromFront: false, // true or false - if true, truncate from the front of the input instead of the back

@@ -432,13 +432,8 @@ class PathwayResolver {
             }
         }
 
-        // Check for parallel prompt processing first
-        if (this.pathway.useParallelPromptProcessing && this.prompts.length > 1) {
-            // Execute all prompts in parallel on the input text and return array of results
-            return await this.applyPromptsInParallel(chunks, parameters);
-        }
         // If pre information is needed, apply current prompt with previous prompt info, only parallelize current call
-        else if (this.pathway.useParallelChunkProcessing) {
+        if (this.pathway.useParallelChunkProcessing) {
             // Apply each prompt across all chunks in parallel
             // this.previousResult is not available at the object level as it is different for each chunk
             this.previousResult = '';
@@ -503,32 +498,6 @@ class PathwayResolver {
             result = await this.applyPrompt(prompt, text, { ...parameters, previousResult });
         }
         return result;
-    }
-
-    async applyPromptsInParallel(chunks, parameters) {
-        // Execute all prompts in parallel on the input text
-        // Each prompt gets the original input text (no previousResult available)
-        const results = await Promise.all(this.prompts.map(async (prompt) => {
-            if (!prompt.usesTextInput) {
-                // If prompt doesn't use text input, apply it directly
-                return await this.applyPrompt(prompt, null, parameters);
-            } else {
-                // Apply prompt to all chunks
-                const chunkResults = await Promise.all(chunks.map(chunk =>
-                    this.applyPrompt(prompt, chunk, parameters)));
-                
-                // If single chunk, return the result directly
-                if (chunkResults.length === 1) {
-                    return chunkResults[0];
-                } else if (!parameters.stream) {
-                    // Join multiple chunk results
-                    return chunkResults.join(this.pathway.joinChunksWith || "\n\n");
-                }
-                return chunkResults;
-            }
-        }));
-        
-        return results;
     }
 
     async applyPrompt(prompt, text, parameters) {
