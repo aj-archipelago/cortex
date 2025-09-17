@@ -15,11 +15,6 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     fontconfig \
     && rm -rf /var/lib/apt/lists/*
-RUN curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg \
-    && mv microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg \
-    && sh -c 'echo "deb [arch=amd64,arm64,armhf] https://packages.microsoft.com/repos/microsoft-debian-bullseye-prod bullseye main" > /etc/apt/sources.list.d/azure-cli.list' \
-    && apt-get update \
-    && apt-get install -y azure-functions-core-tools
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
@@ -27,5 +22,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
-CMD ["func", "start", "--port", "80", "--verbose"]
+
+# Set environment variables for Azure Functions
+ENV AzureWebJobsScriptRoot=/home/site/wwwroot \
+    AzureFunctionsJobHost__Logging__Console__IsEnabled=true \
+    FUNCTIONS_WORKER_RUNTIME=python
+
+# Use the built-in Azure Functions Python worker
+CMD [ "/azure-functions-host/Microsoft.Azure.WebJobs.Script.WebHost" ]
+
 
