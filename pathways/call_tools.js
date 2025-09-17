@@ -358,8 +358,8 @@ export default {
                         logger.warn(`Some tool calls failed: ${failedTools.map(t => t.error).join(', ')}`);
                     }
                 } else {
-                    // No tool calls, this is the final response
-                    finalResponse = response.content;
+                    // No tool calls, this is the final response, but it's a CortexResponse object
+                    finalResponse = response.output_text;
                 }
             }
 
@@ -372,7 +372,6 @@ export default {
         } catch (e) {
             resolver.logError(e);
             const chatResponse = await callPathway('sys_generator_quick', {...args, model: styleModel}, resolver);
-            resolver.tool = JSON.stringify({ search: false, title: args.title });
             return args.stream ? null : chatResponse;
         }
     }

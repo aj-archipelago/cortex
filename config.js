@@ -499,7 +499,7 @@ var config = convict({
                 },
                 "requestsPerSecond": 10,
                 "maxTokenLength": 131072,
-                "maxReturnTokens": 4096,
+                "maxReturnTokens": 32000,
                 "supportsStreaming": true
             },
             "xai-grok-4": {
@@ -513,8 +513,23 @@ var config = convict({
                     "model": "grok-4-0709"
                 },
                 "requestsPerSecond": 10,
-                "maxTokenLength": 131072,
-                "maxReturnTokens": 4096,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-code-fast-1": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-code-fast-1"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
             "apptek-translate": {

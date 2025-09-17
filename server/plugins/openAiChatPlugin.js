@@ -1,6 +1,7 @@
 // OpenAIChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
+import CortexResponse from '../../lib/cortexResponse.js';
 
 class OpenAIChatPlugin extends ModelPlugin {
     constructor(pathway, model) {
@@ -93,13 +94,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
         cortexRequest.params = {}; // query params
 
-        const parsedResponse = await this.executeRequest(cortexRequest);
-
-        if (typeof parsedResponse === 'object' && (parsedResponse.tool_calls || parsedResponse.function_call)) {
-            cortexRequest.pathwayResolver.tool = JSON.stringify({tool_calls: parsedResponse.tool_calls, function_call: parsedResponse.function_call});
-        }
-
-        return parsedResponse;
+        return this.executeRequest(cortexRequest);
     }
 
     // Parse the response from the OpenAI Chat API
@@ -115,16 +110,30 @@ class OpenAIChatPlugin extends ModelPlugin {
             return choices;
         }
 
-        const message = choices[0].message;
+        const choice = choices[0];
+        const message = choice.message;
         if (!message) {
             return null;
         }
 
-        if (message.tool_calls || message.function_call) {
-            return message;
+        // Create standardized CortexResponse object
+        const cortexResponse = new CortexResponse({
+            output_text: message.content || "",
+            finishReason: choice.finish_reason || 'stop',
+            usage: data.usage || null,
+            metadata: {
+                model: this.modelName
+            }
+        });
+
+        // Handle tool calls
+        if (message.tool_calls) {
+            cortexResponse.toolCalls = message.tool_calls;
+        } else if (message.function_call) {
+            cortexResponse.functionCall = message.function_call;
         }
 
-        return message.content || "";
+        return cortexResponse;
     }
 
     // Override the logging function to display the messages and responses

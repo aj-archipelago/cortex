@@ -13,12 +13,7 @@ export default {
     inputParameters: {
         messages: [{role: '', content: []}],
         stream: false,
-        web_search: false,
-        real_time_data: false,
-        return_citations: false,
-        max_search_results: 10,
-        sources: ['web'],
-        search_mode: 'off'
+        search_parameters: '',
     },
     model: 'xai-grok-4',
     useInputChunking: false,
