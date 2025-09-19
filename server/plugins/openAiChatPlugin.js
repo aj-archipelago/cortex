@@ -92,7 +92,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
 
         cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
-        cortexRequest.params = {}; // query params
+        cortexRequest.params = {};
 
         return this.executeRequest(cortexRequest);
     }
