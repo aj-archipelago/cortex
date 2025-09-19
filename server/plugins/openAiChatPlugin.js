@@ -1,6 +1,7 @@
 // OpenAIChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
+import CortexResponse from '../../lib/cortexResponse.js';
 
 class OpenAIChatPlugin extends ModelPlugin {
     constructor(pathway, model) {
@@ -93,13 +94,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
         cortexRequest.params = {}; // query params
 
-        const parsedResponse = await this.executeRequest(cortexRequest);
-
-        if (typeof parsedResponse === 'object' && (parsedResponse.tool_calls || parsedResponse.function_call)) {
-            cortexRequest.pathwayResolver.tool = JSON.stringify({tool_calls: parsedResponse.tool_calls, function_call: parsedResponse.function_call});
-        }
-
-        return parsedResponse;
+        return this.executeRequest(cortexRequest);
     }
 
     // Parse the response from the OpenAI Chat API
@@ -115,16 +110,86 @@ class OpenAIChatPlugin extends ModelPlugin {
             return choices;
         }
 
-        const message = choices[0].message;
+        const choice = choices[0];
+        const message = choice.message;
         if (!message) {
             return null;
         }
 
-        if (message.tool_calls || message.function_call) {
-            return message;
+        // Create standardized CortexResponse object
+        const cortexResponse = new CortexResponse({
+            output_text: message.content || "",
+            finishReason: choice.finish_reason || 'stop',
+            usage: data.usage || null,
+            metadata: {
+                model: this.modelName
+            }
+        });
+
+        // Handle tool calls
+        if (message.tool_calls) {
+            cortexResponse.toolCalls = message.tool_calls;
+        } else if (message.function_call) {
+            cortexResponse.functionCall = message.function_call;
         }
 
-        return message.content || "";
+        return cortexResponse;
+    }
+
+    // Override processStreamEvent to handle OpenAI Chat streaming format
+    processStreamEvent(event, requestProgress) {
+        // check for end of stream or in-stream errors
+        if (event.data.trim() === '[DONE]') {
+            requestProgress.progress = 1;
+        } else {
+            let parsedMessage;
+            try {
+                parsedMessage = JSON.parse(event.data);
+            } catch (error) {
+                throw new Error(`Could not parse stream data: ${error}`);
+            }
+
+            // error can be in different places in the message
+            const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
+            if (streamError) {
+                throw new Error(streamError);
+            }
+
+            // Check if this is an empty/idle event that we should skip
+            const delta = parsedMessage?.choices?.[0]?.delta;
+            const isEmptyEvent = !delta || 
+                (Object.keys(delta).length === 0) || 
+                (Object.keys(delta).length === 1 && delta.content === '') ||
+                (Object.keys(delta).length === 1 && delta.tool_calls && delta.tool_calls.length === 0);
+            
+            // Skip publishing empty events unless they have a finish_reason
+            const hasFinishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
+            
+            if (isEmptyEvent && !hasFinishReason) {
+                // Return requestProgress without setting data to prevent publishing
+                return requestProgress;
+            }
+            
+            // Set the data for non-empty events or events with finish_reason
+            requestProgress.data = event.data;
+
+            // finish reason can be in different places in the message
+            const finishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
+            if (finishReason) {
+                switch (finishReason.toLowerCase()) {
+                    case 'safety':
+                        const safetyRatings = JSON.stringify(parsedMessage?.candidates?.[0]?.safetyRatings) || '';
+                        logger.warn(`Request ${this.requestId} was blocked by the safety filter. ${safetyRatings}`);
+                        requestProgress.data = `\n\nResponse blocked by safety filter: ${safetyRatings}`;
+                        requestProgress.progress = 1;
+                        break;
+                    default:
+                        requestProgress.progress = 1;
+                        break;
+                }
+            }
+        }
+        return requestProgress;
     }
 
     // Override the logging function to display the messages and responses

@@ -8,6 +8,7 @@ import { config } from '../../../config.js';
 import { chatArgsHasImageUrl, removeOldImageAndFileContent, getAvailableFiles } from '../../../lib/util.js';
 import { Prompt } from '../../../server/prompt.js';
 import { getToolsForEntity, loadEntityConfig } from './tools/shared/sys_entity_tools.js';
+import CortexResponse from '../../../lib/cortexResponse.js';
 
 export default {
     emulateOpenAIChatModel: 'cortex-agent',
@@ -39,7 +40,14 @@ export default {
             return;
         }
 
-        const { tool_calls } = message;
+        // Handle both CortexResponse objects and plain message objects
+        let tool_calls;
+        if (message instanceof CortexResponse) {
+            tool_calls = message.toolCalls || message.functionCall ? [message.functionCall] : null;
+        } else {
+            tool_calls = message.tool_calls;
+        }
+        
         const pathwayResolver = resolver;
         const { entityTools, entityToolsOpenAiFormat } = args;
 
@@ -362,7 +370,12 @@ export default {
             });
 
             let toolCallback = pathwayResolver.pathway.toolCallback;
-            while (response?.tool_calls) {
+
+            // Handle both CortexResponse objects and plain responses
+            while (response && (
+                (response instanceof CortexResponse && response.hasToolCalls()) ||
+                (typeof response === 'object' && response.tool_calls)
+            )) {
                 response = await toolCallback(args, response, pathwayResolver);
             }
 
