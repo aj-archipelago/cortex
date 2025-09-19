@@ -202,6 +202,7 @@ class PathwayResolver {
             const cortexData = {
                 citations: cortexResponse.citations,
                 toolCalls: cortexResponse.toolCalls,
+                functionCall: cortexResponse.functionCall,
                 usage: cortexResponse.usage,
                 finishReason: cortexResponse.finishReason
             };
