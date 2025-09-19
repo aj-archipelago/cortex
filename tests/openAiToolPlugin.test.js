@@ -71,18 +71,22 @@ test('Tool call response handling', async (t) => {
 
     const result = plugin.parseResponse(responseData);
     
-    t.deepEqual(result, {
-        role: 'assistant',
-        content: 'I will check the weather for you.',
-        tool_calls: [{
-            id: 'call_123',
-            type: 'function',
-            function: {
-                name: 'get_weather',
-                arguments: '{"location": "Bogotá, Colombia"}'
-            }
-        }]
-    });
+    // Verify it's a CortexResponse object
+    t.truthy(result);
+    t.is(typeof result, 'object');
+    t.is(result.constructor.name, 'CortexResponse');
+    
+    // Verify the content
+    t.is(result.output_text, 'I will check the weather for you.');
+    t.is(result.finishReason, 'tool_calls');
+    
+    // Verify tool calls
+    t.truthy(result.toolCalls);
+    t.is(result.toolCalls.length, 1);
+    t.is(result.toolCalls[0].id, 'call_123');
+    t.is(result.toolCalls[0].type, 'function');
+    t.is(result.toolCalls[0].function.name, 'get_weather');
+    t.is(result.toolCalls[0].function.arguments, '{"location": "Bogotá, Colombia"}');
 });
 
 // Test tool result message handling
@@ -177,18 +181,22 @@ test('Error handling in tool calls', async (t) => {
 
     const result = plugin.parseResponse(responseData);
     
-    t.deepEqual(result, {
-        role: 'assistant',
-        content: 'I will check the weather for you.',
-        tool_calls: [{
-            id: 'call_123',
-            type: 'function',
-            function: {
-                name: 'get_weather',
-                arguments: 'invalid json'
-            }
-        }]
-    });
+    // Verify it's a CortexResponse object
+    t.truthy(result);
+    t.is(typeof result, 'object');
+    t.is(result.constructor.name, 'CortexResponse');
+    
+    // Verify the content
+    t.is(result.output_text, 'I will check the weather for you.');
+    t.is(result.finishReason, 'tool_calls');
+    
+    // Verify tool calls
+    t.truthy(result.toolCalls);
+    t.is(result.toolCalls.length, 1);
+    t.is(result.toolCalls[0].id, 'call_123');
+    t.is(result.toolCalls[0].type, 'function');
+    t.is(result.toolCalls[0].function.name, 'get_weather');
+    t.is(result.toolCalls[0].function.arguments, 'invalid json');
 });
 
 // Test multiple tool calls in sequence

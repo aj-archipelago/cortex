@@ -39,6 +39,7 @@ const getPathwayTypeDef = (name, returnType) => {
   return `type ${name} {
     debug: String
     result: ${returnType}
+    resultData: String
     previousResult: String
     warnings: [String]
     errors: [String]

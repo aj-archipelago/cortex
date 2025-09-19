@@ -107,7 +107,16 @@ test('parseResponse', (t) => {
         ],
     };
     const result = plugin.parseResponse(data);
-    t.is(result, 'Sure, I can help John who is 30 years old.');
+    
+    // Verify it's a CortexResponse object
+    t.truthy(result);
+    t.is(typeof result, 'object');
+    t.is(result.constructor.name, 'CortexResponse');
+    
+    
+    // Verify the content using string conversion (triggers toString automatically)
+    t.is(String(result), 'Sure, I can help John who is 30 years old.');
+    t.is(result.finishReason, 'stop');
 });
 
 // Test the logRequestData function

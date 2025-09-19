@@ -1,7 +1,7 @@
-import { config } from '@aj-archipelago/cortex/config.js';
-import { chatArgsHasImageUrl, chatArgsHasType, getAvailableFiles, removeOldImageAndFileContent } from '@aj-archipelago/cortex/lib/util.js';
-import { loadEntityConfig } from '@aj-archipelago/cortex/pathways/system/entity/tools/shared/sys_entity_tools.js';
-import { Prompt } from '@aj-archipelago/cortex/server/prompt.js';
+import { config } from '../../../config.js';
+import { chatArgsHasImageUrl, chatArgsHasType, getAvailableFiles, removeOldImageAndFileContent } from '../../../lib/util.js';
+import { loadEntityConfig } from '../../../pathways/system/entity/tools/shared/sys_entity_tools.js';
+import { Prompt } from '../../../server/prompt.js';
 
 export default {
     emulateOpenAIChatModel: 'cortex-agent',

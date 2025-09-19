@@ -477,7 +477,7 @@ test('POST /chat/completions should handle array content properly', async (t) =>
     },
     {
       type: 'image', 
-      url: 'https://example.com/test.jpg'
+      url: 'https://static.toiimg.com/thumb/msid-102827471,width-1280,height-720,resizemode-4/102827471.jpg'
     }
   ];
   
