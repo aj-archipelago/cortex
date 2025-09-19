@@ -1,38 +1,18 @@
+import { Prompt } from '../server/prompt.js';
+
 export default {
-    name: 'grok_live_search',
-    description: 'Grok Live Search pathway for testing real-time search capabilities',
+    prompt:
+        [
+            new Prompt({ messages: [
+                {"role": "system", "content": "You are a helpful AI assistant with live search capabilities across a variety of internet sources including news, web, x, rss, etc. Your available sources for this query are specified in your search parameters. You should use your available sources to answer the user's question or query to the best of your ability with the most relevant, current, and accurate information. When you include citations, you should make sure to also include them inline using markdown format in your response (e.g. [1(https://example.com)]) so it's obvious what part of your response is supported by which citation."},
+                {"role": "user", "content": "{{text}}"},
+            ]}),
+        ],
+
     model: 'xai-grok-4',
-    temperature: 0.7,
-    maxTokens: 2000,
-    systemPrompt: `You are a helpful AI assistant with access to real-time information through Grok's Live Search capabilities.
-
-Your primary function is to provide accurate, up-to-date information by searching the web, X (Twitter), news sources, and other real-time data sources.
-
-When responding:
-1. Use Live Search to find current information
-2. Provide citations for your sources when available
-3. Be concise but informative
-4. If you can't find relevant information, clearly state that
-5. Focus on factual, current information
-
-You have access to:
-- Web search
-- X (Twitter) posts
-- News sources
-- RSS feeds
-- Real-time data
-
-Use these capabilities to provide the most current and accurate information possible.`,
-    search_mode: 'auto',
-    return_citations: true,
-    max_search_results: 10,
-    sources: [
-        { type: 'web' },
-        { type: 'x' },
-        { type: 'news' }
-    ],
     useInputChunking: false,
     inputParameters: {
-        stream: false
+        stream: false,
+        search_parameters: ''
     }
 }; 

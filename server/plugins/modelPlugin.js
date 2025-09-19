@@ -618,22 +618,7 @@ class ModelPlugin {
                 throw new Error(streamError);
             }
 
-            // Check if this is an empty/idle event that we should skip
-            const delta = parsedMessage?.choices?.[0]?.delta;
-            const isEmptyEvent = !delta || 
-                (Object.keys(delta).length === 0) || 
-                (Object.keys(delta).length === 1 && delta.content === '') ||
-                (Object.keys(delta).length === 1 && delta.tool_calls && delta.tool_calls.length === 0);
-            
-            // Skip publishing empty events unless they have a finish_reason
-            const hasFinishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
-            
-            if (isEmptyEvent && !hasFinishReason) {
-                // Return requestProgress without setting data to prevent publishing
-                return requestProgress;
-            }
-            
-            // Set the data for non-empty events or events with finish_reason
+            // Set the data for the event
             requestProgress.data = event.data;
 
             // finish reason can be in different places in the message

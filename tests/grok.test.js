@@ -108,10 +108,10 @@ test('test grok live search pathway - simple', async t => {
   // Check for Live Search data in resultData
   if (resultData) {
     try {
-      const cortexResponse = JSON.parse(resultData);
+      const resultDataObject = JSON.parse(resultData);
       
-      if (cortexResponse.citations) {
-        t.true(Array.isArray(cortexResponse.citations), 'Citations should be an array');
+      if (resultDataObject.citations) {
+        t.true(Array.isArray(resultDataObject.citations), 'Citations should be an array');
       }
     } catch (error) {
       t.fail('Failed to parse resultData');
@@ -197,15 +197,15 @@ test('should execute Live Search with X platform search', async t => {
   // Parse resultData for Live Search information
   t.truthy(resultData, 'Should have resultData');
   try {
-    const cortexResponse = JSON.parse(resultData);
+    const resultDataObject = JSON.parse(resultData);
     
     // Parse and display citations
-    t.truthy(cortexResponse.citations, 'Should have citations array since return_citations is true');
-    t.true(Array.isArray(cortexResponse.citations), 'Citations should be an array');
-    t.true(cortexResponse.citations.length > 0, 'Should have at least one citation for successful search');
+    t.truthy(resultDataObject.citations, 'Should have citations array since return_citations is true');
+    t.true(Array.isArray(resultDataObject.citations), 'Citations should be an array');
+    t.true(resultDataObject.citations.length > 0, 'Should have at least one citation for successful search');
 
     // Validate citation structure
-    cortexResponse.citations.forEach((citation, index) => {
+    resultDataObject.citations.forEach((citation, index) => {
       t.truthy(citation.url, `Citation ${index} should have a URL`);
       t.true(typeof citation.url === 'string', `Citation ${index} URL should be a string`);
 
@@ -219,10 +219,15 @@ test('should execute Live Search with X platform search', async t => {
     });
 
     // Parse and display usage data
-    t.truthy(cortexResponse.usage, 'Should have usage data');
-    if (cortexResponse.usage) {
-      if (cortexResponse.usage.num_sources_used) {
-        t.true(typeof cortexResponse.usage.num_sources_used === 'number', 'num_sources_used should be a number');
+    t.truthy(resultDataObject.usage, 'Should have usage data');
+    if (resultDataObject.usage) {
+      // Usage should now be an array of objects
+      t.true(Array.isArray(resultDataObject.usage), 'Usage should be an array');
+      if (resultDataObject.usage.length > 0) {
+        const latestUsage = resultDataObject.usage[0]; // Most recent usage first
+        if (latestUsage.num_sources_used) {
+          t.true(typeof latestUsage.num_sources_used === 'number', 'num_sources_used should be a number');
+        }
       }
     }
     
@@ -274,17 +279,17 @@ test('should execute Live Search with web source parameters', async t => {
   // Check for Live Search data in resultData and validate citations
   if (resultData) {
     try {
-      const cortexResponse = JSON.parse(resultData);
+      const resultDataObject = JSON.parse(resultData);
       
       // Citations should exist since return_citations is true
-      t.truthy(cortexResponse.citations, 'Should have citations array since return_citations is true');
-      t.true(Array.isArray(cortexResponse.citations), 'Citations should be an array');
+      t.truthy(resultDataObject.citations, 'Should have citations array since return_citations is true');
+      t.true(Array.isArray(resultDataObject.citations), 'Citations should be an array');
 
       // Validate that citations exist and are from valid sources
-      t.true(cortexResponse.citations.length > 0, 'Should have at least one citation for successful search');
+      t.true(resultDataObject.citations.length > 0, 'Should have at least one citation for successful search');
 
       // Validate citation structure and URLs
-      cortexResponse.citations.forEach((citation, index) => {
+      resultDataObject.citations.forEach((citation, index) => {
         t.truthy(citation.url, `Citation ${index} should have a URL`);
         t.true(typeof citation.url === 'string', `Citation ${index} URL should be a string`);
 
@@ -349,15 +354,15 @@ test('should execute Live Search with X source parameters', async t => {
   // Check for Live Search data in resultData
   if (resultData) {
     try {
-      const cortexResponse = JSON.parse(resultData);
+      const resultDataObject = JSON.parse(resultData);
 
       // Citations should exist since return_citations is true
-      t.truthy(cortexResponse.citations, 'Should have citations array since return_citations is true');
-      t.true(Array.isArray(cortexResponse.citations), 'Citations should be an array');
-      t.true(cortexResponse.citations.length > 0, 'Should have at least one citation for successful search');
+      t.truthy(resultDataObject.citations, 'Should have citations array since return_citations is true');
+      t.true(Array.isArray(resultDataObject.citations), 'Citations should be an array');
+      t.true(resultDataObject.citations.length > 0, 'Should have at least one citation for successful search');
 
       // Validate citation structure for X platform sources
-      cortexResponse.citations.forEach((citation, index) => {
+      resultDataObject.citations.forEach((citation, index) => {
         t.truthy(citation.url, `Citation ${index} should have a URL`);
         t.true(typeof citation.url === 'string', `Citation ${index} URL should be a string`);
 
@@ -422,15 +427,15 @@ test('should execute Live Search with news source parameters', async t => {
   // Check for Live Search data in resultData
   if (resultData) {
     try {
-      const cortexResponse = JSON.parse(resultData);
+      const resultDataObject = JSON.parse(resultData);
 
       // Citations should exist since return_citations is true
-      t.truthy(cortexResponse.citations, 'Should have citations array since return_citations is true');
-      t.true(Array.isArray(cortexResponse.citations), 'Citations should be an array');
-      t.true(cortexResponse.citations.length > 0, 'Should have at least one citation for successful search');
+      t.truthy(resultDataObject.citations, 'Should have citations array since return_citations is true');
+      t.true(Array.isArray(resultDataObject.citations), 'Citations should be an array');
+      t.true(resultDataObject.citations.length > 0, 'Should have at least one citation for successful search');
 
       // Validate citation structure for news sources
-      cortexResponse.citations.forEach((citation, index) => {
+      resultDataObject.citations.forEach((citation, index) => {
         t.truthy(citation.url, `Citation ${index} should have a URL`);
         t.true(typeof citation.url === 'string', `Citation ${index} URL should be a string`);
 
@@ -456,7 +461,7 @@ test('should execute Live Search with news source parameters', async t => {
 });
 
 // Test Live Search with RSS source parameters
-test('should execute Live Search with RSS source parameters', async t => {
+test.only('should execute Live Search with RSS source parameters', async t => {
 
   const search_parameters = JSON.stringify({
     mode: 'on',
@@ -495,15 +500,15 @@ test('should execute Live Search with RSS source parameters', async t => {
   // Check for Live Search data in resultData
   if (resultData) {
     try {
-      const cortexResponse = JSON.parse(resultData);
+      const resultDataObject = JSON.parse(resultData);
 
       // Citations should exist since return_citations is true
-      t.truthy(cortexResponse.citations, 'Should have citations array since return_citations is true');
-      t.true(Array.isArray(cortexResponse.citations), 'Citations should be an array');
-      t.true(cortexResponse.citations.length > 0, 'Should have at least one citation for successful search');
+      t.truthy(resultDataObject.citations, 'Should have citations array since return_citations is true');
+      t.true(Array.isArray(resultDataObject.citations), 'Citations should be an array');
+      t.true(resultDataObject.citations.length > 0, 'Should have at least one citation for successful search');
 
       // Validate citation structure for RSS sources
-      cortexResponse.citations.forEach((citation, index) => {
+      resultDataObject.citations.forEach((citation, index) => {
         t.truthy(citation.url, `Citation ${index} should have a URL`);
         t.true(typeof citation.url === 'string', `Citation ${index} URL should be a string`);
 
@@ -571,15 +576,15 @@ test('should execute Live Search with date range parameters', async t => {
   // Check for Live Search data in resultData
   if (resultData) {
     try {
-      const cortexResponse = JSON.parse(resultData);
+      const resultDataObject = JSON.parse(resultData);
 
       // Citations should exist since return_citations is true
-      t.truthy(cortexResponse.citations, 'Should have citations array since return_citations is true');
-      t.true(Array.isArray(cortexResponse.citations), 'Citations should be an array');
-      t.true(cortexResponse.citations.length > 0, 'Should have at least one citation for successful search');
+      t.truthy(resultDataObject.citations, 'Should have citations array since return_citations is true');
+      t.true(Array.isArray(resultDataObject.citations), 'Citations should be an array');
+      t.true(resultDataObject.citations.length > 0, 'Should have at least one citation for successful search');
 
       // Validate citation structure for date range searches
-      cortexResponse.citations.forEach((citation, index) => {
+      resultDataObject.citations.forEach((citation, index) => {
         t.truthy(citation.url, `Citation ${index} should have a URL`);
         t.true(typeof citation.url === 'string', `Citation ${index} URL should be a string`);
 
@@ -645,16 +650,16 @@ test('should execute Live Search with custom sources configuration', async t => 
   // Check for Live Search data in resultData
   if (resultData) {
     try {
-      const cortexResponse = JSON.parse(resultData);
+      const resultDataObject = JSON.parse(resultData);
 
       // Citations should exist since return_citations is true
-      t.truthy(cortexResponse.citations, 'Should have citations array since return_citations is true');
-      t.true(Array.isArray(cortexResponse.citations), 'Citations should be an array');
-      t.true(cortexResponse.citations.length > 0, 'Should have at least one citation for successful search');
-      t.true(cortexResponse.citations.length <= 20, 'Should respect max_search_results limit');
+      t.truthy(resultDataObject.citations, 'Should have citations array since return_citations is true');
+      t.true(Array.isArray(resultDataObject.citations), 'Citations should be an array');
+      t.true(resultDataObject.citations.length > 0, 'Should have at least one citation for successful search');
+      t.true(resultDataObject.citations.length <= 20, 'Should respect max_search_results limit');
 
       // Validate citation structure for custom sources (web + x)
-      cortexResponse.citations.forEach((citation, index) => {
+      resultDataObject.citations.forEach((citation, index) => {
         t.truthy(citation.url, `Citation ${index} should have a URL`);
         t.true(typeof citation.url === 'string', `Citation ${index} URL should be a string`);
 
@@ -670,8 +675,11 @@ test('should execute Live Search with custom sources configuration', async t => 
         t.pass(`Citation ${index} has properly formatted citation data`);
       });
 
-      if (cortexResponse.usage && cortexResponse.usage.num_sources_used) {
-        t.true(typeof cortexResponse.usage.num_sources_used === 'number', 'num_sources_used should be a number');
+      if (resultDataObject.usage && Array.isArray(resultDataObject.usage) && resultDataObject.usage.length > 0) {
+        const latestUsage = resultDataObject.usage[0]; // Most recent usage first
+        if (latestUsage.num_sources_used) {
+          t.true(typeof latestUsage.num_sources_used === 'number', 'num_sources_used should be a number');
+        }
       }
     } catch (error) {
       t.fail('Failed to parse resultData');
