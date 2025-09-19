@@ -461,7 +461,7 @@ test('should execute Live Search with news source parameters', async t => {
 });
 
 // Test Live Search with RSS source parameters
-test.only('should execute Live Search with RSS source parameters', async t => {
+test('should execute Live Search with RSS source parameters', async t => {
 
   const search_parameters = JSON.stringify({
     mode: 'on',

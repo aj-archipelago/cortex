@@ -195,15 +195,32 @@ function validateInfoObject(t, info, testName) {
 
   // Validate usage if present
   if (info.usage) {
-    t.true(typeof info.usage === 'object', `${testName}: usage should be an object`);
-    if (info.usage.promptTokens) {
-      t.true(typeof info.usage.promptTokens === 'number', `${testName}: usage.promptTokens should be a number`);
-    }
-    if (info.usage.completionTokens) {
-      t.true(typeof info.usage.completionTokens === 'number', `${testName}: usage.completionTokens should be a number`);
-    }
-    if (info.usage.totalTokens) {
-      t.true(typeof info.usage.totalTokens === 'number', `${testName}: usage.totalTokens should be a number`);
+    // Handle both single usage object and array of usage objects
+    if (Array.isArray(info.usage)) {
+      t.true(info.usage.length > 0, `${testName}: usage array should not be empty`);
+      info.usage.forEach((usage, index) => {
+        t.true(typeof usage === 'object', `${testName}: usage[${index}] should be an object`);
+        if (usage.prompt_tokens !== undefined) {
+          t.true(typeof usage.prompt_tokens === 'number', `${testName}: usage[${index}].prompt_tokens should be a number`);
+        }
+        if (usage.completion_tokens !== undefined) {
+          t.true(typeof usage.completion_tokens === 'number', `${testName}: usage[${index}].completion_tokens should be a number`);
+        }
+        if (usage.total_tokens !== undefined) {
+          t.true(typeof usage.total_tokens === 'number', `${testName}: usage[${index}].total_tokens should be a number`);
+        }
+      });
+    } else {
+      t.true(typeof info.usage === 'object', `${testName}: usage should be an object`);
+      if (info.usage.prompt_tokens !== undefined) {
+        t.true(typeof info.usage.prompt_tokens === 'number', `${testName}: usage.prompt_tokens should be a number`);
+      }
+      if (info.usage.completion_tokens !== undefined) {
+        t.true(typeof info.usage.completion_tokens === 'number', `${testName}: usage.completion_tokens should be a number`);
+      }
+      if (info.usage.total_tokens !== undefined) {
+        t.true(typeof info.usage.total_tokens === 'number', `${testName}: usage.total_tokens should be a number`);
+      }
     }
   }
 
@@ -438,8 +455,16 @@ createModelTest('sys_entity_agent handles multi-step task with tools', async (t,
 
   // Validate usage statistics
   if (infoObject.usage) {
-    t.truthy(infoObject.usage.totalTokens, 'Multi-step task should have total token usage');
-    t.true(infoObject.usage.totalTokens > 0, 'Multi-step task should have used tokens');
+    // Handle both single usage object and array of usage objects
+    if (Array.isArray(infoObject.usage)) {
+      t.true(infoObject.usage.length > 0, 'Multi-step task should have usage data');
+      const latestUsage = infoObject.usage[0]; // Most recent usage first
+      t.truthy(latestUsage.total_tokens, 'Multi-step task should have total token usage');
+      t.true(latestUsage.total_tokens > 0, 'Multi-step task should have used tokens');
+    } else {
+      t.truthy(infoObject.usage.total_tokens, 'Multi-step task should have total token usage');
+      t.true(infoObject.usage.total_tokens > 0, 'Multi-step task should have used tokens');
+    }
   }
 
   // Validate finish reason
