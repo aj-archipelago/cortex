@@ -11,9 +11,9 @@ export default {
     inputParameters: {
         chatHistory: [{role: '', content: []}],
         contextId: ``,
+        model: `oai-gpt41`,
     },
     max_tokens: 1024,
-    model: 'oai-gpt41',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,
