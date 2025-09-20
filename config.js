@@ -532,6 +532,36 @@ var config = convict({
                 "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
+            "xai-grok-4-fast-reasoning": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-fast-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-fast-non-reasoning": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-fast-non-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
             "apptek-translate": {
                 "type": "APPTEK-TRANSLATE",
                 "url": "{{APPTEK_API_ENDPOINT}}",

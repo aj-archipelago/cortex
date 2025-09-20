@@ -70,7 +70,7 @@ test('make a chat_jarvis API call to Grok 4', async t => {
           content: 'Hi there!  To whom am I speaking?  Can you tell me what model you are running on right now?'
         }
       ],
-      model: 'xai-grok-4'
+      model: 'xai-grok-4-fast-reasoning'
     }
   });
 
