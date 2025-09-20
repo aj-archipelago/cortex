@@ -159,6 +159,21 @@
             ],
             "requestsPerSecond": 10,
             "maxTokenLength": 1024
+        },
+        "xai-grok-3": {
+            "type": "GROK-VISION",
+            "url": "https://api.x.ai/v1/chat/completions",
+            "headers": {
+                "Authorization": "Bearer {{XAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "grok-3-latest"
+            },
+            "requestsPerSecond": 10,
+            "maxTokenLength": 131072,
+            "maxReturnTokens": 4096,
+            "supportsStreaming": true
         }
     },
     "enableCache": false,

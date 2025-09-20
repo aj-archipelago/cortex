@@ -12,7 +12,7 @@ export default {
     inputParameters: {
         chatHistory: [{role: '', content: []}],
         contextId: ``,
+        model: 'oai-gpt4o',
     },
-    model: 'oai-gpt4o',
     useInputChunking: false,
 }
