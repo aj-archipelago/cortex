@@ -528,7 +528,7 @@ var config = convict({
                     "model": "grok-code-fast-1"
                 },
                 "requestsPerSecond": 10,
-                "maxTokenLength": 256000,
+                "maxTokenLength": 2000000,
                 "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
@@ -543,7 +543,7 @@ var config = convict({
                     "model": "grok-4-fast-reasoning"
                 },
                 "requestsPerSecond": 10,
-                "maxTokenLength": 256000,
+                "maxTokenLength": 2000000,
                 "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
