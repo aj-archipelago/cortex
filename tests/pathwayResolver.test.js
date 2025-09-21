@@ -133,7 +133,7 @@ test('promptAndParse swaps model when model is specified in args', async (t) => 
   // Mock the response parser to return the result directly
   const parseStub = sinon.stub(resolver.responseParser, 'parse').returns(Promise.resolve('test result'));
   
-  const argsWithModel = { ...mockArgs, model: 'anotherModel' };
+  const argsWithModel = { ...mockArgs, modelOverride: 'anotherModel' };
   
   await resolver.promptAndParse(argsWithModel);
   
@@ -174,7 +174,7 @@ test('promptAndParse handles model swap errors gracefully', async (t) => {
   // Mock swapModel to throw an error
   const swapModelStub = sinon.stub(resolver, 'swapModel').throws(new Error('Model not found'));
   
-  const argsWithInvalidModel = { ...mockArgs, model: 'invalidModel' };
+  const argsWithInvalidModel = { ...mockArgs, modelOverride: 'invalidModel' };
   
   await resolver.promptAndParse(argsWithInvalidModel);
   
