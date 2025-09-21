@@ -137,26 +137,48 @@ test('getRequestParameters with long message in chatHistory', async (t) => {
 test('parseResponse', (t) => {
     const plugin = new Claude3VertexPlugin(pathway, model);
 
+    // Test text content response
     const dataWithTextContent = {
         content: [
             { type: 'text', text: 'Hello, World!' }
-        ]
+        ],
+        usage: { input_tokens: 10, output_tokens: 5 },
+        stop_reason: 'end_turn'
     };
     const resultWithTextContent = plugin.parseResponse(dataWithTextContent);
-    t.is(resultWithTextContent, 'Hello, World!');
+    t.truthy(resultWithTextContent.output_text === 'Hello, World!');
+    t.truthy(resultWithTextContent.finishReason === 'stop');
+    t.truthy(resultWithTextContent.usage);
+    t.truthy(resultWithTextContent.metadata.model === plugin.modelName);
 
-    const dataWithoutTextContent = {
+    // Test tool calls response
+    const dataWithToolCalls = {
         content: [
-            { type: 'image', url: 'http://example.com/image.jpg' }
-        ]
+            { 
+                type: 'tool_use', 
+                id: 'tool_1',
+                name: 'search_web',
+                input: { query: 'test search' }
+            }
+        ],
+        usage: { input_tokens: 15, output_tokens: 8 },
+        stop_reason: 'tool_use'
     };
-    const resultWithoutTextContent = plugin.parseResponse(dataWithoutTextContent);
-    t.deepEqual(resultWithoutTextContent, dataWithoutTextContent);
+    const resultWithToolCalls = plugin.parseResponse(dataWithToolCalls);
+    t.truthy(resultWithToolCalls.output_text === '');
+    t.truthy(resultWithToolCalls.finishReason === 'tool_calls');
+    t.truthy(resultWithToolCalls.toolCalls);
+    t.truthy(resultWithToolCalls.toolCalls.length === 1);
+    t.truthy(resultWithToolCalls.toolCalls[0].id === 'tool_1');
+    t.truthy(resultWithToolCalls.toolCalls[0].function.name === 'search_web');
+    t.truthy(resultWithToolCalls.toolCalls[0].function.arguments === '{"query":"test search"}');
 
+    // Test data without content (should return original data)
     const dataWithoutContent = {};
     const resultWithoutContent = plugin.parseResponse(dataWithoutContent);
     t.deepEqual(resultWithoutContent, dataWithoutContent);
 
+    // Test null data (should return null)
     const dataNull = null;
     const resultNull = plugin.parseResponse(dataNull);
     t.is(resultNull, dataNull);
