@@ -487,6 +487,81 @@ var config = convict({
                 "maxReturnTokens": 4096,
                 "supportsStreaming": true
             },
+            "xai-grok-3": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-3-latest"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 131072,
+                "maxReturnTokens": 32000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-0709"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-code-fast-1": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-code-fast-1"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-fast-reasoning": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-fast-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-fast-non-reasoning": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-fast-non-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
             "apptek-translate": {
                 "type": "APPTEK-TRANSLATE",
                 "url": "{{APPTEK_API_ENDPOINT}}",
@@ -761,10 +836,15 @@ const buildPathways = async (config) => {
                     Object.assign(pathways, subPathways);
                 } else if (file.name.endsWith('.js')) {
                     // Load individual pathway file
-                    const pathwayURL = pathToFileURL(fullPath).toString();
-                    const pathway = await import(pathwayURL).then(module => module.default || module);
-                    const pathwayName = path.basename(file.name, '.js');
-                    pathways[pathwayName] = pathway;
+                    try {
+                        const pathwayURL = pathToFileURL(fullPath).toString();
+                        const pathway = await import(pathwayURL).then(module => module.default || module);
+                        const pathwayName = path.basename(file.name, '.js');
+                        pathways[pathwayName] = pathway;
+                    } catch (pathwayError) {
+                        logger.error(`Error loading pathway file ${fullPath}: ${pathwayError.message}`);
+                        throw pathwayError; // Re-throw to be caught by outer catch block
+                    }
                 }
             }
         } catch (error) {
