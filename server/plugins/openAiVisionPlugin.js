@@ -155,7 +155,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             ...(cortexRequest.data || {}),
             ...requestParameters,
         };
-        cortexRequest.params = {}; // query params
+        cortexRequest.params = {};
         cortexRequest.stream = stream;
 
         return this.executeRequest(cortexRequest);
