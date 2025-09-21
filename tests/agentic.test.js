@@ -247,7 +247,7 @@ function flattenArray(arr) {
 
 // Test basic single-step task
 createModelTest('sys_entity_agent handles single-step task', async (t, model) => {
-  t.timeout(60000); // 30 second timeout
+  t.timeout(60000); // 60 second timeout
   const response = await testServer.executeOperation({
     query: `
       query TestAgentSingleStep(
