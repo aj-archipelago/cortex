@@ -443,7 +443,7 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         // Handle finish reasons
         if (eventData.candidates?.[0]?.finishReason === "STOP") {
             const finishReason = this.hadToolCalls ? "tool_calls" : "stop";
-            
+
             // Check if there's any remaining content in the final chunk that needs to be published
             if (eventData.candidates?.[0]?.content?.parts) {
                 const parts = eventData.candidates[0].content.parts;
@@ -460,36 +460,25 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                 // No content, just send finish chunk
                 requestProgress.data = JSON.stringify(createChunk({}, finishReason));
             }
-            
-            // Set progress to 1 for all finish reasons (Gemini doesn't send [DONE], just ends with STOP)
-            requestProgress.progress = 1;
-            
-            // Look to see if we need to add citations to the response
+
             const pathwayResolver = requestState[this.requestId]?.pathwayResolver;
-            addCitationsToResolver(pathwayResolver, this.contentBuffer);
-            
-            // Clear buffers on finish
-            this.toolCallsBuffer = [];
-            this.contentBuffer = '';
-            
-            // Execute tool calls if present
-            if (this.hadToolCalls && this.toolCallsBuffer.length > 0 && this.pathwayToolCallback) {
-                // Get pathwayResolver from requestState (same as OpenAI plugin)
-                const pathwayResolver = requestState[this.requestId]?.pathwayResolver;
-                
-                if (pathwayResolver) {
-                    const toolMessage = {
-                        role: 'assistant',
-                        content: this.contentBuffer || '', 
-                        tool_calls: this.toolCallsBuffer,
-                    };
-                    this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
-                    this.toolCallsBuffer = []; // Clear buffer after processing
-                } else {
-                    // pathwayResolver missing; nothing to do
-                }
+
+            if (finishReason === 'tool_calls' && this.toolCallsBuffer.length > 0 && this.pathwayToolCallback && pathwayResolver) {
+                // Execute tool callback and keep stream open
+                const toolMessage = {
+                    role: 'assistant',
+                    content: this.contentBuffer || '',
+                    tool_calls: this.toolCallsBuffer,
+                };
+                this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
+                // Clear tool buffer after processing; keep content for citations/continuations
+                this.toolCallsBuffer = [];
             } else {
-                // No tool calls to execute
+                // Either regular stop, or tool_calls without a callback → close the stream
+                requestProgress.progress = 1;
+                addCitationsToResolver(pathwayResolver, this.contentBuffer);
+                this.toolCallsBuffer = [];
+                this.contentBuffer = '';
             }
         }
 
