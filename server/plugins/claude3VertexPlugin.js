@@ -343,7 +343,6 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
           } else if (toolChoice === 'none') {
             requestParameters.tool_choice = { type: 'none' };
           }
-          return requestParameters;
         }
       }
       

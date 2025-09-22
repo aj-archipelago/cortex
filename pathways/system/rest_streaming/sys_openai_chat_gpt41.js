@@ -13,6 +13,7 @@ export default {
     inputParameters: {
         messages: [{role: '', content: []}],
         tools: '',
+        functions: '',
         tool_choice: 'auto',
     },
     model: 'oai-gpt41',

@@ -6,7 +6,7 @@ let testServer;
 // List of models to test - comment out models you don't want to test
 const modelsToTest = [
   'oai-gpt41-mini',
-  'claude-37-sonnet-vertex',
+  'claude-4-sonnet-vertex',
 ];
 
 // Add timing data structure
