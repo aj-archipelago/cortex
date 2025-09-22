@@ -335,6 +335,15 @@ var config = convict({
                 "requestsPerSecond": 10,
                 "maxTokenLength": 200000
             },
+            "google-cse": {
+                "type": "GOOGLE-CSE",
+                "url": "https://www.googleapis.com/customsearch/v1",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 200000
+            },
             "runware-flux-schnell": {
                 "type": "RUNWARE-AI",
                 "url": "https://api.runware.ai/v1",
