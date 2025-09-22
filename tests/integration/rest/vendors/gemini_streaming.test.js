@@ -38,18 +38,10 @@ test('Gemini SSE chat stream returns OAI-style chunks', async (t) => {
     stream: true,
   };
 
-  try {
-    const chunks = await collectSSEChunks(baseUrl, '/chat/completions', payload);
-    t.true(chunks.length > 0);
-    chunks.forEach(ch => assertOAIChatChunkBasics(t, ch));
-    t.true(assertAnyContentDelta(chunks));
-  } catch (err) {
-    if (err?.response?.status === 404) {
-      t.pass('Skipping - REST OAI endpoint not available for Gemini');
-      return;
-    }
-    throw err;
-  }
+  const chunks = await collectSSEChunks(baseUrl, '/chat/completions', payload);
+  t.true(chunks.length > 0);
+  chunks.forEach(ch => assertOAIChatChunkBasics(t, ch));
+  t.true(assertAnyContentDelta(chunks));
 });
 
 

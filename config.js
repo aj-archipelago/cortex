@@ -59,7 +59,7 @@ var config = convict({
     },
     defaultModelName: {
         format: String,
-        default: null,
+        default: 'oai-gpt4o',
         env: 'DEFAULT_MODEL_NAME'
     },
     defaultEntityName: {
@@ -471,6 +471,18 @@ var config = convict({
                 "requestsPerSecond": 10,
                 "maxTokenLength": 65536,
                 "maxReturnTokens": 4096,
+                "supportsStreaming": true
+            },
+            "claude-37-sonnet-vertex": {
+                "type": "CLAUDE-3-VERTEX",
+                "url": "{{claudeVertexUrl}}",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 200000,
+                "maxReturnTokens": 4096,
+                "maxImageSize": 5242880,
                 "supportsStreaming": true
             },
             "claude-4-sonnet-vertex": {
