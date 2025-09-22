@@ -191,64 +191,79 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
 
     // Override getRequestParameters to handle tool conversion
     getRequestParameters(text, parameters, prompt, cortexRequest) {
-        console.log('=== GEMINI TOOL DEBUG ===');
-        console.log('parameters keys:', Object.keys(parameters || {}));
-        console.log('parameters.tools:', parameters?.tools);
-        console.log('parameters.chatHistory length:', parameters?.chatHistory?.length);
-        console.log('parameters.chatHistory:', JSON.stringify(parameters?.chatHistory, null, 2));
-        console.log('cortexRequest keys:', Object.keys(cortexRequest || {}));
-        console.log('cortexRequest.tools:', cortexRequest?.tools);
-        console.log('cortexRequest.pathway keys:', Object.keys(cortexRequest?.pathway || {}));
-        console.log('cortexRequest.pathway.tools:', cortexRequest?.pathway?.tools);
-        
         // Convert OpenAI tools to Gemini format if present
         let convertedTools = [];
-        
-        // Check for tools in parameters.tools (OpenAI format) - this is where Claude gets them
-        if (parameters?.tools && Array.isArray(parameters.tools)) {
-            console.log('Found tools in parameters.tools:', parameters.tools.length);
-            convertedTools = this.convertOpenAIToolsToGemini(parameters.tools);
+
+        // Handle tools parameter - could be string (from REST) or array
+        let toolsArray = parameters?.tools;
+        if (typeof toolsArray === 'string') {
+            try {
+                toolsArray = JSON.parse(toolsArray);
+            } catch (e) {
+                toolsArray = [];
+            }
         }
         
-        // Check for tools in cortexRequest.tools (OpenAI format)
+        if (toolsArray && Array.isArray(toolsArray)) {
+            convertedTools = this.convertOpenAIToolsToGemini(toolsArray);
+        }
+
         if (cortexRequest?.tools && Array.isArray(cortexRequest.tools)) {
-            console.log('Found tools in cortexRequest.tools:', cortexRequest.tools.length);
             const requestTools = this.convertOpenAIToolsToGemini(cortexRequest.tools);
             convertedTools = [...convertedTools, ...requestTools];
         }
-        
-        // Check for tools in cortexRequest.pathway.tools (OpenAI format)
+
         if (cortexRequest?.pathway?.tools && Array.isArray(cortexRequest.pathway.tools)) {
-            console.log('Found tools in cortexRequest.pathway.tools:', cortexRequest.pathway.tools.length);
             const pathwayTools = this.convertOpenAIToolsToGemini(cortexRequest.pathway.tools);
             convertedTools = [...convertedTools, ...pathwayTools];
         }
-        
+
         // Temporarily remove geminiTools from pathway to prevent override
         const originalGeminiTools = cortexRequest?.pathway?.geminiTools;
         if (cortexRequest?.pathway) {
             delete cortexRequest.pathway.geminiTools;
         }
-        
+
         const baseParameters = super.getRequestParameters(text, parameters, prompt, cortexRequest);
-        
+
         // Restore original geminiTools
         if (cortexRequest?.pathway && originalGeminiTools !== undefined) {
             cortexRequest.pathway.geminiTools = originalGeminiTools;
         }
-        
-        // If we have converted tools, add them to the request (this will override any geminiTools)
+
         if (convertedTools.length > 0) {
             baseParameters.tools = convertedTools;
-            console.log('Gemini tools being sent:', JSON.stringify(convertedTools, null, 2));
-            console.log('Expected format: tools array with functionDeclarations inside');
-        } else {
-            console.log('No tools found or converted');
+            
+            // Handle tool_choice parameter - convert OpenAI format to Gemini toolConfig
+            let toolChoice = parameters.tool_choice;
+            if (typeof toolChoice === 'string' && toolChoice !== 'auto' && toolChoice !== 'none' && toolChoice !== 'required' && toolChoice !== 'any') {
+                try {
+                    toolChoice = JSON.parse(toolChoice);
+                } catch (e) {
+                    toolChoice = 'auto';
+                }
+            }
+            
+            if (toolChoice) {
+                if (typeof toolChoice === 'string') {
+                    if (toolChoice === 'auto') {
+                        baseParameters.toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
+                    } else if (toolChoice === 'required' || toolChoice === 'any') {
+                        baseParameters.toolConfig = { functionCallingConfig: { mode: 'ANY' } };
+                    } else if (toolChoice === 'none') {
+                        baseParameters.toolConfig = { functionCallingConfig: { mode: 'NONE' } };
+                    }
+                } else if (toolChoice.type === 'function') {
+                    // Force specific function - use ANY mode with allowed function names
+                    baseParameters.toolConfig = { 
+                        functionCallingConfig: { 
+                            mode: 'ANY',
+                            allowedFunctionNames: [toolChoice.function.name || toolChoice.function]
+                        } 
+                    };
+                }
+            }
         }
-
-        console.log('Final baseParameters keys:', Object.keys(baseParameters));
-        console.log('Final baseParameters.tools:', baseParameters.tools);
-        console.log('=== END GEMINI TOOL DEBUG ===');
 
         return baseParameters;
     }
@@ -394,11 +409,6 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     
                     this.toolCallsBuffer.push(toolCall);
                     
-                    console.log('=== GEMINI STREAMING DEBUG ===');
-                    console.log('Detected functionCall:', part.functionCall);
-                    console.log('Created toolCall:', toolCall);
-                    console.log('toolCallsBuffer length:', this.toolCallsBuffer.length);
-                    
                     // Send tool call delta
                     requestProgress.data = JSON.stringify(createChunk({
                         tool_calls: [{
@@ -412,14 +422,9 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                         }]
                     }));
                     
-                    console.log('Sent tool call delta:', requestProgress.data);
-                    console.log('=== END GEMINI STREAMING DEBUG ===');
-                    
                 } else if (part.text) {
                     // Regular text content
                     this.contentBuffer += part.text;
-                    console.log('Accumulated contentBuffer length:', this.contentBuffer.length);
-                    console.log('contentBuffer ends with:', this.contentBuffer.slice(-50));
                     
                     if (!requestProgress.started) {
                         // First chunk - send role
@@ -439,18 +444,11 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         if (eventData.candidates?.[0]?.finishReason === "STOP") {
             const finishReason = this.hadToolCalls ? "tool_calls" : "stop";
             
-            console.log('=== GEMINI FINISH DEBUG ===');
-            console.log('finishReason:', finishReason);
-            console.log('hadToolCalls:', this.hadToolCalls);
-            console.log('toolCallsBuffer.length:', this.toolCallsBuffer.length);
-            console.log('pathwayToolCallback exists:', !!this.pathwayToolCallback);
-            
             // Check if there's any remaining content in the final chunk that needs to be published
             if (eventData.candidates?.[0]?.content?.parts) {
                 const parts = eventData.candidates[0].content.parts;
                 for (const part of parts) {
                     if (part.text && part.text.trim()) {
-                        console.log('Publishing final content chunk:', part.text);
                         // Send the final content chunk with finish reason
                         requestProgress.data = JSON.stringify(createChunk({ 
                             content: part.text 
@@ -463,23 +461,16 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                 requestProgress.data = JSON.stringify(createChunk({}, finishReason));
             }
             
-            // Don't set progress to 1 for tool calls to keep stream open (same as OpenAI plugin)
-            if (finishReason !== "tool_calls") {
-                // Look to see if we need to add citations to the response
-                const pathwayResolver = requestState[this.requestId]?.pathwayResolver;
-                console.log('=== FINAL CITATION PROCESSING ===');
-                console.log('Final contentBuffer length:', this.contentBuffer.length);
-                console.log('Final contentBuffer:', this.contentBuffer);
-                console.log('Search results available:', pathwayResolver?.searchResults?.length || 0);
-                addCitationsToResolver(pathwayResolver, this.contentBuffer);
-                console.log('=== END FINAL CITATION PROCESSING ===');
-                requestProgress.progress = 1;
-                // Clear buffers on finish (same as OpenAI plugin)
-                this.toolCallsBuffer = [];
-                this.contentBuffer = '';
-            }
+            // Set progress to 1 for all finish reasons (Gemini doesn't send [DONE], just ends with STOP)
+            requestProgress.progress = 1;
             
-            console.log('Sent finish chunk:', requestProgress.data);
+            // Look to see if we need to add citations to the response
+            const pathwayResolver = requestState[this.requestId]?.pathwayResolver;
+            addCitationsToResolver(pathwayResolver, this.contentBuffer);
+            
+            // Clear buffers on finish
+            this.toolCallsBuffer = [];
+            this.contentBuffer = '';
             
             // Execute tool calls if present
             if (this.hadToolCalls && this.toolCallsBuffer.length > 0 && this.pathwayToolCallback) {
@@ -492,24 +483,14 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                         content: this.contentBuffer || '', 
                         tool_calls: this.toolCallsBuffer,
                     };
-                    
-                    console.log('Calling pathwayToolCallback with:', {
-                        args: pathwayResolver?.args,
-                        toolMessage,
-                        pathwayResolver
-                    });
-                    
                     this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
                     this.toolCallsBuffer = []; // Clear buffer after processing
-                    console.log('Tool calls executed and buffer cleared');
                 } else {
-                    console.log('pathwayResolver not found in requestState');
+                    // pathwayResolver missing; nothing to do
                 }
             } else {
-                console.log('Not calling pathwayToolCallback - conditions not met');
+                // No tool calls to execute
             }
-            
-            console.log('=== END GEMINI FINISH DEBUG ===');
         }
 
         // Handle safety blocks

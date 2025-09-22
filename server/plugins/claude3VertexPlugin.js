@@ -327,20 +327,31 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
     if (parameters.tool_choice) {
       // Convert OpenAI tool_choice format to Claude format
-      if (typeof parameters.tool_choice === 'string') {
-        // Handle string values: auto, required, none
-        if (parameters.tool_choice === 'required') {
-          requestParameters.tool_choice = { type: 'any' }; // OpenAI's 'required' maps to Claude's 'any'
-        } else if (parameters.tool_choice === 'auto') {
-          requestParameters.tool_choice = { type: 'auto' };
-        } else if (parameters.tool_choice === 'none') {
-          requestParameters.tool_choice = { type: 'none' };
+      let toolChoice = parameters.tool_choice;
+      
+      // Handle JSON string from REST endpoint
+      if (typeof toolChoice === 'string') {
+        try {
+          // Try to parse as JSON first
+          toolChoice = JSON.parse(toolChoice);
+        } catch (e) {
+          // If not JSON, handle as simple string values: auto, required, none
+          if (toolChoice === 'required') {
+            requestParameters.tool_choice = { type: 'any' }; // OpenAI's 'required' maps to Claude's 'any'
+          } else if (toolChoice === 'auto') {
+            requestParameters.tool_choice = { type: 'auto' };
+          } else if (toolChoice === 'none') {
+            requestParameters.tool_choice = { type: 'none' };
+          }
         }
-      } else if (parameters.tool_choice.type === "function") {
+      }
+      
+      // Handle parsed object
+      if (toolChoice.type === "function") {
         // Handle function-specific tool choice
         requestParameters.tool_choice = {
           type: "tool",
-          name: parameters.tool_choice.function.name
+          name: toolChoice.function.name || toolChoice.function
         };
       }
     }

@@ -18,7 +18,7 @@ import cors from 'cors';
 import { buildModels, buildPathways } from '../config.js';
 import logger from '../lib/logger.js';
 import { buildModelEndpoints } from '../lib/requestExecutor.js';
-import { startTestServer } from '../tests/server.js';
+import { startTestServer } from '../tests/helpers/server.js';
 import { requestState } from './requestState.js';
 import { cancelRequestResolver } from './resolver.js';
 import subscriptions from './subscriptions.js';

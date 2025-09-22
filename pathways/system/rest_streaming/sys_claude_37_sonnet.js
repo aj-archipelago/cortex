@@ -1,5 +1,5 @@
-// sys_openai_chat_gpt41.js
-// override handler for gpt-41
+// sys_claude_37_sonnet.js
+// override handler for claude-37-sonnet
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -13,10 +13,9 @@ export default {
     inputParameters: {
         messages: [{role: '', content: []}],
         tools: '',
-        functions: '',
         tool_choice: 'auto',
     },
-    model: 'oai-gpt41',
+    model: 'claude-37-sonnet-vertex',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-4.1',
-}
+    emulateOpenAIChatModel: 'claude-3.7-sonnet',
+} 

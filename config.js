@@ -94,12 +94,12 @@ var config = convict({
     },
     claudeVertexUrl: {
         format: String,
-        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/anthropic/models/claude-3-5-sonnet@20240620',
+        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/anthropic/models/claude-4-sonnet@20250722',
         env: 'CLAUDE_VERTEX_URL'
     },
     geminiFlashUrl: {
         format: String,
-        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/google/models/gemini-2.0-flash-001',
+        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/google/models/gemini-2.5-flash',
         env: 'GEMINI_FLASH_URL'
     },
     entityConfig: {
@@ -464,7 +464,7 @@ var config = convict({
                 "maxReturnTokens": 4096,
                 "supportsStreaming": true
             },
-            "claude-35-sonnet-vertex": {
+            "claude-4-sonnet-vertex": {
                 "type": "CLAUDE-3-VERTEX",
                 "url": "{{claudeVertexUrl}}",
                 "headers": {
@@ -476,15 +476,15 @@ var config = convict({
                 "maxImageSize": 5242880,
                 "supportsStreaming": true
             },
-            "gemini-flash-20-vision": {
+            "gemini-flash-25-vision": {
                 "type": "GEMINI-1.5-VISION",
                 "url": "{{geminiFlashUrl}}",
                 "headers": {
                     "Content-Type": "application/json"
                 },
                 "requestsPerSecond": 10,
-                "maxTokenLength": 200000,
-                "maxReturnTokens": 4096,
+                "maxTokenLength": 1048576,
+                "maxReturnTokens": 65535,
                 "supportsStreaming": true
             },
             "xai-grok-3": {
