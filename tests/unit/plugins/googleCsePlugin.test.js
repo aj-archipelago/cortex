@@ -22,7 +22,7 @@ test.beforeEach(async t => {
   process.env.OPENAI_API_KEY = 'test-openai-key';
   process.env.GOOGLE_CSE_KEY = 'test-google-key';
   process.env.GOOGLE_CSE_CX = 'test-google-cx';
-  const module = await import('../server/plugins/googleCsePlugin.js');
+  const module = await import('../../../server/plugins/googleCsePlugin.js');
   const GoogleCsePlugin = module.default;
   t.context.plugin = new GoogleCsePlugin(mockPathway, mockModel);
 });

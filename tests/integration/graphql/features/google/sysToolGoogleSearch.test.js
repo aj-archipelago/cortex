@@ -50,8 +50,8 @@ const restoreEnv = (t) => {
 
 // We import modules lazily after env vars are set to avoid config init errors
 const loadModules = async () => {
-  const { config } = await import('../config.js');
-  const toolModule = await import('../pathways/system/entity/tools/sys_tool_google_search.js');
+  const { config } = await import('../../../../../config.js');
+  const toolModule = await import('../../../../../pathways/system/entity/tools/sys_tool_google_search.js');
   return { config, tool: toolModule.default };
 };
 
