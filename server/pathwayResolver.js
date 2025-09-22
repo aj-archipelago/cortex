@@ -368,6 +368,15 @@ class PathwayResolver {
     }
 
     async promptAndParse(args) {
+        // Check if model is specified in args and swap if different from current model
+        if (args.modelOverride && args.modelOverride !== this.modelName) {
+            try {
+                this.swapModel(args.modelOverride);
+            } catch (error) {
+                this.logError(`Failed to swap model to ${args.modelOverride}: ${error.message}`);
+            }
+        }
+
         // Get saved context from contextId or change contextId if needed
         const { contextId } = args;
         this.savedContextId = contextId ? contextId : uuidv4();
@@ -615,6 +624,30 @@ class PathwayResolver {
             result = await this.applyPrompt(prompt, text, { ...parameters, previousResult });
         }
         return result;
+    }
+
+    /**
+     * Swaps the model used by this PathwayResolver
+     * @param {string} newModelName - The name of the new model to use
+     * @throws {Error} If the new model is not found in the endpoints
+     */
+    swapModel(newModelName) {
+        // Validate that the new model exists in endpoints
+        if (!this.endpoints[newModelName]) {
+            throw new Error(`Model ${newModelName} not found in config`);
+        }
+
+        // Update model references
+        this.modelName = newModelName;
+        this.model = this.endpoints[newModelName];
+
+        // Create new ModelExecutor with the new model
+        this.modelExecutor = new ModelExecutor(this.pathway, this.model);
+
+        // Recalculate chunk max token length as it depends on the model
+        this.chunkMaxTokenLength = this.getChunkMaxTokenLength();
+
+        this.logWarning(`Model swapped to ${newModelName}`);
     }
 
     async applyPrompt(prompt, text, parameters) {

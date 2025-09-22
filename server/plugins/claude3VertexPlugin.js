@@ -1,5 +1,8 @@
 import OpenAIVisionPlugin from "./openAiVisionPlugin.js";
 import logger from "../../lib/logger.js";
+import { requestState } from '../requestState.js';
+import { addCitationsToResolver } from '../../lib/pathwayTools.js';
+import CortexResponse from '../../lib/cortexResponse.js';
 import axios from 'axios';
 
 async function convertContentItem(item, maxImageSize, plugin) {
@@ -108,35 +111,63 @@ async function fetchImageAsDataURL(imageUrl) {
 
 class Claude3VertexPlugin extends OpenAIVisionPlugin {
   
+  constructor(pathway, model) {
+    super(pathway, model);
+    this.isMultiModal = true;
+    this.pathwayToolCallback = pathway.toolCallback;
+    this.toolCallsBuffer = [];
+    this.contentBuffer = ''; // Initialize content buffer
+    this.hadToolCalls = false; // Track if this stream had tool calls
+  }
+  
   parseResponse(data) {
     if (!data) {
       return data;
     }
 
-    const { content } = data;
+    const { content, usage, stop_reason } = data;
 
     // Handle tool use responses from Claude
     if (content && Array.isArray(content)) {
       const toolUses = content.filter(item => item.type === "tool_use");
       if (toolUses.length > 0) {
-        return {
-          role: "assistant",
-          content: "",
-          tool_calls: toolUses.map(toolUse => ({
-            id: toolUse.id,
-            type: "function",
-            function: {
-              name: toolUse.name,
-              arguments: JSON.stringify(toolUse.input)
-            }
-          }))
-        };
+        // Create standardized CortexResponse object for tool calls
+        const cortexResponse = new CortexResponse({
+          output_text: "",
+          finishReason: "tool_calls",
+          usage: usage || null,
+          metadata: {
+            model: this.modelName
+          }
+        });
+
+        // Convert Claude tool uses to OpenAI format
+        cortexResponse.toolCalls = toolUses.map(toolUse => ({
+          id: toolUse.id,
+          type: "function",
+          function: {
+            name: toolUse.name,
+            arguments: JSON.stringify(toolUse.input)
+          }
+        }));
+
+        return cortexResponse;
       }
 
       // Handle regular text responses
       const textContent = content.find(item => item.type === "text");
       if (textContent) {
-        return textContent.text;
+        // Create standardized CortexResponse object for text responses
+        const cortexResponse = new CortexResponse({
+          output_text: textContent.text || "",
+          finishReason: stop_reason === "tool_use" ? "tool_calls" : "stop",
+          usage: usage || null,
+          metadata: {
+            model: this.modelName
+          }
+        });
+
+        return cortexResponse;
       }
     }
 
@@ -451,8 +482,19 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     return this.executeRequest(cortexRequest);
   }
 
-  processStreamEvent(event, requestProgress) {
-    const eventData = JSON.parse(event.data);
+  convertClaudeSSEToOpenAI(event) {
+    // Handle end of stream
+    if (event.data.trim() === '[DONE]') {
+      return event; // Pass through unchanged
+    }
+
+    let eventData;
+    try {
+      eventData = JSON.parse(event.data);
+    } catch (error) {
+      throw new Error(`Could not parse stream data: ${error}`);
+    }
+
     const baseOpenAIResponse = {
       id: eventData.message?.id || `chatcmpl-${Date.now()}`,
       object: "chat.completion.chunk",
@@ -465,50 +507,141 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       }]
     };
 
+    let delta = {};
+    let finishReason = null;
+
+    // Handle errors - convert to OpenAI error format instead of throwing
+    const streamError = eventData?.error?.message || eventData?.error;
+    if (streamError) {
+      delta = {
+        content: `\n\n*** ${streamError} ***`
+      };
+      finishReason = "error";
+      
+      // Update the OpenAI response
+      baseOpenAIResponse.choices[0].delta = delta;
+      baseOpenAIResponse.choices[0].finish_reason = finishReason;
+      
+      // Create new event with OpenAI format
+      return {
+        ...event,
+        data: JSON.stringify(baseOpenAIResponse)
+      };
+    }
+
+    // Handle different Claude event types
     switch (eventData.type) {
       case "message_start":
-        // Initial message with role
-        baseOpenAIResponse.choices[0].delta = {
-          role: "assistant",
-          content: ""
-        };
-        requestProgress.data = JSON.stringify(baseOpenAIResponse);
+        delta = { role: "assistant", content: "" };
+        // Reset tool calls flag for new message
+        this.hadToolCalls = false;
         break;
 
       case "content_block_delta":
         if (eventData.delta.type === "text_delta") {
-          baseOpenAIResponse.choices[0].delta = {
-            content: eventData.delta.text
+          delta = { content: eventData.delta.text };
+        } else if (eventData.delta.type === "input_json_delta") {
+          // Handle tool call argument streaming
+          const toolCallIndex = eventData.index || 0;
+          
+          // Create OpenAI tool call delta - parent class will handle accumulation
+          delta = {
+            tool_calls: [{
+              index: toolCallIndex,
+              id: eventData.id || `call_${toolCallIndex}_${Date.now()}`,
+              type: "function",
+              function: {
+                arguments: eventData.delta.partial_json || ""
+              }
+            }]
           };
-          requestProgress.data = JSON.stringify(baseOpenAIResponse);
+        } else if (eventData.delta.type === "name_delta") {
+          // Handle tool call name streaming
+          const toolCallIndex = eventData.index || 0;
+          
+          // Create OpenAI tool call delta - parent class will handle accumulation
+          delta = {
+            tool_calls: [{
+              index: toolCallIndex,
+              id: eventData.id || `call_${toolCallIndex}_${Date.now()}`,
+              type: "function",
+              function: {
+                name: eventData.delta.name || ""
+              }
+            }]
+          };
         }
         break;
 
+      case "content_block_start":
+        if (eventData.content_block.type === "tool_use") {
+          // Mark that we have tool calls in this stream
+          this.hadToolCalls = true;
+          
+          // Create OpenAI tool call delta - parent class will handle buffer management
+          const toolCallIndex = eventData.index || 0;
+          delta = {
+            tool_calls: [{
+              index: toolCallIndex,
+              id: eventData.content_block.id || `call_${toolCallIndex}_${Date.now()}`,
+              type: "function",
+              function: {
+                name: eventData.content_block.name || ""
+              }
+            }]
+          };
+        }
+        break;
+
+      case "message_delta":
+        // Handle message delta events (like stop_reason)
+        // Don't set finish_reason here - let the stream continue until message_stop
+        delta = {};
+        break;
+
       case "message_stop":
-        baseOpenAIResponse.choices[0].delta = {};
-        baseOpenAIResponse.choices[0].finish_reason = "stop";
-        requestProgress.data = JSON.stringify(baseOpenAIResponse);
-        requestProgress.progress = 1;
+        delta = {};
+        // Determine finish reason based on whether there were tool calls in this stream
+        if (this.hadToolCalls) {
+          finishReason = "tool_calls";
+        } else {
+          finishReason = "stop";
+        }
         break;
 
       case "error":
-        baseOpenAIResponse.choices[0].delta = {
+        delta = {
           content: `\n\n*** ${eventData.error.message || eventData.error} ***`
         };
-        baseOpenAIResponse.choices[0].finish_reason = "error";
-        requestProgress.data = JSON.stringify(baseOpenAIResponse);
-        requestProgress.progress = 1;
+        finishReason = "error";
         break;
 
       // Ignore other event types as they don't map to OpenAI format
-      case "content_block_start":
       case "content_block_stop":
       case "message_delta":
       case "ping":
         break;
     }
 
-    return requestProgress;
+    // Update the OpenAI response
+    baseOpenAIResponse.choices[0].delta = delta;
+    if (finishReason) {
+      baseOpenAIResponse.choices[0].finish_reason = finishReason;
+    }
+
+    // Create new event with OpenAI format
+    return {
+      ...event,
+      data: JSON.stringify(baseOpenAIResponse)
+    };
+  }
+
+  processStreamEvent(event, requestProgress) {
+    // Convert Claude event to OpenAI format
+    const openAIEvent = this.convertClaudeSSEToOpenAI(event);
+    
+    // Delegate to parent class for all the tool call logic
+    return super.processStreamEvent(openAIEvent, requestProgress);
   }
 
 }

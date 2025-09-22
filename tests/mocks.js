@@ -92,4 +92,7 @@ export const mockConfig = {
       }),
   };
 
-  export const mockModelEndpoints = { testModel: { name: 'testModel', url: 'https://api.example.com/testModel', type: 'OPENAI-COMPLETION' }};
+  export const mockModelEndpoints = { 
+    testModel: { name: 'testModel', url: 'https://api.example.com/testModel', type: 'OPENAI-COMPLETION' },
+    anotherModel: { name: 'anotherModel', url: 'https://api.example.com/anotherModel', type: 'OPENAI-CHAT' }
+  };

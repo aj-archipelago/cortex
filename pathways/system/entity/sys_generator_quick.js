@@ -7,6 +7,7 @@ export default {
         contextId: ``,
         aiName: "Jarvis",
         language: "English",
+        model: 'oai-gpt41-mini',
     },
     useInputChunking: false,
     enableDuplicateRequests: false,
