@@ -1,5 +1,5 @@
-// sys_grok_chat.js
-// override handler for grok-4 and grok-3
+// sys_openai_chat_gpt5_mini.js
+// override handler for gpt-5-mini
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -12,10 +12,10 @@ export default {
     ],
     inputParameters: {
         messages: [{role: '', content: []}],
-        stream: false,
-        search_parameters: '',
+        tools: '',
+        tool_choice: 'auto',
     },
-    model: 'xai-grok-4',
+    model: 'oai-gpt5-mini',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'grok-4'
+    emulateOpenAIChatModel: 'gpt-5-mini',
 } 

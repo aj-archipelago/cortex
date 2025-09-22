@@ -1,5 +1,5 @@
-// sys_openai_chat_gpt4_32.js
-// override handler for gpt-4-32
+// sys_openai_chat_gpt4_omni.js
+// override handler for gpt-4-omni
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -11,9 +11,11 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{role: '', content: []}],
+        tools: '',
+        tool_choice: 'auto',
     },
-    model: 'oai-gpt4-32',
+    model: 'oai-gpt4o',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-4-32k',
+    emulateOpenAIChatModel: 'gpt-4o',
 }

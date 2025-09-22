@@ -170,7 +170,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
     }
     
     if (req.body.tool_choice) {
-        variables.tool_choice = req.body.tool_choice;
+        variables.tool_choice = typeof req.body.tool_choice === 'string' ? req.body.tool_choice : JSON.stringify(req.body.tool_choice);
     }
     
     // Add functions to variables if they exist in the request (legacy function calling)
@@ -197,8 +197,8 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             `;
 
     // Debug: Log the variables being passed
-    console.log('DEBUG: REST endpoint variables:', JSON.stringify(variables, null, 2));
-    console.log('DEBUG: REST endpoint query:', query);
+    logger.debug(`REST endpoint variables: ${JSON.stringify(variables, null, 2)}`);
+    logger.debug(`REST endpoint query: ${query}`);
     
     const result = await server.executeOperation({ query, variables });
 
@@ -405,8 +405,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
                     fillJsonResponseWithToolCalls(jsonResponse, delta.tool_calls, finishReason || "tool_calls");
                     sendStreamData(jsonResponse);
                     
-                    if (finishReason === "tool_calls") {
-        
+                    if (finishReason === "tool_calls" || progress === 1) {
                         safeUnsubscribe();
                         finishStream(res, jsonResponse);
                     }

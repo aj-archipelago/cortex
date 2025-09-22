@@ -1,5 +1,5 @@
-// sys_openai_chat_gpt41.js
-// override handler for gpt-41
+// sys_openai_chat_gpt5_nano.js
+// override handler for gpt-5-nano
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -15,7 +15,7 @@ export default {
         tools: '',
         tool_choice: 'auto',
     },
-    model: 'oai-gpt41',
+    model: 'oai-gpt5-nano',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-4.1',
-}
+    emulateOpenAIChatModel: 'gpt-5-nano',
+} 

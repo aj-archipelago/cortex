@@ -1,5 +1,5 @@
-// sys_claude_3_haiku.js
-// override handler for claude-3-haiku
+// sys_openai_chat_gpt5_chat.js
+// override handler for gpt-5-chat
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -12,8 +12,10 @@ export default {
     ],
     inputParameters: {
         messages: [{role: '', content: []}],
+        tools: '',
+        tool_choice: 'auto',
     },
-    model: 'claude-3-haiku-vertex',
+    model: 'oai-gpt5-chat',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'claude-3-haiku',
-}
+    emulateOpenAIChatModel: 'gpt-5-chat',
+} 

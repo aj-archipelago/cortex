@@ -1,5 +1,5 @@
-// sys_openai_chat_gpt41.js
-// override handler for gpt-41
+// sys_grok_4_fast_reasoning.js
+// override handler for grok-4-fast-reasoning
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -12,10 +12,12 @@ export default {
     ],
     inputParameters: {
         messages: [{role: '', content: []}],
+        stream: false,
+        search_parameters: '',
         tools: '',
         tool_choice: 'auto',
     },
-    model: 'oai-gpt41',
+    model: 'xai-grok-4-fast-reasoning',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-4.1',
+    emulateOpenAIChatModel: 'grok-4-fast-reasoning'
 }

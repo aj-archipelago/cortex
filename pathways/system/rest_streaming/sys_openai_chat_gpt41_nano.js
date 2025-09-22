@@ -1,4 +1,5 @@
-// sys_openai_chat_o1.js
+// sys_openai_chat_gpt41_nano.js
+// override handler for gpt-41-nano
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -11,9 +12,10 @@ export default {
     ],
     inputParameters: {
         messages: [{role: '', content: []}],
+        tools: '',
+        tool_choice: 'auto',
     },
-    model: 'oai-o1',
+    model: 'oai-gpt41-nano',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'o1',
-    enableDuplicateRequests: false,
+    emulateOpenAIChatModel: 'gpt-4.1-nano',
 }

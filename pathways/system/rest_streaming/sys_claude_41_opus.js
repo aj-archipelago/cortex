@@ -1,5 +1,5 @@
-// sys_openai_chat_gpt41.js
-// override handler for gpt-41
+// sys_claude_41_opus.js
+// override handler for claude-41-opus
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -15,7 +15,7 @@ export default {
         tools: '',
         tool_choice: 'auto',
     },
-    model: 'oai-gpt41',
+    model: 'claude-41-opus-vertex',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-4.1',
+    emulateOpenAIChatModel: 'claude-4.1-opus',
 }

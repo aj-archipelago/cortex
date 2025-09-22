@@ -1,5 +1,5 @@
-// sys_claude_35_sonnet.js
-// override handler for claude-35-sonnet
+// sys_grok_4.js
+// override handler for grok-4
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -12,8 +12,12 @@ export default {
     ],
     inputParameters: {
         messages: [{role: '', content: []}],
+        stream: false,
+        search_parameters: '',
+        tools: '',
+        tool_choice: 'auto',
     },
-    model: 'claude-35-sonnet-vertex',
+    model: 'xai-grok-4',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'claude-3.5-sonnet',
-}
+    emulateOpenAIChatModel: 'grok-4'
+} 

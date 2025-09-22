@@ -1,5 +1,5 @@
-// sys_openai_chat_gpt4.js
-// override handler for gpt-4
+// sys_openai_chat_gpt5.js
+// override handler for gpt-5
 
 import { Prompt } from '../../../server/prompt.js';
 
@@ -11,9 +11,11 @@ export default {
         ]}),
     ],
     inputParameters: {
-        messages: [],
+        messages: [{role: '', content: []}],
+        tools: '',
+        tool_choice: 'auto',
     },
-    model: 'oai-gpt4',
+    model: 'oai-gpt5',
     useInputChunking: false,
-    emulateOpenAIChatModel: 'gpt-4',
-}
+    emulateOpenAIChatModel: 'gpt-5',
+} 

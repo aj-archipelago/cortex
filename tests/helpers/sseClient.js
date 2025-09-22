@@ -4,6 +4,10 @@ import axios from 'axios';
 // Calls onEvent for each parsed SSE message JSON.
 export async function connectToSSEEndpoint(baseUrl, endpoint, payload, onEvent) {
   return new Promise(async (resolve, reject) => {
+    const timeout = setTimeout(() => {
+      resolve(); // Resolve instead of reject on timeout
+    }, 8000); // 8 second timeout
+    
     try {
       const instance = axios.create({
         baseURL: baseUrl,
@@ -28,6 +32,7 @@ export async function connectToSSEEndpoint(baseUrl, endpoint, payload, onEvent) 
           eventCount++;
 
           if (event.trim() === 'data: [DONE]') {
+            clearTimeout(timeout);
             resolve();
             return;
           }
@@ -42,6 +47,7 @@ export async function connectToSSEEndpoint(baseUrl, endpoint, payload, onEvent) 
         });
       });
     } catch (error) {
+      clearTimeout(timeout);
       reject(error);
     }
   });
