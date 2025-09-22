@@ -19,4 +19,5 @@ export default {
     useInputChunking: false,
     json: true,
     responseFormat: { type: "json_object" },
+    requestLoggingDisabled: true,
 }

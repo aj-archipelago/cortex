@@ -19,5 +19,6 @@ export default {
     model: 'oai-gpt41',
     useInputChunking: false,
     json: true,
+    requestLoggingDisabled: true,
     ...config.get('entityConstants')
 }
