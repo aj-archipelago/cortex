@@ -7,7 +7,7 @@ class GoogleCsePlugin extends ModelPlugin {
         super(pathway, model);
     }
 
-    getRequestParameters(text, parameters = {}) {
+    getRequestParameters(text, parameters = {}, prompt) {
         const env = config.getEnv();
         const apiKey = env["GOOGLE_CSE_KEY"];
         const cxEnv = env["GOOGLE_CSE_CX"];
