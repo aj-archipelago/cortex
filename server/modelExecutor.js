@@ -35,6 +35,7 @@ import GroqChatPlugin from './plugins/groqChatPlugin.js';
 import VeoVideoPlugin from './plugins/veoVideoPlugin.js';
 import GrokVisionPlugin from './plugins/grokVisionPlugin.js';
 import AzureFoundryAgentsPlugin from './plugins/azureFoundryAgentsPlugin.js';
+import GoogleCsePlugin from './plugins/googleCsePlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -140,6 +141,9 @@ class ModelExecutor {
                 break;
             case 'AZURE-FOUNDRY-AGENTS':
                 plugin = new AzureFoundryAgentsPlugin(pathway, model);
+                break;
+            case 'GOOGLE-CSE':
+                plugin = new GoogleCsePlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);
