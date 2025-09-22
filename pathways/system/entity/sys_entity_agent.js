@@ -8,6 +8,7 @@ import { config } from '../../../config.js';
 import { chatArgsHasImageUrl, removeOldImageAndFileContent, getAvailableFiles } from '../../../lib/util.js';
 import { Prompt } from '../../../server/prompt.js';
 import { getToolsForEntity, loadEntityConfig } from './tools/shared/sys_entity_tools.js';
+import CortexResponse from '../../../lib/cortexResponse.js';
 
 export default {
     emulateOpenAIChatModel: 'cortex-agent',
@@ -39,7 +40,14 @@ export default {
             return;
         }
 
-        const { tool_calls } = message;
+        // Handle both CortexResponse objects and plain message objects
+        let tool_calls;
+        if (message instanceof CortexResponse) {
+            tool_calls = message.toolCalls || message.functionCall ? [message.functionCall] : null;
+        } else {
+            tool_calls = message.tool_calls;
+        }
+        
         const pathwayResolver = resolver;
         const { entityTools, entityToolsOpenAiFormat } = args;
 
@@ -311,8 +319,19 @@ export default {
         ];
 
         // set the style model if applicable
-        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
-        const styleModel = aiStyle === "Anthropic" ? AI_STYLE_ANTHROPIC : AI_STYLE_OPENAI;
+        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI, AI_STYLE_ANTHROPIC_RESEARCH, AI_STYLE_OPENAI_RESEARCH, AI_STYLE_XAI, AI_STYLE_XAI_RESEARCH, AI_STYLE_GOOGLE, AI_STYLE_GOOGLE_RESEARCH } = args;
+
+        // Create a mapping of AI styles to their corresponding models
+        const styleModelMap = {
+            "Anthropic": { normal: AI_STYLE_ANTHROPIC, research: AI_STYLE_ANTHROPIC_RESEARCH },
+            "OpenAI": { normal: AI_STYLE_OPENAI, research: AI_STYLE_OPENAI_RESEARCH },
+            "XAI": { normal: AI_STYLE_XAI, research: AI_STYLE_XAI_RESEARCH },
+            "Google": { normal: AI_STYLE_GOOGLE, research: AI_STYLE_GOOGLE_RESEARCH }
+        };
+
+        // Get the appropriate model based on AI style and research mode
+        const styleConfig = styleModelMap[aiStyle] || styleModelMap["OpenAI"]; // Default to OpenAI
+        const styleModel = researchMode ? styleConfig.research : styleConfig.normal;
 
         // Limit the chat history to 20 messages to speed up processing
         if (args.messages && args.messages.length > 0) {
@@ -355,6 +374,7 @@ export default {
 
             let response = await runAllPrompts({
                 ...args,
+                modelOverride: styleModel,
                 chatHistory: currentMessages,
                 availableFiles,
                 tools: entityToolsOpenAiFormat,
@@ -362,7 +382,12 @@ export default {
             });
 
             let toolCallback = pathwayResolver.pathway.toolCallback;
-            while (response?.tool_calls) {
+
+            // Handle both CortexResponse objects and plain responses
+            while (response && (
+                (response instanceof CortexResponse && response.hasToolCalls()) ||
+                (typeof response === 'object' && response.tool_calls)
+            )) {
                 response = await toolCallback(args, response, pathwayResolver);
             }
 

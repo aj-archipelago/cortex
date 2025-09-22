@@ -608,7 +608,6 @@ class ModelPlugin {
             let parsedMessage;
             try {
                 parsedMessage = JSON.parse(event.data);
-                requestProgress.data = event.data;
             } catch (error) {
                 throw new Error(`Could not parse stream data: ${error}`);
             }
@@ -618,6 +617,9 @@ class ModelPlugin {
             if (streamError) {
                 throw new Error(streamError);
             }
+
+            // Set the data for the event
+            requestProgress.data = event.data;
 
             // finish reason can be in different places in the message
             const finishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;

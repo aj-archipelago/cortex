@@ -94,12 +94,12 @@ var config = convict({
     },
     claudeVertexUrl: {
         format: String,
-        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/anthropic/models/claude-3-5-sonnet@20240620',
+        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/anthropic/models/claude-4-sonnet@20250722',
         env: 'CLAUDE_VERTEX_URL'
     },
     geminiFlashUrl: {
         format: String,
-        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/google/models/gemini-2.0-flash-001',
+        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/google/models/gemini-2.5-flash',
         env: 'GEMINI_FLASH_URL'
     },
     entityConfig: {
@@ -473,7 +473,7 @@ var config = convict({
                 "maxReturnTokens": 4096,
                 "supportsStreaming": true
             },
-            "claude-35-sonnet-vertex": {
+            "claude-4-sonnet-vertex": {
                 "type": "CLAUDE-3-VERTEX",
                 "url": "{{claudeVertexUrl}}",
                 "headers": {
@@ -485,15 +485,90 @@ var config = convict({
                 "maxImageSize": 5242880,
                 "supportsStreaming": true
             },
-            "gemini-flash-20-vision": {
+            "gemini-flash-25-vision": {
                 "type": "GEMINI-1.5-VISION",
                 "url": "{{geminiFlashUrl}}",
                 "headers": {
                     "Content-Type": "application/json"
                 },
                 "requestsPerSecond": 10,
-                "maxTokenLength": 200000,
-                "maxReturnTokens": 4096,
+                "maxTokenLength": 1048576,
+                "maxReturnTokens": 65535,
+                "supportsStreaming": true
+            },
+            "xai-grok-3": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-3-latest"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 131072,
+                "maxReturnTokens": 32000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-0709"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-code-fast-1": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-code-fast-1"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-fast-reasoning": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-fast-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-fast-non-reasoning": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-fast-non-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
             "apptek-translate": {
@@ -770,10 +845,15 @@ const buildPathways = async (config) => {
                     Object.assign(pathways, subPathways);
                 } else if (file.name.endsWith('.js')) {
                     // Load individual pathway file
-                    const pathwayURL = pathToFileURL(fullPath).toString();
-                    const pathway = await import(pathwayURL).then(module => module.default || module);
-                    const pathwayName = path.basename(file.name, '.js');
-                    pathways[pathwayName] = pathway;
+                    try {
+                        const pathwayURL = pathToFileURL(fullPath).toString();
+                        const pathway = await import(pathwayURL).then(module => module.default || module);
+                        const pathwayName = path.basename(file.name, '.js');
+                        pathways[pathwayName] = pathway;
+                    } catch (pathwayError) {
+                        logger.error(`Error loading pathway file ${fullPath}: ${pathwayError.message}`);
+                        throw pathwayError; // Re-throw to be caught by outer catch block
+                    }
                 }
             }
         } catch (error) {

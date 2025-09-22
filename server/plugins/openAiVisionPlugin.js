@@ -2,6 +2,7 @@ import OpenAIChatPlugin from './openAiChatPlugin.js';
 import logger from '../../lib/logger.js';
 import { requestState } from '../requestState.js';
 import { addCitationsToResolver } from '../../lib/pathwayTools.js';
+import CortexResponse from '../../lib/cortexResponse.js';
 function safeJsonParse(content) {
     try {
         const parsedContent = JSON.parse(content);
@@ -154,16 +155,10 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             ...(cortexRequest.data || {}),
             ...requestParameters,
         };
-        cortexRequest.params = {}; // query params
+        cortexRequest.params = {};
         cortexRequest.stream = stream;
 
-        const parsedResponse = await this.executeRequest(cortexRequest);
-
-        if (typeof parsedResponse === 'object' && (parsedResponse.tool_calls || parsedResponse.function_call)) {
-            cortexRequest.pathwayResolver.tool = JSON.stringify({tool_calls: parsedResponse.tool_calls, function_call: parsedResponse.function_call});
-        }
-
-        return parsedResponse;
+        return this.executeRequest(cortexRequest);
     }
 
     // Override parseResponse to handle tool calls
@@ -174,21 +169,30 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             return data;
         }
 
-        // if we got a choices array back with more than one choice, return the whole array
-        if (choices.length > 1) {
-            return choices;
-        }
-
-        const message = choices[0].message;
+        const choice = choices[0];
+        const message = choice.message;
         if (!message) {
             return null;
         }
 
-        if (message.tool_calls || message.function_call) {
-            return message;
+        // Create standardized CortexResponse object
+        const cortexResponse = new CortexResponse({
+            output_text: message.content || "",
+            finishReason: choice.finish_reason || 'stop',
+            usage: data.usage || null,
+            metadata: {
+                model: this.modelName
+            }
+        });
+
+        // Handle tool calls
+        if (message.tool_calls) {
+            cortexResponse.toolCalls = message.tool_calls;
+        } else if (message.function_call) {
+            cortexResponse.functionCall = message.function_call;
         }
 
-        return message.content || "";
+        return cortexResponse;
     }
 
     processStreamEvent(event, requestProgress) {
@@ -202,7 +206,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             let parsedMessage;
             try {
                 parsedMessage = JSON.parse(event.data);
-                requestProgress.data = event.data;
             } catch (error) {
                 // Clear buffers on error
                 this.toolCallsBuffer = [];
@@ -220,6 +223,23 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             }
 
             const delta = parsedMessage?.choices?.[0]?.delta;
+            
+            // Check if this is an empty/idle event that we should skip
+            const isEmptyEvent = !delta || 
+                (Object.keys(delta).length === 0) || 
+                (Object.keys(delta).length === 1 && delta.content === '') ||
+                (Object.keys(delta).length === 1 && delta.tool_calls && delta.tool_calls.length === 0);
+            
+            // Skip publishing empty events unless they have a finish_reason
+            const hasFinishReason = parsedMessage?.choices?.[0]?.finish_reason;
+            
+            if (isEmptyEvent && !hasFinishReason) {
+                // Return requestProgress without setting data to prevent publishing
+                return requestProgress;
+            }
+            
+            // Set the data for non-empty events or events with finish_reason
+            requestProgress.data = event.data;
 
             // Accumulate content
             if (delta?.content) {

@@ -56,34 +56,35 @@ const handleModelNotFound = (res, modelName) => {
 
 const extractResponseData = (pathwayResponse) => {
     if (typeof pathwayResponse === 'string') {
-        return { resultText: pathwayResponse, toolData: null };
+        return { resultText: pathwayResponse, resultData: null };
     }
     return {
         resultText: pathwayResponse.result || "",
-        toolData: pathwayResponse.tool || null
+        resultData: pathwayResponse.resultData || null
     };
 };
 
-const parseToolCalls = (toolData, resultText) => {
+const parseToolCalls = (resultData, resultText) => {
     let messageContent = resultText;
     let toolCalls = null;
     let functionCall = null;
     let finishReason = 'stop';
 
-    // First check if we have tool data from the pathway response
-    if (toolData) {
+    // First check if we have structured response data from the pathway response
+    if (resultData) {
         try {
-            const parsedToolData = typeof toolData === 'string' ? JSON.parse(toolData) : toolData;
+            const parsedResultData = typeof resultData === 'string' ? JSON.parse(resultData) : resultData;
             
-            if (parsedToolData.tool_calls) {
-                toolCalls = parsedToolData.tool_calls;
+            // resultData contains the full CortexResponse object
+            if (parsedResultData && parsedResultData.toolCalls) {
+                toolCalls = parsedResultData.toolCalls;
                 finishReason = 'tool_calls';
-            } else if (parsedToolData.function_call) {
-                functionCall = parsedToolData.function_call;
+            } else if (parsedResultData && parsedResultData.functionCall) {
+                functionCall = parsedResultData.functionCall;
                 finishReason = 'function_call';
             }
         } catch (e) {
-            // If parsing tool data fails, continue with regular parsing
+            // If parsing structured response fails, continue with regular parsing
         }
     }
 
@@ -145,6 +146,8 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                     msg.content.map(item => JSON.stringify(item)) : 
                     msg.content
             }));
+        } else if (type === '[String]' && Array.isArray(value)) {
+            return value;
         } else {
             return value;
         }
@@ -167,7 +170,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
     }
     
     if (req.body.tool_choice) {
-        variables.tool_choice = req.body.tool_choice;
+        variables.tool_choice = typeof req.body.tool_choice === 'string' ? req.body.tool_choice : JSON.stringify(req.body.tool_choice);
     }
     
     // Add functions to variables if they exist in the request (legacy function calling)
@@ -184,6 +187,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                         contextId
                         previousResult
                         result
+                        resultData
                         tool
                         warnings
                         errors
@@ -192,6 +196,10 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
                 }
             `;
 
+    // Debug: Log the variables being passed
+    logger.debug(`REST endpoint variables: ${JSON.stringify(variables, null, 2)}`);
+    logger.debug(`REST endpoint query: ${query}`);
+    
     const result = await server.executeOperation({ query, variables });
 
     // if we're streaming and there are errors, we return a standard error code
@@ -206,6 +214,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
     if (pathwayData) {
         return {
             result: pathwayData.result || "",
+            resultData: pathwayData.resultData || null,
             tool: pathwayData.tool || null,
             errors: pathwayData.errors || null,
             warnings: pathwayData.warnings || null
@@ -216,6 +225,7 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
     const errorMessage = result?.body?.singleResult?.errors?.[0]?.message || "";
     return {
         result: errorMessage,
+        resultData: null,
         tool: null,
         errors: errorMessage ? [errorMessage] : null,
         warnings: null
@@ -395,8 +405,7 @@ const processIncomingStream = (requestId, res, jsonResponse, pathway) => {
                     fillJsonResponseWithToolCalls(jsonResponse, delta.tool_calls, finishReason || "tool_calls");
                     sendStreamData(jsonResponse);
                     
-                    if (finishReason === "tool_calls") {
-        
+                    if (finishReason === "tool_calls" || progress === 1) {
                         safeUnsubscribe();
                         finishStream(res, jsonResponse);
                     }
@@ -586,8 +595,8 @@ function buildRestEndpoints(pathways, app, server, config) {
 
             const pathway = pathways[pathwayName];
             const pathwayResponse = await processRestRequest(server, req, pathway, pathwayName);
-            const { resultText, toolData } = extractResponseData(pathwayResponse);
-            const { messageContent, toolCalls, functionCall, finishReason } = parseToolCalls(toolData, resultText);
+            const { resultText, resultData } = extractResponseData(pathwayResponse);
+            const { messageContent, toolCalls, functionCall, finishReason } = parseToolCalls(resultData, resultText);
 
             const jsonResponse = {
                 id: `chatcmpl`,
