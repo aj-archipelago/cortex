@@ -464,11 +464,13 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
             const pathwayResolver = requestState[this.requestId]?.pathwayResolver;
 
             if (finishReason === 'tool_calls' && this.toolCallsBuffer.length > 0 && this.pathwayToolCallback && pathwayResolver) {
+                // Filter out undefined elements from the tool calls buffer
+                const validToolCalls = this.toolCallsBuffer.filter(tc => tc && tc.function && tc.function.name);
                 // Execute tool callback and keep stream open
                 const toolMessage = {
                     role: 'assistant',
                     content: this.contentBuffer || '',
-                    tool_calls: this.toolCallsBuffer,
+                    tool_calls: validToolCalls,
                 };
                 this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
                 // Clear tool buffer after processing; keep content for citations/continuations

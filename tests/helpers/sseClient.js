@@ -7,7 +7,7 @@ export async function connectToSSEEndpoint(baseUrl, endpoint, payload, onEvent) 
     let sawDone = false;
     const timeout = setTimeout(() => {
       reject(new Error('SSE timeout waiting for [DONE]'));
-    }, 8000); // 8 second timeout
+    }, 20000); // 20 second timeout
     
     try {
       const instance = axios.create({
