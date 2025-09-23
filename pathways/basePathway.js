@@ -36,5 +36,6 @@ export default {
     manageTokenLength: true,
     // Use this pathway as a tool for LLM calls
     toolDefinition: {},
+    requestLoggingDisabled: false,
 };
 

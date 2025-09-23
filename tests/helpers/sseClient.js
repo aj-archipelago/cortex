@@ -4,8 +4,9 @@ import axios from 'axios';
 // Calls onEvent for each parsed SSE message JSON.
 export async function connectToSSEEndpoint(baseUrl, endpoint, payload, onEvent) {
   return new Promise(async (resolve, reject) => {
+    let sawDone = false;
     const timeout = setTimeout(() => {
-      resolve(); // Resolve instead of reject on timeout
+      reject(new Error('SSE timeout waiting for [DONE]'));
     }, 8000); // 8 second timeout
     
     try {
@@ -32,6 +33,7 @@ export async function connectToSSEEndpoint(baseUrl, endpoint, payload, onEvent) 
           eventCount++;
 
           if (event.trim() === 'data: [DONE]') {
+            sawDone = true;
             clearTimeout(timeout);
             resolve();
             return;
@@ -45,6 +47,21 @@ export async function connectToSSEEndpoint(baseUrl, endpoint, payload, onEvent) 
             // ignore lines that are not JSON
           }
         });
+      });
+
+      // If the underlying stream ends without a [DONE], treat as failure
+      incomingMessage.on('end', () => {
+        if (!sawDone) {
+          clearTimeout(timeout);
+          reject(new Error('SSE stream ended without [DONE]'));
+        }
+      });
+
+      incomingMessage.on('close', () => {
+        if (!sawDone) {
+          clearTimeout(timeout);
+          reject(new Error('SSE stream closed without [DONE]'));
+        }
       });
     } catch (error) {
       clearTimeout(timeout);

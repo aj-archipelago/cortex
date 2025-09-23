@@ -51,16 +51,7 @@ test('Gemini streaming tool_calls appear as OAI deltas', async (t) => {
     stream: true,
   };
 
-  let chunks;
-  try {
-    chunks = await collectSSEChunks(baseUrl, '/chat/completions', payload);
-  } catch (err) {
-    if (err?.response?.status === 404) {
-      t.pass('Skipping - vendor streaming endpoint not available');
-      return;
-    }
-    throw err;
-  }
+  const chunks = await collectSSEChunks(baseUrl, '/chat/completions', payload);
 
   t.true(chunks.length > 0);
 

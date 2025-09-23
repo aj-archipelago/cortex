@@ -51,16 +51,7 @@ test('Grok streaming tool_calls appear as OAI deltas', async (t) => {
     stream: true,
   };
 
-  let chunks;
-  try {
-    chunks = await collectSSEChunks(baseUrl, '/chat/completions', payload);
-  } catch (err) {
-    if (err?.response?.status === 404) {
-      t.pass('Skipping - vendor streaming endpoint not available');
-      return;
-    }
-    throw err;
-  }
+  const chunks = await collectSSEChunks(baseUrl, '/chat/completions', payload);
 
   t.true(chunks.length > 0);
 
@@ -76,10 +67,7 @@ test('Grok streaming tool_calls appear as OAI deltas', async (t) => {
     }
   }
 
-  if (!sawToolCall) {
-    t.pass('Skipping - no tool_calls emitted for this vendor/model config');
-    return;
-  }
+  t.true(sawToolCall);
   t.is(toolName, 'sum');
   if (argsBuffer) t.true(/[\{\}"]/g.test(argsBuffer));
 });

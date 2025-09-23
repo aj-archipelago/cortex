@@ -1,5 +1,6 @@
 # Cortex
-Cortex simplifies and accelerates the process of creating applications that harness the power of modern AI models like GPT-4o (chatGPT), o1, o3-mini, Gemini, the Claude series, Flux, Grok and more by poviding a structured interface (GraphQL or REST) to a powerful prompt execution environment. This enables complex augmented prompting and abstracts away most of the complexity of managing model connections like chunking input, rate limiting, formatting output, caching, and handling errors.
+Cortex simplifies and accelerates the process of creating applications that harness the power of modern AI models like GPT-5 (chatGPT), o4, Gemini, the Claude series, Flux, Grok and more by poviding a structured interface (GraphQL or REST) to a powerful prompt execution environment. This enables complex augmented prompting and abstracts away most of the complexity of managing model connections like chunking input, rate limiting, formatting output, caching, and handling errors.
+
 ## Why build Cortex?
 Modern AI models are transformational, but a number of complexities emerge when developers start using them to deliver application-ready functions. Most models require precisely formatted, carefully engineered and sequenced prompts to produce consistent results, and the responses are typically largely unstructured text without validation or formatting. Additionally, these models are evolving rapidly, are typically costly and slow to query and implement hard request size and rate restrictions that need to be carefully navigated for optimum throughput. Cortex offers a solution to these problems and provides a simple and extensible package for interacting with NL AI models.
 
@@ -18,6 +19,7 @@ Just about anything! It's kind of an LLM swiss army knife.  Here are some ideas:
 * Simple architecture to build custom functional endpoints (called `pathways`), that implement common NL AI tasks. Default pathways include chat, summarization, translation, paraphrasing, completion, spelling and grammar correction, entity extraction, sentiment analysis, and bias analysis.
 * Extensive model support with built-in integrations for:
   - OpenAI models:
+    - GPT-5 (all flavors and router)
     - GPT-4.1 (+mini, +nano)
     - GPT-4 Omni (GPT-4o)
     - O3 and O4-mini (Advanced reasoning models)
@@ -28,10 +30,15 @@ Just about anything! It's kind of an LLM swiss army knife.  Here are some ideas:
     - Gemini 2.0 Flash
     - Earlier Google models (Gemini 1.5 series)
   - Anthropic models:
-    - Claude 3.7 Sonnet
-    - Claude 3.5 Sonnet
-    - Claude 3.5 Haiku
-    - Claude 3 Series
+  - Claude 4 Sonnet (Vertex)
+  - Claude 4.1 Opus (Vertex)
+  - Claude 3.7 Sonnet
+  - Claude 3.5 Sonnet
+  - Claude 3.5 Haiku
+  - Claude 3 Series
+  - Grok (XAI) models:
+    - Grok 3 and Grok 4 series (including fast-reasoning and code-fast variants)
+    - Multimodal chat with vision, streaming, and tool calling
   - Ollama support
   - Azure OpenAI support
   - Custom model implementations
@@ -419,6 +426,11 @@ Each pathway can define the following properties (with defaults from basePathway
 - `temperature`: Model temperature setting (0.0 to 1.0). Default: 0.9
 - `json`: Require valid JSON response from model. Default: false
 - `manageTokenLength`: Manage input token length for model. Default: true
+  
+#### Dynamic model override
+
+- `model`: In many cases, specifying the model as an input parameter will tell the pathway which model to use when setting up the pathway for execution.
+- `modelOverride`: In some cases, you need even more dynamic model selection. At runtime, a pathway can optionally specify `modelOverride` in request args to switch the model used for execution without restarting the server. Cortex will attempt a hot swap and continue execution; errors are logged gracefully if the model is invalid.
 
 ## Core (Default) Pathways
 
@@ -528,6 +540,7 @@ Models are configured in the `models` section of the config. Each model can have
 - `GEMINI-1.5-CHAT`: For Gemini 1.5 Pro chat models
 - `GEMINI-1.5-VISION`: For Gemini vision models (including 2.0 Flash experimental)
 - `CLAUDE-3-VERTEX`: For Claude-3 and 3.5 models (Haiku, Opus, Sonnet)
+- `GROK-VISION`: For XAI Grok models (Grok-3, Grok-4, fast-reasoning, code-fast) with multimodal/vision and reasoning
 - `AZURE-TRANSLATE`: For Azure translation services
 
 Each model configuration can include:
@@ -605,6 +618,18 @@ To enable Ollama support, add the following to your configuration:
     "ollamaUrl": "http://localhost:11434"  // or your Ollama server URL
 }
 ```
+
+#### Tool Calling and Structured Responses
+
+When using the OpenAI-compatible REST endpoints, Cortex supports vendor-agnostic tool calling with OpenAI-style `tool_calls` deltas in streaming mode. Pathway responses now include a structured `resultData` field (also exposed via GraphQL) that may contain:
+
+- `toolCalls` and/or `functionCall` objects
+- vendor-specific metadata (e.g., search citations)
+- usage details
+
+Notes:
+- `tool_choice` accepts either a string (e.g., `"auto"`, `"required"`) or an object (`{ type: 'function', function: 'name' }`); Cortex normalizes this across vendors (OpenAI, Claude via Vertex, Gemini, Grok).
+- Arrays for `[String]` inputs are passed directly through REST conversion.
 
 You can then use any Ollama model through the standard OpenAI-compatible endpoints:
 
@@ -846,8 +871,7 @@ Cortex includes a powerful Entity System that allows you to build autonomous age
 ### Overview
 
 The Entity System is built around two core pathways:
-- `sys_entity_start.js`: The entry point for entity interactions, handling initial routing and tool selection
-- `sys_entity_continue.js`: Manages callback execution in synchronous mode
+- `sys_entity_agent.js`: The entry point for entity interactions, handling initial routing and tool selection
 
 ### Key Features
 
