@@ -140,7 +140,7 @@ export default {
                             });
                         }
 
-                        const result = { 
+                        return { 
                             success: true, 
                             result: toolResult,
                             toolCall,
@@ -148,7 +148,6 @@ export default {
                             toolFunction,
                             messages: toolMessages
                         };
-                        return result;
                     } catch (error) {
                         logger.error(`Error executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
                         
@@ -173,7 +172,7 @@ export default {
                             content: `Error: ${error.message}`
                         });
 
-                        const errorResult = { 
+                        return { 
                             success: false, 
                             error: error.message,
                             toolCall,
@@ -181,7 +180,6 @@ export default {
                             toolFunction: toolCall?.function?.name?.toLowerCase() || 'unknown',
                             messages: errorMessages
                         };
-                        return errorResult;
                     }
                 }));
 
@@ -205,12 +203,6 @@ export default {
                 const failedTools = toolResults.filter(result => result && !result.success);
                 if (failedTools.length > 0) {
                     logger.warn(`Some tool calls failed: ${failedTools.map(t => t.error).join(', ')}`);
-                }
-                
-                // Check for undefined results
-                const undefinedResults = toolResults.filter(result => result === undefined);
-                if (undefinedResults.length > 0) {
-                    logger.error(`Found ${undefinedResults.length} undefined tool results`);
                 }
 
                 pathwayResolver.toolCallCount = (pathwayResolver.toolCallCount || 0) + toolResults.length;
