@@ -2,6 +2,7 @@ import OpenAIChatPlugin from './openAiChatPlugin.js';
 import logger from '../../lib/logger.js';
 import { requestState } from '../requestState.js';
 import { addCitationsToResolver } from '../../lib/pathwayTools.js';
+import CortexResponse from '../../lib/cortexResponse.js';
 function safeJsonParse(content) {
     try {
         const parsedContent = JSON.parse(content);
@@ -113,16 +114,14 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         }
         if (stream) {
             logger.info(`[response received as an SSE stream]`);
-        } else {
-            const parsedResponse = this.parseResponse(responseData);
-            
-            if (typeof parsedResponse === 'string') {
-                const { length, units } = this.getLength(parsedResponse);
+        } else {           
+            if (typeof responseData === 'string') {
+                const { length, units } = this.getLength(responseData);
                 logger.info(`[response received containing ${length} ${units}]`);
-                logger.verbose(`${this.shortenContent(parsedResponse)}`);
+                logger.verbose(`${this.shortenContent(responseData)}`);
             } else {
                 logger.info(`[response received containing object]`);
-                logger.verbose(`${JSON.stringify(parsedResponse)}`);
+                logger.verbose(`${JSON.stringify(responseData)}`);
             }
         }
 
@@ -134,15 +133,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         const requestParameters = super.getRequestParameters(text, parameters, prompt);
 
         requestParameters.messages = await this.tryParseMessages(requestParameters.messages);
-
-        // Add tools support if provided in parameters
-        if (parameters.tools) {
-            requestParameters.tools = parameters.tools;
-        }
-
-        if (parameters.tool_choice) {
-            requestParameters.tool_choice = parameters.tool_choice;
-        }
 
         const modelMaxReturnTokens = this.getModelMaxReturnTokens();
         const maxTokensPrompt = this.promptParameters.max_tokens;
@@ -165,7 +155,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             ...(cortexRequest.data || {}),
             ...requestParameters,
         };
-        cortexRequest.params = {}; // query params
+        cortexRequest.params = {};
         cortexRequest.stream = stream;
 
         return this.executeRequest(cortexRequest);
@@ -179,24 +169,30 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             return data;
         }
 
-        // if we got a choices array back with more than one choice, return the whole array
-        if (choices.length > 1) {
-            return choices;
-        }
-
         const choice = choices[0];
         const message = choice.message;
-
-        // Handle tool calls in the response
-        if (message.tool_calls) {
-            return {
-                role: message.role,
-                content: message.content || "",
-                tool_calls: message.tool_calls
-            };
+        if (!message) {
+            return null;
         }
 
-        return message.content || "";
+        // Create standardized CortexResponse object
+        const cortexResponse = new CortexResponse({
+            output_text: message.content || "",
+            finishReason: choice.finish_reason || 'stop',
+            usage: data.usage || null,
+            metadata: {
+                model: this.modelName
+            }
+        });
+
+        // Handle tool calls
+        if (message.tool_calls) {
+            cortexResponse.toolCalls = message.tool_calls;
+        } else if (message.function_call) {
+            cortexResponse.functionCall = message.function_call;
+        }
+
+        return cortexResponse;
     }
 
     processStreamEvent(event, requestProgress) {
@@ -210,7 +206,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             let parsedMessage;
             try {
                 parsedMessage = JSON.parse(event.data);
-                requestProgress.data = event.data;
             } catch (error) {
                 // Clear buffers on error
                 this.toolCallsBuffer = [];
@@ -228,6 +223,23 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             }
 
             const delta = parsedMessage?.choices?.[0]?.delta;
+            
+            // Check if this is an empty/idle event that we should skip
+            const isEmptyEvent = !delta || 
+                (Object.keys(delta).length === 0) || 
+                (Object.keys(delta).length === 1 && delta.content === '') ||
+                (Object.keys(delta).length === 1 && delta.tool_calls && delta.tool_calls.length === 0);
+            
+            // Skip publishing empty events unless they have a finish_reason
+            const hasFinishReason = parsedMessage?.choices?.[0]?.finish_reason;
+            
+            if (isEmptyEvent && !hasFinishReason) {
+                // Return requestProgress without setting data to prevent publishing
+                return requestProgress;
+            }
+            
+            // Set the data for non-empty events or events with finish_reason
+            requestProgress.data = event.data;
 
             // Accumulate content
             if (delta?.content) {

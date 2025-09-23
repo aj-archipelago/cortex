@@ -69,6 +69,27 @@ class Gemini15ChatPlugin extends ModelPlugin {
                     modifiedMessages[modifiedMessages.length - 1].parts.push({ text: content });
                 }
 
+                // Handle tool result messages
+                else if (role === 'tool') {
+                    // Convert OpenAI tool result format to Gemini format
+                    // OpenAI: { role: 'tool', tool_call_id: '...', content: '...' }
+                    // Gemini: { role: 'function', parts: [{ functionResponse: { name: '...', response: { content: '...' } } }] }
+                    const toolCallId = message.tool_call_id || message.toolCallId;
+                    const toolName = toolCallId ? toolCallId.split('_')[0] : 'unknown_tool';
+                    
+                    modifiedMessages.push({
+                        role: 'function',
+                        parts: [{
+                            functionResponse: {
+                                name: toolName,
+                                response: {
+                                    content: content
+                                }
+                            }
+                        }]
+                    });
+                    lastAuthor = 'function';
+                }
                 // Push messages that are role: 'user' or 'assistant', changing 'assistant' to 'model'
                 else if (role === 'user' || role === 'assistant' || author) {
                     modifiedMessages.push({

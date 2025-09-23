@@ -29,6 +29,7 @@ export default {
     model: 'oai-gpt41-mini',
     useInputChunking: false,
     enableDuplicateRequests: false,
+    requestLoggingDisabled: true,
     timeout: 300,
     executePathway: async ({args, runAllPrompts}) => {
 

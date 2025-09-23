@@ -36,7 +36,7 @@ export class StorageService {
     /*
             Supported call shapes:
             1) uploadFile(buffer, filename)
-            2) uploadFile(context, filePath, requestId, hash?) – legacy internal use
+            2) uploadFile(context, filePath, requestId, hash?, filename?, containerName?) – legacy internal use
         */
 
     await this._initialize();
@@ -65,9 +65,9 @@ export class StorageService {
       }
     }
 
-    // Fallback to legacy (context, filePath, requestId, hash?)
-    const [context, filePath, requestId, hash] = args;
-    return this.uploadFileWithProviders(context, filePath, requestId, hash);
+    // Fallback to legacy (context, filePath, requestId, hash?, filename?, containerName?)
+    const [context, filePath, requestId, hash, filename, containerName] = args;
+    return this.uploadFileWithProviders(context, filePath, requestId, hash, filename, containerName);
   }
 
   async uploadFileToBackup(fileOrBuffer, filename) {
@@ -174,9 +174,13 @@ export class StorageService {
 
     const results = [];
 
-    // Get file information from Redis map
+    // Get and remove file information from Redis map (non-atomic operations)
     const { getFileStoreMap, removeFromFileStoreMap } = await import("../../redis.js");
     const hashResult = await getFileStoreMap(hash);
+    
+    if (hashResult) {
+      await removeFromFileStoreMap(hash);
+    }
     
     if (!hashResult) {
       throw new Error(`File with hash ${hash} not found`);
@@ -208,12 +212,8 @@ export class StorageService {
       }
     }
 
-    // Remove from Redis map
-    try {
-      await removeFromFileStoreMap(hash);
-    } catch (error) {
-      console.error(`Error removing hash from Redis map:`, error);
-    }
+    // Note: Hash was already removed from Redis atomically at the beginning
+    // No need to remove again
 
     return {
       hash,
@@ -222,20 +222,27 @@ export class StorageService {
     };
   }
 
-  async uploadFileWithProviders(context, filePath, requestId, hash = null) {
+  async uploadFileWithProviders(context, filePath, requestId, hash = null, filename = null, containerName = null) {
     await this._initialize();
     
-    // Generate filename once to ensure both providers use the same name
-    const fileExtension = path.extname(filePath);
-    const shortId = generateShortId();
-    const filename = `${shortId}${fileExtension}`;
+    // Use provided filename or generate one
+    const finalFilename = filename || (() => {
+      const fileExtension = path.extname(filePath);
+      const shortId = generateShortId();
+      return `${shortId}${fileExtension}`;
+    })();
 
-    const primaryResult = await this.primaryProvider.uploadFile(
+    // Get the appropriate provider for the container
+    const primaryProvider = containerName ? 
+      await this.factory.getAzureProvider(containerName) : 
+      this.primaryProvider;
+
+    const primaryResult = await primaryProvider.uploadFile(
       context,
       filePath,
       requestId,
       hash,
-      filename,
+      finalFilename,
     );
 
     let gcsResult = null;
@@ -245,7 +252,7 @@ export class StorageService {
         filePath,
         requestId,
         hash,
-        filename,
+        finalFilename,
       );
     }
 

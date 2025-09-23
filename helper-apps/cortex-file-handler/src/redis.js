@@ -34,6 +34,21 @@ const createMockClient = () => {
       }
       return 0;
     },
+    async eval(script, numKeys, ...args) {
+      // Mock implementation for atomic get-and-delete operation
+      if (script.includes('hget') && script.includes('hdel')) {
+        const hashName = args[0];
+        const key = args[1];
+        const hash = hashMap.get(hashName);
+        if (hash && hash.has(key)) {
+          const value = hash.get(key);
+          hash.delete(key);
+          return value;
+        }
+        return null;
+      }
+      throw new Error('Mock eval only supports atomic get-and-delete');
+    },
   };
 };
 

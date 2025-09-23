@@ -29,7 +29,7 @@ class PathwayResolver {
         this.requestId = uuidv4();
         this.rootRequestId = null;
         this.responseParser = new PathwayResponseParser(pathway);
-        this.tool = null;
+        this.pathwayResultData = {};
         this.modelName = [
             pathway.model,
             args?.model,
@@ -72,12 +72,58 @@ class PathwayResolver {
         // set up initial prompt
         this.pathwayPrompt = pathway.prompt;
     }
+    
+    // Legacy 'tool' property is now stored in pathwayResultData
+    get tool() {      
+        // Select fields to serialize for legacy compat, excluding undefined values
+        const legacyFields = Object.fromEntries(
+            Object.entries({
+                hideFromModel: this.pathwayResultData.hideFromModel,    
+                toolCallbackName: this.pathwayResultData.toolCallbackName, 
+                title: this.pathwayResultData.title,
+                search: this.pathwayResultData.search,
+                coding: this.pathwayResultData.coding,
+                codeRequestId: this.pathwayResultData.codeRequestId,
+                toolCallbackId: this.pathwayResultData.toolCallbackId,
+                toolUsed: this.pathwayResultData.toolUsed,
+                citations: this.pathwayResultData.citations,
+
+            }).filter(([_, value]) => value !== undefined)
+        );
+        return JSON.stringify(legacyFields);
+    }
+
+    set tool(value) {
+        // Accepts a JSON string, parses, merges into pathwayResultData
+        let parsed;
+        try {
+            parsed = (typeof value === 'string') ? JSON.parse(value) : value;
+            this.pathwayResultData = this.mergeResultData(parsed);
+        } catch (e) {
+            // Optionally warn: invalid format or merge error
+            console.warn('Invalid tool property assignment:', e);
+        }
+    }
 
     publishNestedRequestProgress(requestProgress) {
-        if (requestProgress.progress === 1 && this.rootRequestId) {
-            delete requestProgress.progress;
+
+        if (this.rootRequestId) {
+            // if this is a nested request, don't end the stream
+            if (requestProgress.progress === 1) {
+                delete requestProgress.progress;
+            }
+            publishRequestProgress(requestProgress);
+        } else {
+            // this is a root request, so we add the pathwayResultData to the info
+            // and allow the end stream message to be sent
+            if (requestProgress.progress === 1) {
+                const infoObject = { ...this.pathwayResultData || {} };
+                requestProgress.info = JSON.stringify(infoObject);
+                requestProgress.error = this.errors.join(', ') || '';
+            }
+            publishRequestProgress(requestProgress);
         }
-        publishRequestProgress({...requestProgress, info: this.tool || '', error: this.errors.join(', ')});
+
     }
 
     // This code handles async and streaming responses for either long-running
@@ -120,31 +166,102 @@ class PathwayResolver {
             
             // some models don't support progress updates
             if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
+                const infoObject = { ...this.pathwayResultData || {} };
                 this.publishNestedRequestProgress({
                         requestId: this.rootRequestId || this.requestId,
                         progress: Math.min(completedCount, totalCount) / totalCount,
                         // Clients expect these to be strings
                         data: JSON.stringify(responseData || ''),
-                        info: this.tool || '',
+                        info: JSON.stringify(infoObject) || '',
                         error: this.errors.join(', ') || ''
                 });
             }
         }
     }
 
-    mergeResults(mergeData) {
-        if (mergeData) {
-            this.previousResult = mergeData.previousResult ? mergeData.previousResult : this.previousResult;
-            this.warnings = [...this.warnings, ...(mergeData.warnings || [])];
-            this.errors = [...this.errors, ...(mergeData.errors || [])];
-            try {
-                const mergeDataTool = typeof mergeData.tool === 'string' ? JSON.parse(mergeData.tool) : mergeData.tool || {};
-                const thisTool = typeof this.tool === 'string' ? JSON.parse(this.tool) : this.tool || {};
-                this.tool = JSON.stringify({ ...thisTool, ...mergeDataTool });
-            } catch (error) {
-                logger.warn('Error merging pathway resolver tool objects: ' + error);
+    mergeResolver(otherResolver) {
+        if (otherResolver) {
+            this.previousResult = otherResolver.previousResult ? otherResolver.previousResult : this.previousResult;
+            this.warnings = [...this.warnings, ...otherResolver.warnings];
+            this.errors = [...this.errors, ...otherResolver.errors];
+
+            // Use the shared mergeResultData method
+            this.pathwayResultData = this.mergeResultData(otherResolver.pathwayResultData);
+        }
+    }
+
+    // Merge pathwayResultData with either another pathwayResultData object or a CortexResponse
+    mergeResultData(newData) {
+        if (!newData) return this.pathwayResultData;
+
+        const currentData = this.pathwayResultData || {};
+
+        // Handle CortexResponse objects
+        if (newData.constructor && newData.constructor.name === 'CortexResponse') {
+            const cortexResponse = newData;
+            const cortexData = {
+                citations: cortexResponse.citations,
+                toolCalls: cortexResponse.toolCalls,
+                functionCall: cortexResponse.functionCall,
+                usage: cortexResponse.usage,
+                finishReason: cortexResponse.finishReason
+            };
+            newData = cortexData;
+        }
+
+        // Create merged result
+        const merged = { ...currentData, ...newData };
+
+        // Handle array fields that should be concatenated
+        const arrayFields = ['citations', 'toolCalls'];
+        for (const field of arrayFields) {
+            const currentArray = currentData[field] || [];
+            const newArray = newData[field] || [];
+            if (newArray.length > 0) {
+                merged[field] = [...currentArray, ...newArray];
+            } else if (currentArray.length > 0) {
+                merged[field] = currentArray;
             }
         }
+
+        // Handle usage and toolUsed data - convert to arrays with most recent first
+        const createArrayFromData = (currentValue, newValue) => {
+            if (!currentValue && !newValue) return null;
+
+            const array = [];
+
+            // Add new value first (most recent)
+            if (newValue) {
+                if (Array.isArray(newValue)) {
+                    array.push(...newValue);
+                } else {
+                    array.push(newValue);
+                }
+            }
+
+            // Add current value second (older)
+            if (currentValue) {
+                if (Array.isArray(currentValue)) {
+                    array.push(...currentValue);
+                } else {
+                    array.push(currentValue);
+                }
+            }
+
+            return array;
+        };
+
+        const usageArray = createArrayFromData(currentData.usage, newData.usage);
+        if (usageArray) {
+            merged.usage = usageArray;
+        }
+
+        const toolUsedArray = createArrayFromData(currentData.toolUsed, newData.toolUsed);
+        if (toolUsedArray) {
+            merged.toolUsed = toolUsedArray;
+        }
+
+        return merged;
     }
 
     async handleStream(response) {
@@ -251,6 +368,15 @@ class PathwayResolver {
     }
 
     async promptAndParse(args) {
+        // Check if model is specified in args and swap if different from current model
+        if (args.modelOverride && args.modelOverride !== this.modelName) {
+            try {
+                this.swapModel(args.modelOverride);
+            } catch (error) {
+                this.logError(`Failed to swap model to ${args.modelOverride}: ${error.message}`);
+            }
+        }
+
         // Get saved context from contextId or change contextId if needed
         const { contextId } = args;
         this.savedContextId = contextId ? contextId : uuidv4();
@@ -498,6 +624,30 @@ class PathwayResolver {
             result = await this.applyPrompt(prompt, text, { ...parameters, previousResult });
         }
         return result;
+    }
+
+    /**
+     * Swaps the model used by this PathwayResolver
+     * @param {string} newModelName - The name of the new model to use
+     * @throws {Error} If the new model is not found in the endpoints
+     */
+    swapModel(newModelName) {
+        // Validate that the new model exists in endpoints
+        if (!this.endpoints[newModelName]) {
+            throw new Error(`Model ${newModelName} not found in config`);
+        }
+
+        // Update model references
+        this.modelName = newModelName;
+        this.model = this.endpoints[newModelName];
+
+        // Create new ModelExecutor with the new model
+        this.modelExecutor = new ModelExecutor(this.pathway, this.model);
+
+        // Recalculate chunk max token length as it depends on the model
+        this.chunkMaxTokenLength = this.getChunkMaxTokenLength();
+
+        this.logWarning(`Model swapped to ${newModelName}`);
     }
 
     async applyPrompt(prompt, text, parameters) {

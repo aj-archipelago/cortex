@@ -7,6 +7,7 @@ import fs from "fs";
 import path from "path";
 
 import { StorageProvider } from "./StorageProvider.js";
+import { AZURITE_ACCOUNT_NAME } from "../../constants.js";
 import {
   generateShortId,
   generateBlobName,
@@ -61,7 +62,7 @@ export class AzureStorageProvider extends StorageProvider {
       }
     } else {
       // Azurite development storage fallback
-      accountName = "devstoreaccount1";
+      accountName = AZURITE_ACCOUNT_NAME;
       accountKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
     }
     
@@ -170,7 +171,17 @@ export class AzureStorageProvider extends StorageProvider {
       const urlObj = new URL(url);
       let blobName = urlObj.pathname.substring(1); // Remove leading slash
       
-      // Remove container name prefix if present
+      // Handle Azurite URLs which include account name in path: /devstoreaccount1/container/blob
+      if (blobName.includes('/')) {
+        const pathSegments = blobName.split('/');
+        if (pathSegments.length >= 2) {
+          // For Azurite: devstoreaccount1/container/blobname -> blobname
+          // Skip the account and container segments to get the actual blob name
+          blobName = pathSegments.slice(2).join('/');
+        }
+      }
+      
+      // Remove container name prefix if present (for non-Azurite URLs)
       if (blobName.startsWith(this.containerName + '/')) {
         blobName = blobName.substring(this.containerName.length + 1);
       }

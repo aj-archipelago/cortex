@@ -3,7 +3,7 @@ import os from "os";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 
-import { DOC_EXTENSIONS } from "./constants.js";
+import { DOC_EXTENSIONS, AZURITE_ACCOUNT_NAME } from "./constants.js";
 import { easyChunker } from "./docHelper.js";
 import { downloadFile, splitMediaFile } from "./fileChunker.js";
 import { ensureEncoded, ensureFileExtension, urlExists } from "./helper.js";
@@ -153,7 +153,7 @@ async function CortexFileHandler(context, req) {
       } catch (error) {
         context.res = {
           status: 404,
-          body: { error: error.message },
+          body: error.message,
         };
         return;
       }
@@ -200,15 +200,16 @@ async function CortexFileHandler(context, req) {
         return;
       }
 
-      // Check if file already exists (using hash as the key)
-      const exists = await getFileStoreMap(remoteUrl);
+      // Check if file already exists (using hash or URL as the key)
+      const cacheKey = hash || remoteUrl;
+      const exists = await getFileStoreMap(cacheKey);
       if (exists) {
         context.res = {
           status: 200,
           body: exists,
         };
         //update redis timestamp with current time
-        await setFileStoreMap(remoteUrl, exists);
+        await setFileStoreMap(cacheKey, exists);
         return;
       }
 
@@ -223,10 +224,10 @@ async function CortexFileHandler(context, req) {
 
       // For remote files, we don't need a requestId folder structure since it's just a single file
       // Pass empty string to store the file directly in the root
-      const res = await storageService.uploadFile(context, filename, '');
+      const res = await storageService.uploadFile(context, filename, '', null, null, container);
 
-      //Update Redis (using hash as the key)
-      await setFileStoreMap(remoteUrl, res);
+      //Update Redis (using hash or URL as the key)
+      await setFileStoreMap(cacheKey, res);
 
       // Return the file URL
       context.res = {
@@ -355,6 +356,9 @@ async function CortexFileHandler(context, req) {
               context,
               downloadedFile,
               hash,
+              null,
+              null,
+              container,
             );
 
             // Update the hash result with the new primary storage URL
@@ -410,19 +414,52 @@ async function CortexFileHandler(context, req) {
           timestamp: new Date().toISOString(),
         };
 
-        // Always generate short-lived URL for checkHash operations
+        // Ensure converted version exists and is synced across storage providers
         try {
-          // Extract blob name from the stored URL to generate new SAS token
+          hashResult = await conversionService.ensureConvertedVersion(
+            hashResult,
+            requestId,
+            container,
+          );
+        } catch (error) {
+          context.log(`Error ensuring converted version: ${error}`);
+        }
+
+        // Attach converted info to response if present
+        if (hashResult.converted) {
+          response.converted = {
+            url: hashResult.converted.url,
+            gcs: hashResult.converted.gcs,
+          };
+        }
+
+        // Always generate short-lived URL for checkHash operations
+        // Use converted URL if available, otherwise use original URL
+        const urlForShortLived = hashResult.converted?.url || hashResult.url;
+        try {
+          // Extract blob name from the URL to generate new SAS token
           let blobName;
           try {
-            const url = new URL(hashResult.url);
+            const url = new URL(urlForShortLived);
             // Extract blob name from the URL path (remove leading slash)
-            blobName = url.pathname.substring(1);
-            // If there's a container prefix, remove it
+            let path = url.pathname.substring(1);
+            
+            // For Azurite URLs, the path includes account name: devstoreaccount1/container/blob
+            // For real Azure URLs, the path is: container/blob
             const containerName = storageService.primaryProvider.containerName;
-            if (blobName.startsWith(containerName + '/')) {
-              blobName = blobName.substring(containerName.length + 1);
+            
+    // Check if this is an Azurite URL (contains devstoreaccount1)
+    if (path.startsWith(`${AZURITE_ACCOUNT_NAME}/`)) {
+      path = path.substring(`${AZURITE_ACCOUNT_NAME}/`.length); // Remove account prefix
             }
+            
+            // Now remove container prefix if it exists
+            if (path.startsWith(containerName + '/')) {
+              blobName = path.substring(containerName.length + 1);
+            } else {
+              blobName = path;
+            }
+            
           } catch (urlError) {
             context.log(`Error parsing URL for short-lived generation: ${urlError}`);
           }
@@ -437,43 +474,27 @@ async function CortexFileHandler(context, req) {
             );
             
             // Construct new URL with short-lived SAS token
-            const baseUrl = hashResult.url.split('?')[0]; // Remove existing SAS token
+            const baseUrl = urlForShortLived.split('?')[0]; // Remove existing SAS token
             const shortLivedUrl = `${baseUrl}?${sasToken}`;
             
             // Add short-lived URL to response
             response.shortLivedUrl = shortLivedUrl;
             response.expiresInMinutes = shortLivedDuration;
             
-            context.log(`Generated short-lived URL for hash: ${hash} (expires in ${shortLivedDuration} minutes)`);
+            const urlType = hashResult.converted?.url ? 'converted' : 'original';
+            context.log(`Generated short-lived URL for hash: ${hash} using ${urlType} URL (expires in ${shortLivedDuration} minutes)`);
           } else {
             // Fallback for storage providers that don't support short-lived tokens
-            response.shortLivedUrl = hashResult.url;
+            response.shortLivedUrl = urlForShortLived;
             response.expiresInMinutes = shortLivedDuration;
-            context.log(`Storage provider doesn't support short-lived tokens, using original URL`);
+            const urlType = hashResult.converted?.url ? 'converted' : 'original';
+            context.log(`Storage provider doesn't support short-lived tokens, using ${urlType} URL`);
           }
         } catch (error) {
           context.log(`Error generating short-lived URL: ${error}`);
           // Provide fallback even on error
-          response.shortLivedUrl = hashResult.url;
+          response.shortLivedUrl = urlForShortLived;
           response.expiresInMinutes = shortLivedDuration;
-        }
-
-        // Ensure converted version exists and is synced across storage providers
-        try {
-          hashResult = await conversionService.ensureConvertedVersion(
-            hashResult,
-            requestId,
-          );
-        } catch (error) {
-          context.log(`Error ensuring converted version: ${error}`);
-        }
-
-        // Attach converted info to response if present
-        if (hashResult.converted) {
-          response.converted = {
-            url: hashResult.converted.url,
-            gcs: hashResult.converted.gcs,
-          };
         }
 
         //update redis timestamp with current time
@@ -509,7 +530,7 @@ async function CortexFileHandler(context, req) {
       storageService.primaryProvider.constructor.name ===
       "LocalStorageProvider";
     // Use uploadBlob to handle multipart/form-data
-    const result = await uploadBlob(context, req, saveToLocal, null, hash);
+    const result = await uploadBlob(context, req, saveToLocal, null, hash, container);
     if (result?.hash && context?.res?.body) {
       await setFileStoreMap(result.hash, context.res.body);
     }
@@ -577,6 +598,8 @@ async function CortexFileHandler(context, req) {
               await conversionService._saveConvertedFile(
                 conversion.convertedPath,
                 requestId,
+                null,
+                container,
               );
 
             // Return the converted file URL
@@ -592,6 +615,8 @@ async function CortexFileHandler(context, req) {
             const saveResult = await conversionService._saveConvertedFile(
               downloadedFile,
               requestId,
+              null,
+              container,
             );
 
             // Return the original file URL
@@ -673,6 +698,7 @@ async function CortexFileHandler(context, req) {
           requestId,
           null,
           chunkFilename,
+          container,
         );
 
         const chunkOffset = chunkOffsets[index];

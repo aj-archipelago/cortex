@@ -1,6 +1,7 @@
 // OpenAIChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
+import CortexResponse from '../../lib/cortexResponse.js';
 
 class OpenAIChatPlugin extends ModelPlugin {
     constructor(pathway, model) {
@@ -45,15 +46,24 @@ class OpenAIChatPlugin extends ModelPlugin {
     // Set up parameters specific to the OpenAI Chat API
     getRequestParameters(text, parameters, prompt) {
         const { modelPromptText, modelPromptMessages, tokenLength, modelPrompt } = this.getCompiledPrompt(text, parameters, prompt);
-        const { stream } = parameters;
-    
+        let { stream, tools, functions } = parameters;
+
+        if (typeof tools === 'string') {
+            tools = JSON.parse(tools);
+        }
+        
+        if (typeof functions === 'string') {
+            functions = JSON.parse(functions);
+        }
+
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxPromptTokens();
-    
+
         let requestMessages = modelPromptMessages || [{ "role": "user", "content": modelPromptText }];
         
         // Check if the messages are in Palm format and convert them to OpenAI format if necessary
         const isPalmFormat = requestMessages.some(message => 'author' in message);
+
         if (isPalmFormat) {
             const context = modelPrompt.context || '';
             const examples = modelPrompt.examples || [];
@@ -65,11 +75,13 @@ class OpenAIChatPlugin extends ModelPlugin {
             // Remove older messages until the token length is within the model's limit
             requestMessages = this.truncateMessagesToTargetLength(requestMessages, modelTargetTokenLength);
         }
-    
+
         const requestParameters = {
         messages: requestMessages,
         temperature: this.temperature ?? 0.7,
         ...(stream !== undefined ? { stream } : {}),
+        ...(tools && tools.length > 0 ? { tools, tool_choice: parameters.tool_choice || 'auto' } : {}),
+        ...(functions && functions.length > 0 ? { functions } : {}),
         };
     
         return requestParameters;
@@ -80,7 +92,7 @@ class OpenAIChatPlugin extends ModelPlugin {
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
 
         cortexRequest.data = { ...(cortexRequest.data || {}), ...requestParameters };
-        cortexRequest.params = {}; // query params
+        cortexRequest.params = {};
 
         return this.executeRequest(cortexRequest);
     }
@@ -98,9 +110,86 @@ class OpenAIChatPlugin extends ModelPlugin {
             return choices;
         }
 
-        // otherwise, return the first choice
-        const messageResult = choices[0].message && choices[0].message.content && choices[0].message.content.trim();
-        return messageResult ?? null;
+        const choice = choices[0];
+        const message = choice.message;
+        if (!message) {
+            return null;
+        }
+
+        // Create standardized CortexResponse object
+        const cortexResponse = new CortexResponse({
+            output_text: message.content || "",
+            finishReason: choice.finish_reason || 'stop',
+            usage: data.usage || null,
+            metadata: {
+                model: this.modelName
+            }
+        });
+
+        // Handle tool calls
+        if (message.tool_calls) {
+            cortexResponse.toolCalls = message.tool_calls;
+        } else if (message.function_call) {
+            cortexResponse.functionCall = message.function_call;
+        }
+
+        return cortexResponse;
+    }
+
+    // Override processStreamEvent to handle OpenAI Chat streaming format
+    processStreamEvent(event, requestProgress) {
+        // check for end of stream or in-stream errors
+        if (event.data.trim() === '[DONE]') {
+            requestProgress.progress = 1;
+        } else {
+            let parsedMessage;
+            try {
+                parsedMessage = JSON.parse(event.data);
+            } catch (error) {
+                throw new Error(`Could not parse stream data: ${error}`);
+            }
+
+            // error can be in different places in the message
+            const streamError = parsedMessage?.error || parsedMessage?.choices?.[0]?.delta?.content?.error || parsedMessage?.choices?.[0]?.text?.error;
+            if (streamError) {
+                throw new Error(streamError);
+            }
+
+            // Check if this is an empty/idle event that we should skip
+            const delta = parsedMessage?.choices?.[0]?.delta;
+            const isEmptyEvent = !delta || 
+                (Object.keys(delta).length === 0) || 
+                (Object.keys(delta).length === 1 && delta.content === '') ||
+                (Object.keys(delta).length === 1 && delta.tool_calls && delta.tool_calls.length === 0);
+            
+            // Skip publishing empty events unless they have a finish_reason
+            const hasFinishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
+            
+            if (isEmptyEvent && !hasFinishReason) {
+                // Return requestProgress without setting data to prevent publishing
+                return requestProgress;
+            }
+            
+            // Set the data for non-empty events or events with finish_reason
+            requestProgress.data = event.data;
+
+            // finish reason can be in different places in the message
+            const finishReason = parsedMessage?.choices?.[0]?.finish_reason || parsedMessage?.candidates?.[0]?.finishReason;
+            if (finishReason) {
+                switch (finishReason.toLowerCase()) {
+                    case 'safety':
+                        const safetyRatings = JSON.stringify(parsedMessage?.candidates?.[0]?.safetyRatings) || '';
+                        logger.warn(`Request ${this.requestId} was blocked by the safety filter. ${safetyRatings}`);
+                        requestProgress.data = `\n\nResponse blocked by safety filter: ${safetyRatings}`;
+                        requestProgress.progress = 1;
+                        break;
+                    default:
+                        requestProgress.progress = 1;
+                        break;
+                }
+            }
+        }
+        return requestProgress;
     }
 
     // Override the logging function to display the messages and responses
@@ -135,11 +224,15 @@ class OpenAIChatPlugin extends ModelPlugin {
     
         if (stream) {
             logger.info(`[response received as an SSE stream]`);
-        } else {
-            const responseText = this.parseResponse(responseData);
-            const { length, units } = this.getLength(responseText);
-            logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${this.shortenContent(responseText)}`);
+        } else {           
+            if (typeof responseData === 'string') {
+                const { length, units } = this.getLength(responseData);
+                logger.info(`[response received containing ${length} ${units}]`);
+                logger.verbose(`${this.shortenContent(responseData)}`);
+            } else {
+                logger.info(`[response received containing object]`);
+                logger.verbose(`${JSON.stringify(responseData)}`);
+            }
         }
 
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);

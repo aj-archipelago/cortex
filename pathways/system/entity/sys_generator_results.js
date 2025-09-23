@@ -342,7 +342,7 @@ Here are the information sources that were found:
             }
             
             if (!args.voiceResponse) {
-                const referencedSources = extractReferencedSources(result);
+                const referencedSources = extractReferencedSources(result.toString());
                 searchResults = searchResults.length ? pruneSearchResults(searchResults, referencedSources) : [];
             }
 

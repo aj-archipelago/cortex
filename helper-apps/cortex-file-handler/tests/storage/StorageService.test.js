@@ -347,3 +347,133 @@ test("should handle delete file by hash with empty URL in Redis", async (t) => {
     throw error;
   }
 });
+
+// Container-specific tests
+test("should upload file with specific container name", async (t) => {
+  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
+    t.pass("Skipping test - Azure not configured");
+    return;
+  }
+
+  const factory = new StorageFactory();
+  const service = new StorageService(factory);
+  
+  // Create a temporary file
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "test-"));
+  const testFile = path.join(tempDir, "test.txt");
+  fs.writeFileSync(testFile, "test content");
+  
+  try {
+    // Mock environment to have multiple containers
+    const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
+    process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
+    
+    try {
+      // Test upload with specific container
+      const result = await service.uploadFileWithProviders(
+        { log: () => {} }, // mock context
+        testFile,
+        "test-request",
+        null,
+        "test2"
+      );
+      
+      t.truthy(result.url);
+      t.truthy(result.url.includes("test2") || result.url.includes("/test2/"));
+      
+      // Cleanup
+      await service.deleteFiles("test-request");
+    } finally {
+      // Restore original env
+      if (originalEnv) {
+        process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
+      } else {
+        delete process.env.AZURE_STORAGE_CONTAINER_NAME;
+      }
+    }
+  } finally {
+    // Cleanup temp file
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("should use default container when no container specified", async (t) => {
+  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
+    t.pass("Skipping test - Azure not configured");
+    return;
+  }
+
+  const factory = new StorageFactory();
+  const service = new StorageService(factory);
+  
+  // Create a temporary file
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "test-"));
+  const testFile = path.join(tempDir, "test.txt");
+  fs.writeFileSync(testFile, "test content");
+  
+  try {
+    // Test upload without container (should use default)
+    const result = await service.uploadFileWithProviders(
+      { log: () => {} }, // mock context
+      testFile,
+      "test-request",
+      null,
+      null // no container specified
+    );
+    
+    t.truthy(result.url);
+    
+    // Cleanup
+    await service.deleteFiles("test-request");
+  } finally {
+    // Cleanup temp file
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("should pass container parameter through uploadFile method", async (t) => {
+  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
+    t.pass("Skipping test - Azure not configured");
+    return;
+  }
+
+  const factory = new StorageFactory();
+  const service = new StorageService(factory);
+  
+  // Create a temporary file
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "test-"));
+  const testFile = path.join(tempDir, "test.txt");
+  fs.writeFileSync(testFile, "test content");
+  
+  try {
+    // Mock environment to have multiple containers
+    const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
+    process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
+    
+    try {
+      // Test upload using the uploadFile method with container parameter
+      const result = await service.uploadFile(
+        { log: () => {} }, // context
+        testFile,         // filePath
+        "test-request",   // requestId
+        null,             // hash
+        "test3"           // containerName
+      );
+      
+      t.truthy(result.url);
+      
+      // Cleanup
+      await service.deleteFiles("test-request");
+    } finally {
+      // Restore original env
+      if (originalEnv) {
+        process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
+      } else {
+        delete process.env.AZURE_STORAGE_CONTAINER_NAME;
+      }
+    }
+  } finally {
+    // Cleanup temp file
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

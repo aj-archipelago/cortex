@@ -1,0 +1,61 @@
+name: Cortex File Handler Tests
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - 'helper-apps/cortex-file-handler/**'
+      - '.github/workflows/cortex-file-handler-test.yml'
+  pull_request:
+    branches: [ main, dev ]
+    paths:
+      - 'helper-apps/cortex-file-handler/**'
+      - '.github/workflows/cortex-file-handler-test.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    
+    defaults:
+      run:
+        working-directory: helper-apps/cortex-file-handler
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js 20.x
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        cache-dependency-path: helper-apps/cortex-file-handler/package-lock.json
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Install Azurite
+      run: npm install -g azurite
+    
+    - name: Setup GCS test environment
+      run: cp .env.test.gcs.ci .env.test.gcs
+    
+    - name: Setup Azure test environment
+      run: cp .env.test.azure.ci .env.test.azure
+    
+    - name: Run GCS tests
+      run: npm run test:gcs
+    
+    - name: Run Azure tests
+      run: npm run test:azure
+    
+    - name: Run tests
+      run: npm test
+      env:
+        NODE_ENV: test

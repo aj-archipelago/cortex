@@ -12,6 +12,9 @@ export default {
     ],
     inputParameters: {
         messages: [],
+        tools: '',
+        tool_choice: 'auto',
+        functions: '',
     },
     model: 'oai-gpt4o',
     useInputChunking: false,
