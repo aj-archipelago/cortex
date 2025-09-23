@@ -15,6 +15,13 @@ from azure.core.exceptions import AzureError, ServiceResponseError
 
 logger = logging.getLogger(__name__)
 
+# Ensure correct MIME types for Office files, especially PPT/PPTX, for proper downloads in browsers
+try:
+    mimetypes.add_type("application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pptx", strict=False)
+    mimetypes.add_type("application/vnd.ms-powerpoint", ".ppt", strict=False)
+except Exception:
+    pass
+
 def _validate_sas_url(url: str) -> bool:
     """Private helper to validate an Azure blob SAS URL."""
     try:

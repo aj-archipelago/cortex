@@ -72,6 +72,9 @@ class TaskProcessor:
     async def summarize_progress(self, content: str, message_type: str = None, source: str = None) -> str:
         """Summarize progress content for display with intelligent filtering."""
         try:
+            # Skip internal selector or housekeeping messages entirely
+            if self._is_internal_selector_message(content):
+                return None
             # Filter out technical/internal messages that shouldn't be shown to users
             if self._should_skip_progress_update(content, message_type, source):
                 return None
@@ -128,6 +131,10 @@ Generate only the progress update:"""
             
         content_str = str(content).strip().upper()
         
+        # Skip internal selector prompts or bare role names
+        if self._is_internal_selector_message(content):
+            return True
+
         # Skip termination messages
         if content_str == "TERMINATE" or "TERMINATE" in content_str:
             return True
@@ -182,6 +189,30 @@ Generate only the progress update:"""
             return None
             
         return cleaned
+
+    def _is_internal_selector_message(self, content: str) -> bool:
+        """Detect AutoGen selector prompts and bare role selections to avoid surfacing them."""
+        if not content:
+            return False
+        text = str(content).strip()
+        selector_markers = [
+            "You are in a role play game.",
+            "select the next role",
+            "Only return the role.",
+        ]
+        for marker in selector_markers:
+            if marker.lower() in text.lower():
+                return True
+
+        role_names = {
+            "planner_agent", "coder_agent", "code_executor", "terminator_agent",
+            "presenter_agent", "file_cloud_uploader_agent", "aj_sql_agent",
+            "aj_article_writer_agent", "cognitive_search_agent", "web_search_agent"
+        }
+        # If the entire content is just a role name, treat as internal
+        if text in role_names:
+            return True
+        return False
 
     async def handle_progress_update(self, task_id: str, percentage: float, content: str, message_type: str = None, source: str = None):
         """Handle progress updates with intelligent summarization."""
@@ -249,7 +280,7 @@ Generate only the progress update:"""
                 if task_completed_percentage >= 1.0:
                     task_completed_percentage = 0.99
                     
-                if content:
+                if content and not self._is_internal_selector_message(content):
                     processed_content_for_progress = content
                     if message.type == "ToolCallExecutionEvent" and hasattr(message, 'content') and isinstance(message.content, list):
                         error_contents = [res.content for res in message.content if hasattr(res, 'is_error') and res.is_error]
@@ -286,7 +317,7 @@ Generate only the progress update:"""
                     import time
                     now = time.time()
                     max_age_seconds = 15 * 60  # last 15 minutes
-                    deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf"}
+                    deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf", ".zip"}
                     candidate_dirs: List[str] = []
                     try:
                         wd = os.getenv("CORTEX_WORK_DIR", "/tmp/coding")

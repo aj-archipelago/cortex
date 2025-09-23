@@ -209,41 +209,74 @@ async def download_image(url: str, filename: str, work_dir: Optional[str] = None
             "Chrome/125.0.0.0 Safari/537.36"
         )
         session = requests.Session()
-        session.headers.update({"User-Agent": BROWSER_UA})
+        session.headers.update({
+            "User-Agent": BROWSER_UA,
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://duckduckgo.com/",
+            "Cache-Control": "no-cache",
+        })
 
-        with session.get(url, stream=True, timeout=20, allow_redirects=True) as response:
-            response.raise_for_status()
+        # Attempt to derive an original Wikimedia URL if this is a thumbnail
+        wm_orig = None
+        try:
+            if "upload.wikimedia.org" in url and "/thumb/" in url:
+                parts = url.split("/thumb/")
+                if len(parts) == 2:
+                    tail = parts[1]
+                    segs = tail.split("/")
+                    if len(segs) >= 3:
+                        wm_orig = parts[0] + "/" + segs[0] + "/" + segs[1] + "/" + segs[2]
+        except Exception:
+            wm_orig = None
 
-            content_type = (response.headers.get("Content-Type") or "").lower()
+        candidates = []
+        if wm_orig:
+            candidates.append(wm_orig)
+        candidates.append(url)
 
-            # Peek first few bytes to validate image magic if header is missing/misleading
-            first_chunk = next(response.iter_content(chunk_size=4096), b"")
+        last_err = None
+        for candidate in candidates:
+            try:
+                with session.get(candidate, stream=True, timeout=25, allow_redirects=True) as response:
+                    response.raise_for_status()
 
-            def looks_like_image(buf: bytes) -> bool:
-                if not buf or len(buf) < 4:
-                    return False
-                sigs = [
-                    b"\x89PNG\r\n\x1a\n",  # PNG
-                    b"\xff\xd8\xff",        # JPEG
-                    b"GIF87a", b"GIF89a",    # GIF
-                    b"RIFF"                    # WEBP starts with RIFF
-                ]
-                return any(buf.startswith(sig) for sig in sigs)
+                    content_type = (response.headers.get("Content-Type") or "").lower()
 
-            if not (content_type.startswith("image/") or looks_like_image(first_chunk)):
-                logger.error(f"❌ URL did not return an image content-type: {content_type} for {url}")
-                return json.dumps({"status": "error", "message": f"Non-image content-type: {content_type}"})
+                    # Peek first few bytes to validate image magic if header is missing/misleading
+                    first_chunk = next(response.iter_content(chunk_size=4096), b"")
 
-            # Write first chunk then stream the rest
-            with open(file_path, 'wb') as f:
-                if first_chunk:
-                    f.write(first_chunk)
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+                    def looks_like_image(buf: bytes) -> bool:
+                        if not buf or len(buf) < 4:
+                            return False
+                        sigs = [
+                            b"\x89PNG\r\n\x1a\n",  # PNG
+                            b"\xff\xd8\xff",        # JPEG
+                            b"GIF87a", b"GIF89a",    # GIF
+                            b"RIFF"                    # WEBP starts with RIFF
+                        ]
+                        return any(buf.startswith(sig) for sig in sigs)
 
-        logger.info(f"✅ Successfully downloaded image from {url} to {file_path}")
-        return json.dumps({"status": "success", "file_path": file_path})
+                    if not (content_type.startswith("image/") or looks_like_image(first_chunk)):
+                        last_err = f"Non-image content-type: {content_type} for {candidate}"
+                        continue
+
+                    # Write first chunk then stream the rest
+                    with open(file_path, 'wb') as f:
+                        if first_chunk:
+                            f.write(first_chunk)
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+
+                logger.info(f"✅ Successfully downloaded image from {candidate} to {file_path}")
+                return json.dumps({"status": "success", "file_path": file_path})
+            except Exception as e:
+                last_err = str(e)
+                continue
+
+        logger.error(f"❌ Failed to download image after candidates. Last error: {last_err}")
+        return json.dumps({"status": "error", "message": last_err or "download_failed"})
     except Exception as e:
         logger.error(f"❌ Failed to download image from {url}: {e}")
         return json.dumps({"status": "error", "message": str(e)})

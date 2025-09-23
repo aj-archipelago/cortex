@@ -58,10 +58,23 @@ def _normalize_image_results(items: List[Dict[str, Any]]) -> List[Dict[str, Any]
         url = item.get("image") or item.get("url") or item.get("thumbnail")
         if not url:
             continue
+        # For Wikimedia thumbnail URLs, add an "original_url" when derivable
+        original_url = None
+        try:
+            if isinstance(url, str) and "upload.wikimedia.org" in url and "/thumb/" in url:
+                parts = url.split("/thumb/")
+                if len(parts) == 2:
+                    tail = parts[1]
+                    segs = tail.split("/")
+                    if len(segs) >= 3:
+                        original_url = parts[0] + "/" + segs[0] + "/" + segs[1] + "/" + segs[2]
+        except Exception:
+            original_url = None
         normalized.append({
             "type": "image",
             "title": item.get("title"),
             "url": url,
+            "original_url": original_url,
             "thumbnail_url": item.get("thumbnail"),
             "width": item.get("width"),
             "height": item.get("height"),
@@ -497,7 +510,8 @@ async def collect_task_images(
         for it in filtered:
             if used >= count:
                 break
-            img_url = it.get("url")
+            # Prefer original_url if available
+            img_url = it.get("original_url") or it.get("url")
             if not img_url:
                 skipped.append({"reason": "missing_url", "item": it})
                 continue
