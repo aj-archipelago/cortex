@@ -457,29 +457,49 @@ async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
 
 async def image_search(query: str, count: int = 25) -> str:
     try:
-        # Heuristic query rewrite to bias towards high-quality, relevant images
-        def rewrite_query(q: str) -> str:
-            # Encourage official/artwork sources and higher-quality imagery
-            terms = [q, "high resolution", "official", "artwork"]
-            return " ".join(t for t in terms if t)
+        # Heuristic query expansion to bias towards high-quality, relevant images
+        def generate_query_variants(q: str) -> List[str]:
+            base = q.strip()
+            variants = [
+                base,
+                f"{base} high resolution official photo",
+                f"{base} 4k ultra hd wallpaper",
+                f"{base} artwork concept art",
+            ]
+            # Deduplicate while preserving order
+            seenv = set()
+            uniq = []
+            for v in variants:
+                if v not in seenv:
+                    seenv.add(v)
+                    uniq.append(v)
+            return uniq
 
         results: List[Dict[str, Any]] = []
-        # Prefer Google CSE when configured
+        # Prefer Google CSE when configured; try multiple high-quality variants in parallel
         if _has_google_cse_env():
             try:
-                raw = await google_cse_search(
-                    text=rewrite_query(query),
-                    parameters={
-                        "num": max(1, min(count, 10)),
-                        "searchType": "image",
-                        # Bias toward large, photo-like images; adjust as needed
-                        "imgSize": "xlarge",         # icon, small, medium, large, xlarge, xxlarge, huge
-                        "imgType": "photo",          # clipart, face, lineart, news, photo, animated
-                        "safe": "active",
-                    }
-                )
-                data = json.loads(raw) if raw else {}
-                results = _normalize_cse_image_results(data)
+                variants = generate_query_variants(query)[:3]  # cap to 3 calls
+                params_base = {
+                    "num": max(1, min(count, 10)),
+                    "searchType": "image",
+                    "imgSize": "xxlarge",        # larger default for quality
+                    "imgType": "photo",
+                    "safe": "active",
+                }
+                tasks = [
+                    google_cse_search(text=v, parameters=dict(params_base))
+                    for v in variants
+                ]
+                raws = await asyncio.gather(*tasks)
+                merged: List[Dict[str, Any]] = []
+                for raw in raws:
+                    try:
+                        data = json.loads(raw) if raw else {}
+                        merged.extend(_normalize_cse_image_results(data))
+                    except Exception:
+                        continue
+                results = merged
             except Exception:
                 results = []
 
@@ -504,7 +524,7 @@ async def image_search(query: str, count: int = 25) -> str:
                     s += ext_score
                     break
             # Penalize likely low-quality assets
-            negative_tokens = ["sprite", "icon", "thumbnail", "thumb", "small", "mini"]
+            negative_tokens = ["sprite", "icon", "thumbnail", "thumb", "small", "mini", "logo", "watermark", "stock"]
             s -= sum(1 for tok in negative_tokens if tok in url)
             # Slightly reward positive descriptors
             positive_tokens = ["official", "press", "hd", "4k", "wallpaper", "hero"]
@@ -513,12 +533,13 @@ async def image_search(query: str, count: int = 25) -> str:
             try:
                 w = int(item.get("width") or 0)
                 h = int(item.get("height") or 0)
-                if w >= 800 and h >= 800:
-                    s += 5
-                elif w >= 600 and h >= 600:
-                    s += 3
-                elif w >= 400 and h >= 400:
-                    s += 1
+                area = w * h
+                if area >= 1600 * 900:      # ~1080p or larger
+                    s += 6
+                elif area >= 1280 * 720:
+                    s += 4
+                elif area >= 800 * 600:
+                    s += 2
             except Exception:
                 pass
             # Penalize obvious stock/CDN thumbs when no original_url
