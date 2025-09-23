@@ -5,3 +5,7 @@ node_modules/
 **/__pycache__
 **/.venv
 .aider*
+test-files/
+**/tests/temp/*
+**/src/files/*
+test_output.log

@@ -6,8 +6,6 @@ import axios from 'axios';
 class AzureFoundryAgentsPlugin extends ModelPlugin {
     constructor(pathway, model) {
         super(pathway, model);
-        this.agentId = model.agentId;
-        this.projectUrl = model.url;
     }
 
     // Convert to Azure Foundry Agents messages array format
@@ -72,7 +70,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
         }
     
         const requestParameters = {
-            assistant_id: this.agentId,
+            assistant_id: this.assistantId,
             thread: {
                 messages: requestMessages
             },
@@ -97,12 +95,14 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
 
     // Assemble and execute the request to the Azure Foundry Agents API
     async execute(text, parameters, prompt, cortexRequest) {
+        this.baseUrl = cortexRequest.url;
+        this.assistantId = cortexRequest.params.assistant_id;
+
         const requestParameters = this.getRequestParameters(text, parameters, prompt);
 
         // Set up the request for Azure Foundry Agents
-        cortexRequest.url = this.requestUrl();
+        cortexRequest.url = `${this.baseUrl}/threads/runs`;
         cortexRequest.data = requestParameters;
-        cortexRequest.params = { 'api-version': '2025-05-01' }; // Azure API version
 
         // Get authentication token and add to headers
         const azureAuthTokenHelper = this.config.get('azureAuthTokenHelper');
@@ -158,14 +158,14 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                     }
                 }
                 
-                const pollUrl = this.constructAzureUrl(`/threads/${threadId}/runs/${runId}`);
+                const pollUrl = `${this.baseUrl}/threads/${threadId}/runs/${runId}`;
                 const pollResponse = await axios.get(pollUrl, {
                     headers: {
                         'Content-Type': 'application/json',
-                        ...this.model.headers,
+                        ...cortexRequest.headers,
                         ...(authToken && { 'Authorization': `Bearer ${authToken}` })
                     },
-                    params: { 'api-version': '2025-05-01' }
+                    params: cortexRequest.params
                 });
                 const runStatus = pollResponse?.data;
                 
@@ -177,7 +177,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 // Check if run is completed
                 if (runStatus.status === 'completed') {
                     logger.info(`[Azure Foundry Agent] Run completed successfully: ${runId}`);
-                    return await this.retrieveMessages(threadId, cortexRequest);
+                    return await this.retrieveMessages(threadId);
                 }
                 
                 // Check if run failed
@@ -212,7 +212,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
     }
 
     // Retrieve messages from the completed thread
-    async retrieveMessages(threadId, cortexRequest) {
+    async retrieveMessages(threadId) {
         try { 
             // Add authentication token if available
             const azureAuthTokenHelper = this.config.get('azureAuthTokenHelper');
@@ -226,7 +226,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 }
             }
             
-            const messagesUrl = this.constructAzureUrl(`/threads/${threadId}/messages`);
+            const messagesUrl = `${this.baseUrl}/threads/${threadId}/messages`;
             const axiosResponse = await axios.get(messagesUrl, {
                 headers: {
                     'Content-Type': 'application/json',
@@ -355,17 +355,6 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
         }
 
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
-    }
-
-    // Override the request URL to use the Azure Foundry Agents endpoint
-    requestUrl() {
-        // The URL should be constructed as: {projectUrl}/threads/runs
-        return `${this.projectUrl}/threads/runs`;
-    }
-
-    // Helper method to construct Azure Foundry Agents URLs
-    constructAzureUrl(path) {
-        return `${this.projectUrl}${path}`;
     }
 }
 

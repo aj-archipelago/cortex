@@ -1,6 +1,9 @@
 import axios from "axios";
 import { execSync } from "child_process";
 import fs from "fs/promises";
+import path from "path";
+
+import { app, port } from "../src/start.js";
 
 export async function cleanupHashAndFile(hash, uploadedUrl, baseUrl) {
   // Only perform hash operations if hash is provided
@@ -86,4 +89,75 @@ export async function createTestMediaFile(filepath, durationSeconds = 10) {
     if (error.stderr) console.error("ffmpeg error:", error.stderr.toString());
     throw error;
   }
+}
+
+// Test server management helpers
+let server;
+
+/**
+ * Starts the test server and waits for it to be ready
+ * @param {Object} options - Optional configuration
+ * @param {Function} options.beforeReady - Optional callback to run after server starts but before ready check
+ * @returns {Promise<Object>} - Server instance
+ */
+export async function startTestServer(options = {}) {
+  if (server) {
+    throw new Error("Test server is already running");
+  }
+
+  // Start the server for tests
+  server = app.listen(port, () => {
+    console.log(`Test server started on port ${port}`);
+  });
+  
+  // Wait for server to be ready
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+
+  // Run any pre-ready setup if provided
+  if (options.beforeReady) {
+    await options.beforeReady();
+  }
+
+  // Verify server is responding
+  try {
+    await axios.get(`http://localhost:${port}/files`);
+  } catch (error) {
+    // 404 is fine, it means server is running but directory is empty
+    if (error.response?.status !== 404) {
+      throw new Error("Server not ready");
+    }
+  }
+
+  return server;
+}
+
+/**
+ * Stops the test server
+ * @param {Function} beforeClose - Optional callback to run before closing server
+ * @returns {Promise<void>}
+ */
+export async function stopTestServer(beforeClose) {
+  if (beforeClose) {
+    await beforeClose();
+  }
+  
+  if (server) {
+    server.close();
+    server = null;
+  }
+}
+
+/**
+ * Creates a test directory and sets up context for AVA tests
+ * @param {Object} t - AVA test context
+ * @param {string} dirName - Optional directory name (defaults to "test-files")
+ * @returns {Promise<string>} - Path to created test directory
+ */
+export async function setupTestDirectory(t, dirName = "test-files") {
+  const testDir = path.join(process.cwd(), "tests", dirName);
+  await fs.mkdir(testDir, { recursive: true });
+  if (t && t.context) {
+    t.context.testDir = testDir;
+  }
+  return testDir;
 }

@@ -34,8 +34,8 @@ export default {
     executePathway: async ({args, runAllPrompts, resolver}) => {
 
         // Check if Bing API key is available
-        const servicePricipalAvailable = !!config.getEnv()["AZURE_SERVICE_PRINCIPAL_CREDENTIALS"];
-        if (!servicePricipalAvailable) {
+        const servicePrincipalAvailable = !!config.getEnv()["AZURE_SERVICE_PRINCIPAL_CREDENTIALS"];
+        if (!servicePrincipalAvailable) {
             throw new Error("Service Principal for Bing Search Agent is not available!");
         }
 
