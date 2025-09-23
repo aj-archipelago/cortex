@@ -59,7 +59,15 @@ export default {
         if (tool_calls) {
             if (pathwayResolver.toolCallCount < MAX_TOOL_CALLS) {
                 // Execute tool calls in parallel but with isolated message histories
-                const toolResults = await Promise.all(tool_calls.map(async (toolCall) => {
+                // Filter out any undefined or invalid tool calls
+                const invalidToolCalls = tool_calls.filter(tc => !tc || !tc.function || !tc.function.name);
+                if (invalidToolCalls.length > 0) {
+                    logger.warn(`Found ${invalidToolCalls.length} invalid tool calls:`, invalidToolCalls);
+                }
+                
+                const validToolCalls = tool_calls.filter(tc => tc && tc.function && tc.function.name);
+                
+                const toolResults = await Promise.all(validToolCalls.map(async (toolCall) => {
                     try {
                         if (!toolCall?.function?.arguments) {
                             throw new Error('Invalid tool call structure: missing function arguments');
@@ -132,7 +140,7 @@ export default {
                             });
                         }
 
-                        return { 
+                        const result = { 
                             success: true, 
                             result: toolResult,
                             toolCall,
@@ -140,6 +148,7 @@ export default {
                             toolFunction,
                             messages: toolMessages
                         };
+                        return result;
                     } catch (error) {
                         logger.error(`Error executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
                         
@@ -164,7 +173,7 @@ export default {
                             content: `Error: ${error.message}`
                         });
 
-                        return { 
+                        const errorResult = { 
                             success: false, 
                             error: error.message,
                             toolCall,
@@ -172,6 +181,7 @@ export default {
                             toolFunction: toolCall?.function?.name?.toLowerCase() || 'unknown',
                             messages: errorMessages
                         };
+                        return errorResult;
                     }
                 }));
 
@@ -192,9 +202,15 @@ export default {
                 }
 
                 // Check if any tool calls failed
-                const failedTools = toolResults.filter(result => !result.success);
+                const failedTools = toolResults.filter(result => result && !result.success);
                 if (failedTools.length > 0) {
                     logger.warn(`Some tool calls failed: ${failedTools.map(t => t.error).join(', ')}`);
+                }
+                
+                // Check for undefined results
+                const undefinedResults = toolResults.filter(result => result === undefined);
+                if (undefinedResults.length > 0) {
+                    logger.error(`Found ${undefinedResults.length} undefined tool results`);
                 }
 
                 pathwayResolver.toolCallCount = (pathwayResolver.toolCallCount || 0) + toolResults.length;

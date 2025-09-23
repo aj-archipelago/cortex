@@ -280,10 +280,12 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                     case 'tool_calls':
                         // Process complete tool calls when we get the finish reason
                         if (this.pathwayToolCallback && this.toolCallsBuffer.length > 0 && pathwayResolver) {
+                            // Filter out undefined elements from the tool calls buffer
+                            const validToolCalls = this.toolCallsBuffer.filter(tc => tc && tc.function && tc.function.name);
                             const toolMessage = {
                                 role: 'assistant',
                                 content: delta?.content || '', 
-                                tool_calls: this.toolCallsBuffer,
+                                tool_calls: validToolCalls,
                             };
                             this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
                         }
