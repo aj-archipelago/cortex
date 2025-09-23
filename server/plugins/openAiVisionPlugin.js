@@ -51,8 +51,16 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                                     }
                                     return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
                                 }
+                                if (!parsedItem.type) {
+                                    const url = parsedItem.image_url?.url;
+                                    if (url && await this.validateImageUrl(url)) {
+                                        return { type: 'image_url', image_url: { url } };
+                                    }
+                                    const text = (typeof parsedItem.text === 'string') ? parsedItem.text : JSON.stringify(parsedItem);
+                                    return { type: 'text', text };
+                                }
+                                return parsedItem;
                             }
-                            
                             return parsedItem;
                         }))
                     };
