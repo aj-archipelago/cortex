@@ -15,6 +15,7 @@ import { WebSocketServer } from 'ws';
 import responseCachePlugin from '@apollo/server-plugin-response-cache';
 import { KeyvAdapter } from '@apollo/utils.keyvadapter';
 import cors from 'cors';
+import { v4 as uuidv4 } from 'uuid';
 import { buildModels, buildPathways } from '../config.js';
 import logger from '../lib/logger.js';
 import { buildModelEndpoints } from '../lib/requestExecutor.js';
@@ -75,8 +76,21 @@ const getTypedefs = (pathways, pathwayManager) => {
 
     ${getPathwayTypeDef('ExecuteWorkspace', 'String')}
     
+    type ExecuteWorkspaceResult {
+        debug: String
+        result: String
+        resultData: String
+        previousResult: String
+        warnings: [String]
+        errors: [String]
+        contextId: String
+        tool: String
+    }
+    
+    union ExecuteWorkspaceResponse = ExecuteWorkspace | ExecuteWorkspaceResult
+    
     extend type Query {
-        executeWorkspace(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): ExecuteWorkspace
+        executeWorkspace(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): [ExecuteWorkspaceResult]
     }
 
     type RequestSubscription {
@@ -102,6 +116,7 @@ const getTypedefs = (pathways, pathwayManager) => {
     return typeDefs.join('\n');
 }
 
+
 // Resolvers for GraphQL
 const getResolvers = (config, pathways, pathwayManager) => {
     const resolverFunctions = {};
@@ -118,14 +133,138 @@ const getResolvers = (config, pathways, pathwayManager) => {
     const pathwayManagerResolvers = pathwayManager?.getResolvers() || {};
 
     const executeWorkspaceResolver = async (_, args, contextValue, info) => {
-        const { userId, pathwayName, ...pathwayArgs } = args;
-        const userPathway = await pathwayManager.getPathway(userId, pathwayName);
+        const startTime = Date.now();
+        const requestId = uuidv4();
+        const { userId, pathwayName, promptNames, ...pathwayArgs } = args;
         
-        contextValue.pathway = userPathway;
-        contextValue.config = config;
+        logger.info(`>>> [${requestId}] executeWorkspace started - userId: ${userId}, pathwayName: ${pathwayName}, promptNames: ${promptNames?.join(',') || 'none'}`);
         
-        const result = await userPathway.rootResolver(null, pathwayArgs, contextValue, info);
-        return result;
+        try {
+            contextValue.config = config;
+            
+            // Get the base pathway from the user
+            const pathways = await pathwayManager.getLatestPathways();
+            
+            if (!pathways[userId] || !pathways[userId][pathwayName]) {
+                const error = new Error(`Pathway '${pathwayName}' not found for user '${userId}'`);
+                logger.error(`!!! [${requestId}] ${error.message} - Available users: ${Object.keys(pathways).join(', ')}`);
+                throw error;
+            }
+
+            const basePathway = pathways[userId][pathwayName];
+            logger.debug(`[${requestId}] Found pathway: ${pathwayName} for user: ${userId}`);
+            
+            // If promptNames is specified, use getPathways to get individual pathways and execute in parallel
+            if (promptNames && promptNames.length > 0) {
+                // Handle wildcard case - execute all prompts in parallel
+                if (promptNames.includes('*')) {
+                    logger.info(`[${requestId}] Executing all prompts in parallel (wildcard specified)`);
+                    const individualPathways = await pathwayManager.getPathways(basePathway);
+                    
+                    if (individualPathways.length === 0) {
+                        const error = new Error(`No prompts found in pathway '${pathwayName}'`);
+                        logger.error(`!!! [${requestId}] ${error.message}`);
+                        throw error;
+                    }
+                    
+                    // Execute all pathways in parallel
+                    logger.debug(`[${requestId}] Executing ${individualPathways.length} pathways in parallel`);
+                    const results = await Promise.all(
+                        individualPathways.map(async (pathway, index) => {
+                            try {
+                                logger.debug(`[${requestId}] Starting pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}`);
+                                const pathwayContext = { ...contextValue, pathway };
+                                const result = await pathway.rootResolver(null, pathwayArgs, pathwayContext, info);
+                                logger.debug(`[${requestId}] Completed pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}`);
+                                return {
+                                    result: result.result,
+                                    promptName: pathway.name || `prompt_${index + 1}`
+                                };
+                            } catch (error) {
+                                logger.error(`!!! [${requestId}] Error in pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'} - ${error.message}`);
+                                logger.debug(`[${requestId}] Error stack: ${error.stack}`);
+                                throw error;
+                            }
+                        })
+                    );
+                    
+                    const duration = Date.now() - startTime;
+                    logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned ${results.length} results`);
+                    
+                    // Return a single result with JSON stringified array of results
+                    return [{
+                        debug: `Executed ${results.length} prompts in parallel`,
+                        result: JSON.stringify(results),
+                        resultData: null,
+                        previousResult: null,
+                        warnings: [],
+                        errors: [],
+                        contextId: requestId,
+                        tool: 'executeWorkspace'
+                    }];
+                } else {
+                    // Handle specific prompt names
+                    logger.info(`[${requestId}] Executing specific prompts: ${promptNames.join(', ')}`);
+                    const individualPathways = await pathwayManager.getPathways(basePathway, promptNames);
+                    
+                    if (individualPathways.length === 0) {
+                        const error = new Error(`No prompts found matching the specified names: ${promptNames.join(', ')}`);
+                        logger.error(`!!! [${requestId}] ${error.message}`);
+                        throw error;
+                    }
+                    
+                    // Execute all pathways in parallel
+                    logger.debug(`[${requestId}] Executing ${individualPathways.length} pathways in parallel`);
+                    const results = await Promise.all(
+                        individualPathways.map(async (pathway, index) => {
+                            try {
+                                logger.debug(`[${requestId}] Starting pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}`);
+                                const pathwayContext = { ...contextValue, pathway };
+                                const result = await pathway.rootResolver(null, pathwayArgs, pathwayContext, info);
+                                logger.debug(`[${requestId}] Completed pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}`);
+                                return result;
+                            } catch (error) {
+                                logger.error(`!!! [${requestId}] Error in pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'} - ${error.message}`);
+                                logger.debug(`[${requestId}] Error stack: ${error.stack}`);
+                                throw error;
+                            }
+                        })
+                    );
+                    
+                    const duration = Date.now() - startTime;
+                    logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned ${results.length} results`);
+                    return results;
+                }
+            }
+            
+            // Default behavior: execute all prompts in sequence
+            logger.info(`[${requestId}] Executing prompts in sequence`);
+            const userPathway = await pathwayManager.getPathway(userId, pathwayName);
+            contextValue.pathway = userPathway;
+            
+            const result = await userPathway.rootResolver(null, pathwayArgs, contextValue, info);
+            const duration = Date.now() - startTime;
+            logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned 1 result`);
+            return [result]; // Wrap single result in array for consistent return type
+            
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            logger.error(`!!! [${requestId}] executeWorkspace failed after ${duration}ms`);
+            logger.error(`!!! [${requestId}] Error type: ${error.constructor.name}`);
+            logger.error(`!!! [${requestId}] Error message: ${error.message}`);
+            logger.error(`!!! [${requestId}] Error stack: ${error.stack}`);
+            
+            // Log additional context for debugging "memory access out of bounds" errors
+            if (error.message && error.message.includes('memory')) {
+                logger.error(`!!! [${requestId}] MEMORY ERROR DETECTED - Additional context:`);
+                logger.error(`!!! [${requestId}] - Node.js version: ${process.version}`);
+                logger.error(`!!! [${requestId}] - Memory usage: ${JSON.stringify(process.memoryUsage())}`);
+                logger.error(`!!! [${requestId}] - Args size estimate: ${JSON.stringify(args).length} chars`);
+                logger.error(`!!! [${requestId}] - PathwayArgs keys: ${Object.keys(pathwayArgs).join(', ')}`);
+            }
+            
+            throw error;
+        }
     };
 
     const resolvers = {
@@ -278,3 +417,4 @@ const build = async (config) => {
 export {
     build
 };
+

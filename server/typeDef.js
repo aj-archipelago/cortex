@@ -92,7 +92,7 @@ const typeDef = (pathway) => {
   return getPathwayTypeDefAndExtendQuery(pathway);
 };
 
-const userPathwayInputParameters = `text: String`;
+const userPathwayInputParameters = `text: String, promptNames: [String]`;
 
 
 export {
