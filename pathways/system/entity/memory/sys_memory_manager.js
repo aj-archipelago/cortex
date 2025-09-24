@@ -123,7 +123,7 @@ export default {
                 return "";
 
             } catch (e) {
-                logger.warn('sys_memory_required returned invalid JSON:', memoryRequired);
+                logger.warn(`sys_memory_required returned invalid JSON: ${JSON.stringify(memoryRequired)}`);
                 return "";
             }
 

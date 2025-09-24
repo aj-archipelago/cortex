@@ -34,7 +34,7 @@ const normalizeMemoryFormat = async (args, content) => {
                 formattedContent = [...validLines, ...formattedBlock.split('\n')];
             }
         } catch (error) {
-            logger.warn('Error formatting invalid memory lines:', error);
+            logger.warn(`Error formatting invalid memory lines: ${error?.message || 'Unknown error'}`);
         }
     }
 

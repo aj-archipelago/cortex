@@ -43,9 +43,12 @@ export default {
         // Handle both CortexResponse objects and plain message objects
         let tool_calls;
         if (message instanceof CortexResponse) {
-            tool_calls = message.toolCalls || message.functionCall ? [message.functionCall] : null;
+            tool_calls = [...(message.toolCalls || [])];
+            if (message.functionCall) {
+                tool_calls.push(message.functionCall);
+            }
         } else {
-            tool_calls = message.tool_calls;
+            tool_calls = [...(message.tool_calls || [])];
         }
         
         const pathwayResolver = resolver;
@@ -56,13 +59,15 @@ export default {
         const preToolCallMessages = JSON.parse(JSON.stringify(args.chatHistory || []));
         const finalMessages = JSON.parse(JSON.stringify(preToolCallMessages));
 
-        if (tool_calls) {
+        if (tool_calls && tool_calls.length > 0) {
             if (pathwayResolver.toolCallCount < MAX_TOOL_CALLS) {
                 // Execute tool calls in parallel but with isolated message histories
                 // Filter out any undefined or invalid tool calls
                 const invalidToolCalls = tool_calls.filter(tc => !tc || !tc.function || !tc.function.name);
                 if (invalidToolCalls.length > 0) {
-                    logger.warn(`Found ${invalidToolCalls.length} invalid tool calls:`, invalidToolCalls);
+                    logger.warn(`Found ${invalidToolCalls.length} invalid tool calls: ${JSON.stringify(invalidToolCalls, null, 2)}`);
+                    // bail out if we're getting invalid tool calls
+                    pathwayResolver.toolCallCount = MAX_TOOL_CALLS;
                 }
                 
                 const validToolCalls = tool_calls.filter(tc => tc && tc.function && tc.function.name);
