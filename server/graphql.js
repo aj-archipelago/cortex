@@ -234,7 +234,10 @@ const getResolvers = (config, pathways, pathwayManager) => {
                                 const pathwayContext = { ...contextValue, pathway };
                                 const result = await pathway.rootResolver(null, pathwayArgs, pathwayContext, info);
                                 logger.debug(`[${requestId}] Completed pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}`);
-                                return result;
+                                return {
+                                    result: result.result,
+                                    promptName: pathway.name || `prompt_${index + 1}`
+                                };
                             } catch (error) {
                                 logger.error(`!!! [${requestId}] Error in pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'} - ${error.message}`);
                                 logger.debug(`[${requestId}] Error stack: ${error.stack}`);
@@ -245,7 +248,18 @@ const getResolvers = (config, pathways, pathwayManager) => {
                     
                     const duration = Date.now() - startTime;
                     logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned ${results.length} results`);
-                    return results;
+                    
+                    // Return a single result with JSON stringified array of results (consistent with wildcard case)
+                    return [{
+                        debug: `Executed ${results.length} specific prompts in parallel: ${promptNames.join(', ')}`,
+                        result: JSON.stringify(results),
+                        resultData: null,
+                        previousResult: null,
+                        warnings: [],
+                        errors: [],
+                        contextId: requestId,
+                        tool: 'executeWorkspace'
+                    }];
                 }
             }
             
