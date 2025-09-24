@@ -586,3 +586,49 @@ test('Large image handling', async (t) => {
     t.is(claudeMessages[0].content[0].text, 'Check this large image:');
     t.is(geminiMessages[0].parts[0].text, 'Check this large image:');
 });
+
+// Test handling of null content in messages
+test('Null content handling in vision plugins', async (t) => {
+    const { openai, claude } = createPlugins();
+    
+    const nullContentMessages = [
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: null },
+        { role: 'assistant', content: 'I can help you.' },
+        { role: 'user', content: [
+            { type: 'text', text: 'What is in this image?' },
+            { type: 'image_url', image_url: { url: sampleBase64Image } }
+        ]},
+        { role: 'assistant', content: null }
+    ];
+
+    // Test OpenAI Vision Plugin tryParseMessages
+    const parsedOpenAI = await openai.tryParseMessages(nullContentMessages);
+    
+    // Verify null content is converted to empty string
+    t.is(parsedOpenAI[1].content, '');
+    t.is(parsedOpenAI[4].content, '');
+    
+    // Verify other content is preserved
+    t.is(parsedOpenAI[0].content, 'You are a helpful assistant.');
+    t.is(parsedOpenAI[2].content, 'I can help you.');
+    t.true(Array.isArray(parsedOpenAI[3].content));
+    t.is(parsedOpenAI[3].content[0].text, 'What is in this image?');
+
+    // Test Claude conversion with null content messages
+    // Note: Claude filters out messages with empty content, so we only expect the meaningful messages
+    const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
+    
+    t.is(claudeSystem, 'You are a helpful assistant.');
+    t.is(claudeMessages.length, 1); // Only the meaningful image message survives Claude's filtering
+    
+    // Verify the remaining message is the one with actual content (the image message)
+    t.is(claudeMessages[0].role, 'user');
+    t.is(claudeMessages[0].content[0].text, 'What is in this image?');
+    t.is(claudeMessages[0].content[1].type, 'image');
+    
+    // The key test is that the vision plugin doesn't crash on null content
+    // and produces valid output that downstream plugins can process
+    t.true(Array.isArray(claudeMessages));
+    t.true(claudeMessages.every(msg => msg.role && msg.content));
+});
