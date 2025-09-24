@@ -12,6 +12,7 @@ import { publishRequestProgress } from '../lib/redisSubscription.js';
 import logger from '../lib/logger.js';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { createParser } from 'eventsource-parser';
+import CortexResponse from '../lib/cortexResponse.js';
 
 const modelTypesExcludedFromProgressUpdates = ['OPENAI-DALLE2', 'OPENAI-DALLE3'];
 
@@ -589,11 +590,15 @@ class PathwayResolver {
                 // If the prompt doesn't contain {{text}} then we can skip the chunking, and also give that token space to the previous result
                 if (!this.prompts[i].usesTextInput) {
                     // Limit context to it's N + text's characters
-                    previousResult = this.truncate(previousResult, 2 * this.chunkMaxTokenLength);
+                    if (previousResult) {
+                        previousResult = this.truncate(previousResult, 2 * this.chunkMaxTokenLength);
+                    }
                     result = await this.applyPrompt(this.prompts[i], null, currentParameters);
                 } else {
                     // Limit context to N characters
-                    previousResult = this.truncate(previousResult, this.chunkMaxTokenLength);
+                    if (previousResult) {
+                        previousResult = this.truncate(previousResult, this.chunkMaxTokenLength);
+                    }
                     result = await Promise.all(chunks.map(chunk =>
                         this.applyPrompt(this.prompts[i], chunk, currentParameters)));
 
@@ -607,6 +612,9 @@ class PathwayResolver {
                 // If this is any prompt other than the last, use the result as the previous context
                 if (i < this.prompts.length - 1) {
                     previousResult = result;
+                    if (result instanceof CortexResponse) {
+                        previousResult = this.mergeResultData(result).output_text;
+                    }
                 }
             }
             // store the previous result in the PathwayResolver
