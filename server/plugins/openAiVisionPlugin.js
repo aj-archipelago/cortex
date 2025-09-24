@@ -28,16 +28,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                 // Handle tool-related message types
                 if (message.role === "tool" || (message.role === "assistant" && message.tool_calls)) {
                     return {
-                        ...message,
-                        content: message.content === null || message.content === undefined ? '' : message.content
-                    };
-                }
-
-                // Handle null content by converting to empty string
-                if (message.content === null) {
-                    return {
-                        ...message,
-                        content: ''
+                        ...message
                     };
                 }
 
@@ -142,12 +133,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         const requestParameters = super.getRequestParameters(text, parameters, prompt);
 
         requestParameters.messages = await this.tryParseMessages(requestParameters.messages);
-
-        // Ensure all messages have valid content (never null) to prevent OpenAI API validation errors
-        requestParameters.messages = requestParameters.messages.map(message => ({
-            ...message,
-            content: message.content === null || message.content === undefined ? '' : message.content
-        }));
 
         const modelMaxReturnTokens = this.getModelMaxReturnTokens();
         const maxTokensPrompt = this.promptParameters.max_tokens;

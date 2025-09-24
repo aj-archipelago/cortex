@@ -267,14 +267,6 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
                     };
                 }
 
-                // Handle null content by converting to empty string
-                if (message.content === null) {
-                    return {
-                        ...message,
-                        content: ''
-                    };
-                }
-
                 if (Array.isArray(message.content)) {
                     return {
                         ...message,
