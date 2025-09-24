@@ -156,6 +156,18 @@ const getResolvers = (config, pathways, pathwayManager) => {
             
             // If promptNames is specified, use getPathways to get individual pathways and execute in parallel
             if (promptNames && promptNames.length > 0) {
+                
+                // Check if the prompts are in legacy format (array of strings)
+                // If so, we can't use promptNames filtering and need to ask user to republish
+                if (pathwayManager.isLegacyPromptFormat(userId, pathwayName)) {
+                    const error = new Error(
+                        `The pathway '${pathwayName}' uses legacy prompt format (array of strings) which doesn't support the promptNames parameter. ` +
+                        `Please unpublish and republish your workspace to upgrade to the new format that supports named prompts.`
+                    );
+                    logger.error(`!!! [${requestId}] ${error.message}`);
+                    throw error;
+                }
+                
                 // Handle wildcard case - execute all prompts in parallel
                 if (promptNames.includes('*')) {
                     logger.info(`[${requestId}] Executing all prompts in parallel (wildcard specified)`);
@@ -415,6 +427,7 @@ const build = async (config) => {
 
 
 export {
-    build
+    build,
+    getResolvers
 };
 
