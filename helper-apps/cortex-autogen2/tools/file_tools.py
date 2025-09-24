@@ -546,32 +546,124 @@ def get_file_tools(executor_work_dir: Optional[str] = None) -> List[FunctionTool
     tools = []
     
     # Create partial functions with work_dir bound
-    def bound_list_files():
-        return asyncio.run(list_files_in_work_dir(executor_work_dir))
+    def _to_text_part(value: str) -> Dict[str, Any]:
+        # Always return OpenAI-typed content
+        return {"type": "text", "text": value if isinstance(value, str) else str(value)}
+
+    def bound_list_files_typed() -> Dict[str, Any]:
+        return _to_text_part(asyncio.run(list_files_in_work_dir(executor_work_dir)))
     
-    def bound_read_file(filename: str, max_length: int = 5000):
-        return asyncio.run(read_file_from_work_dir(filename, executor_work_dir, max_length))
+    def bound_read_file_typed(filename: str, max_length: int = 5000) -> Dict[str, Any]:
+        return _to_text_part(asyncio.run(read_file_from_work_dir(filename, executor_work_dir, max_length)))
     
-    def bound_get_file_info(filename: str):
-        return asyncio.run(get_file_info(filename, executor_work_dir))
+    def bound_get_file_info_typed(filename: str) -> Dict[str, Any]:
+        return _to_text_part(asyncio.run(get_file_info(filename, executor_work_dir)))
     
     # Add tools
     tools.append(FunctionTool(
-        bound_list_files,
+        bound_list_files_typed,
         name="list_files_in_work_dir",
         description="Intelligently discover and categorize all files in the working directory with comprehensive metadata"
     ))
     
     tools.append(FunctionTool(
-        bound_read_file,
+        bound_read_file_typed,
         name="read_file_from_work_dir", 
         description="Intelligently read and analyze any file type with automatic content detection and preview generation"
     ))
     
     tools.append(FunctionTool(
-        bound_get_file_info,
+        bound_get_file_info_typed,
         name="get_file_info",
         description="Get comprehensive metadata and analysis for any file type including permissions and recommendations"
+    ))
+
+    # Add a convenience uploader for the newest deliverables
+    async def _upload_recent_deliverables(max_age_minutes: int = 15, max_files: int = 5) -> str:
+        try:
+            from .azure_blob_tools import upload_file_to_azure_blob
+            import time
+            work_dir = executor_work_dir or os.getcwd()
+            now = time.time()
+            deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf", ".zip"}
+            candidates: List[str] = []
+            if os.path.isdir(work_dir):
+                for name in os.listdir(work_dir):
+                    path = os.path.join(work_dir, name)
+                    if os.path.isfile(path) and os.path.splitext(name)[1].lower() in deliverable_exts:
+                        try:
+                            mtime = os.path.getmtime(path)
+                            if now - mtime <= max_age_minutes * 60:
+                                candidates.append(path)
+                        except Exception:
+                            continue
+            candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+            uploads = []
+            for p in candidates[:max_files]:
+                try:
+                    up_json = upload_file_to_azure_blob(p)
+                    uploads.append(json.loads(up_json))
+                except Exception as e:
+                    uploads.append({"error": str(e), "file": p})
+            return json.dumps({"uploads": uploads})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def bound_upload_recent_deliverables_typed(max_age_minutes: int = 15, max_files: int = 5) -> Dict[str, Any]:
+        return _to_text_part(asyncio.run(_upload_recent_deliverables(max_age_minutes, max_files)))
+
+    tools.append(FunctionTool(
+        bound_upload_recent_deliverables_typed,
+        name="upload_recent_deliverables",
+        description="Upload the newest deliverables from the working directory (scans last N minutes) and return their URLs"
+    ))
+
+    # A suggestion-only tool: list likely deliverables without uploading
+    async def _list_recent_deliverables(max_age_minutes: int = 15, max_files: int = 10, min_size_bytes: int = 1024) -> str:
+        try:
+            import time
+            work_dir = executor_work_dir or os.getcwd()
+            now = time.time()
+            deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf", ".zip"}
+            suggestions = []
+            if os.path.isdir(work_dir):
+                for name in os.listdir(work_dir):
+                    path = os.path.join(work_dir, name)
+                    if not os.path.isfile(path):
+                        continue
+                    ext = os.path.splitext(name)[1].lower()
+                    if ext not in deliverable_exts:
+                        continue
+                    try:
+                        size = os.path.getsize(path)
+                        if size < min_size_bytes:
+                            continue
+                        mtime = os.path.getmtime(path)
+                        age_s = now - mtime
+                        if age_s > max_age_minutes * 60:
+                            continue
+                        suggestions.append({
+                            "filename": name,
+                            "absolute_path": path,
+                            "size_bytes": size,
+                            "age_seconds": int(age_s),
+                            "extension": ext,
+                        })
+                    except Exception:
+                        continue
+            # Sort by size desc then recency
+            suggestions.sort(key=lambda x: (x["size_bytes"], -x["age_seconds"]), reverse=True)
+            return json.dumps({"suggestions": suggestions[:max_files]})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def bound_list_recent_deliverables_typed(max_age_minutes: int = 15, max_files: int = 10, min_size_bytes: int = 1024) -> Dict[str, Any]:
+        return _to_text_part(asyncio.run(_list_recent_deliverables(max_age_minutes, max_files, min_size_bytes)))
+
+    tools.append(FunctionTool(
+        bound_list_recent_deliverables_typed,
+        name="list_recent_deliverables",
+        description="List likely deliverables (by type, size, recency) without uploading; returns suggestions for human-like selection"
     ))
     
     logger.info(f"✅ Universal file tools created for work_dir: {executor_work_dir}")

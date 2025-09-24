@@ -455,16 +455,59 @@ async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
         return json.dumps({"error": f"Web search failed: {str(exc)}"})
 
 
-async def image_search(query: str, count: int = 25) -> str:
+def _make_image_session():
+    try:
+        s = requests.Session()
+        s.headers.update({
+            "User-Agent": USER_AGENT,
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+        })
+        return s
+    except Exception:
+        return None
+
+
+def _is_downloadable_image(url: str, session=None, timeout: int = 15) -> bool:
+    if not url:
+        return False
+    try:
+        s = session or _make_image_session()
+    except Exception:
+        s = None
+    try:
+        if not s:
+            s = requests
+        r = s.get(url, stream=True, timeout=timeout, allow_redirects=True)
+        ct = (r.headers.get("content-type") or "").lower()
+        if r.status_code != 200:
+            return False
+        if ct.startswith("image/"):
+            return True
+        # Peek first bytes for magic
+        try:
+            first_chunk = next(r.iter_content(2048), b"")
+        except Exception:
+            first_chunk = b""
+        if first_chunk:
+            sigs = [b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"RIFF"]
+            return any(first_chunk.startswith(sig) for sig in sigs)
+        return False
+    except Exception:
+        return False
+
+
+async def image_search(query: str, count: int = 25, verify_download: bool = True) -> str:
     try:
         # Heuristic query expansion to bias towards high-quality, relevant images
         def generate_query_variants(q: str) -> List[str]:
             base = q.strip()
             variants = [
                 base,
-                f"{base} high resolution official photo",
-                f"{base} 4k ultra hd wallpaper",
-                f"{base} artwork concept art",
+                f"{base} official photo",
+                f"{base} wallpaper",
+                f"{base} artwork",
             ]
             # Deduplicate while preserving order
             seenv = set()
@@ -483,8 +526,7 @@ async def image_search(query: str, count: int = 25) -> str:
                 params_base = {
                     "num": max(1, min(count, 10)),
                     "searchType": "image",
-                    "imgSize": "xxlarge",        # larger default for quality
-                    "imgType": "photo",
+                    # No strict size/type constraints; let ranking + verification decide
                     "safe": "active",
                 }
                 tasks = [
@@ -558,6 +600,19 @@ async def image_search(query: str, count: int = 25) -> str:
             deduped.append(it)
 
         deduped.sort(key=score, reverse=True)
+
+        # Optionally verify downloadability and pick top working images
+        if verify_download:
+            session = _make_image_session()
+            accepted: List[Dict[str, Any]] = []
+            for it in deduped:
+                if len(accepted) >= count:
+                    break
+                test_url = it.get("original_url") or it.get("url")
+                if _is_downloadable_image(test_url, session=session):
+                    accepted.append(it)
+            deduped = accepted
+
         deduped = deduped[:count]
 
         if not deduped:
@@ -623,8 +678,8 @@ async def collect_task_images(
       - work_dir: directory to save files; defaults to current working directory
     """
     try:
-        # Step 1: search many to have selection headroom
-        raw_json = await image_search(query, count=max(count * 3, count))
+        # Step 1: search many to have selection headroom; disable double verification here
+        raw_json = await image_search(query, count=max(count * 3, count), verify_download=False)
         parsed = json.loads(raw_json) if raw_json else []
         # Normalize parsed results to a list of dicts; handle dict status payloads gracefully
         if isinstance(parsed, dict):

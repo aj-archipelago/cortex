@@ -8,6 +8,7 @@ import logging
 import mimetypes
 import uuid
 import time
+import hashlib
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions, ContentSettings
@@ -63,6 +64,8 @@ class AzureBlobUploader:
         
         self.connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
         self.container_name = os.getenv("AZURE_BLOB_CONTAINER", "autogentempfiles")
+        # In-memory deduplication cache: sha256 -> blob_name
+        self._sha256_to_blob: dict = {}
         
         if not self.connection_string:
             raise ValueError("AZURE_STORAGE_CONNECTION_STRING environment variable is required")
@@ -143,6 +146,22 @@ class AzureBlobUploader:
         except Exception:
             pass
 
+        # Compute sha256 to deduplicate repeat uploads during same process lifetime
+        sha256_hex = None
+        try:
+            hasher = hashlib.sha256()
+            with open(file_path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    hasher.update(chunk)
+            sha256_hex = hasher.hexdigest()
+            if sha256_hex in self._sha256_to_blob:
+                # Return prior URL for identical content
+                prior_blob = self._sha256_to_blob[sha256_hex]
+                sas_url = self.generate_sas_url(prior_blob)
+                return {"blob_name": prior_blob, "download_url": sas_url, "deduplicated": True}
+        except Exception:
+            sha256_hex = None
+
         # Simple upload; SDK will handle block uploads automatically for large blobs
         with open(file_path, "rb") as data:
             blob_client.upload_blob(
@@ -156,6 +175,11 @@ class AzureBlobUploader:
         sas_url = self.generate_sas_url(normalized_blob_name)
         if not _validate_sas_url(sas_url):
             raise Exception("Generated SAS URL failed validation.")
+        if sha256_hex:
+            try:
+                self._sha256_to_blob[sha256_hex] = normalized_blob_name
+            except Exception:
+                pass
         return {"blob_name": blob_name, "download_url": sas_url}
 
 # Keep a single function for external calls to use the singleton uploader
