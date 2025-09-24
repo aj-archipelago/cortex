@@ -65,8 +65,8 @@ aiofiles>=24.1.0
 # -------------------------------------------------------------------
 openai>=1.97.1
 tiktoken>=0.9.0
-autogen-agentchat[openai]>=0.6.4
-autogen-ext[docker]>=0.6.4
+autogen-agentchat[openai]>=0.7.4
+autogen-ext[docker]>=0.7.4
 docker>=7.1.0
 playwright>=1.54.0
 markitdown>=0.1.2
