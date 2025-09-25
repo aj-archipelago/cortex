@@ -28,6 +28,10 @@ class TaskProcessor:
         self.gpt41_model_client = None
         self.progress_tracker = None
         self.final_progress_sent = False
+        # Background progress worker components
+        self._progress_queue: Optional[asyncio.Queue] = None
+        self._progress_worker_task: Optional[asyncio.Task] = None
+        self._last_summary_by_request: Dict[str, str] = {}
         
     async def initialize(self):
         """Initialize model clients and services."""
@@ -68,6 +72,53 @@ class TaskProcessor:
         )
         
         self.progress_tracker = await get_redis_publisher()
+        # Ensure background progress worker is running
+        await self._ensure_progress_worker()
+
+    async def _ensure_progress_worker(self) -> None:
+        """Start a single background worker to process progress updates asynchronously."""
+        try:
+            if self._progress_queue is None:
+                # Bounded queue to avoid memory growth; newest updates replace when full
+                self._progress_queue = asyncio.Queue(maxsize=256)
+            if self._progress_worker_task is None or self._progress_worker_task.done():
+                self._progress_worker_task = asyncio.create_task(self._progress_worker_loop())
+        except Exception as e:
+            logger.warning(f"Failed to start progress worker: {e}")
+
+    async def _progress_worker_loop(self) -> None:
+        """Continuously consume progress events, summarize, de-duplicate, and publish transient updates."""
+        try:
+            while True:
+                try:
+                    event = await self._progress_queue.get()
+                    if not event:
+                        self._progress_queue.task_done()
+                        continue
+                    req_id = event.get("task_id")
+                    pct = float(event.get("percentage") or 0.0)
+                    content = event.get("content")
+                    msg_type = event.get("message_type")
+                    source = event.get("source")
+                    # Summarize in background
+                    summary = await self.summarize_progress(content, msg_type, source)
+                    if summary:
+                        last = self._last_summary_by_request.get(req_id)
+                        if last != summary:
+                            self._last_summary_by_request[req_id] = summary
+                            try:
+                                await self.progress_tracker.set_transient_update(req_id, pct, summary)
+                            except Exception as pub_err:
+                                logger.debug(f"Progress transient publish error for {req_id}: {pub_err}")
+                    self._progress_queue.task_done()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as loop_err:
+                    logger.debug(f"Progress worker loop error: {loop_err}")
+        except asyncio.CancelledError:
+            logger.info("Progress worker task cancelled")
+        except Exception as e:
+            logger.warning(f"Progress worker terminated unexpectedly: {e}")
 
     async def summarize_progress(self, content: str, message_type: str = None, source: str = None) -> str:
         """Summarize progress content for display with intelligent filtering."""
@@ -84,37 +135,36 @@ class TaskProcessor:
             if not cleaned_content:
                 return None
             
-            prompt = f"""Generate a concise, engaging, and user-friendly progress update (5-15 words) that clearly indicates what the AI is currently working on. Include an appropriate emoji.
+            prompt = f"""Write a single fun-professional, engaging progress update (7–14 words) that clearly says what’s happening now. Start with a role-appropriate emoji.
 
 Context: This is for a user-facing progress indicator in a React app.
 
 Current Activity: {cleaned_content}
 Agent Source: {source if source else "Unknown"}
 
-Requirements:
-- Be positive and professional
-- Focus on what the user will benefit from
-- Avoid technical jargon
-- Use engaging, action-oriented language
-- Include a relevant emoji
-- Consider the agent source to provide context (e.g., coder_agent = coding, presenter_agent = creating presentation)
+Sample Emojis (use first that fits): 🧭, 🗺️, 📝, 💻, 🛠️, 🧪, 🔎, 🌐, 🧠, 📚,🗃️, 📊, 🎨, 📣, 🖼️, 🏁
 
-Examples of good updates:
-- "🔍 Researching the latest trends"
-- "📊 Analyzing data patterns" 
-- "🎨 Creating visual content"
-- "📝 Compiling your report"
-- "🚀 Finalizing results"
-- "💻 Writing code for your request"
-- "☁️ Uploading files to cloud storage"
+Style Requirements:
+- Positive, succinct, and user-benefit oriented; no jargon.
+- Use a strong verb + concrete noun (e.g., “Analyzing sales trends”, “Uploading charts”).
+- Focus strictly on the current action (no next-step hints).
+- Vary phrasing naturally (avoid repeating the same template).
+- One line only. No quotes. No code/tool names.
+
+Good examples:
+- "🔎 Researching sources for your brief"
+- "📊 Analyzing time-series data"
+- "🎨 Crafting visuals for your report"
+- "☁️ Uploading deliverables"
+- "💻 Refining code for accuracy"
 
 Bad examples (avoid):
-- "Task terminated"
-- "Processing internal data"
-- "Executing tool calls"
-- "TERMINATE"
+- Task terminated
+- Processing internal data
+- Executing tool calls
+- TERMINATE
 
-Generate only the progress update:"""
+Return only the update line, nothing else:"""
             
             messages = [UserMessage(content=str(prompt), source="summarize_progress_function")]
             
@@ -215,12 +265,33 @@ Generate only the progress update:"""
         return False
 
     async def handle_progress_update(self, task_id: str, percentage: float, content: str, message_type: str = None, source: str = None):
-        """Handle progress updates with intelligent summarization."""
-        summarized_content = await self.summarize_progress(content, message_type, source)
-        
-        # Only publish if we have meaningful content
-        if summarized_content:
-            await self.progress_tracker.publish_progress(task_id, percentage, summarized_content)
+        """Enqueue progress updates for the background worker to process (non-blocking)."""
+        try:
+            if self._progress_queue is None:
+                await self._ensure_progress_worker()
+            event = {
+                "task_id": task_id,
+                "percentage": percentage,
+                "content": content,
+                "message_type": message_type,
+                "source": source,
+            }
+            # Prefer non-blocking put; if full, drop the oldest and retry once
+            try:
+                self._progress_queue.put_nowait(event)
+            except asyncio.QueueFull:
+                try:
+                    # Drop one item to make room
+                    _ = self._progress_queue.get_nowait()
+                    self._progress_queue.task_done()
+                except Exception:
+                    pass
+                try:
+                    self._progress_queue.put_nowait(event)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"handle_progress_update enqueue error: {e}")
 
     async def publish_final(self, task_id: str, message: str, data: Any = None) -> None:
         """Publish a final 1.0 progress message once."""
@@ -240,12 +311,12 @@ Generate only the progress update:"""
             task_completed_percentage = 0.05
             task = task_content
 
-            # Send initial progress update
-            await self.progress_tracker.publish_progress(task_id, 0.05, "🚀 Starting your task...")
+            # Send initial progress update (transient only)
+            await self.progress_tracker.set_transient_update(task_id, 0.05, "🚀 Starting your task...")
 
             termination = HandoffTermination(target="user") | TextMentionTermination("TERMINATE")
 
-            agents, presenter_agent = await get_agents(
+            agents, presenter_agent, terminator_agent = await get_agents(
                 self.gpt41_model_client,
                 self.o3_model_client,
                 self.gpt41_model_client
@@ -255,11 +326,12 @@ Generate only the progress update:"""
                 participants=agents,
                 model_client=self.gpt41_model_client,
                 termination_condition=termination,
-                max_turns=10000
+                max_turns=200
             )
 
             messages = []
             uploaded_file_urls = {}
+            external_media_urls: List[str] = []
             final_result_content = []
 
             detailed_task = f"""
@@ -295,18 +367,53 @@ Generate only the progress update:"""
                             if isinstance(json_content, dict):
                                 if "download_url" in json_content and "blob_name" in json_content:
                                     uploaded_file_urls[json_content["blob_name"]] = json_content["download_url"]
+                                # collect external media from known keys
+                                for k in ("images", "image_urls", "media", "videos", "thumbnails", "assets"):
+                                    try:
+                                        vals = json_content.get(k)
+                                        if isinstance(vals, list):
+                                            for v in vals:
+                                                if isinstance(v, str) and v.startswith("http"):
+                                                    external_media_urls.append(v)
+                                        elif isinstance(vals, dict):
+                                            for v in vals.values():
+                                                if isinstance(v, str) and v.startswith("http"):
+                                                    external_media_urls.append(v)
+                                    except Exception:
+                                        pass
                             elif isinstance(json_content, list):
                                 for item in json_content:
                                     if isinstance(item, dict) and "download_url" in item and "blob_name" in item:
                                         uploaded_file_urls[item["blob_name"]] = item["download_url"]
+                                    # look for url-like fields
+                                    if isinstance(item, dict):
+                                        for key in ("url", "image", "thumbnail", "video", "download_url"):
+                                            try:
+                                                val = item.get(key)
+                                                if isinstance(val, str) and val.startswith("http"):
+                                                    external_media_urls.append(val)
+                                            except Exception:
+                                                pass
                             # otherwise, ignore scalars like numbers/strings
                         except json.JSONDecodeError:
-                            pass
+                            # best-effort regex scrape of http(s) URLs that look like media
+                            try:
+                                import re
+                                for m in re.findall(r"https?://[^\s)\]}]+", content):
+                                    if any(m.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm", ".mov")):
+                                        external_media_urls.append(m)
+                            except Exception:
+                                pass
                     
                     final_result_content.append(str(content))
+                    # Enqueue progress update for background processing (non-blocking)
                     asyncio.create_task(self.handle_progress_update(task_id, task_completed_percentage, processed_content_for_progress, message.type, source))
 
-            await self.progress_tracker.publish_progress(task_id, 0.95, "✨ Finalizing your results...")
+            try:
+                # Finalizing update (transient only)
+                await self.progress_tracker.set_transient_update(task_id, 0.95, "✨ Finalizing your results...")
+            except Exception:
+                pass
 
             # Targeted auto-upload: if no URLs yet, opportunistically upload recent deliverables created in this run.
             # Fast, non-recursive, and limited to known dirs and extensions.
@@ -410,10 +517,23 @@ Generate only the progress update:"""
             except Exception:
                 pass
 
+            # Deduplicate and cap external media to a reasonable number
+            try:
+                dedup_media = []
+                seen = set()
+                for u in external_media_urls:
+                    if u in seen:
+                        continue
+                    seen.add(u)
+                    dedup_media.append(u)
+                external_media_urls = dedup_media[:24]
+            except Exception:
+                pass
+
             result_limited_to_fit = "\n".join(final_result_content)
 
             presenter_task = f"""
-            Present the task result in a clean, professional Markdown that contains ONLY what the task requested. This will be shown in a React app.
+            Present the task result in a clean, professional Markdown/HTML that contains ONLY what the task requested. This will be shown in a React app.
             Use only the information provided.
 
             TASK:
@@ -425,15 +545,20 @@ Generate only the progress update:"""
             UPLOADED_FILES_SAS_URLS:
             {json.dumps(uploaded_file_urls, indent=2)}
 
+            EXTERNAL_MEDIA_URLS:
+            {json.dumps(external_media_urls, indent=2)}
+
             STRICT OUTPUT RULES:
             - If a file was created, list only the real download URL(s) from UPLOADED_FILES_SAS_URLS.
-            - Do NOT include any external previews or images unless that exact image URL is present in UPLOADED_FILES_SAS_URLS.
-            - Never fabricate text previews of the content. If a preview is not available from the uploaded file itself, omit it.
-            - Do NOT invent or guess any URLs, images, or content.
+            - You MAY include images and videos from EXTERNAL_MEDIA_URLS. Place them thoughtfully with captions.
+            - SINGLE media: wrap in <figure style=\"margin: 12px 0;\"> with <img style=\"display:block;width:100%;max-width:960px;height:auto;margin:0 auto;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.12)\"> and a <figcaption style=\"margin-top:8px;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;\">.
+            - MULTIPLE media: use <div style=\"display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;align-items:stretch;justify-items:stretch;\"> and child <figure style=\"margin:0;width:100%;\"> with <img style=\"display:block;width:100%;max-width:100%;height:auto;object-fit:contain;border-radius:8px;\">.
+            - Avoid framework classes in HTML; rely on inline styles only. Do NOT include any class attributes. Use color: inherit for captions to respect dark/light mode.
+            - Never fabricate URLs, images, or content; use only links from UPLOADED_FILES_SAS_URLS or EXTERNAL_MEDIA_URLS.
             - Present each uploaded file ONCE only (no duplicate links), using its filename as the link text.
-            - For links, prefer HTML anchor tags: <a href="URL" target="_blank" rel="noopener noreferrer">FILENAME</a>. For common file types (pdf, pptx, csv, png, jpg, jpeg), include the download attribute: <a href="URL" target="_blank" rel="noopener noreferrer" download>FILENAME</a>.
+            - For links, prefer HTML anchor tags: <a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\">FILENAME</a>. For common file types (pdf, pptx, csv, png, jpg, jpeg), include the download attribute: <a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" download>FILENAME</a>.
             - Do NOT include code, tool usage, or internal logs.
-            - Keep it concise and task-focused.
+            - Be detailed and user-facing. Include Overview, Visuals, Key Takeaways, and Downloads sections when applicable.
             """
             
             presenter_stream = presenter_agent.run_stream(task=presenter_task)
@@ -446,11 +571,59 @@ Generate only the progress update:"""
             last_message = task_result.messages[-1]
             text_result = last_message.content if hasattr(last_message, 'content') else None
 
-            # Safety checks: strip any links not in UPLOADED_FILES_SAS_URLS
+            # Safety checks: allow only links in UPLOADED_FILES_SAS_URLS or EXTERNAL_MEDIA_URLS
             try:
                 import re
                 if isinstance(text_result, str):
-                    allowed_urls = set(uploaded_file_urls.values())
+                    # Normalize presenter HTML to ensure images/galleries fill available width and no classes leak in
+                    try:
+                        from bs4 import BeautifulSoup  # available in requirements
+                        def _normalize_presenter_html(html: str) -> str:
+                            soup = BeautifulSoup(html, 'html.parser')
+                            # Drop all class attributes to avoid external CSS interference
+                            for el in soup.find_all(True):
+                                if 'class' in el.attrs:
+                                    del el.attrs['class']
+                            # Normalize gallery containers
+                            for div in soup.find_all('div'):
+                                style = div.get('style', '')
+                                if 'display:grid' in style or 'grid-template-columns' in style:
+                                    # enforce our gallery grid styles
+                                    div['style'] = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;align-items:stretch;justify-items:stretch;'
+                            # Normalize figures
+                            for fig in soup.find_all('figure'):
+                                base = 'margin:0;width:100%;'
+                                style = fig.get('style', '')
+                                fig['style'] = base if not style else base
+                            # Normalize captions
+                            for cap in soup.find_all('figcaption'):
+                                cap['style'] = 'margin-top:8px;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;'
+                            # Normalize images
+                            for img in soup.find_all('img'):
+                                img['style'] = 'display:block;width:100%;max-width:100%;height:auto;object-fit:contain;background:transparent;border:none;outline:none;border-radius:8px;'
+                                # Remove width/height attributes that can force tiny images
+                                if 'width' in img.attrs:
+                                    del img.attrs['width']
+                                if 'height' in img.attrs:
+                                    del img.attrs['height']
+                            return str(soup)
+                        text_result = _normalize_presenter_html(text_result)
+                    except Exception:
+                        # Fallback: regex-based minimal normalization
+                        text_result = re.sub(r'\sclass=\"[^\"]*\"', '', text_result)
+                        # Force img to full width
+                        def _img_style_repl(m):
+                            before, attrs = m.group(1), m.group(2) or ''
+                            # drop width/height attrs
+                            attrs = re.sub(r'\s(width|height)=\"[^\"]*\"', '', attrs)
+                            # replace/append style
+                            if 'style=' in attrs:
+                                attrs = re.sub(r'style=\"[^\"]*\"', 'style="display:block;width:100%;max-width:100%;height:auto;object-fit:contain;border-radius:8px;"', attrs)
+                            else:
+                                attrs += ' style="display:block;width:100%;max-width:100%;height:auto;object-fit:contain;border-radius:8px;"'
+                            return f"<img{attrs}>"
+                        text_result = re.sub(r'<img(\s[^>]*)?>', _img_style_repl, text_result)
+                    allowed_urls = set(uploaded_file_urls.values()) | set(external_media_urls)
                     def repl(m):
                         url = m.group(1)
                         return f"({url})" if url in allowed_urls else "(Download not available)"
@@ -459,8 +632,41 @@ Generate only the progress update:"""
                 pass
 
             logger.info(f"🔍 TASK RESULT:\n{text_result}")
+
+            # Run terminator agent once presenter has produced final text
+            try:
+                term_messages = []
+                term_task = f"""
+                Check if the task is completed and output TERMINATE if and only if done.
+                Latest presenter output:
+                {text_result}
+
+                Uploaded files (SAS URLs):
+                {json.dumps(uploaded_file_urls, indent=2)}
+
+                TASK:
+                {task}
+
+                Reminder:
+                - If the TASK explicitly requires downloadable files, ensure at least one clickable download URL is present.
+                - If the TASK does not require files (e.g., simple answer, calculation, summary, troubleshooting), terminate when the presenter has clearly delivered the requested content. Do not require downloads in that case.
+                """
+                term_stream = terminator_agent.run_stream(task=term_task)
+                async for message in term_stream:
+                    term_messages.append(message)
+                if term_messages:
+                    t_last = term_messages[-1].messages[-1]
+                    t_text = t_last.content if hasattr(t_last, 'content') else ''
+                    logger.info(f"🛑 TERMINATOR: {t_text}")
+                    # If it didn't say TERMINATE but we already have presenter output, proceed anyway
+            except Exception as e:
+                logger.warning(f"⚠️ Terminator agent failed or unavailable: {e}")
             final_data = text_result or "🎉 Your task is complete!"
             await self.progress_tracker.publish_progress(task_id, 1.0, "🎉 Your task is complete!", data=final_data)
+            try:
+                await self.progress_tracker.mark_final(task_id)
+            except Exception:
+                pass
             self.final_progress_sent = True
             
             return text_result
@@ -471,6 +677,21 @@ Generate only the progress update:"""
 
     async def close(self):
         """Close all connections gracefully."""
+        # Stop background progress worker first to avoid pending task destruction
+        try:
+            if self._progress_worker_task is not None:
+                try:
+                    self._progress_worker_task.cancel()
+                    try:
+                        await self._progress_worker_task
+                    except asyncio.CancelledError:
+                        pass
+                finally:
+                    self._progress_worker_task = None
+            # Allow GC of the queue
+            self._progress_queue = None
+        except Exception as e:
+            logger.debug(f"Error stopping progress worker: {e}")
         clients_to_close = [
             self.o3_model_client,
             self.o4_mini_model_client,
