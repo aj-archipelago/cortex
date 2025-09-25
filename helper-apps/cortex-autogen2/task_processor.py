@@ -551,8 +551,9 @@ Return only the update line, nothing else:"""
             STRICT OUTPUT RULES:
             - If a file was created, list only the real download URL(s) from UPLOADED_FILES_SAS_URLS.
             - You MAY include images and videos from EXTERNAL_MEDIA_URLS. Place them thoughtfully with captions.
-            - SINGLE media: wrap in <figure style=\"margin: 12px 0;\"> with <img style=\"display:block;width:100%;max-width:960px;height:auto;margin:0 auto;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.12)\"> and a <figcaption style=\"margin-top:8px;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;\">.
-            - MULTIPLE media: use <div style=\"display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;align-items:stretch;justify-items:stretch;\"> and child <figure style=\"margin:0;width:100%;\"> with <img style=\"display:block;width:100%;max-width:100%;height:auto;object-fit:contain;border-radius:8px;\">.
+            - For media: do NOT use grid or containers.
+              - SINGLE media: wrap in <figure style=\"margin: 12px 0;\"> with <img style=\"display:block;width:100%;max-width:960px;height:auto;margin:0 auto;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.12)\"> and a <figcaption style=\"margin-top:8px;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;\">.
+              - MULTIPLE media: output consecutive <figure> elements, one per row; no wrapping <div>.
             - Avoid framework classes in HTML; rely on inline styles only. Do NOT include any class attributes. Use color: inherit for captions to respect dark/light mode.
             - Never fabricate URLs, images, or content; use only links from UPLOADED_FILES_SAS_URLS or EXTERNAL_MEDIA_URLS.
             - Present each uploaded file ONCE only (no duplicate links), using its filename as the link text.
@@ -584,23 +585,42 @@ Return only the update line, nothing else:"""
                             for el in soup.find_all(True):
                                 if 'class' in el.attrs:
                                     del el.attrs['class']
-                            # Normalize gallery containers
-                            for div in soup.find_all('div'):
+                            # Remove wrapper containers around media entirely to avoid layout conflicts
+                            for div in list(soup.find_all('div')):
+                                # If this div contains only figures/images/captions, unwrap it
+                                try:
+                                    children = list(div.children)
+                                    meaningful = [c for c in children if getattr(c, 'name', None) is not None]
+                                    if meaningful and all(c.name in ('figure', 'img', 'figcaption') for c in meaningful):
+                                        div.unwrap()
+                                        continue
+                                except Exception:
+                                    pass
+                                # Otherwise, strip problematic class and grid styles
+                                if 'class' in div.attrs:
+                                    del div.attrs['class']
                                 style = div.get('style', '')
-                                if 'display:grid' in style or 'grid-template-columns' in style:
-                                    # enforce our gallery grid styles
-                                    div['style'] = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;align-items:stretch;justify-items:stretch;'
+                                if style:
+                                    style = style.replace('place-items: stretch;', '').replace('place-items:stretch;', '')
+                                    style = style.replace('display: grid;', '').replace('display:grid;', '')
+                                    style = style.replace('grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));', '')
+                                    style = style.replace('grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));', '')
+                                    style = style.replace('grid-template-columns:1fr;', '')
+                                    style = style.replace('grid-auto-rows: auto;', '')
+                                    style = style.replace('gap: 0.75rem;', '').replace('gap:0.75rem;', '')
+                                    style = style.replace('gap: 12px;', '').replace('gap:12px;', '')
+                                    div['style'] = style.strip('; ')
                             # Normalize figures
                             for fig in soup.find_all('figure'):
-                                base = 'margin:0;width:100%;'
+                                base = 'margin:0;padding:0;width:100%;'
                                 style = fig.get('style', '')
                                 fig['style'] = base if not style else base
                             # Normalize captions
                             for cap in soup.find_all('figcaption'):
-                                cap['style'] = 'margin-top:8px;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;'
+                                cap['style'] = 'margin-top:0.5rem;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;'
                             # Normalize images
                             for img in soup.find_all('img'):
-                                img['style'] = 'display:block;width:100%;max-width:100%;height:auto;object-fit:contain;background:transparent;border:none;outline:none;border-radius:8px;'
+                                img['style'] = 'display:block;width:100%;max-width:100%;height:auto;object-fit:contain;background:transparent;border:none;outline:none;border-radius:0.5rem;'
                                 # Remove width/height attributes that can force tiny images
                                 if 'width' in img.attrs:
                                     del img.attrs['width']
