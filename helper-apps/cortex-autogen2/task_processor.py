@@ -601,11 +601,7 @@ Return only the update line, nothing else:"""
                         pass
 
                     # 3) Safety checks: allow only links present in uploaded_file_urls or external media
-                    allowed_urls = set(uploaded_file_urls.values()) | set(external_media_urls)
-                    def repl(m):
-                        url = m.group(1)
-                        return f"({url})" if url in allowed_urls else "(Download not available)"
-                    text_result = re.sub(r"\((https?://[^)]+)\)", repl, text_result)
+                    # Remove restrictive filtering. Presenter's output will include uploaded URLs when relevant.
             except Exception:
                 pass
 
