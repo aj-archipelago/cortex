@@ -135,26 +135,27 @@ class TaskProcessor:
             if not cleaned_content:
                 return None
             
-            prompt = f"""Write a single fun-professional, engaging progress update (7–14 words) that clearly says what’s happening now. Start with a role-appropriate emoji.
+            prompt = f"""Write a single fun-professional, engaging progress update (7–14 words) that clearly states what the agent is doing now. Start with a role-appropriate emoji.
 
-Context: This is for a user-facing progress indicator in a React app.
+Context: This is for a progress indicator in a app.
 
 Current Activity: {cleaned_content}
 Agent Source: {source if source else "Unknown"}
 
-Sample Emojis (use first that fits): 🧭, 🗺️, 📝, 💻, 🛠️, 🧪, 🔎, 🌐, 🧠, 📚,🗃️, 📊, 🎨, 📣, 🖼️, 🏁
+Sample Emojis (use first that fits): 🧭, 🗺️, 📝, 💻, 🛠️, 🧪, 🔎, 🌐, 🧠, 📚, 🗃️, 📊, 🎨, 📣, 🖼️, 🏁
 
 Style Requirements:
-- Positive, succinct, and user-benefit oriented; no jargon.
+- Agent-centric; do not address the user. Never use "you" or "your".
+- Positive, succinct; avoid jargon and internal details.
 - Use a strong verb + concrete noun (e.g., “Analyzing sales trends”, “Uploading charts”).
 - Focus strictly on the current action (no next-step hints).
-- Vary phrasing naturally (avoid repeating the same template).
+- Vary phrasing naturally; avoid repeating templates.
 - One line only. No quotes. No code/tool names.
 
 Good examples:
-- "🔎 Researching sources for your brief"
+- "🔎 Researching sources"
 - "📊 Analyzing time-series data"
-- "🎨 Crafting visuals for your report"
+- "🎨 Crafting visuals"
 - "☁️ Uploading deliverables"
 - "💻 Refining code for accuracy"
 
@@ -163,6 +164,7 @@ Bad examples (avoid):
 - Processing internal data
 - Executing tool calls
 - TERMINATE
+- Any text addressing the user (e.g., "your report")
 
 Return only the update line, nothing else:"""
             
@@ -322,6 +324,8 @@ Return only the update line, nothing else:"""
                 request_work_dir = os.path.join(base_wd, req_dir_name)
                 os.makedirs(request_work_dir, exist_ok=True)
                 os.environ["CORTEX_WORK_DIR"] = request_work_dir
+                # pass to get_agents so all tools use this dir
+                request_work_dir_for_agents = request_work_dir
             except Exception:
                 # Fallback to base directory if per-request directory cannot be created
                 try:
@@ -337,7 +341,8 @@ Return only the update line, nothing else:"""
             agents, presenter_agent, terminator_agent = await get_agents(
                 self.gpt41_model_client,
                 self.o3_model_client,
-                self.gpt41_model_client
+                self.gpt41_model_client,
+                request_work_dir=request_work_dir_for_agents if 'request_work_dir_for_agents' in locals() else None
             )
 
             team = SelectorGroupChat(
