@@ -3,12 +3,13 @@ class Prompt {
         if (typeof params === 'string' || params instanceof String) {
             this.prompt = params;
         } else {
-            const { prompt, saveResultTo, messages, context, examples } = params;
+            const { prompt, saveResultTo, messages, context, examples, name } = params;
             this.prompt = prompt;
             this.saveResultTo = saveResultTo;
             this.messages = messages;
             this.context = context;
             this.examples = examples;
+            this.name = name;
             this.params = params;
         }
 

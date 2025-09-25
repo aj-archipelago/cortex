@@ -843,8 +843,57 @@ mutation DeletePathway($name: String!, $userId: String!, $secret: String!, $key:
 3. Executing a dynamic pathway:
 
 ```graphql
-query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String!) {
+query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String, $promptNames: [String]) {
+  executeWorkspace(userId: $userId, pathwayName: $pathwayName, text: $text, promptNames: $promptNames) {
+    result
+    debug
+    resultData
+    previousResult
+    warnings
+    errors
+    contextId
+    tool
+  }
+}
+```
+
+**Parameters:**
+- `userId`: The user identifier for the pathway
+- `pathwayName`: The name of the pathway to execute
+- `text`: Optional input text for the pathway
+- `promptNames`: Optional array of specific prompt names to execute
+  - If omitted: executes prompts serially (default behavior)
+  - If specific names provided: executes only those prompts in parallel
+  - If `["*"]`: executes all prompts in parallel
+
+**Response Formats:**
+- **Serial execution**: Returns single result string in `result` field
+- **Parallel execution**: Returns JSON stringified array in `result` field:
+  ```json
+  "[{\"result\": \"<prompt 1 result>\", \"promptName\": \"<prompt 1 name>\"}, {\"result\": \"<prompt 2 result>\", \"promptName\": \"<prompt 2 name>\"}]"
+  ```
+
+**Note**: The `executeWorkspace` query returns a single `ExecuteWorkspaceResult` object (not an array). For parallel execution, multiple results are JSON-encoded within the `result` field of this single response object.
+
+**Examples:**
+```graphql
+# Execute serially (default)
+query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String) {
   executeWorkspace(userId: $userId, pathwayName: $pathwayName, text: $text) {
+    result
+  }
+}
+
+# Execute specific prompts in parallel
+query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String, $promptNames: [String]) {
+  executeWorkspace(userId: $userId, pathwayName: $pathwayName, text: $text, promptNames: ["Grammar Check", "Tone Analysis"]) {
+    result
+  }
+}
+
+# Execute all prompts in parallel
+query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String, $promptNames: [String]) {
+  executeWorkspace(userId: $userId, pathwayName: $pathwayName, text: $text, promptNames: ["*"]) {
     result
   }
 }
