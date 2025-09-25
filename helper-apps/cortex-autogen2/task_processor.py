@@ -311,6 +311,24 @@ Return only the update line, nothing else:"""
             task_completed_percentage = 0.05
             task = task_content
 
+            # Per-request working directory: isolate artifacts under /tmp/coding/<task_id>
+            try:
+                base_wd = os.getenv("CORTEX_WORK_DIR", "/tmp/coding")
+                # In Azure Functions, force /tmp for write access
+                if os.getenv("WEBSITE_INSTANCE_ID") and base_wd.startswith("/app/"):
+                    base_wd = "/tmp/coding"
+                import time
+                req_dir_name = f"req_{task_id}" if task_id else f"req_{int(time.time())}"
+                request_work_dir = os.path.join(base_wd, req_dir_name)
+                os.makedirs(request_work_dir, exist_ok=True)
+                os.environ["CORTEX_WORK_DIR"] = request_work_dir
+            except Exception:
+                # Fallback to base directory if per-request directory cannot be created
+                try:
+                    os.makedirs(os.getenv("CORTEX_WORK_DIR", "/tmp/coding"), exist_ok=True)
+                except Exception:
+                    pass
+
             # Send initial progress update (transient only)
             await self.progress_tracker.set_transient_update(task_id, 0.05, "🚀 Starting your task...")
 
@@ -415,105 +433,24 @@ Return only the update line, nothing else:"""
             except Exception:
                 pass
 
-            # Targeted auto-upload: if no URLs yet, opportunistically upload recent deliverables created in this run.
-            # Fast, non-recursive, and limited to known dirs and extensions.
+            # Per-request auto-upload: upload any deliverables found in the request work dir
             try:
-                if not uploaded_file_urls:
-                    import time
-                    now = time.time()
-                    max_age_seconds = 15 * 60  # last 15 minutes
-                    deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf", ".zip"}
-                    candidate_dirs: List[str] = []
-                    try:
-                        wd = os.getenv("CORTEX_WORK_DIR", "/tmp/coding")
-                        # In Azure Functions, prefer /tmp for write access
-                        if os.getenv("WEBSITE_INSTANCE_ID") and wd.startswith("/app/"):
-                            wd = "/tmp/coding"
-                        candidate_dirs.append(wd)
-                    except Exception:
-                        pass
-                    candidate_dirs.append("/tmp/coding")
-
-                    recent_files: List[str] = []
-                    for d in candidate_dirs:
-                        if not d:
-                            continue
-                        # Ensure directory exists if possible
-                        try:
-                            os.makedirs(d, exist_ok=True)
-                        except Exception:
-                            pass
-                        if not os.path.isdir(d):
-                            continue
-                        try:
-                            for name in os.listdir(d):
-                                fp = os.path.join(d, name)
-                                if not os.path.isfile(fp):
-                                    continue
+                deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf", ".zip"}
+                req_dir = os.getenv("CORTEX_WORK_DIR", "/tmp/coding")
+                if os.path.isdir(req_dir):
+                    for root, _, files in os.walk(req_dir):
+                        for name in files:
+                            try:
                                 _, ext = os.path.splitext(name)
                                 if ext.lower() not in deliverable_exts:
                                     continue
-                                try:
-                                    mtime = os.path.getmtime(fp)
-                                    if now - mtime <= max_age_seconds:
-                                        recent_files.append(fp)
-                                except Exception:
-                                    continue
-                        except Exception:
-                            continue
-
-                    # Sort newest first and cap to a few uploads to keep fast
-                    recent_files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
-                    recent_files = recent_files[:5]
-
-                    for fp in recent_files:
-                        try:
-                            up_json = upload_file_to_azure_blob(fp, blob_name=None)
-                            up = json.loads(up_json)
-                            if "download_url" in up and "blob_name" in up:
-                                uploaded_file_urls[up["blob_name"]] = up["download_url"]
-                        except Exception:
-                            continue
-            except Exception:
-                pass
-
-            # Deduplicate uploaded_file_urls by base filename (keep latest by timestamp) and by URL to avoid duplicates
-            try:
-                import re
-                # First pass: group by base name without the autogenerated __TIMESTAMP_HASH suffix
-                groups = {}
-                pattern = re.compile(r"^(?P<base>.+?)__(?P<ts>\d{8}T\d{6}Z)_(?P<hash>[0-9a-f]{8})(?P<ext>\.[A-Za-z0-9]+)?$")
-                for blob, url in uploaded_file_urls.items():
-                    m = pattern.match(blob)
-                    if m:
-                        base_key = (m.group('base') + (m.group('ext') or '')).lower()
-                        ts = m.group('ts')
-                    else:
-                        base_key = blob.lower()
-                        ts = ""
-                    keep = groups.get(base_key)
-                    if not keep:
-                        groups[base_key] = {"blob": blob, "url": url, "ts": ts}
-                    else:
-                        # Prefer newer timestamp if available; else prefer the latter entry
-                        if ts and keep.get("ts") and ts > keep.get("ts"):
-                            groups[base_key] = {"blob": blob, "url": url, "ts": ts}
-                        elif ts and not keep.get("ts"):
-                            groups[base_key] = {"blob": blob, "url": url, "ts": ts}
-                        else:
-                            # keep existing
-                            pass
-                # Second pass: remove duplicates by identical URL
-                seen_urls = set()
-                dedup_map = {}
-                for entry in groups.values():
-                    blob = entry["blob"]
-                    url = entry["url"]
-                    if url in seen_urls:
-                        continue
-                    dedup_map[blob] = url
-                    seen_urls.add(url)
-                uploaded_file_urls = dedup_map
+                                fp = os.path.join(root, name)
+                                up_json = upload_file_to_azure_blob(fp, blob_name=None)
+                                up = json.loads(up_json)
+                                if "download_url" in up and "blob_name" in up:
+                                    uploaded_file_urls[up["blob_name"]] = up["download_url"]
+                            except Exception:
+                                continue
             except Exception:
                 pass
 
@@ -572,22 +509,19 @@ Return only the update line, nothing else:"""
             last_message = task_result.messages[-1]
             text_result = last_message.content if hasattr(last_message, 'content') else None
 
-            # Safety checks: allow only links in UPLOADED_FILES_SAS_URLS or EXTERNAL_MEDIA_URLS
+            # Upload deliverables referenced in presenter's final text (LLM-guided)
             try:
                 import re
                 if isinstance(text_result, str):
-                    # Normalize presenter HTML to ensure images/galleries fill available width and no classes leak in
+                    # 1) Normalize presenter HTML (remove wrapper classes/grids)
                     try:
                         from bs4 import BeautifulSoup  # available in requirements
                         def _normalize_presenter_html(html: str) -> str:
                             soup = BeautifulSoup(html, 'html.parser')
-                            # Drop all class attributes to avoid external CSS interference
                             for el in soup.find_all(True):
                                 if 'class' in el.attrs:
                                     del el.attrs['class']
-                            # Remove wrapper containers around media entirely to avoid layout conflicts
                             for div in list(soup.find_all('div')):
-                                # If this div contains only figures/images/captions, unwrap it
                                 try:
                                     children = list(div.children)
                                     meaningful = [c for c in children if getattr(c, 'name', None) is not None]
@@ -596,32 +530,26 @@ Return only the update line, nothing else:"""
                                         continue
                                 except Exception:
                                     pass
-                                # Otherwise, strip problematic class and grid styles
                                 if 'class' in div.attrs:
                                     del div.attrs['class']
                                 style = div.get('style', '')
                                 if style:
-                                    style = style.replace('place-items: stretch;', '').replace('place-items:stretch;', '')
-                                    style = style.replace('display: grid;', '').replace('display:grid;', '')
-                                    style = style.replace('grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));', '')
-                                    style = style.replace('grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));', '')
-                                    style = style.replace('grid-template-columns:1fr;', '')
-                                    style = style.replace('grid-auto-rows: auto;', '')
-                                    style = style.replace('gap: 0.75rem;', '').replace('gap:0.75rem;', '')
-                                    style = style.replace('gap: 12px;', '').replace('gap:12px;', '')
+                                    for frag in (
+                                        'place-items: stretch;', 'place-items:stretch;',
+                                        'display: grid;', 'display:grid;',
+                                        'grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));',
+                                        'grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));',
+                                        'grid-template-columns:1fr;', 'grid-auto-rows: auto;',
+                                        'gap: 0.75rem;', 'gap:0.75rem;', 'gap: 12px;', 'gap:12px;'
+                                    ):
+                                        style = style.replace(frag, '')
                                     div['style'] = style.strip('; ')
-                            # Normalize figures
                             for fig in soup.find_all('figure'):
-                                base = 'margin:0;padding:0;width:100%;'
-                                style = fig.get('style', '')
-                                fig['style'] = base if not style else base
-                            # Normalize captions
+                                fig['style'] = 'margin:0;padding:0;width:100%;'
                             for cap in soup.find_all('figcaption'):
                                 cap['style'] = 'margin-top:0.5rem;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;'
-                            # Normalize images
                             for img in soup.find_all('img'):
                                 img['style'] = 'display:block;width:100%;max-width:100%;height:auto;object-fit:contain;background:transparent;border:none;outline:none;border-radius:0.5rem;'
-                                # Remove width/height attributes that can force tiny images
                                 if 'width' in img.attrs:
                                     del img.attrs['width']
                                 if 'height' in img.attrs:
@@ -629,20 +557,45 @@ Return only the update line, nothing else:"""
                             return str(soup)
                         text_result = _normalize_presenter_html(text_result)
                     except Exception:
-                        # Fallback: regex-based minimal normalization
                         text_result = re.sub(r'\sclass=\"[^\"]*\"', '', text_result)
-                        # Force img to full width
                         def _img_style_repl(m):
-                            before, attrs = m.group(1), m.group(2) or ''
-                            # drop width/height attrs
+                            attrs = m.group(1) or ''
                             attrs = re.sub(r'\s(width|height)=\"[^\"]*\"', '', attrs)
-                            # replace/append style
                             if 'style=' in attrs:
                                 attrs = re.sub(r'style=\"[^\"]*\"', 'style="display:block;width:100%;max-width:100%;height:auto;object-fit:contain;border-radius:8px;"', attrs)
                             else:
                                 attrs += ' style="display:block;width:100%;max-width:100%;height:auto;object-fit:contain;border-radius:8px;"'
                             return f"<img{attrs}>"
                         text_result = re.sub(r'<img(\s[^>]*)?>', _img_style_repl, text_result)
+
+                    # 2) Identify filenames mentioned in final text and upload ONLY those from request work dir
+                    try:
+                        work_dir_scan = os.getenv('CORTEX_WORK_DIR', '/tmp/coding')
+                        file_regex = r'([A-Za-z0-9._\-]+\.(?:pptx|ppt|csv|png|jpg|jpeg|pdf|zip))'
+                        mentioned = set(re.findall(file_regex, text_result, flags=re.I))
+                        found_map = {}
+                        if mentioned and os.path.isdir(work_dir_scan):
+                            for root, _, files in os.walk(work_dir_scan):
+                                for fname in files:
+                                    for cand in list(mentioned):
+                                        if fname.lower() == cand.lower():
+                                            found_map[cand] = os.path.join(root, fname)
+                                            mentioned.discard(cand)
+                                    if not mentioned:
+                                        break
+                        # Upload found files
+                        for name, path in found_map.items():
+                            try:
+                                up_json = upload_file_to_azure_blob(path, blob_name=None)
+                                up = json.loads(up_json)
+                                if 'download_url' in up and 'blob_name' in up:
+                                    uploaded_file_urls[up['blob_name']] = up['download_url']
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+
+                    # 3) Safety checks: allow only links present in uploaded_file_urls or external media
                     allowed_urls = set(uploaded_file_urls.values()) | set(external_media_urls)
                     def repl(m):
                         url = m.group(1)

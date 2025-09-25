@@ -95,7 +95,13 @@ class RedisPublisher:
         # Heartbeat + transient caching
         self._heartbeat_task: Optional[asyncio.Task] = None
         try:
-            self._interval_seconds = float(os.getenv("PROGRESS_HEARTBEAT_INTERVAL", "1.0"))
+            # Clamp to at most 1.0s to ensure the UI gets updates every second
+            interval = float(os.getenv("PROGRESS_HEARTBEAT_INTERVAL", "1.0"))
+            if interval > 1.0:
+                interval = 1.0
+            if interval <= 0:
+                interval = 1.0
+            self._interval_seconds = interval
         except Exception:
             self._interval_seconds = 1.0
         # We cache only summarized progress strings (emoji sentence) with progress float
