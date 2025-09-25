@@ -613,7 +613,7 @@ class PathwayResolver {
                 if (i < this.prompts.length - 1) {
                     previousResult = result;
                     if (result instanceof CortexResponse) {
-                        previousResult = this.mergeResultData(result).output_text;
+                        previousResult = result.output_text;
                     }
                 }
             }
