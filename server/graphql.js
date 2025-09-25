@@ -204,7 +204,7 @@ const getResolvers = (config, pathways, pathwayManager) => {
                     logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned ${results.length} results`);
                     
                     // Return a single result with JSON stringified array of results
-                    return [{
+                    return {
                         debug: `Executed ${results.length} prompts in parallel`,
                         result: JSON.stringify(results),
                         resultData: null,
@@ -213,7 +213,7 @@ const getResolvers = (config, pathways, pathwayManager) => {
                         errors: [],
                         contextId: requestId,
                         tool: 'executeWorkspace'
-                    }];
+                    };
                 } else {
                     // Handle specific prompt names
                     logger.info(`[${requestId}] Executing specific prompts: ${promptNames.join(', ')}`);
@@ -250,7 +250,7 @@ const getResolvers = (config, pathways, pathwayManager) => {
                     logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned ${results.length} results`);
                     
                     // Return a single result with JSON stringified array of results (consistent with wildcard case)
-                    return [{
+                    return {
                         debug: `Executed ${results.length} specific prompts in parallel: ${promptNames.join(', ')}`,
                         result: JSON.stringify(results),
                         resultData: null,
@@ -259,7 +259,7 @@ const getResolvers = (config, pathways, pathwayManager) => {
                         errors: [],
                         contextId: requestId,
                         tool: 'executeWorkspace'
-                    }];
+                    };
                 }
             }
             
@@ -271,7 +271,7 @@ const getResolvers = (config, pathways, pathwayManager) => {
             const result = await userPathway.rootResolver(null, pathwayArgs, contextValue, info);
             const duration = Date.now() - startTime;
             logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned 1 result`);
-            return [result]; // Wrap single result in array for consistent return type
+            return result; // Return single result directly
             
         } catch (error) {
             const duration = Date.now() - startTime;

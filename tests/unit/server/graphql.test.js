@@ -116,7 +116,8 @@ test('executeWorkspace does not throw for new format with promptNames', async t 
 
     // Should return results without error
     t.truthy(result);
-    t.true(Array.isArray(result));
+    t.is(typeof result, 'object');
+    t.false(Array.isArray(result));
 
     // Verify that the pathwayManager methods were called correctly
     t.true(mockPathwayManager.getLatestPathways.calledOnce);
@@ -160,7 +161,8 @@ test('executeWorkspace does not check format when promptNames not provided', asy
 
     // Should return results without error
     t.truthy(result);
-    t.true(Array.isArray(result));
+    t.is(typeof result, 'object');
+    t.false(Array.isArray(result));
 
     // Verify that isLegacyPromptFormat was NOT called since promptNames wasn't provided
     t.false(mockPathwayManager.isLegacyPromptFormat.called);

@@ -873,6 +873,8 @@ query ExecuteWorkspace($userId: String!, $pathwayName: String!, $text: String, $
   "[{\"result\": \"<prompt 1 result>\", \"promptName\": \"<prompt 1 name>\"}, {\"result\": \"<prompt 2 result>\", \"promptName\": \"<prompt 2 name>\"}]"
   ```
 
+**Note**: The `executeWorkspace` query returns a single `ExecuteWorkspaceResult` object (not an array). For parallel execution, multiple results are JSON-encoded within the `result` field of this single response object.
+
 **Examples:**
 ```graphql
 # Execute serially (default)
