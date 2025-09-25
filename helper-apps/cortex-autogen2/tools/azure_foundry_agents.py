@@ -110,6 +110,32 @@ except Exception:
     _AZURE_SDK_AVAILABLE = False
 
 
+def _normalize_content_to_parts(content: Any) -> List[Dict[str, Any]]:
+    """Convert arbitrary content to Azure Foundry content parts.
+
+    Rules:
+    - If already an array of typed objects ({type:..., ...}), keep as-is.
+    - If it's a dict with 'type', wrap as a single part.
+    - Otherwise stringify to a single text part.
+    """
+    try:
+        # Already properly typed parts
+        if isinstance(content, list) and all(isinstance(p, dict) and isinstance(p.get("type"), str) for p in content):
+            return content
+        # Single typed object
+        if isinstance(content, dict) and isinstance(content.get("type"), str):
+            return [content]
+        # Anything else -> stringify
+        import json as _json
+        if isinstance(content, (dict, list)):
+            text = _json.dumps(content)
+        else:
+            text = str(content) if content is not None else ""
+        return [{"type": "text", "text": text}]
+    except Exception:
+        return [{"type": "text", "text": str(content) if content is not None else ""}]
+
+
 def _convert_to_azure_foundry_messages(
     context: Optional[str],
     examples: Optional[List[Dict[str, Any]]],
@@ -118,26 +144,23 @@ def _convert_to_azure_foundry_messages(
     azure_messages: List[Dict[str, Any]] = []
 
     if context:
-        azure_messages.append({"role": "system", "content": context})
+        azure_messages.append({"role": "system", "content": _normalize_content_to_parts(context)})
 
     if examples:
         for example in examples:
             try:
                 inp = example.get("input", {})
                 out = example.get("output", {})
-                azure_messages.append({"role": inp.get("author", "user"), "content": inp.get("content")})
-                azure_messages.append({"role": out.get("author", "assistant"), "content": out.get("content")})
+                azure_messages.append({"role": inp.get("author", "user"), "content": _normalize_content_to_parts(inp.get("content"))})
+                azure_messages.append({"role": out.get("author", "assistant"), "content": _normalize_content_to_parts(out.get("content"))})
             except Exception:
                 # ignore malformed example
                 continue
 
     for message in messages or []:
-        # Expect message to have 'author' and 'content' keys in Palm-like format,
-        # or 'role' and 'content' already in Azure format.
-        if "role" in message:
-            azure_messages.append({"role": message.get("role"), "content": message.get("content")})
-        else:
-            azure_messages.append({"role": message.get("author"), "content": message.get("content")})
+        role = message.get("role") or message.get("author")
+        content = message.get("content")
+        azure_messages.append({"role": role, "content": _normalize_content_to_parts(content)})
 
     return azure_messages
 

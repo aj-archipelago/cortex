@@ -18,6 +18,7 @@ import pandas as pd
 import re
 import urllib.parse
 import html as html_lib
+from .google_cse import google_cse_search
 
 # try:
 # except ImportError:
@@ -58,16 +59,76 @@ def _normalize_image_results(items: List[Dict[str, Any]]) -> List[Dict[str, Any]
         url = item.get("image") or item.get("url") or item.get("thumbnail")
         if not url:
             continue
+        # For Wikimedia thumbnail URLs, add an "original_url" when derivable
+        original_url = None
+        try:
+            if isinstance(url, str) and "upload.wikimedia.org" in url and "/thumb/" in url:
+                parts = url.split("/thumb/")
+                if len(parts) == 2:
+                    tail = parts[1]
+                    segs = tail.split("/")
+                    if len(segs) >= 3:
+                        original_url = parts[0] + "/" + segs[0] + "/" + segs[1] + "/" + segs[2]
+        except Exception:
+            original_url = None
         normalized.append({
             "type": "image",
             "title": item.get("title"),
             "url": url,
+            "original_url": original_url,
             "thumbnail_url": item.get("thumbnail"),
             "width": item.get("width"),
             "height": item.get("height"),
             "host_page_url": item.get("source") or item.get("page") or item.get("referrer"),
         })
     return normalized
+def _normalize_cse_web_results(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Normalize Google CSE (web) response to our common web result shape.
+    """
+    items = (payload or {}).get("items") or []
+    normalized: List[Dict[str, Any]] = []
+    for it in items:
+        title = it.get("title")
+        url = it.get("link")
+        snippet = it.get("snippet") or (it.get("htmlSnippet") and re.sub('<[^<]+?>', '', it.get("htmlSnippet")))
+        if url and title:
+            normalized.append({
+                "type": "webpage",
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+            })
+    return normalized
+
+
+def _normalize_cse_image_results(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Normalize Google CSE (image) response to our common image result shape.
+    """
+    items = (payload or {}).get("items") or []
+    normalized: List[Dict[str, Any]] = []
+    for it in items:
+        link = it.get("link")  # direct image URL
+        image_obj = it.get("image") or {}
+        if not link and not image_obj:
+            continue
+        normalized.append({
+            "type": "image",
+            "title": it.get("title"),
+            "url": link or image_obj.get("thumbnailLink"),
+            "original_url": link,
+            "thumbnail_url": image_obj.get("thumbnailLink"),
+            "width": image_obj.get("width"),
+            "height": image_obj.get("height"),
+            "host_page_url": image_obj.get("contextLink"),
+        })
+    return normalized
+
+
+def _has_google_cse_env() -> bool:
+    return bool(os.getenv("GOOGLE_CSE_KEY") and os.getenv("GOOGLE_CSE_CX"))
+
 
 
 def _extract_snippet_near(html: str, start_pos: int) -> Optional[str]:
@@ -366,35 +427,231 @@ def _ddg_images(query: str, count: int = 25) -> List[Dict[str, Any]]:
 
 async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
     try:
-        results = _ddg_web(query, count)
-        if enrich:
+        results: List[Dict[str, Any]] = []
+        used_google = False
+        # Prefer Google CSE when configured
+        if _has_google_cse_env():
+            try:
+                raw = await google_cse_search(text=query, parameters={"num": max(1, min(count, 10))})
+                data = json.loads(raw) if raw else {}
+                results = _normalize_cse_web_results(data)
+                used_google = True
+            except Exception:
+                used_google = False
+                results = []
+
+        if not results:
+            results = _ddg_web(query, count)
+
+        if enrich and results:
+            # Enrich only for web-page items
             results = _enrich_web_results_with_meta(results)
+
         if not results:
             return json.dumps({"status": "No relevant results found."})
+
         return json.dumps(results, indent=2)
     except Exception as exc:
         return json.dumps({"error": f"Web search failed: {str(exc)}"})
 
 
-async def image_search(query: str, count: int = 25) -> str:
+def _make_image_session():
     try:
-        results = _ddg_images(query, count)
+        s = requests.Session()
+        s.headers.update({
+            "User-Agent": USER_AGENT,
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+        })
+        return s
+    except Exception:
+        return None
+
+
+def _is_downloadable_image(url: str, session=None, timeout: int = 15) -> bool:
+    if not url:
+        return False
+    try:
+        s = session or _make_image_session()
+    except Exception:
+        s = None
+    try:
+        if not s:
+            s = requests
+        r = s.get(url, stream=True, timeout=timeout, allow_redirects=True)
+        ct = (r.headers.get("content-type") or "").lower()
+        if r.status_code != 200:
+            return False
+        if ct.startswith("image/"):
+            return True
+        # Peek first bytes for magic
+        try:
+            first_chunk = next(r.iter_content(2048), b"")
+        except Exception:
+            first_chunk = b""
+        if first_chunk:
+            sigs = [b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"RIFF"]
+            return any(first_chunk.startswith(sig) for sig in sigs)
+        return False
+    except Exception:
+        return False
+
+
+async def image_search(query: str, count: int = 25, verify_download: bool = True) -> str:
+    try:
+        # Heuristic query expansion to bias towards high-quality, relevant images
+        def generate_query_variants(q: str) -> List[str]:
+            base = q.strip()
+            variants = [
+                base,
+                f"{base} official photo",
+                f"{base} wallpaper",
+                f"{base} artwork",
+            ]
+            # Deduplicate while preserving order
+            seenv = set()
+            uniq = []
+            for v in variants:
+                if v not in seenv:
+                    seenv.add(v)
+                    uniq.append(v)
+            return uniq
+
+        results: List[Dict[str, Any]] = []
+        # Prefer Google CSE when configured; try multiple high-quality variants in parallel
+        if _has_google_cse_env():
+            try:
+                variants = generate_query_variants(query)[:3]  # cap to 3 calls
+                params_base = {
+                    "num": max(1, min(count, 10)),
+                    "searchType": "image",
+                    # No strict size/type constraints; let ranking + verification decide
+                    "safe": "active",
+                }
+                tasks = [
+                    google_cse_search(text=v, parameters=dict(params_base))
+                    for v in variants
+                ]
+                raws = await asyncio.gather(*tasks)
+                merged: List[Dict[str, Any]] = []
+                for raw in raws:
+                    try:
+                        data = json.loads(raw) if raw else {}
+                        merged.extend(_normalize_cse_image_results(data))
+                    except Exception:
+                        continue
+                results = merged
+            except Exception:
+                results = []
+
         if not results:
+            # Fallback to DDG image search if CSE disabled or empty
+            results = _ddg_images(query, count)
+
+        # Post-filtering and ranking for relevance and quality
+        def score(item: Dict[str, Any]) -> int:
+            s = 0
+            title = (item.get("title") or "").lower()
+            url = (item.get("url") or "").lower()
+            host = (item.get("host_page_url") or "").lower()
+            # Reward query term overlap in title
+            q_terms = set(re.findall(r"\w+", query.lower()))
+            t_terms = set(re.findall(r"\w+", title))
+            s += 3 * len(q_terms & t_terms)
+            # General quality signals (no site-specific bias)
+            # Favor high-quality file types
+            for ext, ext_score in ((".png", 2), (".jpg", 2), (".jpeg", 2), (".webp", 2), (".svg", 0), (".gif", 0)):
+                if url.endswith(ext) or (item.get("original_url") or "").lower().endswith(ext):
+                    s += ext_score
+                    break
+            # Penalize likely low-quality assets
+            negative_tokens = ["sprite", "icon", "thumbnail", "thumb", "small", "mini", "logo", "watermark", "stock"]
+            s -= sum(1 for tok in negative_tokens if tok in url)
+            # Slightly reward positive descriptors
+            positive_tokens = ["official", "press", "hd", "4k", "wallpaper", "hero"]
+            s += sum(1 for tok in positive_tokens if tok in title or tok in url)
+            # Reward larger dimensions when known
+            try:
+                w = int(item.get("width") or 0)
+                h = int(item.get("height") or 0)
+                area = w * h
+                if area >= 1600 * 900:      # ~1080p or larger
+                    s += 6
+                elif area >= 1280 * 720:
+                    s += 4
+                elif area >= 800 * 600:
+                    s += 2
+            except Exception:
+                pass
+            # Penalize obvious stock/CDN thumbs when no original_url
+            if ("thumb" in url) and not item.get("original_url"):
+                s -= 2
+            return s
+
+        # De-duplicate by original_url or url
+        seen = set()
+        deduped: List[Dict[str, Any]] = []
+        for it in results:
+            key = it.get("original_url") or it.get("url")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(it)
+
+        deduped.sort(key=score, reverse=True)
+
+        # Optionally verify downloadability and pick top working images
+        if verify_download:
+            session = _make_image_session()
+            accepted: List[Dict[str, Any]] = []
+            for it in deduped:
+                if len(accepted) >= count:
+                    break
+                test_url = it.get("original_url") or it.get("url")
+                if _is_downloadable_image(test_url, session=session):
+                    accepted.append(it)
+            deduped = accepted
+
+        deduped = deduped[:count]
+
+        if not deduped:
             return json.dumps({"status": "No relevant results found."})
-        return json.dumps(results, indent=2)
+        return json.dumps(deduped, indent=2)
     except Exception as exc:
         return json.dumps({"error": f"Image search failed: {str(exc)}"})
 
 
 async def combined_search(query: str, count: int = 25, enrich: bool = True) -> str:
     try:
-        web_task = _ddg_web(query, count)
-        if enrich:
-            web_task = _enrich_web_results_with_meta(web_task)
-        img_task = _ddg_images(query, count)
         combined: List[Dict[str, Any]] = []
-        combined.extend(web_task)
-        combined.extend(img_task)
+        # Prefer Google for both, with fallback to DDG
+        web_results: List[Dict[str, Any]] = []
+        img_results: List[Dict[str, Any]] = []
+
+        if _has_google_cse_env():
+            try:
+                raw_web = await google_cse_search(text=query, parameters={"num": max(1, min(count, 10))})
+                data_web = json.loads(raw_web) if raw_web else {}
+                web_results = _normalize_cse_web_results(data_web)
+            except Exception:
+                web_results = []
+            try:
+                raw_img = await google_cse_search(text=query, parameters={"num": max(1, min(count, 10)), "searchType": "image"})
+                data_img = json.loads(raw_img) if raw_img else {}
+                img_results = _normalize_cse_image_results(data_img)
+            except Exception:
+                img_results = []
+
+        if not web_results:
+            web_results = _ddg_web(query, count)
+        if enrich and web_results:
+            web_results = _enrich_web_results_with_meta(web_results)
+        if not img_results:
+            img_results = _ddg_images(query, count)
+
+        combined.extend(web_results)
+        combined.extend(img_results)
         if not combined:
             return json.dumps({"status": "No relevant results found."})
         return json.dumps(combined, indent=2)
@@ -421,8 +678,8 @@ async def collect_task_images(
       - work_dir: directory to save files; defaults to current working directory
     """
     try:
-        # Step 1: search many to have selection headroom
-        raw_json = await image_search(query, count=max(count * 3, count))
+        # Step 1: search many to have selection headroom; disable double verification here
+        raw_json = await image_search(query, count=max(count * 3, count), verify_download=False)
         parsed = json.loads(raw_json) if raw_json else []
         # Normalize parsed results to a list of dicts; handle dict status payloads gracefully
         if isinstance(parsed, dict):
@@ -497,7 +754,8 @@ async def collect_task_images(
         for it in filtered:
             if used >= count:
                 break
-            img_url = it.get("url")
+            # Prefer original_url if available
+            img_url = it.get("original_url") or it.get("url")
             if not img_url:
                 skipped.append({"reason": "missing_url", "item": it})
                 continue
