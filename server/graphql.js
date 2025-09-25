@@ -90,7 +90,7 @@ const getTypedefs = (pathways, pathwayManager) => {
     union ExecuteWorkspaceResponse = ExecuteWorkspace | ExecuteWorkspaceResult
     
     extend type Query {
-        executeWorkspace(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): [ExecuteWorkspaceResult]
+        executeWorkspace(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): ExecuteWorkspaceResult
     }
 
     type RequestSubscription {
