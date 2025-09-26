@@ -29,7 +29,7 @@ async function sendMessageToQueue(data) {
         logger.info(`Message added to queue: ${JSON.stringify(result)}`);
         return result.messageId;
     } catch (error) {
-        logger.error("Error sending message:", error);
+        logger.error(`Error sending message: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
     }
 }
 

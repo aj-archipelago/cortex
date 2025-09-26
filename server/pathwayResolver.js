@@ -293,7 +293,7 @@ class PathwayResolver {
                         requestProgress = this.modelExecutor.plugin.processStreamEvent(event, requestProgress);
                     } catch (error) {
                         streamErrorOccurred = true;
-                        logger.error(`Stream error: ${error.message}`);
+                        logger.error(`Stream error: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
                         incomingMessage.off('data', processStream);
                         return;
                     }
@@ -304,7 +304,7 @@ class PathwayResolver {
                             streamEnded = requestProgress.progress === 1;
                         }
                     } catch (error) {
-                        logger.error(`Could not publish the stream message: "${event.data}", ${error}`);
+                        logger.error(`Could not publish the stream message: "${event.data}", ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
                     }
 
                 }
@@ -325,7 +325,7 @@ class PathwayResolver {
                 }
 
             } catch (error) {
-                logger.error(`Could not subscribe to stream: ${error}`);
+                logger.error(`Could not subscribe to stream: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
             }
 
             if (streamErrorOccurred) {

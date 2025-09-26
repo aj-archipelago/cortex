@@ -8,6 +8,7 @@ import { getSearchResultId } from '../../../../lib/util.js';
 export default {
     prompt: [],
     timeout: 300,
+    /*
     toolDefinition: { 
         type: "function",
         icon: "🌐",
@@ -46,6 +47,7 @@ export default {
             }
         }
     },
+    */
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
 

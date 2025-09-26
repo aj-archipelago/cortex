@@ -182,7 +182,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 
                 // Check if run failed
                 if (runStatus.status === 'failed') {
-                    logger.error(`[Azure Foundry Agent] Run failed: ${runId}`, runStatus.lastError);
+                    logger.error(`[Azure Foundry Agent] Run failed: ${runId} ${runStatus?.lastError ? JSON.stringify(runStatus.lastError) : ''}`);
                     return null;
                 }
                 

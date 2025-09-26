@@ -10,10 +10,10 @@ export default {
     timeout: 300,
     toolDefinition: { 
         type: "function",
-        icon: "🔎",
+        icon: "🌐",
         function: {
-            name: "SearchInternetGoogle",
-            description: "Search the web using Google Custom Search (CSE). This is a simple pass-through tool: it calls Google CSE with your parameters and returns normalized results with unique IDs for citation. Prefer strict time filters and reputable sources via CSE parameters.",
+            name: "SearchInternet",
+            description: "Search the internet for current knowledge and events. This is a simple pass-through tool: it calls Google CSE with your parameters and returns normalized results with unique IDs for citation. Prefer strict time filters and reputable sources via CSE parameters.",
             parameters: {
                 type: "object",
                 properties: {

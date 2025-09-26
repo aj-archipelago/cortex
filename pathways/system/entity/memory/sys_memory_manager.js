@@ -37,7 +37,7 @@ export default {
                 try {
                     parsedMemory = JSON.parse(await callPathway('sys_read_memory', { ...args, section: 'memoryAll' }));
                 } catch (error) {
-                    logger.error('Error in memory manager:', error);
+                    logger.error(`Error in memory manager: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
                     return "";
                 }
 
@@ -123,12 +123,12 @@ export default {
                 return "";
 
             } catch (e) {
-                logger.warn(`sys_memory_required returned invalid JSON: ${JSON.stringify(memoryRequired)}`);
+                logger.warn(`sys_memory_required returned invalid JSON: ${JSON.stringify(memoryRequired)}, error: ${e instanceof Error ? e.stack || e.message : JSON.stringify(e)}`);
                 return "";
             }
 
         } catch (e) {
-            logger.error('Error in memory manager:', e);
+            logger.error(`Error in memory manager: ${e instanceof Error ? e.stack || e.message : JSON.stringify(e)}`);
             resolver.logError(e);
             return "";
         }

@@ -45,14 +45,24 @@ export default {
                         description: "Optional array of X handles to exclude from search. Maximum 10 handles. Cannot be used in conjunction with includedHandles.",
                         maxItems: 10
                     },
+                    fromDate: {
+                        type: "string",
+                        description: "Optional date from which to start searching (YYYY-MM-DD)",
+                        format: "date"
+                    },
+                    toDate: {
+                        type: "string",
+                        description: "Optional date to which to end searching (YYYY-MM-DD)",
+                        format: "date"
+                    },
                     minFavorites: {
                         type: "number",
-                        description: "Popularity filter: Minimum number of favorites (likes) for posts to include",
+                        description: "Minimum number of favorites (likes) that a post must have to be included. Use this to filter to most liked posts.",
                         minimum: 0
                     },
                     minViews: {
                         type: "number",
-                        description: "Popularity filter: Minimum number of views for posts to include",
+                        description: "Minimum number of views that a post must have to be included. Use this to filter to most viewed posts.",
                         minimum: 0
                     },
                     maxResults: {
