@@ -95,7 +95,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
                 detectedLanguage = result.split('\n')[0].split(';')[0];
             } else {
                 logger.error(`Apptek Language detection failed with status: ${resultResponse.status}`);
-                logger.debug({error: resultResponse, text})
+                logger.debug(`Apptek language detection response: ${JSON.stringify({ status: resultResponse.status, textSnippet: text?.slice?.(0, 200) || text })}`)
             }
 
             if (!detectedLanguage) {
@@ -111,7 +111,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
                     text,
                 });
                 
-                logger.verbose('Successfully used language pathway as fallback', {detectedLanguage});
+                logger.verbose(`Successfully used language pathway as fallback: ${JSON.stringify({ detectedLanguage })}`);
                 if (!detectedLanguage) {
                     throw new Error('Language detection failed using fallback language pathway');
                 }

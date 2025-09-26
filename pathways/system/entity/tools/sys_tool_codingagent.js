@@ -26,7 +26,7 @@ async function sendMessageToQueue(data) {
         logger.info(`Message added to queue: ${JSON.stringify(result)}`);
         return result.messageId;
     } catch (error) {
-        logger.error("Error sending message:", error);
+        logger.error(`Error sending message: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
         throw error;
     }
 }
@@ -103,7 +103,7 @@ export default {
 
             return userMessage || "I've started working on your coding task. I'll let you know when it's complete.";
         } catch (error) {
-            logger.error("Error in coding agent tool:", error);
+            logger.error(`Error in coding agent tool: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
             throw error;
         }
     }

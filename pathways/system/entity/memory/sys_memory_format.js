@@ -26,5 +26,6 @@ export default {
     inputChunkSize: 1000,
     useParallelChunkProcessing: true,
     enableDuplicateRequests: false,
+    requestLoggingDisabled: true,
     timeout: 300,
 }
