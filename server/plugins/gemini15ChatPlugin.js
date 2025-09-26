@@ -155,6 +155,11 @@ class Gemini15ChatPlugin extends ModelPlugin {
 
     // Parse the response from the new Chat API
     parseResponse(data) {
+        // Handle CortexResponse objects by returning them as-is
+        if (data && typeof data === 'object' && data.constructor && data.constructor.name === 'CortexResponse') {
+            return data;
+        }
+
         // If data is not an array, return it directly
         let dataToMerge = [];
         if (data && data.contents && Array.isArray(data.contents)) {

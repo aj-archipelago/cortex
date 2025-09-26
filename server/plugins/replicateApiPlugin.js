@@ -1,5 +1,6 @@
 // replicateApiPlugin.js
 import ModelPlugin from "./modelPlugin.js";
+import CortexResponse from "../../lib/cortexResponse.js";
 import logger from "../../lib/logger.js";
 import axios from "axios";
 
@@ -92,6 +93,122 @@ class ReplicateApiPlugin extends ModelPlugin {
         };
         break;
       }
+      case "replicate-qwen-image": {
+        const aspectRatio = combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio ?? "16:9";
+        const imageSize = combinedParameters.image_size ?? combinedParameters.imageSize ?? "optimize_for_quality";
+        const outputFormat = combinedParameters.output_format ?? combinedParameters.outputFormat ?? "webp";
+        const outputQuality = combinedParameters.output_quality ?? combinedParameters.outputQuality ?? 80;
+        const loraScale = combinedParameters.lora_scale ?? combinedParameters.loraScale ?? 1;
+        const enhancePrompt = combinedParameters.enhance_prompt ?? combinedParameters.enhancePrompt ?? false;
+        const negativePrompt = combinedParameters.negative_prompt ?? combinedParameters.negativePrompt ?? " ";
+        const numInferenceSteps = combinedParameters.num_inference_steps ?? combinedParameters.steps ?? 50;
+        const goFast = combinedParameters.go_fast ?? combinedParameters.goFast ?? true;
+        const guidance = combinedParameters.guidance ?? 4;
+        const strength = combinedParameters.strength ?? 0.9;
+        const numOutputs = combinedParameters.num_outputs ?? combinedParameters.numberResults;
+        const disableSafetyChecker = combinedParameters.disable_safety_checker ?? combinedParameters.disableSafetyChecker ?? false;
+
+        requestParameters = {
+          input: {
+            prompt: modelPromptText,
+            go_fast: goFast,
+            guidance,
+            strength,
+            image_size: imageSize,
+            lora_scale: loraScale,
+            aspect_ratio: aspectRatio,
+            output_format: outputFormat,
+            enhance_prompt: enhancePrompt,
+            output_quality: outputQuality,
+            negative_prompt: negativePrompt,
+            num_inference_steps: numInferenceSteps,
+            disable_safety_checker: disableSafetyChecker,
+            ...(numOutputs ? { num_outputs: numOutputs } : {}),
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) ? { seed: combinedParameters.seed } : {}),
+            ...(combinedParameters.image ? { image: combinedParameters.image } : {}),
+            ...(combinedParameters.input_image ? { input_image: combinedParameters.input_image } : {}),
+          },
+        };
+        break;
+      }
+      case "replicate-qwen-image-edit-plus": {
+        const aspectRatio = combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio ?? "match_input_image";
+        const outputFormat = combinedParameters.output_format ?? combinedParameters.outputFormat ?? "webp";
+        const outputQuality = combinedParameters.output_quality ?? combinedParameters.outputQuality ?? 95;
+        const goFast = combinedParameters.go_fast ?? combinedParameters.goFast ?? true;
+        const disableSafetyChecker = combinedParameters.disable_safety_checker ?? combinedParameters.disableSafetyChecker ?? false;
+
+        const collectImages = (candidate, accumulator) => {
+          if (!candidate) return;
+          if (Array.isArray(candidate)) {
+            candidate.forEach((item) => collectImages(item, accumulator));
+            return;
+          }
+          accumulator.push(candidate);
+        };
+
+        const imageCandidates = [];
+        collectImages(combinedParameters.image, imageCandidates);
+        collectImages(combinedParameters.images, imageCandidates);
+        collectImages(combinedParameters.input_image, imageCandidates);
+        collectImages(combinedParameters.input_images, imageCandidates);
+        collectImages(combinedParameters.input_image_1, imageCandidates);
+        collectImages(combinedParameters.input_image_2, imageCandidates);
+        collectImages(combinedParameters.input_image_3, imageCandidates);
+        collectImages(combinedParameters.image_1, imageCandidates);
+        collectImages(combinedParameters.image_2, imageCandidates);
+
+        const normalizeImageEntry = (entry) => {
+          if (!entry) return null;
+          if (typeof entry === "string") {
+            return entry; // Return the URL string directly
+          }
+          if (typeof entry === "object") {
+            if (Array.isArray(entry)) {
+              return null;
+            }
+            if (entry.value) {
+              return entry.value; // Return the value as a string
+            }
+            if (entry.url) {
+              return entry.url; // Return the URL as a string
+            }
+            if (entry.path) {
+              return entry.path; // Return the path as a string
+            }
+          }
+          return null;
+        };
+
+        const normalizedImages = imageCandidates
+          .map((candidate) => normalizeImageEntry(candidate))
+          .filter((candidate) => candidate && typeof candidate === 'string');
+
+        const omitUndefined = (obj) =>
+          Object.fromEntries(
+            Object.entries(obj).filter(([, value]) => value !== undefined && value !== null),
+          );
+
+        const basePayload = omitUndefined({
+          prompt: modelPromptText,
+          go_fast: goFast,
+          aspect_ratio: aspectRatio,
+          output_format: outputFormat,
+          output_quality: outputQuality,
+          disable_safety_checker: disableSafetyChecker,
+        });
+
+        // For qwen-image-edit-plus, always include the image array if we have images
+        const inputPayload = {
+          ...basePayload,
+          ...(normalizedImages.length > 0 ? { image: normalizedImages } : {})
+        };
+
+        requestParameters = {
+          input: inputPayload,
+        };
+        break;
+      }
       case "replicate-flux-kontext-pro":
       case "replicate-flux-kontext-max": {
         const validRatios = [
@@ -174,12 +291,14 @@ class ReplicateApiPlugin extends ModelPlugin {
     cortexRequest.params = requestParameters.params;
 
     // Make initial request to start prediction
-    const stringifiedResponse = await this.executeRequest(cortexRequest);
-    const parsedResponse = JSON.parse(stringifiedResponse);
+    const response = await this.executeRequest(cortexRequest);
+    
+    // Parse the response to get the actual Replicate data
+    const parsedResponse = JSON.parse(response.output_text);
 
-    // If we got a completed response, return it
+    // If we got a completed response, return it as CortexResponse
     if (parsedResponse?.status === "succeeded") {
-      return stringifiedResponse;
+      return this.createCortexResponse(response);
     }
     
     logger.info("Replicate API returned a non-completed response.");
@@ -211,7 +330,9 @@ class ReplicateApiPlugin extends ModelPlugin {
         
         if (status === "succeeded") {
           logger.info("Replicate API returned a completed response after polling");
-          return JSON.stringify(pollResponse.data);
+          // Parse the polled response to extract artifacts
+          const parsedResponse = this.parseResponse(pollResponse.data);
+          return this.createCortexResponse(parsedResponse);
         } else if (status === "failed" || status === "canceled") {
           throw new Error(`Prediction ${status}: ${pollResponse.data?.error || "Unknown error"}`);
         }
@@ -227,12 +348,67 @@ class ReplicateApiPlugin extends ModelPlugin {
     throw new Error(`Prediction ${predictionId} timed out after ${maxAttempts * pollInterval / 1000} seconds`);
   }
 
-  // Stringify the response from the Replicate API
+  // Parse the response from the Replicate API and extract image artifacts
   parseResponse(data) {
-    if (data.data) {
-      return JSON.stringify(data.data);
+    const responseData = data.data || data;
+    const stringifiedResponse = JSON.stringify(responseData);
+    
+    // Extract image URLs from Replicate response for artifacts
+    const imageArtifacts = [];
+    if (responseData?.output && Array.isArray(responseData.output)) {
+      for (const outputItem of responseData.output) {
+        if (typeof outputItem === 'string' && outputItem.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+          // This is an image URL from Replicate
+          imageArtifacts.push({
+            type: "image",
+            url: outputItem,
+            mimeType: this.getMimeTypeFromUrl(outputItem)
+          });
+        }
+      }
     }
-    return JSON.stringify(data);
+    
+    return {
+      output_text: stringifiedResponse,
+      artifacts: imageArtifacts
+    };
+  }
+
+  // Create a CortexResponse from parsed response data
+  createCortexResponse(parsedResponse) {
+    if (typeof parsedResponse === 'string') {
+      // Handle string response (backward compatibility)
+      return new CortexResponse({
+        output_text: parsedResponse,
+        artifacts: []
+      });
+    } else if (parsedResponse && typeof parsedResponse === 'object') {
+      // Handle object response with artifacts
+      return new CortexResponse({
+        output_text: parsedResponse.output_text,
+        artifacts: parsedResponse.artifacts || []
+      });
+    } else {
+      throw new Error('Unexpected response format');
+    }
+  }
+
+  // Helper method to determine MIME type from URL extension
+  getMimeTypeFromUrl(url) {
+    const extension = url.split('.').pop().toLowerCase();
+    switch (extension) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      default:
+        return 'image/jpeg'; // Default fallback
+    }
   }
 
   // Override the logging function to display the request and response
