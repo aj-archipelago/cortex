@@ -25,6 +25,7 @@ import { cancelRequestResolver } from './resolver.js';
 import subscriptions from './subscriptions.js';
 import { getMessageTypeDefs, getPathwayTypeDef, userPathwayInputParameters } from './typeDef.js';
 import { buildRestEndpoints } from './rest.js';
+import { callPathway } from '../lib/pathwayTools.js';
 
 // Utility functions
 // Server plugins
@@ -130,6 +131,140 @@ const getResolvers = (config, pathways, pathwayManager) => {
 
     const pathwayManagerResolvers = pathwayManager?.getResolvers() || {};
 
+    // Helper function to resolve file hashes and add them to chatHistory
+    const resolveAndAddFileContent = async (pathways, pathwayArgs, requestId, config) => {
+        let fileContentAdded = false;
+        
+        // Check if any pathway has file hashes
+        const pathwaysWithFiles = Array.isArray(pathways) ? pathways : [pathways];
+        
+        for (const pathway of pathwaysWithFiles) {
+            if (pathway.fileHashes && pathway.fileHashes.length > 0) {
+                try {
+                    const { resolveFileHashesToContent } = await import('../lib/util.js');
+                    const fileContent = await resolveFileHashesToContent(pathway.fileHashes, config);
+                    
+                    // Add file content to chatHistory if not already present (only do this once)
+                    if (!fileContentAdded) {
+                        // Initialize chatHistory if it doesn't exist
+                        if (!pathwayArgs.chatHistory) {
+                            pathwayArgs.chatHistory = [];
+                        }
+                        
+                        // Find the last user message or create one
+                        let lastUserMessage = null;
+                        for (let i = pathwayArgs.chatHistory.length - 1; i >= 0; i--) {
+                            if (pathwayArgs.chatHistory[i].role === 'user') {
+                                lastUserMessage = pathwayArgs.chatHistory[i];
+                                break;
+                            }
+                        }
+                        
+                        if (!lastUserMessage) {
+                            lastUserMessage = {
+                                role: 'user',
+                                content: []
+                            };
+                            pathwayArgs.chatHistory.push(lastUserMessage);
+                        }
+                        
+                        // Ensure content is an array
+                        if (!Array.isArray(lastUserMessage.content)) {
+                            lastUserMessage.content = [
+                                JSON.stringify({
+                                    type: "text",
+                                    text: lastUserMessage.content || ""
+                                })
+                            ];
+                        }
+                        
+                        // Add file content
+                        lastUserMessage.content.push(...fileContent);
+                        fileContentAdded = true;
+                    }
+                } catch (error) {
+                    logger.error(`[${requestId}] Failed to resolve file hashes for pathway ${pathway.name || 'unnamed'}: ${error.message}`);
+                    // Continue execution without files
+                }
+                
+                // Only process files once for multiple pathways
+                if (fileContentAdded) break;
+            }
+        }
+        
+        return fileContentAdded;
+    };
+
+    // Helper function to execute pathway with cortex pathway name or fallback to legacy
+    const executePathwayWithFallback = async (pathway, pathwayArgs, contextValue, info, requestId, originalPrompt = null) => {
+        const cortexPathwayName = (originalPrompt && typeof originalPrompt === 'object' && originalPrompt.cortexPathwayName) 
+            ? originalPrompt.cortexPathwayName 
+            : null;
+        
+        if (cortexPathwayName) {
+            // Use the specific cortex pathway
+            // Transform parameters for cortex pathway
+            const cortexArgs = {
+                model: pathway.model || pathwayArgs.model || "labeeb-agent", // Use pathway model or default
+                chatHistory: [],
+                systemPrompt: pathway.systemPrompt
+            };
+            
+            // If we have existing chatHistory, use it as base
+            if (pathwayArgs.chatHistory && pathwayArgs.chatHistory.length > 0) {
+                cortexArgs.chatHistory = JSON.parse(JSON.stringify(pathwayArgs.chatHistory));
+            }
+            
+            // If we have text parameter, we need to add it to the chatHistory
+            if (pathwayArgs.text) {
+                // Find the last user message or create a new one
+                let lastUserMessage = null;
+                for (let i = cortexArgs.chatHistory.length - 1; i >= 0; i--) {
+                    if (cortexArgs.chatHistory[i].role === 'user') {
+                        lastUserMessage = cortexArgs.chatHistory[i];
+                        break;
+                    }
+                }
+                
+                if (lastUserMessage) {
+                    // Ensure content is an array
+                    if (!Array.isArray(lastUserMessage.content)) {
+                        lastUserMessage.content = [JSON.stringify({
+                            type: "text",
+                            text: lastUserMessage.content || ""
+                        })];
+                    }
+                    
+                    // Add the text parameter as a text content item
+                    const textFromPrompt = originalPrompt?.prompt || pathwayArgs.text;
+                    lastUserMessage.content.unshift(JSON.stringify({
+                        type: "text",
+                        text: `${pathwayArgs.text}\n\n${textFromPrompt}`
+                    }));
+                } else {
+                    // Create new user message with text
+                    const textFromPrompt = originalPrompt?.prompt || pathwayArgs.text;
+                    cortexArgs.chatHistory.push({
+                        role: 'user',
+                        content: [JSON.stringify({
+                            type: "text",
+                            text: `${pathwayArgs.text}\n\n${textFromPrompt}`
+                        })]
+                    });
+                }
+            }
+            
+            const result = await callPathway(cortexPathwayName, cortexArgs);
+            
+            // Wrap the result to match expected format
+            return { result };
+        } else {
+            // Fallback to original pathway execution for legacy prompts
+            const pathwayContext = { ...contextValue, pathway };
+            return await pathway.rootResolver(null, pathwayArgs, pathwayContext, info);
+        }
+    };
+
     const executeWorkspaceResolver = async (_, args, contextValue, info) => {
         const startTime = Date.now();
         const requestId = uuidv4();
@@ -150,7 +285,6 @@ const getResolvers = (config, pathways, pathwayManager) => {
             }
 
             const basePathway = pathways[userId][pathwayName];
-            logger.debug(`[${requestId}] Found pathway: ${pathwayName} for user: ${userId}`);
             
             // If promptNames is specified, use getPathways to get individual pathways and execute in parallel
             if (promptNames && promptNames.length > 0) {
@@ -177,22 +311,24 @@ const getResolvers = (config, pathways, pathwayManager) => {
                         throw error;
                     }
                     
+                    // Resolve file content for any pathways that have file hashes
+                    await resolveAndAddFileContent(individualPathways, pathwayArgs, requestId, config);
+                    
                     // Execute all pathways in parallel
-                    logger.debug(`[${requestId}] Executing ${individualPathways.length} pathways in parallel`);
                     const results = await Promise.all(
                         individualPathways.map(async (pathway, index) => {
                             try {
-                                logger.debug(`[${requestId}] Starting pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}`);
-                                const pathwayContext = { ...contextValue, pathway };
-                                const result = await pathway.rootResolver(null, pathwayArgs, pathwayContext, info);
-                                logger.debug(`[${requestId}] Completed pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}`);
+                                // Check if the prompt has a cortexPathwayName (new format)
+                                const originalPrompt = basePathway.prompt[index];
+                                
+                                const result = await executePathwayWithFallback(pathway, pathwayArgs, contextValue, info, requestId, originalPrompt);
+                                
                                 return {
                                     result: result.result,
                                     promptName: pathway.name || `prompt_${index + 1}`
                                 };
                             } catch (error) {
                                 logger.error(`!!! [${requestId}] Error in pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'} - ${error.message}`);
-                                logger.debug(`[${requestId}] Error stack: ${error.stack}`);
                                 throw error;
                             }
                         })
@@ -223,22 +359,27 @@ const getResolvers = (config, pathways, pathwayManager) => {
                         throw error;
                     }
                     
+                    // Resolve file content for any pathways that have file hashes
+                    await resolveAndAddFileContent(individualPathways, pathwayArgs, requestId, config);
+                    
                     // Execute all pathways in parallel
-                    logger.debug(`[${requestId}] Executing ${individualPathways.length} pathways in parallel`);
                     const results = await Promise.all(
                         individualPathways.map(async (pathway, index) => {
                             try {
-                                logger.debug(`[${requestId}] Starting pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}`);
-                                const pathwayContext = { ...contextValue, pathway };
-                                const result = await pathway.rootResolver(null, pathwayArgs, pathwayContext, info);
-                                logger.debug(`[${requestId}] Completed pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}`);
+                                // Find the original prompt by name to get the cortexPathwayName
+                                const originalPrompt = basePathway.prompt.find(p => 
+                                    (typeof p === 'object' && p.name === pathway.name) ||
+                                    (typeof p === 'string' && pathway.name === `prompt_${basePathway.prompt.indexOf(p)}`)
+                                );
+                                
+                                const result = await executePathwayWithFallback(pathway, pathwayArgs, contextValue, info, requestId, originalPrompt);
+                                
                                 return {
                                     result: result.result,
                                     promptName: pathway.name || `prompt_${index + 1}`
                                 };
                             } catch (error) {
                                 logger.error(`!!! [${requestId}] Error in pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'} - ${error.message}`);
-                                logger.debug(`[${requestId}] Error stack: ${error.stack}`);
                                 throw error;
                             }
                         })
@@ -266,7 +407,19 @@ const getResolvers = (config, pathways, pathwayManager) => {
             const userPathway = await pathwayManager.getPathway(userId, pathwayName);
             contextValue.pathway = userPathway;
             
-            const result = await userPathway.rootResolver(null, pathwayArgs, contextValue, info);
+            // Handle file hashes if present in the pathway
+            await resolveAndAddFileContent(userPathway, pathwayArgs, requestId, config);
+            
+            // Check if any prompt has cortexPathwayName (for dynamic pathways)
+            let result;
+            if (userPathway.prompt && Array.isArray(userPathway.prompt)) {
+                const firstPrompt = userPathway.prompt[0];
+                
+                result = await executePathwayWithFallback(userPathway, pathwayArgs, contextValue, info, requestId, firstPrompt);
+            } else {
+                // No prompt array, use legacy execution
+                result = await userPathway.rootResolver(null, pathwayArgs, contextValue, info);
+            }
             const duration = Date.now() - startTime;
             logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned 1 result`);
             return result; // Return single result directly
