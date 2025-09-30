@@ -43,9 +43,11 @@ class TaskProcessor:
         CORTEX_API_BASE_URL = os.getenv("CORTEX_API_BASE_URL", "http://host.docker.internal:4000/v1")
 
         # Define ModelInfo for custom models
-        o3_model_info = ModelInfo(model="o3", name="Cortex o3", max_tokens=8192, cost_per_token=0.0, vision=False, function_calling=True, json_output=False, family="openai", structured_output=False) # Placeholder cost
-        o4_mini_model_info = ModelInfo(model="o4-mini", name="Cortex o4-mini", max_tokens=128000, cost_per_token=0.0, vision=False, function_calling=True, json_output=False, family="openai", structured_output=False) # Placeholder cost
-        gpt41_model_info = ModelInfo(model="gpt-4.1", name="Cortex gpt-4.1", max_tokens=8192, cost_per_token=0.0, vision=False, function_calling=True, json_output=False, family="openai", structured_output=False) # Placeholder cost
+        o3_model_info = ModelInfo(model="o3", name="Cortex o3", max_tokens=128000, cost_per_token=0.0, vision=False, function_calling=True, json_output=False, family="openai", structured_output=False)
+        o4_mini_model_info = ModelInfo(model="o4-mini", name="Cortex o4-mini", max_tokens=128000, cost_per_token=0.0, vision=False, function_calling=True, json_output=False, family="openai", structured_output=False) 
+        gpt41_model_info = ModelInfo(model="gpt-4.1", name="Cortex gpt-4.1", max_tokens=8192, cost_per_token=0.0, vision=False, function_calling=True, json_output=False, family="openai", structured_output=False) 
+        gpt5_model_info = ModelInfo(model="gpt-5", name="Cortex gpt-5", max_tokens=128000, cost_per_token=0.0, vision=False, function_calling=True, json_output=False, family="openai", structured_output=False) 
+        claude_4_sonnet_model_info = ModelInfo(model="claude-4-sonnet", name="Cortex claude-4-sonnet", max_tokens=128000, cost_per_token=0.0, vision=False, function_calling=True, json_output=False, family="openai", structured_output=False) 
 
         self.o3_model_client = OpenAIChatCompletionClient(
             model="o3",
@@ -69,6 +71,22 @@ class TaskProcessor:
             base_url=CORTEX_API_BASE_URL,
             timeout=600,
             model_info=gpt41_model_info # Pass model_info
+        )
+
+        self.gpt5_model_client = OpenAIChatCompletionClient(
+            model="gpt-5",
+            api_key=CORTEX_API_KEY,
+            base_url=CORTEX_API_BASE_URL,
+            timeout=600,
+            model_info=gpt5_model_info # Pass model_info
+        )
+
+        self.claude_4_sonnet_model_client = OpenAIChatCompletionClient(
+            model="claude-4-sonnet",
+            api_key=CORTEX_API_KEY,
+            base_url=CORTEX_API_BASE_URL,
+            timeout=600,
+            model_info=claude_4_sonnet_model_info # Pass model_info
         )
         
         self.progress_tracker = await get_redis_publisher()
@@ -264,6 +282,14 @@ Return only the update line, nothing else:"""
         # If the entire content is just a role name, treat as internal
         if text in role_names:
             return True
+
+        # Treat provider schema errors about tool_calls/MultiMessage as internal noise
+        try:
+            lowered = text.lower()
+            if ("tool_calls" in lowered) and ("multimessage" in lowered) and ("field" in lowered or "variable" in lowered):
+                return True
+        except Exception:
+            pass
         return False
 
     async def handle_progress_update(self, task_id: str, percentage: float, content: str, message_type: str = None, source: str = None):
@@ -354,6 +380,7 @@ Return only the update line, nothing else:"""
 
             messages = []
             uploaded_file_urls = {}
+            uploaded_files_list: List[Dict[str, Any]] = []
             external_media_urls: List[str] = []
             final_result_content = []
 
@@ -364,6 +391,9 @@ Return only the update line, nothing else:"""
             """
 
             stream = team.run_stream(task=task)
+            # Loop guard for repeating provider schema errors (e.g., tool_calls/MultiMessage)
+            repeated_schema_error_count = 0
+            last_schema_error_seen = False
             async for message in stream:
                 messages.append(message)
                 source = message.source if hasattr(message, 'source') else None
@@ -375,6 +405,26 @@ Return only the update line, nothing else:"""
                 if task_completed_percentage >= 1.0:
                     task_completed_percentage = 0.99
                     
+                # Loop-guard detection: break early if the same schema error repeats
+                try:
+                    ctext = str(content) if content is not None else ""
+                    is_schema_err = ("tool_calls" in ctext) and ("MultiMessage" in ctext)
+                    if is_schema_err:
+                        if last_schema_error_seen:
+                            repeated_schema_error_count += 1
+                        else:
+                            repeated_schema_error_count = 1
+                        last_schema_error_seen = True
+                        # If schema error repeats too many times, stop the loop to avoid getting stuck
+                        if repeated_schema_error_count >= 3:
+                            logger.warning("Breaking team.run_stream due to repeated MultiMessage/tool_calls schema errors.")
+                            break
+                    else:
+                        last_schema_error_seen = False
+                        repeated_schema_error_count = 0
+                except Exception:
+                    pass
+
                 if content and not self._is_internal_selector_message(content):
                     processed_content_for_progress = content
                     if message.type == "ToolCallExecutionEvent" and hasattr(message, 'content') and isinstance(message.content, list):
@@ -438,24 +488,75 @@ Return only the update line, nothing else:"""
             except Exception:
                 pass
 
-            # Per-request auto-upload: upload any deliverables found in the request work dir
+            # No fallback file generation: if required assets are missing, allow termination to report inability
+            except Exception:
+                # Catch-all for the outer deliverables-referencing try block
+                pass
+
+            # Per-request auto-upload: select best deliverables (avoid multiple near-identical PPTX)
             try:
                 deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf", ".zip"}
                 req_dir = os.getenv("CORTEX_WORK_DIR", "/tmp/coding")
+                selected_paths: List[str] = []
                 if os.path.isdir(req_dir):
+                    # Gather candidates by extension
+                    candidates_by_ext: Dict[str, List[Dict[str, Any]]] = {}
                     for root, _, files in os.walk(req_dir):
                         for name in files:
                             try:
                                 _, ext = os.path.splitext(name)
-                                if ext.lower() not in deliverable_exts:
+                                ext = ext.lower()
+                                if ext not in deliverable_exts:
                                     continue
                                 fp = os.path.join(root, name)
-                                up_json = upload_file_to_azure_blob(fp, blob_name=None)
-                                up = json.loads(up_json)
-                                if "download_url" in up and "blob_name" in up:
-                                    uploaded_file_urls[up["blob_name"]] = up["download_url"]
+                                size = 0
+                                mtime = 0.0
+                                try:
+                                    st = os.stat(fp)
+                                    size = int(getattr(st, 'st_size', 0))
+                                    mtime = float(getattr(st, 'st_mtime', 0.0))
+                                except Exception:
+                                    pass
+                                lst = candidates_by_ext.setdefault(ext, [])
+                                lst.append({"path": fp, "size": size, "mtime": mtime})
                             except Exception:
                                 continue
+
+                    # Selection policy:
+                    # - For .pptx and .ppt: choose the single largest file (assume most complete)
+                    # - For other ext: include all
+                    for ext, items in candidates_by_ext.items():
+                        if ext in (".pptx", ".ppt"):
+                            if items:
+                                best = max(items, key=lambda x: (x.get("size", 0), x.get("mtime", 0.0)))
+                                selected_paths.append(best["path"])
+                        else:
+                            for it in items:
+                                selected_paths.append(it["path"])
+
+                # Upload only selected paths
+                for fp in selected_paths:
+                    try:
+                        up_json = upload_file_to_azure_blob(fp, blob_name=None)
+                        up = json.loads(up_json)
+                        if "download_url" in up and "blob_name" in up:
+                            uploaded_file_urls[up["blob_name"]] = up["download_url"]
+                            try:
+                                bname = os.path.basename(str(up.get("blob_name") or ""))
+                                extl = os.path.splitext(bname)[1].lower()
+                                is_img = extl in (".png", ".jpg", ".jpeg", ".webp", ".gif")
+                                uploaded_files_list.append({
+                                    "file_name": bname,
+                                    "url": up["download_url"],
+                                    "ext": extl,
+                                    "is_image": is_img,
+                                })
+                                if is_img:
+                                    external_media_urls.append(up["download_url"])
+                            except Exception:
+                                pass
+                    except Exception:
+                        continue
             except Exception:
                 pass
 
@@ -474,6 +575,20 @@ Return only the update line, nothing else:"""
 
             result_limited_to_fit = "\n".join(final_result_content)
 
+            # Provide the presenter with explicit file list to avoid duplication and downloads sections
+            uploaded_files_list = []
+            try:
+                for blob_name, url in (uploaded_file_urls.items() if isinstance(uploaded_file_urls, dict) else []):
+                    try:
+                        fname = os.path.basename(str(blob_name))
+                    except Exception:
+                        fname = str(blob_name)
+                    extl = os.path.splitext(fname)[1].lower()
+                    is_image = extl in (".png", ".jpg", ".jpeg", ".webp", ".gif")
+                    uploaded_files_list.append({"file_name": fname, "url": url, "ext": extl, "is_image": is_image})
+            except Exception:
+                pass
+
             presenter_task = f"""
             Present the task result in a clean, professional Markdown/HTML that contains ONLY what the task requested. This will be shown in a React app.
             Use only the information provided.
@@ -490,18 +605,22 @@ Return only the update line, nothing else:"""
             EXTERNAL_MEDIA_URLS:
             {json.dumps(external_media_urls, indent=2)}
 
+            UPLOADED_FILES_LIST:
+            {json.dumps(uploaded_files_list, indent=2)}
+
             STRICT OUTPUT RULES:
-            - If a file was created, list only the real download URL(s) from UPLOADED_FILES_SAS_URLS.
-            - You MAY include images and videos from EXTERNAL_MEDIA_URLS. Place them thoughtfully with captions.
+            - Use UPLOADED_FILES_LIST (SAS URLs) and EXTERNAL_MEDIA_URLS to present assets. Always use the SAS URL provided in UPLOADED_FILES_LIST for any uploaded file.
+            - Images (png, jpg, jpeg, webp, gif): embed inline in a Visuals section using <figure><img/></figure> with captions. Do NOT provide links for images.
+            - Non-image files (pptx, pdf, csv): insert a SINGLE inline anchor (<a href=\"...\">filename</a>) at the first natural mention; do NOT create a 'Downloads' section; do NOT repeat links.
             - For media: do NOT use grid or containers.
               - SINGLE media: wrap in <figure style=\"margin: 12px 0;\"> with <img style=\"display:block;width:100%;max-width:960px;height:auto;margin:0 auto;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.12)\"> and a <figcaption style=\"margin-top:8px;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;\">.
               - MULTIPLE media: output consecutive <figure> elements, one per row; no wrapping <div>.
             - Avoid framework classes in HTML; rely on inline styles only. Do NOT include any class attributes. Use color: inherit for captions to respect dark/light mode.
-            - Never fabricate URLs, images, or content; use only links from UPLOADED_FILES_SAS_URLS or EXTERNAL_MEDIA_URLS.
-            - Present each uploaded file ONCE only (no duplicate links), using its filename as the link text.
-            - For links, prefer HTML anchor tags: <a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\">FILENAME</a>. For common file types (pdf, pptx, csv, png, jpg, jpeg), include the download attribute: <a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" download>FILENAME</a>.
+            - Never fabricate URLs, images, or content; use only links present in UPLOADED_FILES_LIST or EXTERNAL_MEDIA_URLS.
+            - Present each uploaded non-image file ONCE only (no duplicate links), using its filename as the link text.
+            - For links, prefer HTML anchor tags: <a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" download>FILENAME</a>.
             - Do NOT include code, tool usage, or internal logs.
-            - Be detailed and user-facing. Include Overview, Visuals, Key Takeaways, and Downloads sections when applicable.
+            - Be detailed and user-facing. Include Overview, Visuals, Key Takeaways, and Next Actions sections. Do not create a Downloads section.
             """
             
             presenter_stream = presenter_agent.run_stream(task=presenter_task)
@@ -514,96 +633,13 @@ Return only the update line, nothing else:"""
             last_message = task_result.messages[-1]
             text_result = last_message.content if hasattr(last_message, 'content') else None
 
-            # Upload deliverables referenced in presenter's final text (LLM-guided)
+            # No presenter normalization or auto-upload based on text; rely on strict prompts
             try:
-                import re
-                if isinstance(text_result, str):
-                    # 1) Normalize presenter HTML (remove wrapper classes/grids)
-                    try:
-                        from bs4 import BeautifulSoup  # available in requirements
-                        def _normalize_presenter_html(html: str) -> str:
-                            soup = BeautifulSoup(html, 'html.parser')
-                            for el in soup.find_all(True):
-                                if 'class' in el.attrs:
-                                    del el.attrs['class']
-                            for div in list(soup.find_all('div')):
-                                try:
-                                    children = list(div.children)
-                                    meaningful = [c for c in children if getattr(c, 'name', None) is not None]
-                                    if meaningful and all(c.name in ('figure', 'img', 'figcaption') for c in meaningful):
-                                        div.unwrap()
-                                        continue
-                                except Exception:
-                                    pass
-                                if 'class' in div.attrs:
-                                    del div.attrs['class']
-                                style = div.get('style', '')
-                                if style:
-                                    for frag in (
-                                        'place-items: stretch;', 'place-items:stretch;',
-                                        'display: grid;', 'display:grid;',
-                                        'grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));',
-                                        'grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));',
-                                        'grid-template-columns:1fr;', 'grid-auto-rows: auto;',
-                                        'gap: 0.75rem;', 'gap:0.75rem;', 'gap: 12px;', 'gap:12px;'
-                                    ):
-                                        style = style.replace(frag, '')
-                                    div['style'] = style.strip('; ')
-                            for fig in soup.find_all('figure'):
-                                fig['style'] = 'margin:0;padding:0;width:100%;'
-                            for cap in soup.find_all('figcaption'):
-                                cap['style'] = 'margin-top:0.5rem;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;'
-                            for img in soup.find_all('img'):
-                                img['style'] = 'display:block;width:100%;max-width:100%;height:auto;object-fit:contain;background:transparent;border:none;outline:none;border-radius:0.5rem;'
-                                if 'width' in img.attrs:
-                                    del img.attrs['width']
-                                if 'height' in img.attrs:
-                                    del img.attrs['height']
-                            return str(soup)
-                        text_result = _normalize_presenter_html(text_result)
-                    except Exception:
-                        text_result = re.sub(r'\sclass=\"[^\"]*\"', '', text_result)
-                        def _img_style_repl(m):
-                            attrs = m.group(1) or ''
-                            attrs = re.sub(r'\s(width|height)=\"[^\"]*\"', '', attrs)
-                            if 'style=' in attrs:
-                                attrs = re.sub(r'style=\"[^\"]*\"', 'style="display:block;width:100%;max-width:100%;height:auto;object-fit:contain;border-radius:8px;"', attrs)
-                            else:
-                                attrs += ' style="display:block;width:100%;max-width:100%;height:auto;object-fit:contain;border-radius:8px;"'
-                            return f"<img{attrs}>"
-                        text_result = re.sub(r'<img(\s[^>]*)?>', _img_style_repl, text_result)
-
-                    # 2) Identify filenames mentioned in final text and upload ONLY those from request work dir
-                    try:
-                        work_dir_scan = os.getenv('CORTEX_WORK_DIR', '/tmp/coding')
-                        file_regex = r'([A-Za-z0-9._\-]+\.(?:pptx|ppt|csv|png|jpg|jpeg|pdf|zip))'
-                        mentioned = set(re.findall(file_regex, text_result, flags=re.I))
-                        found_map = {}
-                        if mentioned and os.path.isdir(work_dir_scan):
-                            for root, _, files in os.walk(work_dir_scan):
-                                for fname in files:
-                                    for cand in list(mentioned):
-                                        if fname.lower() == cand.lower():
-                                            found_map[cand] = os.path.join(root, fname)
-                                            mentioned.discard(cand)
-                                    if not mentioned:
-                                        break
-                        # Upload found files
-                        for name, path in found_map.items():
-                            try:
-                                up_json = upload_file_to_azure_blob(path, blob_name=None)
-                                up = json.loads(up_json)
-                                if 'download_url' in up and 'blob_name' in up:
-                                    uploaded_file_urls[up['blob_name']] = up['download_url']
-                            except Exception:
-                                continue
-                    except Exception:
-                        pass
-
-                    # 3) Safety checks: allow only links present in uploaded_file_urls or external media
-                    # Remove restrictive filtering. Presenter's output will include uploaded URLs when relevant.
+                pass
             except Exception:
                 pass
+
+            # No post-sanitization here; enforce via presenter prompt only per user request
 
             logger.info(f"🔍 TASK RESULT:\n{text_result}")
 

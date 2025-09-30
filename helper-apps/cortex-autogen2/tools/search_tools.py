@@ -12,6 +12,8 @@ import os
 import requests
 import json
 from typing import Dict, Any, List, Optional
+import hashlib
+from PIL import Image
 import asyncio # Import asyncio
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -19,6 +21,7 @@ import re
 import urllib.parse
 import html as html_lib
 from .google_cse import google_cse_search
+from urllib.parse import urljoin, urlparse
 
 # try:
 # except ImportError:
@@ -105,24 +108,54 @@ def _normalize_cse_web_results(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _normalize_cse_image_results(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Normalize Google CSE (image) response to our common image result shape.
+    Handles both standard items array and pagemap-based image results.
     """
-    items = (payload or {}).get("items") or []
     normalized: List[Dict[str, Any]] = []
+    
+    # Method 1: Standard items array (searchType=image)
+    items = (payload or {}).get("items") or []
     for it in items:
         link = it.get("link")  # direct image URL
         image_obj = it.get("image") or {}
-        if not link and not image_obj:
+        pagemap = it.get("pagemap") or {}
+        cse_image = (pagemap.get("cse_image") or [{}])[0] if "cse_image" in pagemap else {}
+        
+        # Prefer direct link, fallback to pagemap images
+        img_url = link or image_obj.get("thumbnailLink") or cse_image.get("src")
+        if not img_url:
             continue
+            
         normalized.append({
             "type": "image",
-            "title": it.get("title"),
-            "url": link or image_obj.get("thumbnailLink"),
-            "original_url": link,
-            "thumbnail_url": image_obj.get("thumbnailLink"),
-            "width": image_obj.get("width"),
-            "height": image_obj.get("height"),
-            "host_page_url": image_obj.get("contextLink"),
+            "title": it.get("title") or cse_image.get("alt"),
+            "url": img_url,
+            "original_url": link or img_url,
+            "thumbnail_url": image_obj.get("thumbnailLink") or img_url,
+            "width": image_obj.get("width") or cse_image.get("width"),
+            "height": image_obj.get("height") or cse_image.get("height"),
+            "host_page_url": image_obj.get("contextLink") or it.get("link"),
         })
+    
+    # Method 2: Extract from pagemap in web results (fallback)
+    if not normalized:
+        for it in items:
+            pagemap = it.get("pagemap") or {}
+            cse_images = pagemap.get("cse_image") or []
+            for img in cse_images:
+                img_url = img.get("src")
+                if img_url:
+                    normalized.append({
+                        "type": "image",
+                        "title": it.get("title"),
+                        "url": img_url,
+                        "original_url": img_url,
+                        "thumbnail_url": img_url,
+                        "width": img.get("width"),
+                        "height": img.get("height"),
+                        "host_page_url": it.get("link"),
+                    })
+    
+    logging.info(f"[_normalize_cse_image_results] Extracted {len(normalized)} images from CSE payload")
     return normalized
 
 
@@ -333,96 +366,72 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
         return json.dumps({"error": f"Fetch failed: {str(exc)}"})
 
 
-def _ddg_get_vqd(query: str) -> Optional[str]:
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://duckduckgo.com/"}
-    url = f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}&iax=images&ia=images"
-    resp = requests.get(url, headers=headers, timeout=20)
-    resp.raise_for_status()
-    text = resp.text
-    # Common patterns seen in the page scripts
-    # Try multiple patterns; DDG frequently changes this
-    m = re.search(r"vqd='([\w-]+)'", text)
-    if not m:
-        m = re.search(r'vqd="([\w-]+)"', text)
-    if not m:
-        m = re.search(r'vqd=([\w-]+)&', text)
-    return m.group(1) if m else None
+# DuckDuckGo vqd token method removed - no API key needed, using HTML scraping only
 
 
 def _ddg_images_html(query: str, count: int = 25) -> List[Dict[str, Any]]:
     headers = {"User-Agent": USER_AGENT, "Referer": "https://duckduckgo.com/"}
     url = f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}&ia=images&iar=images"
-    resp = requests.get(url, headers=headers, timeout=20)
-    resp.raise_for_status()
-    html = resp.text
-    items: List[Dict[str, Any]] = []
-    # Look for external-content proxied URLs; extract original via 'u' param
-    for m in re.finditer(r'(?:src|data-src)="(https://external-content\.duckduckgo\.com/iu/\?u=[^"]+)"', html):
-        proxy = html_lib.unescape(m.group(1))
-        try:
-            parsed = urllib.parse.urlparse(proxy)
-            qs = urllib.parse.parse_qs(parsed.query)
-            orig = qs.get('u', [None])[0]
-            if not orig:
-                continue
-            orig = urllib.parse.unquote(orig)
-            items.append({
-                "title": None,
-                "image": orig,
-                "thumbnail": proxy,
-                "width": None,
-                "height": None,
-                "source": None,
-            })
-            if len(items) >= count:
-                break
-        except Exception:
-            continue
-    return _normalize_image_results(items)
-
-
-def _ddg_images(query: str, count: int = 25) -> List[Dict[str, Any]]:
-    vqd = _ddg_get_vqd(query)
-    if not vqd:
-        # Fallback to simple HTML scraping if token not found
-        return _ddg_images_html(query, count)
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://duckduckgo.com/"}
-    params = {
-        "l": "us-en",
-        "o": "json",
-        "q": query,
-        "vqd": vqd,
-        "f": ",",
-        "p": "1",
-        "s": "0",
-    }
-    # Fetch multiple pages to maximize results in a single logical call
-    raw_results: List[Dict[str, Any]] = []
-    next_url = "https://duckduckgo.com/i.js"
-    while len(raw_results) < count and next_url:
-        resp = requests.get(next_url, headers=headers, params=params, timeout=20)
+    try:
+        resp = requests.get(url, headers=headers, timeout=20)
         resp.raise_for_status()
-        data = resp.json()
-        raw_results.extend(data.get("results") or [])
-        next_url = data.get("next")
-        params = None  # subsequent calls use absolute next URL
-        if not next_url:
-            break
-    items: List[Dict[str, Any]] = []
-    for it in raw_results[: max(1, min(count, 200))]:
-        items.append({
-            "title": it.get("title"),
-            "image": it.get("image"),
-            "thumbnail": it.get("thumbnail"),
-            "width": it.get("width"),
-            "height": it.get("height"),
-            "source": it.get("url"),
-        })
-    normalized = _normalize_image_results(items)
-    if not normalized:
-        # Extra fallback to HTML scrape if i.js yields nothing
-        return _ddg_images_html(query, count)
-    return normalized
+        html = resp.text
+        items: List[Dict[str, Any]] = []
+        
+        # Method 1: Look for external-content proxied URLs
+        for m in re.finditer(r'(?:src|data-src)="(https://external-content\.duckduckgo\.com/iu/\?u=[^"]+)"', html):
+            proxy = html_lib.unescape(m.group(1))
+            try:
+                parsed = urllib.parse.urlparse(proxy)
+                qs = urllib.parse.parse_qs(parsed.query)
+                orig = qs.get('u', [None])[0]
+                if not orig:
+                    continue
+                orig = urllib.parse.unquote(orig)
+                items.append({
+                    "title": None,
+                    "image": orig,
+                    "thumbnail": proxy,
+                    "width": None,
+                    "height": None,
+                    "source": None,
+                })
+                if len(items) >= count:
+                    break
+            except Exception:
+                continue
+        
+        # Method 2: Look for direct image URLs in the page
+        if len(items) < count // 2:
+            direct_patterns = [
+                r'"(https://[^"]+\.(?:jpg|jpeg|png|webp|gif))"',
+                r"'(https://[^']+\.(?:jpg|jpeg|png|webp|gif))'",
+            ]
+            for pattern in direct_patterns:
+                for m in re.finditer(pattern, html, re.I):
+                    img_url = m.group(1)
+                    if "duckduckgo.com" not in img_url and img_url not in [i["image"] for i in items]:
+                        items.append({
+                            "title": None,
+                            "image": img_url,
+                            "thumbnail": img_url,
+                            "width": None,
+                            "height": None,
+                            "source": None,
+                        })
+                        if len(items) >= count:
+                            break
+                if len(items) >= count:
+                    break
+        
+        logging.info(f"[_ddg_images_html] Found {len(items)} images for query: {query}")
+        return _normalize_image_results(items)
+    except Exception as e:
+        logging.error(f"[_ddg_images_html] Failed for query '{query}': {e}")
+        return []
+
+
+# DuckDuckGo JSON API method removed - no API key available, using HTML scraping only
 
 
 async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
@@ -498,31 +507,24 @@ def _is_downloadable_image(url: str, session=None, timeout: int = 15) -> bool:
         return False
 
 
-async def image_search(query: str, count: int = 25, verify_download: bool = True) -> str:
+async def image_search(query: str, count: int = 25, verify_download: bool = True, required_terms: Optional[List[str]] = None, allowed_domains: Optional[List[str]] = None, strict_entity: bool = False) -> str:
     try:
-        # Heuristic query expansion to bias towards high-quality, relevant images
+        # Simple query variants - avoid over-expanding which dilutes results
         def generate_query_variants(q: str) -> List[str]:
             base = q.strip()
+            # Only add ONE quality variant to keep results focused
             variants = [
-                base,
-                f"{base} official photo",
-                f"{base} wallpaper",
-                f"{base} artwork",
+                base,  # Primary: exact query
+                f"{base} hd",  # Secondary: just add quality term
             ]
-            # Deduplicate while preserving order
-            seenv = set()
-            uniq = []
-            for v in variants:
-                if v not in seenv:
-                    seenv.add(v)
-                    uniq.append(v)
-            return uniq
+            return variants
 
         results: List[Dict[str, Any]] = []
         # Prefer Google CSE when configured; try multiple high-quality variants in parallel
         if _has_google_cse_env():
             try:
-                variants = generate_query_variants(query)[:3]  # cap to 3 calls
+                logging.info(f"[image_search] Using Google CSE for query: {query}")
+                variants = generate_query_variants(query)[:2]  # cap to 2 calls to stay focused
                 params_base = {
                     "num": max(1, min(count, 10)),
                     "searchType": "image",
@@ -542,12 +544,20 @@ async def image_search(query: str, count: int = 25, verify_download: bool = True
                     except Exception:
                         continue
                 results = merged
-            except Exception:
+                logging.info(f"[image_search] Google CSE returned {len(results)} raw results")
+            except Exception as e:
+                logging.warning(f"[image_search] Google CSE failed: {e}")
                 results = []
 
         if not results:
-            # Fallback to DDG image search if CSE disabled or empty
-            results = _ddg_images(query, count)
+            # Fallback to DuckDuckGo HTML scraping if CSE disabled or empty
+            try:
+                logging.info(f"[image_search] Falling back to DuckDuckGo HTML scraping for query: {query}")
+                results = _ddg_images_html(query, count)
+                logging.info(f"[image_search] DuckDuckGo HTML returned {len(results)} results")
+            except Exception as e:
+                logging.error(f"[image_search] All methods failed for query '{query}': {e}")
+                results = []
 
         # Post-filtering and ranking for relevance and quality
         def score(item: Dict[str, Any]) -> int:
@@ -555,51 +565,123 @@ async def image_search(query: str, count: int = 25, verify_download: bool = True
             title = (item.get("title") or "").lower()
             url = (item.get("url") or "").lower()
             host = (item.get("host_page_url") or "").lower()
-            # Reward query term overlap in title
+            
+            # CRITICAL: Strong relevance check - ensure query terms are present
             q_terms = set(re.findall(r"\w+", query.lower()))
             t_terms = set(re.findall(r"\w+", title))
-            s += 3 * len(q_terms & t_terms)
-            # General quality signals (no site-specific bias)
-            # Favor high-quality file types
+            u_terms = set(re.findall(r"\w+", url))
+            
+            # Primary relevance: query terms in title (highest weight)
+            title_overlap = len(q_terms & t_terms)
+            s += 10 * title_overlap  # Increased from 3 to 10
+            
+            # Secondary relevance: query terms in URL
+            url_overlap = len(q_terms & u_terms)
+            s += 5 * url_overlap
+            
+            # CRITICAL: If NO query terms match title or URL, heavily penalize
+            if title_overlap == 0 and url_overlap == 0:
+                s -= 100  # This image is likely completely unrelated
+            
+            # Quality signals
             for ext, ext_score in ((".png", 2), (".jpg", 2), (".jpeg", 2), (".webp", 2), (".svg", 0), (".gif", 0)):
                 if url.endswith(ext) or (item.get("original_url") or "").lower().endswith(ext):
                     s += ext_score
                     break
-            # Penalize likely low-quality assets
-            negative_tokens = ["sprite", "icon", "thumbnail", "thumb", "small", "mini", "logo", "watermark", "stock"]
-            s -= sum(1 for tok in negative_tokens if tok in url)
-            # Slightly reward positive descriptors
-            positive_tokens = ["official", "press", "hd", "4k", "wallpaper", "hero"]
-            s += sum(1 for tok in positive_tokens if tok in title or tok in url)
-            # Reward larger dimensions when known
+            
+            # Penalize low-quality/irrelevant assets (stronger penalties)
+            negative_tokens = ["sprite", "icon", "thumbnail", "thumb", "small", "mini", "logo", "watermark", "stock", "avatar", "emoji"]
+            s -= 3 * sum(1 for tok in negative_tokens if tok in url)  # Increased penalty
+            
+            # Reward quality descriptors
+            positive_tokens = ["official", "press", "hd", "4k", "wallpaper", "hero", "high-res", "highres"]
+            s += 2 * sum(1 for tok in positive_tokens if tok in title or tok in url)
+            
+            # Reward larger dimensions
             try:
                 w = int(item.get("width") or 0)
                 h = int(item.get("height") or 0)
                 area = w * h
-                if area >= 1600 * 900:      # ~1080p or larger
-                    s += 6
-                elif area >= 1280 * 720:
-                    s += 4
-                elif area >= 800 * 600:
+                if area >= 1920 * 1080:     # Full HD or larger
+                    s += 8
+                elif area >= 1280 * 720:    # HD
+                    s += 5
+                elif area >= 800 * 600:     # Decent size
                     s += 2
+                elif area > 0 and area < 400 * 400:  # Too small
+                    s -= 5
             except Exception:
                 pass
-            # Penalize obvious stock/CDN thumbs when no original_url
-            if ("thumb" in url) and not item.get("original_url"):
-                s -= 2
+            
+            # Penalize thumbnails
+            if ("thumb" in url or "thumbnail" in url) and not item.get("original_url"):
+                s -= 5
+            
             return s
+
+        # Optional entity/term/domain constraints
+        def hostname(url: Optional[str]) -> Optional[str]:
+            try:
+                from urllib.parse import urlparse
+                return urlparse(url).hostname if url else None
+            except Exception:
+                return None
+
+        q_terms = set(re.findall(r"\w+", query.lower()))
+        req_terms = set((required_terms or []))
+
+        filtered1: List[Dict[str, Any]] = []
+        for it in results:
+            try:
+                ttl = (it.get("title") or "")
+                tset = set(re.findall(r"\w+", ttl.lower()))
+                host = hostname(it.get("host_page_url") or it.get("url")) or ""
+                if allowed_domains and not any(d.lower() in host.lower() for d in allowed_domains):
+                    continue
+                if req_terms and not req_terms.issubset(tset):
+                    # If strict mode, skip; otherwise allow but lower score later
+                    if strict_entity:
+                        continue
+                    it = dict(it)
+                    it["_missing_required_terms"] = True
+                # CRITICAL: Always require at least one query term in title OR URL (even without strict mode)
+                url_terms = set(re.findall(r"\w+", (it.get("url") or "").lower()))
+                has_match = bool(q_terms & tset) or bool(q_terms & url_terms)
+                
+                if strict_entity and not has_match:
+                    continue
+                elif not strict_entity and not has_match:
+                    # Even in non-strict mode, skip images with ZERO query term matches
+                    # This prevents completely unrelated images
+                    continue
+                    
+                filtered1.append(it)
+            except Exception:
+                continue
 
         # De-duplicate by original_url or url
         seen = set()
         deduped: List[Dict[str, Any]] = []
-        for it in results:
+        for it in filtered1:
             key = it.get("original_url") or it.get("url")
             if not key or key in seen:
                 continue
             seen.add(key)
             deduped.append(it)
 
-        deduped.sort(key=score, reverse=True)
+        # Penalize items missing required terms if not strict
+        def score_with_penalty(it: Dict[str, Any]) -> int:
+            base = score(it)
+            if it.get("_missing_required_terms"):
+                base -= 5
+            return base
+
+        deduped.sort(key=score_with_penalty, reverse=True)
+        
+        # Filter out images with low scores (unrelated or poor quality)
+        # Minimum score threshold: at least some query term overlap is required
+        MIN_RELEVANCE_SCORE = 5  # Ensures at least one query term match + some quality
+        deduped = [it for it in deduped if score_with_penalty(it) >= MIN_RELEVANCE_SCORE]
 
         # Optionally verify downloadability and pick top working images
         if verify_download:
@@ -648,7 +730,7 @@ async def combined_search(query: str, count: int = 25, enrich: bool = True) -> s
         if enrich and web_results:
             web_results = _enrich_web_results_with_meta(web_results)
         if not img_results:
-            img_results = _ddg_images(query, count)
+            img_results = _ddg_images_html(query, count)
 
         combined.extend(web_results)
         combined.extend(img_results)
@@ -665,6 +747,11 @@ async def collect_task_images(
     allowed_domains: Optional[List[str]] = None,
     verify_download: bool = True,
     work_dir: Optional[str] = None,
+    required_terms: Optional[List[str]] = None,
+    strict_entity: bool = False,
+    min_width: int = 0,
+    min_height: int = 0,
+    dedup_content: bool = True,
 ) -> str:
     """
     Search for task-relevant images, optionally filter by allowed domains, download locally,
@@ -679,7 +766,7 @@ async def collect_task_images(
     """
     try:
         # Step 1: search many to have selection headroom; disable double verification here
-        raw_json = await image_search(query, count=max(count * 3, count), verify_download=False)
+        raw_json = await image_search(query, count=max(count * 3, count), verify_download=False, required_terms=required_terms, allowed_domains=allowed_domains, strict_entity=strict_entity)
         parsed = json.loads(raw_json) if raw_json else []
         # Normalize parsed results to a list of dicts; handle dict status payloads gracefully
         if isinstance(parsed, dict):
@@ -690,6 +777,17 @@ async def collect_task_images(
         else:
             results = []
 
+        # Allow default domains from env if not provided
+        if not allowed_domains:
+            try:
+                env_domains = os.getenv("IMAGE_ALLOWED_DOMAINS")
+                if env_domains:
+                    allowed_domains = [d.strip() for d in env_domains.split(",") if d.strip()]
+            except Exception:
+                allowed_domains = None
+
+        logging.info(f"[collect_task_images] Found {len(results)} raw results before filtering. allowed_domains={allowed_domains}, required_terms={required_terms}, strict_entity={strict_entity}")
+
         # Step 2: relevance filter by domain and title match
         def hostname(url: Optional[str]) -> Optional[str]:
             try:
@@ -699,21 +797,34 @@ async def collect_task_images(
                 return None
 
         query_terms = set(re.findall(r"\w+", query.lower()))
+        req_terms_lower = set(t.lower() for t in (required_terms or []))
         filtered: List[Dict[str, Any]] = []
         for it in results:
             if not isinstance(it, dict):
                 continue
             host = hostname(it.get("host_page_url") or it.get("url")) or ""
+            # Domain filter (if specified)
             if allowed_domains:
                 if not any(d.lower() in (host or "").lower() for d in allowed_domains):
+                    logging.debug(f"[collect_task_images] Skipped (domain mismatch): host={host}, allowed={allowed_domains}")
                     continue
             title = (it.get("title") or "").lower()
+            url = (it.get("url") or "").lower()
             title_terms = set(re.findall(r"\w+", title))
+            url_terms = set(re.findall(r"\w+", url))
+            # Enforce strict entity/required terms if requested (check both title AND url)
+            if strict_entity and req_terms_lower:
+                combined_terms = title_terms | url_terms
+                if not req_terms_lower.issubset(combined_terms):
+                    logging.debug(f"[collect_task_images] Skipped (strict_entity): required={req_terms_lower}, found={combined_terms}")
+                    continue
             overlap = len(query_terms & title_terms)
             it_copy = dict(it)
             it_copy["_rank"] = overlap
             it_copy["_host"] = host
             filtered.append(it_copy)
+
+        logging.info(f"[collect_task_images] {len(filtered)} results after domain/entity filtering")
 
         # Rank by overlap desc, then presence of host_page_url
         filtered.sort(key=lambda x: (x.get("_rank", 0), bool(x.get("host_page_url"))), reverse=True)
@@ -751,6 +862,7 @@ async def collect_task_images(
             return False
 
         used = 0
+        seen_hashes: set = set()
         for it in filtered:
             if used >= count:
                 break
@@ -763,9 +875,11 @@ async def collect_task_images(
                 skipped.append({"reason": "verify_failed", "url": img_url})
                 continue
 
-            # safe filename
+            # Determine extension; if SVG, download as .svg then convert to PNG
             base = re.sub(r"[^a-zA-Z0-9_-]+", "_", (it.get("title") or "image").strip())[:80] or "image"
-            filename = f"{base}_{used+1}.jpg"
+            url_lower = (img_url or "").lower()
+            is_svg = url_lower.endswith(".svg") or ".svg" in url_lower
+            filename = f"{base}_{used+1}.svg" if is_svg else f"{base}_{used+1}.jpg"
             dl_json = await download_image(img_url, filename, work_dir)
             dl = json.loads(dl_json)
             if dl.get("status") != "success":
@@ -773,6 +887,57 @@ async def collect_task_images(
                 continue
 
             file_path = dl.get("file_path")
+            # If SVG, convert to PNG for PIL compatibility
+            if is_svg and file_path and os.path.exists(file_path):
+                try:
+                    import cairosvg  # type: ignore
+                    png_path = os.path.splitext(file_path)[0] + ".png"
+                    cairosvg.svg2png(url=file_path, write_to=png_path)
+                    try:
+                        os.remove(file_path)
+                    except Exception:
+                        pass
+                    file_path = png_path
+                except Exception as e:
+                    skipped.append({"reason": "svg_convert_failed", "url": img_url, "error": str(e)})
+                    try:
+                        os.remove(file_path)
+                    except Exception:
+                        pass
+                    continue
+            # Optional dimension filter
+            try:
+                if (min_width or min_height) and file_path and os.path.exists(file_path):
+                    with Image.open(file_path) as im:
+                        w, h = im.size
+                        if (min_width and w < min_width) or (min_height and h < min_height):
+                            skipped.append({"reason": "too_small", "url": img_url, "width": w, "height": h})
+                            try:
+                                os.remove(file_path)
+                            except Exception:
+                                pass
+                            continue
+            except Exception:
+                pass
+
+            # Optional content deduplication by hash
+            try:
+                if dedup_content and file_path and os.path.exists(file_path):
+                    hasher = hashlib.sha256()
+                    with open(file_path, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                            hasher.update(chunk)
+                    digest = hasher.hexdigest()
+                    if digest in seen_hashes:
+                        skipped.append({"reason": "content_duplicate", "url": img_url})
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
+                        continue
+                    seen_hashes.add(digest)
+            except Exception:
+                pass
             # Upload if configured, else mark as local only
             azure_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
             if azure_conn:
@@ -817,6 +982,140 @@ async def collect_task_images(
         }, indent=2)
     except Exception as exc:
         return json.dumps({"error": f"collect_task_images failed: {str(exc)}"})
+
+
+async def collect_images_by_pattern(
+    base_url: str,
+    filename_pattern: str,
+    start: int,
+    end: int,
+    zpad: int = 0,
+    ext: str = "png",
+    work_dir: Optional[str] = None,
+) -> str:
+    """
+    Enumerate image URLs from a predictable pattern and download them.
+
+    Example: base_url="https://example.com/images/", filename_pattern="{name}_{i}", start=1, end=10
+    Constructed URL: base_url + filename_pattern.format(i=idx) + "." + ext
+
+    Returns JSON with downloaded local file paths and any errors.
+    """
+    try:
+        if not work_dir:
+            work_dir = os.getcwd()
+        os.makedirs(work_dir, exist_ok=True)
+
+        from .file_tools import download_image
+
+        downloaded: List[Dict[str, Any]] = []
+        errors: List[Dict[str, Any]] = []
+
+        for i in range(start, end + 1):
+            try:
+                idx = str(i).zfill(zpad) if zpad > 0 else str(i)
+                name = filename_pattern.format(i=idx)
+                url = urljoin(base_url, f"{name}.{ext.lstrip('.')}")
+                safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", name) + f".{ext.lstrip('.')}"
+                dl_json = await download_image(url, safe_name, work_dir)
+                dl = json.loads(dl_json)
+                if dl.get("status") == "success":
+                    downloaded.append({"url": url, "file_path": dl.get("file_path")})
+                else:
+                    errors.append({"url": url, "error": dl})
+            except Exception as e:
+                errors.append({"i": i, "error": str(e)})
+
+        return json.dumps({
+            "base_url": base_url,
+            "pattern": filename_pattern,
+            "range": [start, end],
+            "ext": ext,
+            "downloaded": downloaded,
+            "errors": errors,
+        }, indent=2)
+    except Exception as exc:
+        return json.dumps({"error": f"collect_images_by_pattern failed: {str(exc)}"})
+
+
+async def scrape_image_gallery(
+    page_url: str,
+    css_selector: Optional[str] = None,
+    attribute: str = "src",
+    max_images: int = 100,
+    work_dir: Optional[str] = None,
+) -> str:
+    """
+    Scrape a gallery page to collect image URLs (from <img> or link tags) and download them.
+    - css_selector: optional CSS selector for images/links; defaults to <img> and <a> with image-like href.
+    - attribute: which attribute to read (src or href).
+    Returns JSON with downloaded file paths and skipped entries.
+    """
+    try:
+        headers = {"User-Agent": USER_AGENT}
+        r = requests.get(page_url, headers=headers, timeout=20)
+        r.raise_for_status()
+        html = r.text
+        base = str(r.url or page_url)
+
+        urls: List[str] = []
+        if css_selector:
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(html, "html.parser")
+                for el in soup.select(css_selector):
+                    u = el.get(attribute)
+                    if isinstance(u, str):
+                        urls.append(urljoin(base, u))
+            except Exception:
+                pass
+        if not urls:
+            # Fallback: parse common <img> and <a href> patterns
+            for m in re.finditer(r'<img[^>]+src="([^"]+)"', html, flags=re.I):
+                urls.append(urljoin(base, html_lib.unescape(m.group(1))))
+            for m in re.finditer(r'<a[^>]+href="([^"]+)"', html, flags=re.I):
+                href = html_lib.unescape(m.group(1))
+                if re.search(r'\.(?:png|jpg|jpeg|webp|gif)(?:\?|$)', href, flags=re.I):
+                    urls.append(urljoin(base, href))
+
+        # Deduplicate while preserving order
+        seen = set()
+        clean_urls = []
+        for u in urls:
+            if u not in seen:
+                seen.add(u)
+                clean_urls.append(u)
+        clean_urls = clean_urls[:max_images]
+
+        if not work_dir:
+            work_dir = os.getcwd()
+        os.makedirs(work_dir, exist_ok=True)
+
+        from .file_tools import download_image
+        downloaded: List[Dict[str, Any]] = []
+        skipped: List[Dict[str, Any]] = []
+        for idx, u in enumerate(clean_urls, 1):
+            try:
+                ext_match = re.search(r'\.([a-zA-Z0-9]{3,4})(?:\?|$)', u)
+                ext = ext_match.group(1) if ext_match else "jpg"
+                fname = f"gallery_{idx}.{ext}"
+                dl_json = await download_image(u, fname, work_dir)
+                dl = json.loads(dl_json)
+                if dl.get("status") == "success":
+                    downloaded.append({"url": u, "file_path": dl.get("file_path")})
+                else:
+                    skipped.append({"url": u, "error": dl})
+            except Exception as e:
+                skipped.append({"url": u, "error": str(e)})
+
+        return json.dumps({
+            "page_url": page_url,
+            "collected": len(downloaded),
+            "downloaded": downloaded,
+            "skipped": skipped,
+        }, indent=2)
+    except Exception as exc:
+        return json.dumps({"error": f"scrape_image_gallery failed: {str(exc)}"})
 
 
 async def _perform_single_cognitive_search(

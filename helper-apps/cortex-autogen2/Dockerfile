@@ -34,6 +34,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         libsm6 libxext6 libglib2.0-0 \
         # ─ HDF5 stack for `h5py`
         libhdf5-serial-dev hdf5-tools \
+        # ─ Cairo / Pango / GDK-PixBuf for SVG->PNG rendering (CairoSVG optional deps)
+        libcairo2 libcairo2-dev \
+        libpango-1.0-0 libpangoft2-1.0-0 libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 libgdk-pixbuf2.0-bin \
         # ─ GDAL for GIS formats (and Python bindings)
         gdal-bin libgdal-dev python3-gdal \
         # ─ 7-Zip & RAR extractors (for patool / rarfile fall-back)

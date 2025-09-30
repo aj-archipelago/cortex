@@ -159,6 +159,9 @@ def _convert_to_azure_foundry_messages(
 
     for message in messages or []:
         role = message.get("role") or message.get("author")
+        # Normalize any unexpected roles to 'user' to satisfy Foundry role schema
+        if role not in ("user", "assistant", "system"):
+            role = "user"
         content = message.get("content")
         azure_messages.append({"role": role, "content": _normalize_content_to_parts(content)})
 
@@ -308,8 +311,9 @@ def call_azure_foundry_agent(
         On failure returns {"status":"error","error": "..."}
     """
     try:
-        # Prefer using the Azure SDK path if available - it handles auth and endpoints robustly.
-        if _AZURE_SDK_AVAILABLE:
+        # Prefer using the Azure SDK path only when explicitly enabled via env var
+        # Set AZURE_FOUNDRY_USE_SDK=true to enable. Default is to use HTTP path.
+        if _AZURE_SDK_AVAILABLE and str(os.getenv("AZURE_FOUNDRY_USE_SDK", "false")).lower() == "true":
             try:
                 # Build credential: prefer explicit service principal creds in env var, else DefaultAzureCredential
                 cred = None
@@ -478,8 +482,17 @@ def call_azure_foundry_agent(
             "stream": bool(parameters.get("stream") if parameters else False),
         }
 
-        # Merge allowed parameter keys into body
+        # Sanitize and merge allowed parameter keys into body
         if parameters:
+            # Make a shallow copy so we can normalize values safely
+            sanitized_params = dict(parameters)
+            # Coerce unsupported response_format values to 'auto'
+            try:
+                rf = sanitized_params.get("response_format")
+                if isinstance(rf, str) and rf.lower() != "auto":
+                    sanitized_params["response_format"] = "auto"
+            except Exception:
+                pass
             allowed_keys = [
                 "tools",
                 "tool_resources",
@@ -495,8 +508,8 @@ def call_azure_foundry_agent(
                 "truncation_strategy",
             ]
             for k in allowed_keys:
-                if k in parameters:
-                    body[k] = parameters[k]
+                if k in sanitized_params:
+                    body[k] = sanitized_params[k]
 
         url = project_url.rstrip("/") + "/threads/runs"
         headers = {"Content-Type": "application/json"}

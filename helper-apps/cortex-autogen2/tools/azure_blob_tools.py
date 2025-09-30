@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions, ContentSettings
 from azure.core.exceptions import AzureError, ServiceResponseError
+import requests
 
 logger = logging.getLogger(__name__)
 
