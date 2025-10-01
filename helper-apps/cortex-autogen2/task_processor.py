@@ -153,38 +153,51 @@ class TaskProcessor:
             if not cleaned_content:
                 return None
             
-            prompt = f"""Write a single fun-professional, engaging progress update (7–14 words) that clearly states what the agent is doing now. Start with a role-appropriate emoji.
+            prompt = f"""Transform this agent activity into a delightful, crystal-clear progress update (8-15 words) that makes non-technical users feel excited about what's happening. Start with a perfect emoji.
 
-Context: This is for a progress indicator in a app.
+Context: This appears in a live progress indicator for end users who aren't coders.
 
 Current Activity: {cleaned_content}
-Agent Source: {source if source else "Unknown"}
+Agent Role: {source if source else "Unknown"}
 
-Sample Emojis (use first that fits): 🧭, 🗺️, 📝, 💻, 🛠️, 🧪, 🔎, 🌐, 🧠, 📚, 🗃️, 📊, 🎨, 📣, 🖼️, 🏁
+🎨 Emoji Guide (pick the most fitting):
+Planning/Thinking: 🧭 🗺️ 💡 🎯 🤔
+Research/Search: 🔎 🔍 🌐 📚 🕵️
+Data/Analysis: 📊 📈 📉 🧮 💹
+Writing/Creating: ✍️ 📝 🖊️ ✨ 🎨
+Images/Media: 🖼️ 📸 🎬 🌈 🖌️
+Code/Technical: 💻 ⚙️ 🛠️ 🔧 ⚡
+Files/Upload: 📁 ☁️ 📤 💾 🗂️
+Success/Done: ✅ 🎉 🏆 🎊 ⭐
 
-Style Requirements:
-- Agent-centric; do not address the user. Never use "you" or "your".
-- Positive, succinct; avoid jargon and internal details.
-- Use a strong verb + concrete noun (e.g., “Analyzing sales trends”, “Uploading charts”).
-- Focus strictly on the current action (no next-step hints).
-- Vary phrasing naturally; avoid repeating templates.
-- One line only. No quotes. No code/tool names.
+✨ Writing Style:
+- ENGAGING: Use vivid, active verbs that paint a picture (discovering, crafting, weaving, building, hunting)
+- HUMAN: Conversational and warm, like a helpful colleague updating you
+- CLEAR: Zero jargon, no technical terms, no agent/tool names
+- SPECIFIC: Say what's actually being created/found (not just "processing data")
+- UPBEAT: Positive energy, but not over-the-top
+- SHORT: 8-15 words max - every word must earn its place
 
-Good examples:
-- "🔎 Researching sources"
-- "📊 Analyzing time-series data"
-- "🎨 Crafting visuals"
-- "☁️ Uploading deliverables"
-- "💻 Refining code for accuracy"
+🌟 Great Examples (follow these patterns):
+- "🔍 Hunting down the perfect images for your presentation"
+- "📊 Crunching numbers to reveal hidden trends"
+- "✨ Weaving everything together into a polished report"
+- "🎨 Designing eye-catching charts that tell the story"
+- "📚 Diving deep into research to find golden insights"
+- "🖼️ Gathering stunning visuals to bring ideas to life"
+- "💡 Mapping out the smartest approach to tackle this"
+- "☁️ Packaging everything up for easy download"
+- "🔎 Exploring databases to uncover the answers"
+- "✍️ Crafting a compelling narrative from the data"
 
-Bad examples (avoid):
-- Task terminated
-- Processing internal data
-- Executing tool calls
-- TERMINATE
-- Any text addressing the user (e.g., "your report")
+❌ Avoid These (too boring/technical):
+- "Processing data" (vague)
+- "Executing SQL query" (jargon)
+- "Running code" (technical)
+- "Your report is ready" (premature/addressing user)
+- "Task terminated" (robotic)
 
-Return only the update line, nothing else:"""
+Return ONLY the update line with emoji - nothing else:"""
             
             messages = [UserMessage(content=str(prompt), source="summarize_progress_function")]
             
