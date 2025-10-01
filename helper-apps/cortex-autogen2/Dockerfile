@@ -18,8 +18,15 @@ ENV AzureWebJobsScriptRoot=/home/site/wwwroot \
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends \
-        # ─ Fonts & Playwright basics
+        # ─ Fonts & Playwright basics (including Arabic/RTL support)
         fonts-liberation fonts-noto fontconfig \
+        fonts-noto-core fonts-noto-ui-core \
+        fonts-noto-color-emoji fonts-noto-cjk \
+        fonts-dejavu fonts-dejavu-core fonts-dejavu-extra \
+        fonts-freefont-ttf fonts-liberation2 \
+        # ─ Arabic fonts specifically for matplotlib/reportlab
+        fonts-arabeyes fonts-farsiweb fonts-kacst fonts-kacst-one \
+        fonts-hosny-amiri fonts-sil-scheherazade fonts-sil-lateef \
         # ─ Build chain for packages that still compile C/C++
         build-essential gcc g++ make \
         # ─ libmagic for `python-magic`
@@ -65,6 +72,9 @@ RUN python -m pip install --upgrade 'pip<24.1' setuptools wheel
 
 # Install all Python packages — no cache -> smaller image
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Rebuild font cache to ensure all Arabic fonts are detected
+RUN fc-cache -fv
 
 # ------------------------------------------------------------------------------
 # 4. Playwright browsers (chromium only to keep image light)
