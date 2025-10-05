@@ -1,9 +1,12 @@
 import { Prompt } from '../server/prompt.js';
 
 export default {
-    prompt: [
-        new Prompt({ messages: [
-            {"role": "system", "content": `You are an expert prompt optimizer for Gemini 2.5 image generation. Your job is to transform basic image generation requests into highly detailed, professional prompts that follow Google's official best practices and templates for optimal image generation.
+    prompt: [],
+    executePathway: async ({args, runAllPrompts, resolver}) => {
+        const { userPrompt, hasInputImages } = { ...resolver.pathway.inputParameters, ...args };
+        
+        // Build the system prompt dynamically based on whether input images are provided
+        let systemContent = `You are an expert prompt optimizer for Gemini 2.5 image generation. Your job is to transform basic image generation requests into highly detailed, professional prompts that follow Google's official best practices and templates for optimal image generation.
 
 ## Core Optimization Principles (from Google's Official Guide):
 
@@ -11,6 +14,7 @@ export default {
 Transform vague descriptions into detailed, specific instructions:
 - Instead of "fantasy armor" → "ornate elven plate armor, etched with silver leaf patterns, with a high collar and pauldrons shaped like falcon wings"
 - Instead of "a cat" → "a majestic adult tabby cat with distinctive orange and black striped fur, sitting gracefully on a sunlit wooden windowsill"
+- If the prompt refers to something already mentioned, it might be using an image as a precise reference, so don't re-describe it in the prompt.For example, if the prompt says "this cat", don't say "the black cat sitting on a sunlit wooden window sill", just say "this cat".
 
 ### 2. **Provide Context and Intent**
 Always explain the purpose and context of the image:
@@ -99,12 +103,43 @@ The user will provide a simple image generation request.
 ## Output Format:
 Return ONLY the optimized prompt, ready to use with Gemini 2.5. Use the appropriate template when applicable, or create a detailed, specific prompt following the core principles. Make it professional and comprehensive.
 
-Current date and time: {{now}}`},
-            {"role": "user", "content": "{{userPrompt}}"},
-        ]}),
-    ],
+Current date and time: {{now}}`;
+
+        // Add specific instructions for input images if they are provided
+        if (hasInputImages) {
+            systemContent += `
+
+## IMPORTANT: Input Images Context
+The user has provided input images that should be used as reference or source material for the image generation. When optimizing the prompt, make it explicit about using these input images:
+
+- Reference the input images directly in your optimized prompt
+- Use phrases like "using the provided input image(s)" or "based on the input image(s)"
+- Specify how the input images should be incorporated (as reference, for style transfer, for composition, etc.)
+- If the user's request is vague about how to use the input images, make educated assumptions and be explicit about them
+- Use the Image Editing Templates above when appropriate for input image scenarios
+
+Examples of how to reference input images:
+- "Using the provided input image as a reference, create a photorealistic portrait..."
+- "Transform the provided input image into the artistic style of..."
+- "Using the input images, combine the elements to create a new composition..."
+- "Based on the input image, modify the scene to include..."`;
+        }
+
+        const promptMessages = [
+            {"role": "system", "content": systemContent},
+            {"role": "user", "content": userPrompt},
+        ];
+
+        resolver.pathwayPrompt = [
+            new Prompt({ messages: promptMessages }),
+        ];
+
+        return await runAllPrompts({ ...args });
+    },
+    
     inputParameters: {
         userPrompt: ``,
+        hasInputImages: false,
     },
     max_tokens: 4096,
     model: 'oai-gpt41',

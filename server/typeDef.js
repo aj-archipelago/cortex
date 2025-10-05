@@ -1,30 +1,43 @@
 const getGraphQlType = (value) => {
+  // The value might be an object with explicit type specification
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && 
+      value.type && value.value !== undefined && 
+      Object.keys(value).length === 2 && 
+      Object.keys(value).includes('type') && Object.keys(value).includes('value')) {
+    return {
+      type: value.type,
+      defaultValue: typeof value.value === 'string' ? `"${value.value}"` : value.value
+    };
+  }
+  
+  // Otherwise, autodetect the type
   switch (typeof value) {
     case 'boolean':
-      return {type: 'Boolean'};
+      return {type: 'Boolean', defaultValue: value};
     case 'string':
-      return {type: 'String'};
+      return {type: 'String', defaultValue: `"${value}"`};
     case 'number':
-      return {type: 'Int'};
+      // Check if it's an integer or float
+      return Number.isInteger(value) ? {type: 'Int', defaultValue: value} : {type: 'Float', defaultValue: value};
     case 'object':
       if (Array.isArray(value)) {
         if (value.length > 0 && typeof(value[0]) === 'string') {
-          return {type: '[String]'};
+          return {type: '[String]', defaultValue: JSON.stringify(value)};
         }
         else {
-          // New case for MultiMessage type
+          // Check if it's MultiMessage (content is array) or Message (content is string)
           if (Array.isArray(value[0]?.content)) {
-            return {type: '[MultiMessage]'};
+            return {type: '[MultiMessage]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
           }
           else {
-            return {type: '[Message]'};
+            return {type: '[Message]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
           }
         }
       } else {
-        return {type: `[${value.objName}]`};
+        return {type: `[${value.objName}]`, defaultValue: JSON.stringify(value)};
       }
     default:
-      return {type: 'String'};
+      return {type: 'String', defaultValue: `"${value}"`};
   }
 };
 
@@ -80,7 +93,7 @@ const getPathwayTypeDefAndExtendQuery = (pathway) => {
     };
   });
 
-  const gqlDefinition = `${type}\n\n${responseType}\n\nextend type Query {${name}(${paramsStr}): ${objName}}`;
+  const gqlDefinition = `${type}\n\n${responseType}\n\nextend type Query {${name}${paramsStr ? `(${paramsStr})` : ''}: ${objName}}`;
 
   return {
     gqlDefinition,

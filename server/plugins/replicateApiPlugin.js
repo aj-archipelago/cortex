@@ -274,6 +274,86 @@ class ReplicateApiPlugin extends ModelPlugin {
         };
         break;
       }
+      case "replicate-seedream-4": {
+        const validSizes = ["1K", "2K", "4K", "custom"];
+        const validRatios = ["1:1", "4:3", "3:4", "16:9", "9:16", "match_input_image"];
+        const validSequentialModes = ["disabled", "auto"];
+
+        // Collect input images from multiple parameter sources (same pattern as qwen-image-edit-plus)
+        const collectImages = (candidate, accumulator) => {
+          if (!candidate) return;
+          if (Array.isArray(candidate)) {
+            candidate.forEach((item) => collectImages(item, accumulator));
+            return;
+          }
+          accumulator.push(candidate);
+        };
+
+        const imageCandidates = [];
+        collectImages(combinedParameters.image, imageCandidates);
+        collectImages(combinedParameters.images, imageCandidates);
+        collectImages(combinedParameters.input_image, imageCandidates);
+        collectImages(combinedParameters.input_images, imageCandidates);
+        collectImages(combinedParameters.input_image_1, imageCandidates);
+        collectImages(combinedParameters.input_image_2, imageCandidates);
+        collectImages(combinedParameters.input_image_3, imageCandidates);
+        collectImages(combinedParameters.image_1, imageCandidates);
+        collectImages(combinedParameters.image_2, imageCandidates);
+        collectImages(combinedParameters.imageInput, imageCandidates);
+
+        const normalizeImageEntry = (entry) => {
+          if (!entry) return null;
+          if (typeof entry === "string") {
+            return entry; // Return the URL string directly
+          }
+          if (typeof entry === "object") {
+            if (Array.isArray(entry)) {
+              return null;
+            }
+            if (entry.value) {
+              return entry.value; // Return the value as a string
+            }
+            if (entry.url) {
+              return entry.url; // Return the URL as a string
+            }
+            if (entry.path) {
+              return entry.path; // Return the path as a string
+            }
+          }
+          return null;
+        };
+
+        const normalizedImages = imageCandidates
+          .map((candidate) => normalizeImageEntry(candidate))
+          .filter((candidate) => candidate && typeof candidate === 'string');
+
+        const omitUndefined = (obj) =>
+          Object.fromEntries(
+            Object.entries(obj).filter(([, value]) => value !== undefined && value !== null),
+          );
+
+        const basePayload = omitUndefined({
+          prompt: modelPromptText,
+          size: validSizes.includes(combinedParameters.size) ? combinedParameters.size : "2K",
+          width: combinedParameters.width || 2048,
+          height: combinedParameters.height || 2048,
+          max_images: combinedParameters.maxImages || combinedParameters.numberResults || 1,
+          aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "4:3",
+          sequential_image_generation: validSequentialModes.includes(combinedParameters.sequentialImageGeneration) ? combinedParameters.sequentialImageGeneration : "disabled",
+          ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+        });
+
+        // For seedream-4, include the image_input array if we have images
+        const inputPayload = {
+          ...basePayload,
+          ...(normalizedImages.length > 0 ? { image_input: normalizedImages } : {})
+        };
+
+        requestParameters = {
+          input: inputPayload,
+        };
+        break;
+      }
     }
 
     return requestParameters;

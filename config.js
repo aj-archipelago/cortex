@@ -441,6 +441,15 @@ var config = convict({
                     "Content-Type": "application/json"
                 },
             },
+            "replicate-seedream-4": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/bytedance/seedream-4/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
             "azure-video-translate": {
                 "type": "AZURE-VIDEO-TRANSLATE",
                 "url": "https://eastus.api.cognitive.microsoft.com/videotranslation",

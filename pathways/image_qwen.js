@@ -17,10 +17,10 @@ export default {
     
     // Qwen-specific parameters
     go_fast: true,
-    guidance: 4, // For replicate-qwen-image only
-    strength: 0.9, // For replicate-qwen-image only
+    guidance: { type: 'Float', value: 4.0 }, // For replicate-qwen-image only
+    strength: 0.9,
     image_size: "optimize_for_quality", // For replicate-qwen-image only
-    lora_scale: 1, // For replicate-qwen-image only
+    lora_scale: { type: 'Float', value: 1.0 }, // For replicate-qwen-image only
     enhance_prompt: false, // For replicate-qwen-image only
     num_inference_steps: 50, // For replicate-qwen-image only
     disable_safety_checker: false,
