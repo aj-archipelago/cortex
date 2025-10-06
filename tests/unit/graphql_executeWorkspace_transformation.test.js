@@ -1,3 +1,29 @@
+/**
+ * Cortex Pathway Argument Transformation Tests
+ * 
+ * This test suite validates the argument transformation logic used when executing
+ * cortex pathways through the GraphQL executeWorkspace mutation. Specifically, it tests
+ * how the system transforms incoming pathway arguments (text, chatHistory, model) into
+ * the format expected by cortex pathways.
+ * 
+ * Key transformation behaviors tested:
+ * - Merging text parameters with existing chatHistory entries
+ * - Preserving multimodal content (images, etc.) in the correct order
+ * - Creating new user messages when no chatHistory exists
+ * - Handling model selection with fallback to default values
+ * - Ensuring content arrays maintain proper JSON-stringified structure
+ * 
+ * The transformation logic ensures that:
+ * 1. Text content is prepended to the last user message's content array
+ * 2. Existing multimodal content (e.g., images) is preserved
+ * 3. If no user message exists, a new one is created with the text
+ * 4. Model and systemPrompt are properly inherited from pathway configuration
+ * 
+ * These tests simulate the core transformation logic from executePathwayWithFallback
+ * without requiring full integration test setup, allowing for focused unit testing
+ * of the argument transformation behavior.
+ */
+
 import test from 'ava';
 
 // Test the transformation logic directly without mocking

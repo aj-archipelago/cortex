@@ -1,3 +1,29 @@
+/**
+ * PathwayManager File Handling Tests
+ * 
+ * This test suite validates the PathwayManager's file handling functionality, specifically
+ * testing how the manager processes and transforms pathway prompts that include file attachments.
+ * 
+ * Key functionality tested:
+ * - File hash transformation from 'files' to 'fileHashes' property
+ * - Collection and deduplication of file hashes at the pathway level
+ * - Backward compatibility with legacy string-based prompts without file attachments
+ * - Handling of edge cases (null, undefined, empty file arrays)
+ * - Prompt object creation with file metadata
+ * 
+ * The PathwayManager allows prompts to reference files by their hashes, which are then
+ * processed and made available to the execution context. This test suite ensures that
+ * file metadata is correctly preserved, transformed, and aggregated during pathway processing.
+ * 
+ * Test scenarios covered:
+ * 1. Prompts with multiple file attachments
+ * 2. Prompts with empty or missing file arrays
+ * 3. Legacy string prompts (no file support)
+ * 4. Duplicate file hash deduplication
+ * 5. Null/undefined file handling
+ * 6. Direct prompt object creation with files
+ */
+
 import test from 'ava';
 import PathwayManager from '../../../lib/pathwayManager.js';
 
