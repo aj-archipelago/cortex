@@ -4,6 +4,7 @@ import logging
 import tempfile
 import os
 import urllib.request
+import urllib.parse
 from pathlib import Path
 import shutil
 from converter import DocumentConverter
