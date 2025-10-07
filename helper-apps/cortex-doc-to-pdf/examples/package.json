@@ -1,0 +1,23 @@
+{
+    "name": "doc-to-pdf-client-examples",
+    "version": "1.0.0",
+    "description": "Client examples for Document to PDF Converter service",
+    "main": "nodejs-client.js",
+    "scripts": {
+        "example": "node nodejs-client.js",
+        "test": "node nodejs-client.js"
+    },
+    "dependencies": {
+        "axios": "^1.6.0",
+        "form-data": "^4.0.0"
+    },
+    "devDependencies": {},
+    "keywords": [
+        "pdf",
+        "converter",
+        "document",
+        "streaming"
+    ],
+    "author": "",
+    "license": "ISC"
+}
