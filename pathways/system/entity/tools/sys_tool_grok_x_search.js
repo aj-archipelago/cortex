@@ -37,11 +37,13 @@ export default {
                         type: "array",
                         items: { type: "string" },
                         description: "Optional array of X handles to include in search (e.g., ['OpenAI', 'AnthropicAI', 'xai']). Maximum 10 handles.",
+                        maxItems: 10
                     },
                     excludedHandles: {
                         type: "array",
                         items: { type: "string" },
                         description: "Optional array of X handles to exclude from search. Maximum 10 handles. Cannot be used in conjunction with includedHandles.",
+                        maxItems: 10
                     },
                     fromDate: {
                         type: "string",
@@ -56,14 +58,19 @@ export default {
                     minFavorites: {
                         type: "number",
                         description: "Minimum number of favorites (likes) that a post must have to be included. Use this to filter to most liked posts.",
+                        minimum: 0
                     },
                     minViews: {
                         type: "number",
                         description: "Minimum number of views that a post must have to be included. Use this to filter to most viewed posts.",
+                        minimum: 0
                     },
                     maxResults: {
                         type: "number",
                         description: "Maximum number of search results to return (default: 10, max: 50)",
+                        minimum: 1,
+                        maximum: 50,
+                        default: 10
                     }
                 },
                 required: ["text", "userMessage"]

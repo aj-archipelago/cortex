@@ -28,7 +28,7 @@ export default {
                         description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["detailedInstructions", "renderText", "userMessage"]
+                required: ["detailedInstructions", "userMessage"]
             }
         }
     },
