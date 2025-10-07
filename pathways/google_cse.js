@@ -3,8 +3,8 @@
 
 export default {
     inputParameters: {
-        text: ``,
-        q: ``,
+        text: '',
+        q: '',
         num: 10,
         start: 1,
         safe: 'off', // 'off' | 'active'

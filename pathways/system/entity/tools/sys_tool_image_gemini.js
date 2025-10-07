@@ -1,6 +1,7 @@
-// sys_tool_image.js
+// sys_tool_image_gemini.js
 // Entity tool that creates and modifies images for the entity to show to the user
 import { callPathway } from '../../../../lib/pathwayTools.js';
+import { uploadImageToCloud } from '../../../../lib/util.js';
 
 export default {
     prompt: [],
@@ -10,6 +11,7 @@ export default {
         model: 'oai-gpt4o',
     },
     timeout: 300,
+    /*
     toolDefinition: [{
         type: "function",
         icon: "🎨",
@@ -66,40 +68,64 @@ export default {
             }
         }
     }],
-
+    */
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
 
         try {   
-            let model = "replicate-seedream-4";
+            let model = "gemini-25-flash-image";
             let prompt = args.detailedInstructions || "";
-
-            // If we have an input image, use the flux-kontext-max model
-            if (args.inputImage || args.inputImage2 || args.inputImage3) {
-                model = "replicate-qwen-image-edit-plus";
-            }
-
-            pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
             
-            // Build parameters object, only including image parameters if they have non-empty values
-            const params = {
+            // Call the image generation pathway
+            let result = await callPathway('image_gemini_25', {
                 ...args, 
-                text: prompt, 
+                text: prompt,
                 model, 
                 stream: false,
-            };
-            
-            if (args.inputImage && args.inputImage.trim()) {
-                params.input_image = args.inputImage;
+                input_image: args.inputImage,
+                input_image_2: args.inputImage2,
+                input_image_3: args.inputImage3,
+                optimizePrompt: true,
+            }, pathwayResolver);
+
+            pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
+
+            if (pathwayResolver.pathwayResultData) {
+                if (pathwayResolver.pathwayResultData.artifacts && Array.isArray(pathwayResolver.pathwayResultData.artifacts)) {
+                    const uploadedImages = [];
+                    
+                    // Process each image artifact
+                    for (const artifact of pathwayResolver.pathwayResultData.artifacts) {
+                        if (artifact.type === 'image' && artifact.data && artifact.mimeType) {
+                            try {
+                                // Upload image to cloud storage
+                                const imageUrl = await uploadImageToCloud(artifact.data, artifact.mimeType, pathwayResolver);
+                                uploadedImages.push({
+                                    type: 'image',
+                                    url: imageUrl,
+                                    mimeType: artifact.mimeType
+                                });
+                            } catch (uploadError) {
+                                pathwayResolver.logError(`Failed to upload artifact: ${uploadError.message}`);
+                                // Keep original artifact as fallback
+                                uploadedImages.push(artifact);
+                            }
+                        } else {
+                            // Keep non-image artifacts as-is
+                            uploadedImages.push(artifact);
+                        }
+                    }
+                    
+                    // Return the urls of the uploaded images as text in the result
+                    result = result + '\n' + uploadedImages.map(image => image.url).join('\n');
+                }
+            } else {
+                // If result is not a CortexResponse, log a warning but return as-is
+                pathwayResolver.logWarning('No artifacts to upload');
+                result = result + '\n' + 'No images generated';
             }
-            if (args.inputImage2 && args.inputImage2.trim()) {
-                params.input_image_2 = args.inputImage2;
-            }
-            if (args.inputImage3 && args.inputImage3.trim()) {
-                params.input_image_3 = args.inputImage3;
-            }
-            
-            return await callPathway('image_qwen', params);
+
+            return result;
 
         } catch (e) {
             pathwayResolver.logError(e.message ?? e);

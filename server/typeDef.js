@@ -1,9 +1,32 @@
+// Check if a value is a type specification object
+const isTypeSpecObject = (value) => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) && 
+         value.type && value.value !== undefined && 
+         Object.keys(value).length === 2 && 
+         Object.keys(value).includes('type') && Object.keys(value).includes('value');
+};
+
+// Extract the actual value from a type specification object or return the value as-is
+const extractValueFromTypeSpec = (value) => {
+  return isTypeSpecObject(value) ? value.value : value;
+};
+
+// Process parameters to convert any type specification objects to their actual values
+const processPathwayParameters = (params) => {
+  if (!params || typeof params !== 'object') {
+    return params;
+  }
+  
+  const processed = {};
+  for (const [key, value] of Object.entries(params)) {
+    processed[key] = extractValueFromTypeSpec(value);
+  }
+  return processed;
+};
+
 const getGraphQlType = (value) => {
   // The value might be an object with explicit type specification
-  if (typeof value === 'object' && value !== null && !Array.isArray(value) && 
-      value.type && value.value !== undefined && 
-      Object.keys(value).length === 2 && 
-      Object.keys(value).includes('type') && Object.keys(value).includes('value')) {
+  if (isTypeSpecObject(value)) {
     return {
       type: value.type,
       defaultValue: typeof value.value === 'string' ? `"${value.value}"` : value.value
@@ -113,4 +136,7 @@ export {
   getMessageTypeDefs,
   getPathwayTypeDef,
   userPathwayInputParameters,
+  isTypeSpecObject,
+  extractValueFromTypeSpec,
+  processPathwayParameters,
 };

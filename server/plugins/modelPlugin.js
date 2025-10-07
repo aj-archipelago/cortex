@@ -6,6 +6,7 @@ import { getFirstNToken } from '../chunker.js';
 import logger, { obscureUrlParams } from '../../lib/logger.js';
 import { config } from '../../config.js';
 import axios from 'axios';
+import { extractValueFromTypeSpec } from '../typeDef.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETURN_TOKENS = 256;
@@ -28,11 +29,11 @@ class ModelPlugin {
 
         // Make all of the parameters defined on the pathway itself available to the prompt
         for (const [k, v] of Object.entries(pathway)) {
-            this.promptParameters[k] = v?.default ?? v;
+            this.promptParameters[k] = extractValueFromTypeSpec(v?.default ?? v);
         }
         if (pathway.inputParameters) {
             for (const [k, v] of Object.entries(pathway.inputParameters)) {
-                this.promptParameters[k] = v?.default ?? v;
+                this.promptParameters[k] = extractValueFromTypeSpec(v?.default ?? v);
             }
         }
 
