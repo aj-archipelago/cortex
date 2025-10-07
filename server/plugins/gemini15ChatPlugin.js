@@ -138,16 +138,16 @@ class Gemini15ChatPlugin extends ModelPlugin {
         }
     
         const requestParameters = {
-        contents: requestMessages,
-        generationConfig: {
-            temperature: this.temperature || 0.7,
-            maxOutputTokens: max_tokens || this.getModelMaxReturnTokens(),
-            topP: parameters.topP || 0.95,
-            topK: parameters.topK || 40,
-        },
-        ...(geminiSafetySettings ? {safety_settings: geminiSafetySettings} : {}),
-        ...(system ? {systemInstruction: system} : {}),
-        ...(geminiTools ? {tools: geminiTools} : {})
+            contents: requestMessages,
+            generationConfig: {
+                temperature: this.temperature || 0.7,
+                maxOutputTokens: max_tokens || this.getModelMaxReturnTokens(),
+                topP: parameters.topP || 0.95,
+                topK: parameters.topK || 40,
+            },
+            ...(geminiSafetySettings ? {safety_settings: geminiSafetySettings} : {}),
+            ...(system ? {systemInstruction: system} : {}),
+            ...(geminiTools ? {tools: geminiTools} : {})
         };
     
         return requestParameters;

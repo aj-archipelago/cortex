@@ -29,7 +29,8 @@ const getGraphQlType = (value) => {
   if (isTypeSpecObject(value)) {
     return {
       type: value.type,
-      defaultValue: typeof value.value === 'string' ? `"${value.value}"` : value.value
+      defaultValue: typeof value.value === 'string' ? `"${value.value}"` : 
+                   Array.isArray(value.value) ? JSON.stringify(value.value) : value.value
     };
   }
   

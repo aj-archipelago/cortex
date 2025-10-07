@@ -48,12 +48,12 @@ class OpenAIChatPlugin extends ModelPlugin {
         const { modelPromptText, modelPromptMessages, tokenLength, modelPrompt } = this.getCompiledPrompt(text, parameters, prompt);
         let { stream, tools, functions } = parameters;
 
-        if (typeof tools === 'string') {
-            tools = JSON.parse(tools);
-        }
-        
-        if (typeof functions === 'string') {
-            functions = JSON.parse(functions);
+        try {    
+            tools = (tools && typeof tools === 'string' && tools !== '' ? JSON.parse(tools) : tools);
+            functions = (functions && typeof functions === 'string' && functions !== '' ? JSON.parse(functions) : functions);
+        } catch (e) {
+            tools = [];
+            functions = [];
         }
 
         // Define the model's max token length
