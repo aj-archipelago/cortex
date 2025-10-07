@@ -2,6 +2,9 @@ import test from 'ava';
 import sinon from 'sinon';
 import { getResolvers } from '../../../server/graphql.js';
 
+// Mock callPathway to avoid actual external calls
+const mockCallPathway = sinon.stub();
+
 // Mock logger to avoid actual logging during tests
 const mockLogger = {
     info: sinon.stub(),
@@ -17,7 +20,7 @@ const mockConfig = {
 
 test.beforeEach(t => {
     // Reset stubs before each test
-    sinon.restore();
+    mockCallPathway.resetHistory();
     mockLogger.info.resetHistory();
     mockLogger.debug.resetHistory();
     mockLogger.error.resetHistory();
@@ -167,4 +170,122 @@ test('executeWorkspace does not check format when promptNames not provided', asy
     // Verify that isLegacyPromptFormat was NOT called since promptNames wasn't provided
     t.false(mockPathwayManager.isLegacyPromptFormat.called);
     t.true(mockPathwayManager.getPathway.calledOnce);
+});
+
+test('executeWorkspace helper function DRY refactoring - structure verification', async t => {
+    // This test verifies that the DRY refactoring doesn't break existing functionality
+    // by testing that all three code paths (wildcard, specific prompts, default) 
+    // still work with fallback to legacy execution
+    
+    const mockRootResolver = sinon.stub().resolves({ result: 'legacy-result' });
+
+    // Test wildcard case with legacy fallback
+    const mockPathwayManager = {
+        getLatestPathways: sinon.stub().resolves({
+            'test-user': {
+                'test-pathway': {
+                    prompt: [
+                        { name: 'prompt1' }, // No cortexPathwayName - will fallback
+                        { name: 'prompt2' }  // No cortexPathwayName - will fallback
+                    ],
+                    systemPrompt: 'Test system prompt'
+                }
+            }
+        }),
+        isLegacyPromptFormat: sinon.stub().returns(false),
+        getPathways: sinon.stub().resolves([
+            {
+                name: 'prompt1',
+                systemPrompt: 'System prompt 1',
+                prompt: [{ messages: ['message1'] }],
+                fileHashes: [],
+                rootResolver: mockRootResolver
+            },
+            {
+                name: 'prompt2',
+                systemPrompt: 'System prompt 2', 
+                prompt: [{ messages: ['message2'] }],
+                fileHashes: [],
+                rootResolver: mockRootResolver
+            }
+        ]),
+        getResolvers: sinon.stub().returns({ Mutation: {} })
+    };
+
+    const resolvers = getResolvers(mockConfig, {}, mockPathwayManager);
+    const executeWorkspaceResolver = resolvers.Query.executeWorkspace;
+
+    const mockContextValue = { config: mockConfig };
+    const mockInfo = {};
+
+    const args = {
+        userId: 'test-user',
+        pathwayName: 'test-pathway',
+        promptNames: ['*'], // Wildcard to execute all
+        text: 'test input'
+    };
+
+    const result = await executeWorkspaceResolver(null, args, mockContextValue, mockInfo);
+
+    // Verify that legacy resolvers were called (indicating the DRY helper function worked)
+    t.is(mockRootResolver.callCount, 2); // Called twice for both prompts
+    
+    // Verify result structure matches expected format
+    t.truthy(result);
+    t.truthy(result.result);
+    t.true(result.debug.includes('Executed 2 prompts in parallel'));
+    
+    // Parse the result to verify both prompts were executed
+    const parsedResult = JSON.parse(result.result);
+    t.is(parsedResult.length, 2);
+    t.is(parsedResult[0].promptName, 'prompt1');
+    t.is(parsedResult[1].promptName, 'prompt2');
+});
+
+test('executeWorkspace helper function DRY refactoring - default case structure', async t => {
+    // Test that the default case still works with the DRY helper function
+    
+    const mockRootResolver = sinon.stub().resolves({ result: 'default-legacy-result' });
+
+    const mockPathwayManager = {
+        getLatestPathways: sinon.stub().resolves({
+            'test-user': {
+                'test-pathway': {
+                    prompt: [
+                        { name: 'default-prompt' } // No cortexPathwayName
+                    ],
+                    systemPrompt: 'Test system prompt'
+                }
+            }
+        }),
+        getPathway: sinon.stub().resolves({
+            prompt: [{ name: 'default-prompt' }], // No cortexPathwayName
+            systemPrompt: 'Test system prompt',
+            fileHashes: [],
+            rootResolver: mockRootResolver
+        }),
+        getResolvers: sinon.stub().returns({ Mutation: {} })
+    };
+
+    const resolvers = getResolvers(mockConfig, {}, mockPathwayManager);
+    const executeWorkspaceResolver = resolvers.Query.executeWorkspace;
+
+    const mockContextValue = { config: mockConfig };
+    const mockInfo = {};
+
+    const args = {
+        userId: 'test-user',
+        pathwayName: 'test-pathway',
+        text: 'test input'
+        // No promptNames provided - uses default case
+    };
+
+    const result = await executeWorkspaceResolver(null, args, mockContextValue, mockInfo);
+
+    // Verify that legacy resolver was called (indicating DRY helper function worked for default case)
+    t.is(mockRootResolver.callCount, 1);
+    
+    // Verify result structure
+    t.truthy(result);
+    t.is(result.result, 'default-legacy-result');
 });
