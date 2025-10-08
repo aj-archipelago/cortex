@@ -232,20 +232,32 @@ test.serial("should fetch remote file", async (t) => {
   const requestId = uuidv4();
   const remoteUrl = "https://example.com/test.txt";
 
+  // Mock external HEAD and GET to avoid network dependency
+  const body = "hello from example";
+  const scope = nock("https://example.com")
+    .head("/test.txt")
+    .reply(200, "", {
+      "Content-Type": "text/plain",
+      "Content-Length": body.length.toString(),
+    })
+    .get("/test.txt")
+    .reply(200, body, {
+      "Content-Type": "text/plain",
+      "Content-Length": body.length.toString(),
+    });
+
   const response = await axios.get(baseUrl, {
     params: {
       fetch: remoteUrl,
       requestId,
     },
     validateStatus: (status) => true,
+    timeout: 10000,
   });
 
-  t.is(response.status, 400, "Should reject invalid URL");
-  t.is(
-    response.data,
-    "Invalid or inaccessible URL",
-    "Should return correct error message",
-  );
+  t.is(response.status, 200, "Should fetch and store remote file");
+  t.truthy(response.data.url, "Should return file URL");
+  t.true(scope.isDone(), "All external requests should be mocked and used");
 });
 
 // Test: Redis caching behavior for remote files
@@ -296,7 +308,7 @@ test.serial("should cache remote files in Redis", async (t) => {
 
     t.is(secondResponse.status, 200, "Should return cached file from Redis");
     t.truthy(secondResponse.data.url, "Should return cached file URL");
-    
+
     // Cleanup
     await cleanupHashAndFile(hash, secondResponse.data.url, baseUrl);
   } finally {
