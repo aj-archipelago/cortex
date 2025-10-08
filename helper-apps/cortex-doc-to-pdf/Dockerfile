@@ -1,7 +1,7 @@
 # Use official Azure Functions Python base image
 FROM mcr.microsoft.com/azure-functions/python:4-python3.11
 
-# Install LibreOffice + UNO Python bindings and unoconv for fast conversions
+# Install LibreOffice + UNO Python bindings for fast conversions
 RUN apt-get update && \
     apt-get install -y \
     libreoffice \
@@ -9,7 +9,6 @@ RUN apt-get update && \
     libreoffice-calc \
     libreoffice-impress \
     python3-uno \
-    unoconv \
     fonts-liberation \
     fonts-dejavu \
     fonts-liberation2 \
@@ -39,8 +38,15 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy function app files
 COPY . .
 
+# Make UNO startup script executable
+RUN chmod +x start-unoserver.sh
+
 # Expose port for standalone server mode
 EXPOSE 8080
 
-# Start the application directly (no UNO listener)
-CMD ["python", "function_app.py"]
+# Environment for unoserver
+ENV UNOSERVER_PORT=2002 \
+    UNO_PROFILE_DIR=/tmp/uno-profile
+
+# Start unoserver daemon and then the app
+CMD ["./start-unoserver.sh"]
