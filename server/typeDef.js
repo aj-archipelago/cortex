@@ -51,7 +51,7 @@ const getGraphQlType = (value) => {
     }
     if (schema.type === 'number') {
       const def = schema.default;
-      return Number.isInteger(def) ? { type: 'Int', defaultValue: def } : { type: 'Float', defaultValue: def };
+      return { type: 'Float', defaultValue: def };
     }
     if (schema.type === 'array') {
       // Support arrays of primitive types; fall back to JSON string for complex types
