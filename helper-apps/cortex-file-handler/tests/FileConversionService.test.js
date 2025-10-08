@@ -154,10 +154,10 @@ test("converts document to PDF via external service", async (t) => {
   });
 
   const service = new FileConversionService(mockContext);
-  const result = await service.convertFile(
-    "test.docx",
-    "https://example.com/test.docx",
-  );
+  // Create a real local test file to stream to the PDF service
+  const docPath = join(t.context.testDir, "test.docx");
+  await fs.writeFile(docPath, "Dummy DOCX content for PDF test");
+  const result = await service.convertFile(docPath, "https://example.com/test.docx");
 
   t.true(result.converted);
   t.true(result.convertedPath.endsWith(".pdf"));
