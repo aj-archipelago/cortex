@@ -227,7 +227,7 @@ class ReplicateApiPlugin extends ModelPlugin {
             input_image: combinedParameters.input_image,
             aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
             safety_tolerance: safetyTolerance,
-            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) && combinedParameters.seed > 0 ? { seed: combinedParameters.seed } : {}),
           },
         };
         break;
@@ -250,7 +250,7 @@ class ReplicateApiPlugin extends ModelPlugin {
             input_image_2: combinedParameters.input_image_2,
             aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "1:1",
             safety_tolerance: safetyTolerance,
-            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) && combinedParameters.seed > 0 ? { seed: combinedParameters.seed } : {}),
           },
         };
         break;
@@ -265,7 +265,7 @@ class ReplicateApiPlugin extends ModelPlugin {
             prompt: modelPromptText,
             resolution: validResolutions.includes(combinedParameters.resolution) ? combinedParameters.resolution : "1080p",
             aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "16:9",
-            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) && combinedParameters.seed > 0 ? { seed: combinedParameters.seed } : {}),
             fps: validFps.includes(combinedParameters.fps) ? combinedParameters.fps : 24,
             camera_fixed: combinedParameters.camera_fixed || false,
             duration: combinedParameters.duration || 5,
@@ -340,7 +340,7 @@ class ReplicateApiPlugin extends ModelPlugin {
           max_images: combinedParameters.maxImages || combinedParameters.numberResults || 1,
           aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "4:3",
           sequential_image_generation: validSequentialModes.includes(combinedParameters.sequentialImageGeneration) ? combinedParameters.sequentialImageGeneration : "disabled",
-          ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed && combinedParameters.seed > 0) ? { seed: combinedParameters.seed } : {}),
+          ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) && combinedParameters.seed > 0 ? { seed: combinedParameters.seed } : {}),
         });
 
         // For seedream-4, include the image_input array if we have images
