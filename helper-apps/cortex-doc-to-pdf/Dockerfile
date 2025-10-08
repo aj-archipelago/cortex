@@ -1,13 +1,15 @@
 # Use official Azure Functions Python base image
 FROM mcr.microsoft.com/azure-functions/python:4-python3.11
 
-# Install LibreOffice and dependencies
+# Install LibreOffice + UNO Python bindings and unoconv for fast conversions
 RUN apt-get update && \
     apt-get install -y \
     libreoffice \
     libreoffice-writer \
     libreoffice-calc \
     libreoffice-impress \
+    python3-uno \
+    unoconv \
     fonts-liberation \
     fonts-dejavu \
     fonts-liberation2 \
@@ -40,5 +42,5 @@ COPY . .
 # Expose port for standalone server mode
 EXPOSE 8080
 
-# Default runs Azure Functions host, but can override to run standalone
+# Start the application directly (no UNO listener)
 CMD ["python", "function_app.py"]

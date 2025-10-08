@@ -7,6 +7,9 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
+      
+    tmpfs:
+      - /tmp:size=256m
     volumes:
       # Mount local code for development (optional)
       - ./function_app.py:/home/site/wwwroot/function_app.py
