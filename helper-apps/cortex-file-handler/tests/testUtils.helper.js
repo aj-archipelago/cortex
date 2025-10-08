@@ -109,7 +109,7 @@ export async function startTestServer(options = {}) {
   server = app.listen(port, () => {
     console.log(`Test server started on port ${port}`);
   });
-
+  
   // Wait for server to be ready
   await new Promise((resolve) => setTimeout(resolve, 1000));
 
@@ -140,7 +140,7 @@ export async function stopTestServer(beforeClose) {
   if (beforeClose) {
     await beforeClose();
   }
-
+  
   if (server) {
     server.close();
     server = null;
