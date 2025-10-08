@@ -19,7 +19,7 @@ export default {
         calculateEmbeddings: false,
         language: "English",
         chatId: ``,
-        dataSources: [""],
+        dataSources: {type: '[String]', value: []},
         model: 'oai-gpt4o',
         aiStyle: "OpenAI",
         generatorPathway: 'sys_generator_results',

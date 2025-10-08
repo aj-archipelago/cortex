@@ -599,7 +599,7 @@ class PathwayResolver {
                     if (previousResult) {
                         previousResult = this.truncate(previousResult, 2 * this.chunkMaxTokenLength);
                     }
-                    result = await this.applyPrompt(this.prompts[i], null, currentParameters);
+                    result = await this.applyPrompt(this.prompts[i], text, currentParameters);
                 } else {
                     // Limit context to N characters
                     if (previousResult) {
@@ -670,20 +670,15 @@ class PathwayResolver {
         }
         let result = '';
 
-        // If this text is empty, skip applying the prompt as it will likely be a nonsensical result
-        if (!/^\s*$/.test(text) || parameters?.file || parameters?.inputVector || this?.modelName.includes('cognitive')) {
-            result = await this.modelExecutor.execute(text, { 
-                ...parameters, 
-                ...this.savedContext,
-                memorySelf: this.memorySelf,
-                memoryDirectives: this.memoryDirectives,
-                memoryTopics: this.memoryTopics,
-                memoryUser: this.memoryUser,
-                memoryContext: this.memoryContext
-            }, prompt, this);
-        } else {
-            result = text;
-        }
+        result = await this.modelExecutor.execute(text, { 
+            ...parameters, 
+            ...this.savedContext,
+            memorySelf: this.memorySelf,
+            memoryDirectives: this.memoryDirectives,
+            memoryTopics: this.memoryTopics,
+            memoryUser: this.memoryUser,
+            memoryContext: this.memoryContext
+        }, prompt, this);
         
         requestState[this.requestId].completedCount++;
 

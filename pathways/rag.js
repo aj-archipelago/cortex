@@ -30,7 +30,7 @@ export default {
         semanticConfiguration: ``,
         roleInformation: ``,    
         calculateEmbeddings: false,
-        dataSources: [""],
+        dataSources: {type: '[String]', value: []},
         language: "English"
     },
     timeout: 300,

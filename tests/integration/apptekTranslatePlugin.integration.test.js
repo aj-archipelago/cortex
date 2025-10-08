@@ -155,7 +155,7 @@ test.serial('AppTek Plugin: Force failure and test GPT-4 Omni fallback', async (
 });
 
 // Test AppTek failure with default fallback (translate_groq)
-test.skip('AppTek Plugin: Force failure and test default fallback', async (t) => {
+test('AppTek Plugin: Force failure and test default fallback', async (t) => {
     // Set a longer timeout for this test since Groq might be slower
     t.timeout(180000); // 3 minutes
     

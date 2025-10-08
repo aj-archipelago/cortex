@@ -1,6 +1,5 @@
 export default {
   prompt: ["{{text}}"],
-
   enableDuplicateRequests: false,
   inputParameters: {
     model: "replicate-seedream-4",
