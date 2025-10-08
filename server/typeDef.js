@@ -1,14 +1,25 @@
-// Check if a value is a type specification object
-const isTypeSpecObject = (value) => {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && 
-         value.type && value.value !== undefined && 
-         Object.keys(value).length === 2 && 
-         Object.keys(value).includes('type') && Object.keys(value).includes('value');
+// Check if a value is a JSON Schema object for parameter typing
+const isJsonSchemaObject = (value) => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  // Basic JSON Schema indicators
+  return (
+    typeof value.type === 'string' ||
+    value.$ref !== undefined ||
+    value.oneOf !== undefined ||
+    value.anyOf !== undefined ||
+    value.allOf !== undefined ||
+    value.enum !== undefined ||
+    value.properties !== undefined ||
+    value.items !== undefined
+  );
 };
 
-// Extract the actual value from a type specification object or return the value as-is
+// Extract the default value from a JSON Schema object or return the value as-is
 const extractValueFromTypeSpec = (value) => {
-  return isTypeSpecObject(value) ? value.value : value;
+  if (isJsonSchemaObject(value)) {
+    return value.hasOwnProperty('default') ? value.default : undefined;
+  }
+  return value;
 };
 
 // Process parameters to convert any type specification objects to their actual values
@@ -25,13 +36,48 @@ const processPathwayParameters = (params) => {
 };
 
 const getGraphQlType = (value) => {
-  // The value might be an object with explicit type specification
-  if (isTypeSpecObject(value)) {
-    return {
-      type: value.type,
-      defaultValue: typeof value.value === 'string' ? `"${value.value}"` : 
-                   Array.isArray(value.value) ? JSON.stringify(value.value) : value.value
-    };
+  // The value might be an object with JSON Schema type specification
+  if (isJsonSchemaObject(value)) {
+    const schema = value;
+    // Map JSON Schema to GraphQL
+    if (schema.type === 'boolean') {
+      return { type: 'Boolean', defaultValue: schema.default === undefined ? undefined : schema.default };
+    }
+    if (schema.type === 'string') {
+      return { type: 'String', defaultValue: schema.default === undefined ? undefined : `"${schema.default}"` };
+    }
+    if (schema.type === 'integer') {
+      return { type: 'Int', defaultValue: schema.default };
+    }
+    if (schema.type === 'number') {
+      const def = schema.default;
+      return Number.isInteger(def) ? { type: 'Int', defaultValue: def } : { type: 'Float', defaultValue: def };
+    }
+    if (schema.type === 'array') {
+      // Support arrays of primitive types; fall back to JSON string for complex types
+      const items = schema.items || {};
+      const def = schema.default;
+      const defaultArray = Array.isArray(def) ? JSON.stringify(def) : '[]';
+      if (items.type === 'string') {
+        return { type: '[String]', defaultValue: defaultArray };
+      }
+      if (items.type === 'integer') {
+        return { type: '[Int]', defaultValue: defaultArray };
+      }
+      if (items.type === 'number') {
+        return { type: '[Float]', defaultValue: defaultArray };
+      }
+      if (items.type === 'boolean') {
+        return { type: '[Boolean]', defaultValue: defaultArray };
+      }
+      // Unknown item type: pass as serialized JSON string argument
+      return { type: 'String', defaultValue: def === undefined ? '"[]"' : `"${JSON.stringify(def).replace(/"/g, '\\"')}"` };
+    }
+    if (schema.type === 'object' || schema.properties) {
+      // Until explicit input types are defined, accept as stringified JSON
+      const def = schema.default;
+      return { type: 'String', defaultValue: def === undefined ? '"{}"' : `"${JSON.stringify(def).replace(/"/g, '\\"')}"` };
+    }
   }
   
   // Otherwise, autodetect the type
@@ -137,7 +183,7 @@ export {
   getMessageTypeDefs,
   getPathwayTypeDef,
   userPathwayInputParameters,
-  isTypeSpecObject,
+  isJsonSchemaObject,
   extractValueFromTypeSpec,
   processPathwayParameters,
 };

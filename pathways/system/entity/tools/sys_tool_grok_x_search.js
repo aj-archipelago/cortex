@@ -10,8 +10,8 @@ export default {
     inputParameters: {
         text: '',
         userMessage: '',
-        includedHandles: { type: '[String]', value: [] },
-        excludedHandles: { type: '[String]', value: [] },
+        includedHandles: { type: 'array', items: { type: 'string' }, default: [] },
+        excludedHandles: { type: 'array', items: { type: 'string' }, default: [] },
         minFavorites: 0,
         minViews: 0,
         maxResults: 10

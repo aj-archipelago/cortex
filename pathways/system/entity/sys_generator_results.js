@@ -24,7 +24,7 @@ export default {
         calculateEmbeddings: false,
         language: "English",
         chatId: ``,
-        dataSources: {type: '[String]', value: []},
+        dataSources: { type: 'array', items: { type: 'string' }, default: [] },
         model: 'oai-gpt41-mini',
     },
     timeout: 300,
