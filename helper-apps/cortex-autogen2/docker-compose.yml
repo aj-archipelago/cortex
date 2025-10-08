@@ -7,14 +7,21 @@ services:
         - linux/amd64
     ports:
       - "7071:80"
+    env_file:
+      - .env
     environment:
-      - CORTEX_API_BASE_URL=http://host.docker.internal:4000/v1
-      - REDIS_CONNECTION_STRING=redis://host.docker.internal:6379
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      - FUNCTIONS_WORKER_RUNTIME=python
+      - AzureWebJobsFeatureFlags=EnableWorkerIndexing
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
+      - AzureWebJobsStorage=${AZURE_STORAGE_CONNECTION_STRING}
+      - QUEUE_NAME=${AZURE_QUEUE_NAME:-${QUEUE_NAME}}
+      - CORTEX_API_BASE_URL=${CORTEX_API_BASE_URL:-http://host.docker.internal:4000/v1}
+      - REDIS_CONNECTION_STRING=${REDIS_CONNECTION_STRING:-redis://host.docker.internal:6379}
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:80/api/health"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 60s
     restart: unless-stopped
     network_mode: host

@@ -90,7 +90,6 @@ test('parseJson should attempt to repair invalid JSON', async t => {
     
     const result = await parser.parseJson(invalidJson);
     
-    console.log('parseJson result:', result);  // For debugging
     
     t.not(result, null);
     

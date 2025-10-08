@@ -79,9 +79,6 @@ export default {
         try {
             let currentMessages = JSON.parse(JSON.stringify(args.chatHistory));
 
-            console.log("currentMessages", currentMessages);
-            console.log("args", args);
-
             let response = await runAllPrompts({
                 ...args,
                 chatHistory: currentMessages,
