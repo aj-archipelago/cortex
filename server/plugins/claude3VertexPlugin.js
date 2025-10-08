@@ -330,22 +330,13 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       });
     }
 
-    let toolChoice = parameters.tool_choice;
-    if (typeof toolChoice === 'string') {
-      try {
-        toolChoice = JSON.parse(toolChoice);
-      } catch (e) {
-        toolChoice = 'auto';
-      }
-    }
-    
-    if (toolChoice) {
-      // Convert OpenAI tool_choice format to Claude format
+    // Handle tool_choice parameter conversion from OpenAI format to Claude format
+    if (parameters.tool_choice) {
+      let toolChoice = parameters.tool_choice;
       
-      // Handle JSON string from REST endpoint
+      // Parse JSON string if needed
       if (typeof toolChoice === 'string') {
         try {
-          // Try to parse as JSON first
           toolChoice = JSON.parse(toolChoice);
         } catch (e) {
           // If not JSON, handle as simple string values: auto, required, none
@@ -356,11 +347,12 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
           } else if (toolChoice === 'none') {
             requestParameters.tool_choice = { type: 'none' };
           }
+          toolChoice = null; // Prevent further processing
         }
       }
       
       // Handle parsed object
-      if (toolChoice.type === "function") {
+      if (toolChoice && toolChoice.type === "function") {
         // Handle function-specific tool choice
         requestParameters.tool_choice = {
           type: "tool",
