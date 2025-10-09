@@ -100,7 +100,7 @@ export default {
             }
             
             // Call appropriate pathway based on model
-            const pathwayName = model.includes('seedream') ? 'image_seedream' : 'image_qwen';
+            const pathwayName = model.includes('seedream') ? 'image_seedream4' : 'image_qwen';
             return await callPathway(pathwayName, params);
 
         } catch (e) {
