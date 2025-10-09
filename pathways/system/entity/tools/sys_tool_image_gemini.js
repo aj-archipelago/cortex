@@ -1,6 +1,7 @@
-// sys_tool_image.js
+// sys_tool_image_gemini.js
 // Entity tool that creates and modifies images for the entity to show to the user
 import { callPathway } from '../../../../lib/pathwayTools.js';
+import { uploadImageToCloud } from '../../../../lib/util.js';
 
 export default {
     prompt: [],
@@ -10,12 +11,13 @@ export default {
         model: 'oai-gpt4o',
     },
     timeout: 300,
+    /*
     toolDefinition: [{
         type: "function",
         icon: "🎨",
         function: {
             name: "GenerateImage",
-            description: "Use when asked to create, generate, or generate revisions of visual content. Any time the user asks you for a picture, a selfie, artwork, a drawing or if you want to illustrate something for the user, you can use this tool to generate any sort of image from cartoon to photo realistic. This tool does not display the image to the user - you need to do that with markdown in your response.",
+            description: "Use when asked to create, generate, or generate revisions of visual content. Any time the user asks you for a picture, a selfie, artwork, a drawing or if you want to illustrate something for the user, you can use this tool to generate any sort of image from cartoon to photo realistic. After you have generated the image, you must include the image in your response to show it to the user.",
             parameters: {
                 type: "object",
                 properties: {
@@ -28,7 +30,7 @@ export default {
                         description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["detailedInstructions", "userMessage"]
+                required: ["detailedInstructions", "renderText", "userMessage"]
             }
         }
     },
@@ -37,7 +39,7 @@ export default {
         icon: "🔄",
         function: {
             name: "ModifyImage",
-            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated. It takes up to two input images as a reference and outputs a new image based on the instructions. This tool does not display the image to the user - you need to do that with markdown in your response.",
+            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated. It takes up to two input images as a reference and outputs a new image based on the instructions.",
             parameters: {
                 type: "object",
                 properties: {
@@ -66,42 +68,64 @@ export default {
             }
         }
     }],
-
+    */
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
 
         try {   
-            let model = "replicate-seedream-4";
+            let model = "gemini-25-flash-image";
             let prompt = args.detailedInstructions || "";
-
-            // If we have an input image, use the flux-kontext-max model
-            if (args.inputImage || args.inputImage2 || args.inputImage3) {
-                model = "replicate-qwen-image-edit-plus";
-            }
-
-            pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
             
-            // Build parameters object, only including image parameters if they have non-empty values
-            const params = {
+            // Call the image generation pathway
+            let result = await callPathway('image_gemini_25', {
                 ...args, 
-                text: prompt, 
+                text: prompt,
                 model, 
                 stream: false,
-            };
-            
-            if (args.inputImage && args.inputImage.trim()) {
-                params.input_image = args.inputImage;
+                input_image: args.inputImage,
+                input_image_2: args.inputImage2,
+                input_image_3: args.inputImage3,
+                optimizePrompt: true,
+            }, pathwayResolver);
+
+            pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
+
+            if (pathwayResolver.pathwayResultData) {
+                if (pathwayResolver.pathwayResultData.artifacts && Array.isArray(pathwayResolver.pathwayResultData.artifacts)) {
+                    const uploadedImages = [];
+                    
+                    // Process each image artifact
+                    for (const artifact of pathwayResolver.pathwayResultData.artifacts) {
+                        if (artifact.type === 'image' && artifact.data && artifact.mimeType) {
+                            try {
+                                // Upload image to cloud storage
+                                const imageUrl = await uploadImageToCloud(artifact.data, artifact.mimeType, pathwayResolver);
+                                uploadedImages.push({
+                                    type: 'image',
+                                    url: imageUrl,
+                                    mimeType: artifact.mimeType
+                                });
+                            } catch (uploadError) {
+                                pathwayResolver.logError(`Failed to upload artifact: ${uploadError.message}`);
+                                // Keep original artifact as fallback
+                                uploadedImages.push(artifact);
+                            }
+                        } else {
+                            // Keep non-image artifacts as-is
+                            uploadedImages.push(artifact);
+                        }
+                    }
+                    
+                    // Return the urls of the uploaded images as text in the result
+                    result = result + '\n' + uploadedImages.map(image => image.url).join('\n');
+                }
+            } else {
+                // If result is not a CortexResponse, log a warning but return as-is
+                pathwayResolver.logWarning('No artifacts to upload');
+                result = result + '\n' + 'No images generated';
             }
-            if (args.inputImage2 && args.inputImage2.trim()) {
-                params.input_image_2 = args.inputImage2;
-            }
-            if (args.inputImage3 && args.inputImage3.trim()) {
-                params.input_image_3 = args.inputImage3;
-            }
-            
-            // Call appropriate pathway based on model
-            const pathwayName = model.includes('seedream') ? 'image_seedream4' : 'image_qwen';
-            return await callPathway(pathwayName, params);
+
+            return result;
 
         } catch (e) {
             pathwayResolver.logError(e.message ?? e);

@@ -10,7 +10,7 @@ export default {
         ],
     inputParameters: {
         chatHistory: [{role: '', content: []}],
-        contextId: ``,
+        contextId: '',
     },
     max_tokens: 2048,
     model: 'gemini-pro-15-vision',

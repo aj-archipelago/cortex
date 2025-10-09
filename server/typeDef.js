@@ -1,30 +1,113 @@
+// Check if a value is a JSON Schema object for parameter typing
+const isJsonSchemaObject = (value) => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  // Basic JSON Schema indicators
+  return (
+    typeof value.type === 'string' ||
+    value.$ref !== undefined ||
+    value.oneOf !== undefined ||
+    value.anyOf !== undefined ||
+    value.allOf !== undefined ||
+    value.enum !== undefined ||
+    value.properties !== undefined ||
+    value.items !== undefined
+  );
+};
+
+// Extract the default value from a JSON Schema object or return the value as-is
+const extractValueFromTypeSpec = (value) => {
+  if (isJsonSchemaObject(value)) {
+    return value.hasOwnProperty('default') ? value.default : undefined;
+  }
+  return value;
+};
+
+// Process parameters to convert any type specification objects to their actual values
+const processPathwayParameters = (params) => {
+  if (!params || typeof params !== 'object') {
+    return params;
+  }
+  
+  const processed = {};
+  for (const [key, value] of Object.entries(params)) {
+    processed[key] = extractValueFromTypeSpec(value);
+  }
+  return processed;
+};
+
 const getGraphQlType = (value) => {
+  // The value might be an object with JSON Schema type specification
+  if (isJsonSchemaObject(value)) {
+    const schema = value;
+    // Map JSON Schema to GraphQL
+    if (schema.type === 'boolean') {
+      return { type: 'Boolean', defaultValue: schema.default === undefined ? undefined : schema.default };
+    }
+    if (schema.type === 'string') {
+      return { type: 'String', defaultValue: schema.default === undefined ? undefined : `"${schema.default}"` };
+    }
+    if (schema.type === 'integer') {
+      return { type: 'Int', defaultValue: schema.default };
+    }
+    if (schema.type === 'number') {
+      const def = schema.default;
+      return { type: 'Float', defaultValue: def };
+    }
+    if (schema.type === 'array') {
+      // Support arrays of primitive types; fall back to JSON string for complex types
+      const items = schema.items || {};
+      const def = schema.default;
+      const defaultArray = Array.isArray(def) ? JSON.stringify(def) : '[]';
+      if (items.type === 'string') {
+        return { type: '[String]', defaultValue: defaultArray };
+      }
+      if (items.type === 'integer') {
+        return { type: '[Int]', defaultValue: defaultArray };
+      }
+      if (items.type === 'number') {
+        return { type: '[Float]', defaultValue: defaultArray };
+      }
+      if (items.type === 'boolean') {
+        return { type: '[Boolean]', defaultValue: defaultArray };
+      }
+      // Unknown item type: pass as serialized JSON string argument
+      return { type: 'String', defaultValue: def === undefined ? '"[]"' : `"${JSON.stringify(def).replace(/"/g, '\\"')}"` };
+    }
+    if (schema.type === 'object' || schema.properties) {
+      // Until explicit input types are defined, accept as stringified JSON
+      const def = schema.default;
+      return { type: 'String', defaultValue: def === undefined ? '"{}"' : `"${JSON.stringify(def).replace(/"/g, '\\"')}"` };
+    }
+  }
+  
+  // Otherwise, autodetect the type
   switch (typeof value) {
     case 'boolean':
-      return {type: 'Boolean'};
+      return {type: 'Boolean', defaultValue: value};
     case 'string':
-      return {type: 'String'};
+      return {type: 'String', defaultValue: `"${value}"`};
     case 'number':
-      return {type: 'Int'};
+      // Check if it's an integer or float
+      return Number.isInteger(value) ? {type: 'Int', defaultValue: value} : {type: 'Float', defaultValue: value};
     case 'object':
       if (Array.isArray(value)) {
         if (value.length > 0 && typeof(value[0]) === 'string') {
-          return {type: '[String]'};
+          return {type: '[String]', defaultValue: JSON.stringify(value)};
         }
         else {
-          // New case for MultiMessage type
+          // Check if it's MultiMessage (content is array) or Message (content is string)
           if (Array.isArray(value[0]?.content)) {
-            return {type: '[MultiMessage]'};
+            return {type: '[MultiMessage]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
           }
           else {
-            return {type: '[Message]'};
+            return {type: '[Message]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
           }
         }
       } else {
-        return {type: `[${value.objName}]`};
+        return {type: `[${value.objName}]`, defaultValue: JSON.stringify(value)};
       }
     default:
-      return {type: 'String'};
+      return {type: 'String', defaultValue: `"${value}"`};
   }
 };
 
@@ -80,7 +163,7 @@ const getPathwayTypeDefAndExtendQuery = (pathway) => {
     };
   });
 
-  const gqlDefinition = `${type}\n\n${responseType}\n\nextend type Query {${name}(${paramsStr}): ${objName}}`;
+  const gqlDefinition = `${type}\n\n${responseType}\n\nextend type Query {${name}${paramsStr ? `(${paramsStr})` : ''}: ${objName}}`;
 
   return {
     gqlDefinition,
@@ -100,4 +183,7 @@ export {
   getMessageTypeDefs,
   getPathwayTypeDef,
   userPathwayInputParameters,
+  isJsonSchemaObject,
+  extractValueFromTypeSpec,
+  processPathwayParameters,
 };

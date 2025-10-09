@@ -193,8 +193,7 @@ test('_createPromptObject handles empty system prompt', t => {
 
     t.true(result instanceof Prompt);
     t.is(result.name, 'test_prompt');
-    t.is(result.messages[0].content, '');
-    t.is(result.messages[1].content, '{{text}}\n\nTest prompt text');
+    t.is(result.messages[0].content, '{{text}}\n\nTest prompt text');
 });
 
 test('_createPromptObject handles null system prompt', t => {
@@ -206,8 +205,7 @@ test('_createPromptObject handles null system prompt', t => {
 
     t.true(result instanceof Prompt);
     t.is(result.name, 'test_prompt');
-    t.is(result.messages[0].content, '');
-    t.is(result.messages[1].content, '{{text}}\n\nTest prompt text');
+    t.is(result.messages[0].content, '{{text}}\n\nTest prompt text');
 });
 
 test('putPathway requires userId and secret', async t => {

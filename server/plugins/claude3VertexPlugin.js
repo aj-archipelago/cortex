@@ -304,12 +304,17 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     requestParameters.messages = modifiedMessages;
 
     // Convert OpenAI tools format to Claude format if present
-    if (typeof parameters.tools === 'string') {
-      parameters.tools = JSON.parse(parameters.tools);
+    let toolsArray = parameters.tools;
+    if (typeof toolsArray === 'string') {
+      try {
+        toolsArray = JSON.parse(toolsArray);
+      } catch (e) {
+        toolsArray = [];
+      }
     }
     
-    if (parameters.tools) {
-      requestParameters.tools = parameters.tools.map(tool => {
+    if (toolsArray && Array.isArray(toolsArray) && toolsArray.length > 0) {
+      requestParameters.tools = toolsArray.map(tool => {
         if (tool.type === 'function') {
           return {
             name: tool.function.name,
@@ -325,14 +330,13 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       });
     }
 
+    // Handle tool_choice parameter conversion from OpenAI format to Claude format
     if (parameters.tool_choice) {
-      // Convert OpenAI tool_choice format to Claude format
       let toolChoice = parameters.tool_choice;
       
-      // Handle JSON string from REST endpoint
+      // Parse JSON string if needed
       if (typeof toolChoice === 'string') {
         try {
-          // Try to parse as JSON first
           toolChoice = JSON.parse(toolChoice);
         } catch (e) {
           // If not JSON, handle as simple string values: auto, required, none
@@ -343,11 +347,12 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
           } else if (toolChoice === 'none') {
             requestParameters.tool_choice = { type: 'none' };
           }
+          toolChoice = null; // Prevent further processing
         }
       }
       
       // Handle parsed object
-      if (toolChoice.type === "function") {
+      if (toolChoice && toolChoice.type === "function") {
         // Handle function-specific tool choice
         requestParameters.tool_choice = {
           type: "tool",

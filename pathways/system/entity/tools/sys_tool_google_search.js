@@ -107,7 +107,8 @@ export default {
         try {
             // Pass-through: call Google CSE with provided args
             const response = await callPathway('google_cse', { 
-                ...args
+                ...args,
+                text: args.q
             }, resolver);
 
             if (resolver.errors && resolver.errors.length > 0) {
@@ -117,7 +118,19 @@ export default {
                 return JSON.stringify({ _type: "SearchError", value: errorMessages, recoveryMessage: "This tool failed. You should try the backup tool for this function." });
             }
 
-            const parsedResponse = JSON.parse(response);
+            // Check if response is null or empty
+            if (!response) {
+                logger.error('Google CSE search returned null response');
+                return JSON.stringify({ _type: "SearchError", value: ["No response received from Google CSE"], recoveryMessage: "This tool failed. You should try the backup tool for this function." });
+            }
+
+            let parsedResponse;
+            try {
+                parsedResponse = JSON.parse(response);
+            } catch (parseError) {
+                logger.error(`Failed to parse Google CSE response: ${parseError.message}`);
+                return JSON.stringify({ _type: "SearchError", value: ["Invalid response format from Google CSE"], recoveryMessage: "This tool failed. You should try the backup tool for this function." });
+            }
 
             const results = [];
             const items = parsedResponse.items || [];

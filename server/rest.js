@@ -139,6 +139,8 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             return Boolean(value);
         } else if (type === 'Int') {
             return parseInt(value, 10);
+        } else if (type === 'Float') {
+            return parseFloat(value);
         } else if (type === '[MultiMessage]' && Array.isArray(value)) {
             return value.map(msg => ({
                 ...msg,

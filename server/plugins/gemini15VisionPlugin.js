@@ -204,34 +204,13 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
             }
         }
         
-        if (toolsArray && Array.isArray(toolsArray)) {
+        if (toolsArray && Array.isArray(toolsArray) && toolsArray.length > 0) {
             convertedTools = this.convertOpenAIToolsToGemini(toolsArray);
-        }
-
-        if (cortexRequest?.tools && Array.isArray(cortexRequest.tools)) {
-            const requestTools = this.convertOpenAIToolsToGemini(cortexRequest.tools);
-            convertedTools = [...convertedTools, ...requestTools];
-        }
-
-        if (cortexRequest?.pathway?.tools && Array.isArray(cortexRequest.pathway.tools)) {
-            const pathwayTools = this.convertOpenAIToolsToGemini(cortexRequest.pathway.tools);
-            convertedTools = [...convertedTools, ...pathwayTools];
-        }
-
-        // Temporarily remove geminiTools from pathway to prevent override
-        const originalGeminiTools = cortexRequest?.pathway?.geminiTools;
-        if (cortexRequest?.pathway) {
-            delete cortexRequest.pathway.geminiTools;
         }
 
         const baseParameters = super.getRequestParameters(text, parameters, prompt, cortexRequest);
 
-        // Restore original geminiTools
-        if (cortexRequest?.pathway && originalGeminiTools !== undefined) {
-            cortexRequest.pathway.geminiTools = originalGeminiTools;
-        }
-
-        if (convertedTools.length > 0) {
+        if (convertedTools[0]?.functionDeclarations?.length > 0) {
             baseParameters.tools = convertedTools;
             
             // Handle tool_choice parameter - convert OpenAI format to Gemini toolConfig

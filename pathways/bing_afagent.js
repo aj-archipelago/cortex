@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import logger from '../lib/logger.js';
 
 export default {
+    prompt: ["{{text}}"],
     inputParameters: {
         text: ``,
         tool_choice: 'auto',

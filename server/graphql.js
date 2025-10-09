@@ -36,10 +36,17 @@ const getPlugins = (config) => {
     //if cache is enabled and Redis is available, use it
     let cache;
     if (config.get('enableGraphqlCache') && config.get('storageConnectionString')) {
-        cache = new KeyvAdapter(new Keyv(config.get('storageConnectionString'), {
+        const keyvCache = new Keyv(config.get('storageConnectionString'), {
             ssl: true,
             abortConnect: false,
-        }));
+        });
+        
+        // Handle Redis connection errors to prevent crashes
+        keyvCache.on('error', (error) => {
+            logger.error(`GraphQL Keyv Redis connection error: ${error}`);
+        });
+        
+        cache = new KeyvAdapter(keyvCache);
         //caching similar strings, embedding hashing, ... #delta similarity 
         // TODO: custom cache key:
         // https://www.apollographql.com/docs/apollo-server/performance/cache-backends#implementing-your-own-cache-backend

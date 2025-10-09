@@ -8,8 +8,8 @@ import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 import { callPathway, addCitationsToResolver } from '../lib/pathwayTools.js';
-import { publishRequestProgress } from '../lib/redisSubscription.js';
 import logger from '../lib/logger.js';
+import { publishRequestProgress } from '../lib/redisSubscription.js';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { createParser } from 'eventsource-parser';
 import CortexResponse from '../lib/cortexResponse.js';
@@ -158,6 +158,11 @@ class PathwayResolver {
             return;
         }
 
+        // Handle CortexResponse objects - merge them into pathwayResultData
+        if (responseData && typeof responseData === 'object' && responseData.constructor && responseData.constructor.name === 'CortexResponse') {
+            this.pathwayResultData = this.mergeResultData(responseData);
+        }
+
         // If the response is a stream, handle it as streaming response
         if (responseData && typeof responseData.on === 'function') {
             await this.handleStream(responseData);
@@ -205,7 +210,8 @@ class PathwayResolver {
                 toolCalls: cortexResponse.toolCalls,
                 functionCall: cortexResponse.functionCall,
                 usage: cortexResponse.usage,
-                finishReason: cortexResponse.finishReason
+                finishReason: cortexResponse.finishReason,
+                artifacts: cortexResponse.artifacts
             };
             newData = cortexData;
         }
@@ -214,7 +220,7 @@ class PathwayResolver {
         const merged = { ...currentData, ...newData };
 
         // Handle array fields that should be concatenated
-        const arrayFields = ['citations', 'toolCalls'];
+        const arrayFields = ['citations', 'toolCalls', 'artifacts'];
         for (const field of arrayFields) {
             const currentArray = currentData[field] || [];
             const newArray = newData[field] || [];
@@ -593,7 +599,7 @@ class PathwayResolver {
                     if (previousResult) {
                         previousResult = this.truncate(previousResult, 2 * this.chunkMaxTokenLength);
                     }
-                    result = await this.applyPrompt(this.prompts[i], null, currentParameters);
+                    result = await this.applyPrompt(this.prompts[i], text, currentParameters);
                 } else {
                     // Limit context to N characters
                     if (previousResult) {
@@ -664,20 +670,15 @@ class PathwayResolver {
         }
         let result = '';
 
-        // If this text is empty, skip applying the prompt as it will likely be a nonsensical result
-        if (!/^\s*$/.test(text) || parameters?.file || parameters?.inputVector || this?.modelName.includes('cognitive')) {
-            result = await this.modelExecutor.execute(text, { 
-                ...parameters, 
-                ...this.savedContext,
-                memorySelf: this.memorySelf,
-                memoryDirectives: this.memoryDirectives,
-                memoryTopics: this.memoryTopics,
-                memoryUser: this.memoryUser,
-                memoryContext: this.memoryContext
-            }, prompt, this);
-        } else {
-            result = text;
-        }
+        result = await this.modelExecutor.execute(text, { 
+            ...parameters, 
+            ...this.savedContext,
+            memorySelf: this.memorySelf,
+            memoryDirectives: this.memoryDirectives,
+            memoryTopics: this.memoryTopics,
+            memoryUser: this.memoryUser,
+            memoryContext: this.memoryContext
+        }, prompt, this);
         
         requestState[this.requestId].completedCount++;
 

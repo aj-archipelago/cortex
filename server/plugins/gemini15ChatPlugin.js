@@ -138,16 +138,16 @@ class Gemini15ChatPlugin extends ModelPlugin {
         }
     
         const requestParameters = {
-        contents: requestMessages,
-        generationConfig: {
-            temperature: this.temperature || 0.7,
-            maxOutputTokens: max_tokens || this.getModelMaxReturnTokens(),
-            topP: parameters.topP || 0.95,
-            topK: parameters.topK || 40,
-        },
-        ...(geminiSafetySettings ? {safety_settings: geminiSafetySettings} : {}),
-        ...(system ? {systemInstruction: system} : {}),
-        ...(geminiTools ? {tools: geminiTools} : {})
+            contents: requestMessages,
+            generationConfig: {
+                temperature: this.temperature || 0.7,
+                maxOutputTokens: max_tokens || this.getModelMaxReturnTokens(),
+                topP: parameters.topP || 0.95,
+                topK: parameters.topK || 40,
+            },
+            ...(geminiSafetySettings ? {safety_settings: geminiSafetySettings} : {}),
+            ...(system ? {systemInstruction: system} : {}),
+            ...(geminiTools ? {tools: geminiTools} : {})
         };
     
         return requestParameters;
@@ -155,6 +155,11 @@ class Gemini15ChatPlugin extends ModelPlugin {
 
     // Parse the response from the new Chat API
     parseResponse(data) {
+        // Handle CortexResponse objects by returning them as-is
+        if (data && typeof data === 'object' && data.constructor && data.constructor.name === 'CortexResponse') {
+            return data;
+        }
+
         // If data is not an array, return it directly
         let dataToMerge = [];
         if (data && data.contents && Array.isArray(data.contents)) {

@@ -21,6 +21,7 @@ import GeminiChatPlugin from './plugins/geminiChatPlugin.js';
 import GeminiVisionPlugin from './plugins/geminiVisionPlugin.js';
 import Gemini15ChatPlugin from './plugins/gemini15ChatPlugin.js';
 import Gemini15VisionPlugin from './plugins/gemini15VisionPlugin.js';
+import Gemini25ImagePlugin from './plugins/gemini25ImagePlugin.js';
 import AzureBingPlugin from './plugins/azureBingPlugin.js';
 import Claude3VertexPlugin from './plugins/claude3VertexPlugin.js';
 import NeuralSpacePlugin from './plugins/neuralSpacePlugin.js';
@@ -102,6 +103,9 @@ class ModelExecutor {
                 break;
             case 'GEMINI-1.5-VISION':
                 plugin = new Gemini15VisionPlugin(pathway, model);
+                break;
+            case 'GEMINI-2.5-IMAGE':
+                plugin = new Gemini25ImagePlugin(pathway, model);
                 break;
             case 'AZURE-BING':
                 plugin = new AzureBingPlugin(pathway, model);
