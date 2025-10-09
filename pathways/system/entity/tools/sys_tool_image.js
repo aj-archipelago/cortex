@@ -99,7 +99,9 @@ export default {
                 params.input_image_3 = args.inputImage3;
             }
             
-            return await callPathway('image_qwen', params);
+            // Call appropriate pathway based on model
+            const pathwayName = model.includes('seedream') ? 'image_seedream' : 'image_qwen';
+            return await callPathway(pathwayName, params);
 
         } catch (e) {
             pathwayResolver.logError(e.message ?? e);
