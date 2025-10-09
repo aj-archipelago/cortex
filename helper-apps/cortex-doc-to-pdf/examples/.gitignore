@@ -1,0 +1,4 @@
+node_modules/
+output/
+*.pdf
+npm-debug.log

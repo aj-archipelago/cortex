@@ -4,12 +4,19 @@ import path from "path";
 import { createReadStream, createWriteStream } from "fs";
 import { pipeline } from "stream/promises";
 import axios from "axios";
+import FormData from "form-data";
 import XLSX from "xlsx";
 import { CONVERTED_EXTENSIONS } from "../constants.js";
 import { v4 as uuidv4 } from "uuid";
 import { sanitizeFilename, generateShortId } from "../utils/filenameUtils.js";
 
-const MARKITDOWN_CONVERT_URL = process.env.MARKITDOWN_CONVERT_URL || null;
+// Read service URLs at call time to allow tests to mutate process.env
+function getMarkitdownUrl() {
+  return process.env.MARKITDOWN_CONVERT_URL || null;
+}
+function getDocToPdfUrl() {
+  return process.env.DOC_TO_PDF_SERVICE_URL || null;
+}
 
 export class ConversionService {
   constructor(context) {
@@ -229,20 +236,36 @@ export class ConversionService {
   }
 
   async _handleDocumentConversion(filePath, originalUrl, tempDir) {
-    this.context.log("Handling document conversion");
+    // Default: Try PDF conversion if service is configured
+    const pdfServiceUrl = getDocToPdfUrl();
+    if (pdfServiceUrl) {
+      this.context.log("PDF service configured - converting to PDF");
+      try {
+        const pdfPath = await this._convertToPDF(filePath, tempDir);
+        if (pdfPath) {
+          return {
+            convertedPath: pdfPath,
+            convertedName: path.basename(pdfPath),
+            converted: true,
+          };
+        }
+      } catch (error) {
+        this.context.log("PDF conversion failed, falling back to markdown:", error.message);
+      }
+    } else {
+      this.context.log("PDF service not configured - using markdown conversion");
+    }
+
+    // Fallback to markdown if PDF service not configured or conversion fails
     if (!originalUrl) {
       throw new Error("Original URL is required for document conversion");
     }
 
     const markdown = await this._convertToMarkdown(originalUrl);
     if (!markdown) {
-      throw new Error("Markdown conversion returned empty result");
+      throw new Error("Markdown conversion failed");
     }
 
-    // Remove any query parameters from the file path before processing
-    const cleanFilePath = filePath.split("?")[0];
-    const ext = path.extname(cleanFilePath);
-    // Use LLM-friendly naming for temp files instead of original filename
     const shortId = generateShortId();
     const convertedPath = path.join(tempDir, `${shortId}.md`);
     await fs.writeFile(convertedPath, markdown);
@@ -254,9 +277,59 @@ export class ConversionService {
     };
   }
 
+  /**
+   * Convert document to PDF using streaming upload
+   * @param {string} filePath - Local path to file
+   * @param {string} tempDir - Temporary directory for output
+   * @returns {Promise<string>} - Path to converted PDF
+   */
+  async _convertToPDF(filePath, tempDir) {
+    try {
+      const pdfServiceUrl = getDocToPdfUrl();
+      if (!pdfServiceUrl) {
+        throw new Error("DOC_TO_PDF_SERVICE_URL is not configured");
+      }
+
+      this.context.log("Converting to PDF via service:", pdfServiceUrl);
+
+      // Create form data with file stream
+      const form = new FormData();
+      form.append('file', createReadStream(filePath), path.basename(filePath));
+
+      // Upload with streaming
+      const response = await axios({
+        method: 'POST',
+        url: pdfServiceUrl,
+        data: form,
+        headers: form.getHeaders(),
+        responseType: 'stream',
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        timeout: 60000, // 60 second timeout
+      });
+
+      // Stream PDF to temp file using original filename with .pdf extension
+      const originalBase = path.basename(filePath);
+      const baseWithoutExt = originalBase.includes('.')
+        ? originalBase.replace(/\.[^/.]+$/, '')
+        : originalBase;
+      const pdfPath = path.join(tempDir, `${baseWithoutExt}.pdf`);
+      const writer = createWriteStream(pdfPath);
+
+      await pipeline(response.data, writer);
+
+      this.context.log("PDF conversion successful:", pdfPath);
+      return pdfPath;
+
+    } catch (error) {
+      this.context.log("PDF conversion error:", error.message);
+      throw error;
+    }
+  }
+
   async _convertToMarkdown(fileUrl) {
     try {
-      const markitdownUrl = process.env.MARKITDOWN_CONVERT_URL;
+      const markitdownUrl = getMarkitdownUrl();
       if (!markitdownUrl) {
         throw new Error("MARKITDOWN_CONVERT_URL is not set");
       }
