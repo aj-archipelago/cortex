@@ -1,6 +1,7 @@
 from autogen_agentchat.agents import AssistantAgent, CodeExecutorAgent
 from autogen_ext.code_executors.local import LocalCommandLineCodeExecutor
-import os   
+import os
+from typing import Optional
 from autogen_core.tools import FunctionTool
 from tools.azure_blob_tools import upload_file_to_azure_blob
 
@@ -19,10 +20,22 @@ If the result indicates there is an error, fix the error and output the code aga
 When you find an answer, verify the answer carefully. Include verifiable evidence in your response if possible."""
 
 
-async def get_agents(default_model_client, big_model_client, small_model_client):
-    
-    #code executor
-    work_dir = os.getenv("CORTEX_WORK_DIR", "/home/site/wwwroot/coding")
+async def get_agents(default_model_client, big_model_client, small_model_client, request_work_dir: Optional[str] = None):
+
+    # Resolve work dir (prefer per-request dir if provided or from env)
+    work_dir = request_work_dir or os.getenv("CORTEX_WORK_DIR", "/home/site/wwwroot/coding")
+    try:
+        # In Azure Functions, ensure /tmp is used for write access if an /app path was set
+        if os.getenv("WEBSITE_INSTANCE_ID") and work_dir.startswith("/app/"):
+            work_dir = "/tmp/coding"
+        os.makedirs(work_dir, exist_ok=True)
+    except Exception:
+        try:
+            work_dir = "/tmp/coding"
+            os.makedirs(work_dir, exist_ok=True)
+        except Exception:
+            pass
+
     code_executor = LocalCommandLineCodeExecutor(work_dir=work_dir, timeout=300)
 
     #TOOLS
