@@ -399,13 +399,12 @@ Return ONLY the update line with emoji - nothing else:"""
 
             termination = HandoffTermination(target="user") | TextMentionTermination("TERMINATE")
 
-            agents, presenter_agent = await get_agents(
+            agents, presenter_agent, terminator_agent = await get_agents(
                 self.gpt41_model_client,
                 self.o3_model_client,
                 self.gpt41_model_client,
                 request_work_dir=request_work_dir_for_agents if 'request_work_dir_for_agents' in locals() else None
             )
-            terminator_agent = next((a for a in agents if getattr(a, "name", None) == "terminator_agent"), None)
 
             team = SelectorGroupChat(
                 participants=agents,

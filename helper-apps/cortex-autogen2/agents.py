@@ -141,4 +141,4 @@ async def get_agents(default_model_client, big_model_client, small_model_client,
     
     agents = [coder_agent, code_executor_agent, file_cloud_uploader_agent, presenter_agent, terminator_agent]
 
-    return agents, presenter_agent 
+    return agents, presenter_agent, terminator_agent 
