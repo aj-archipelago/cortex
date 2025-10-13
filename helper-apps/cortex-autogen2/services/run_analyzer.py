@@ -438,14 +438,14 @@ async def summarize_prior_learnings(similar_docs: List[Dict[str, Any]], model_cl
     # Summarize to <=8 bullets with the model if available
     if model_client and bullets:
         try:
-            prompt = """
+            prompt = f"""
 Condense these prior lessons into at most 8 bullets, clear and de-duplicated. Avoid secrets or environment-specific details.
 
 LESSONS:
-{bullets}
+{chr(10).join(bullets[:40])}
 
 Output 4-8 bullets only.
-""".replace("{bullets}", "\n".join(bullets[:40]))
+"""
             msgs = [UserMessage(content=prompt, source="run_analyzer_prior")]
             resp = await model_client.create(messages=msgs)
             text = (resp.content or "").strip()

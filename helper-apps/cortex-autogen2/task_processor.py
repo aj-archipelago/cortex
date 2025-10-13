@@ -403,12 +403,9 @@ Return ONLY the update line with emoji - nothing else:"""
                 self.gpt41_model_client,
                 self.o3_model_client,
                 self.gpt41_model_client,
+                request_work_dir=request_work_dir_for_agents if 'request_work_dir_for_agents' in locals() else None
             )
-            # Retrieve terminator agent from the agents list by name, if present
-            try:
-                terminator_agent = next((a for a in agents if getattr(a, "name", None) == "terminator_agent"), None)
-            except Exception:
-                terminator_agent = None
+            terminator_agent = next((a for a in agents if getattr(a, "name", None) == "terminator_agent"), None)
 
             team = SelectorGroupChat(
                 participants=agents,
