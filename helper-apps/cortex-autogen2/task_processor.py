@@ -385,25 +385,36 @@ Return ONLY the update line with emoji - nothing else:"""
             # Send initial progress update (transient only)
             await self.progress_tracker.set_transient_update(task_id, 0.05, "🚀 Starting your task...")
 
-            # Pre-run retrieval: prepend lessons from similar past runs
+            # Pre-run retrieval: ALWAYS gather lessons for planner (do not modify task text)
+            planner_learnings = None
             try:
-                if os.getenv("ENABLE_SEARCH_RETRIEVAL", "true").lower() == "true":
-                    similar_docs = search_similar_rest(task, top=3)
-                    if similar_docs:
-                        lessons = await summarize_prior_learnings(similar_docs, self.gpt41_model_client)
-                        if lessons:
-                            task = f"Prior Lessons (do not expose to end-user):\n{lessons}\n\nTask:\n{task}"
-                            await self.progress_tracker.set_transient_update(task_id, 0.07, "🧭 Using lessons from similar past tasks")
+                similar_docs = search_similar_rest(task, top=8)
+                if similar_docs:
+                    planner_learnings = await summarize_prior_learnings(similar_docs, self.gpt41_model_client)
+                    if planner_learnings:
+                        await self.progress_tracker.set_transient_update(task_id, 0.07, "🧭 Using lessons from similar past tasks")
             except Exception as e:
-                logger.debug(f"Pre-run retrieval failed or disabled: {e}")
+                logger.debug(f"Pre-run retrieval failed: {e}")
 
             termination = HandoffTermination(target="user") | TextMentionTermination("TERMINATE")
+
+            # Merge Azure AI Search lessons with structured hints for planner
+            try:
+                merged = []
+                if 'planner_learnings' in locals() and planner_learnings:
+                    merged.append(str(planner_learnings))
+                if 'planner_hints' in locals() and planner_hints:
+                    merged.append("\n".join([f"- {h}" for h in planner_hints][:6]))
+                merged_planner_learnings = "\n".join([m for m in merged if m]) or None
+            except Exception:
+                merged_planner_learnings = locals().get('planner_learnings')
 
             agents, presenter_agent, terminator_agent = await get_agents(
                 self.gpt41_model_client,
                 self.o3_model_client,
                 self.gpt41_model_client,
-                request_work_dir=request_work_dir_for_agents if 'request_work_dir_for_agents' in locals() else None
+                request_work_dir=request_work_dir_for_agents if 'request_work_dir_for_agents' in locals() else None,
+                planner_learnings=merged_planner_learnings
             )
 
             team = SelectorGroupChat(
@@ -711,6 +722,7 @@ Return ONLY the update line with emoji - nothing else:"""
                 improvement_text = playbook.get("text") or ""
                 actionables = int(playbook.get("actionables") or 0)
                 improvement_score = int(playbook.get("improvement_score") or 0)
+                planner_hints = playbook.get("hints") or []
 
                 # Decide whether to index based on signal and playbook strength
                 if should_index_run(metrics, errors, best_text + "\n" + anti_text, "", assets) and (improvement_score >= 50 or actionables >= 5 or metrics.get("toolCallCount", 0) or errors):
@@ -768,7 +780,6 @@ Return ONLY the update line with emoji - nothing else:"""
             except Exception:
                 pass
             self.final_progress_sent = True
-            
             return text_result
         except Exception as e:
             logger.error(f"❌ Error during process_task for {task_id}: {e}", exc_info=True)

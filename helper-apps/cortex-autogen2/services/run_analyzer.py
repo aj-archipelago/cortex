@@ -142,13 +142,16 @@ def extract_errors(messages: List[Any]) -> List[Dict[str, Any]]:
                 if key in seen:
                     continue
                 seen.add(key)
-                results.append({
+                # Capture specific dependency/image/source hints for reuse
+                entry = {
                     "type": kind,
                     "message": msg,
                     "source": src or "unknown",
                     "firstSeenIndex": idx,
                     "createdAt": str(created_at) if created_at else None,
-                })
+                }
+                # Categories intentionally not assigned; rely on LLM to infer lessons
+                results.append(entry)
         except Exception:
             continue
 
@@ -157,27 +160,34 @@ def extract_errors(messages: List[Any]) -> List[Dict[str, Any]]:
 
 async def summarize_learnings(messages_text: str, errors_text: str, model_client) -> Tuple[str, str]:
     """
-    Return (best_practices_text, antipatterns_text). If model unavailable, simple fallbacks.
+    Return (best_practices_text, antipatterns_text) using the LLM; avoid static heuristics.
     """
     try:
-        if not model_client:
-            # naive fallback: pick distinct, non-empty lines
-            return ("- Validate environment and paths early\n- Log outputs and errors concisely\n- Use absolute paths\n- Avoid repeating failed steps\n- Upload deliverables once",
-                    "- Do not leak tokens\n- Avoid infinite retries\n- Do not fabricate URLs\n- Don’t block on large tool outputs\n- Don’t ignore schema errors")
-
         prompt = f"""
-Given the agent transcript and extracted error snippets, produce:
-1) 5-10 Best Practices bullets; 2) 5 Antipatterns bullets.
-Constraints: <=20 words per bullet. Group implicitly for Planner/Coder/Searcher/Executor. No secrets.
+You are a senior reliability engineer extracting high-value, reusable lessons from an agent transcript.
+
+Task: Produce two sections with concise bullets (≤18 words each):
+1) BEST PRACTICES (5–10 bullets): concrete, repeatable actions that prevent failures and speed future runs
+2) ANTIPATTERNS (5 bullets): mistakes to avoid
+
+Rules:
+- No secrets or environment-specific values
+- Prefer actionable checks (dependency preflight, schema validation), robust fallbacks, and proven fast paths
+- Reflect image acquisition pitfalls (network blocks, non-image payloads, licensing) if present
 
 TRANSCRIPT (redacted):
 {_truncate(messages_text, 6000)}
 
-ERRORS:
+ERROR EXCERPTS:
 {_truncate(errors_text, 2000)}
 
-Output format:
-BEST PRACTICES:\n- ...\n- ...\nANTIPATTERNS:\n- ...\n- ...
+Output format exactly:
+BEST PRACTICES:
+- ...
+- ...
+ANTIPATTERNS:
+- ...
+- ...
 """
         msgs = [UserMessage(content=prompt, source="run_analyzer_summarize")]
         resp = await model_client.create(messages=msgs)
@@ -189,10 +199,11 @@ BEST PRACTICES:\n- ...\n- ...\nANTIPATTERNS:\n- ...\n- ...
             t = line.strip()
             if not t:
                 continue
-            if t.upper().startswith("BEST PRACTICES"):
+            u = t.upper()
+            if u.startswith("BEST PRACTICES"):
                 section = "best"
                 continue
-            if t.upper().startswith("ANTIPATTERNS"):
+            if u.startswith("ANTIPATTERNS"):
                 section = "anti"
                 continue
             if t.startswith("-"):
@@ -200,14 +211,9 @@ BEST PRACTICES:\n- ...\n- ...\nANTIPATTERNS:\n- ...\n- ...
                     best.append(t)
                 elif section == "anti":
                     anti.append(t)
-        if not best:
-            best = [f"- {DEFAULT_KEY_PHRASE}", "- Log outputs and errors concisely", "- Use absolute paths", "- Avoid repeating failed steps", "- Upload deliverables once"]
-        if not anti:
-            anti = ["- Do not leak tokens", "- Avoid infinite retries", "- Do not fabricate URLs", "- Don’t block on huge logs", "- Don’t ignore schema errors"]
         return ("\n".join(best[:10]), "\n".join(anti[:10]))
     except Exception:
-        return (f"- {DEFAULT_KEY_PHRASE}\n- Log outputs and errors concisely\n- Use absolute paths\n- Avoid repeating failed steps\n- Upload deliverables once",
-                "- Do not leak tokens\n- Avoid infinite retries\n- Do not fabricate URLs\n- Don’t block on large tool outputs\n- Don’t ignore schema errors")
+        return ("", "")
 
 
 async def generate_improvement_playbook(
@@ -286,6 +292,12 @@ Next-Time Plan Outline:
 2) ...
 3) ...
 
+Image Acquisition Failure Taxonomy (when URLs valid but not usable):
+- Network/HTTP: 403/404/429, timeouts, SSL/captcha blocks
+- Format/Integrity: Content-Type mismatch, non-image payload, Pillow .verify() fails
+- License/Robots: disallowed scraping or reuse; fallback and record reason
+- Mitigations: HEAD check; user-agent; backoff; alternate domain; sprite/fallback pack; manifest notes
+
 IMPROVEMENT SCORE: <0-100>
 ACTIONABLES: <integer count of distinct concrete actions>
 """
@@ -310,11 +322,24 @@ ACTIONABLES: <integer count of distinct concrete actions>
             # Fallback: count bullets
             actionables = _count_bullets(text)
 
+        # Build structured quick-reference hints for planner reuse next time
+        hints: List[str] = []
+        tlow = text.lower()
+        if any(k in tlow for k in ["no module named", "importerror", "cannot import"]):
+            hints.append("Preflight: import python-pptx, Pillow; pip install if import fails")
+        if any(k in tlow for k in ["categorychartdata", "radarchart", "bar chart data"]):
+            hints.append("Use python-pptx CategoryChartData; avoid RadarChartData (unsupported)")
+        if any(k in tlow for k in ["antialias", "resampling.lanczos"]):
+            hints.append("Pillow: use Image.Resampling.LANCZOS instead of ANTIALIAS")
+        if any(k in tlow for k in ["cannot identify image file", "head request", "license"]):
+            hints.append("Validate image URLs via HEAD; Pillow .verify(); ensure license before embed")
+
         return {
             "text": text,
             "actionables": actionables if actionables > 0 else _count_bullets(text),
             "improvement_score": score,
             "has_failures": bool(errors),
+            "hints": hints,
         }
     except Exception:
         return {
@@ -351,6 +376,20 @@ def build_run_document(
         parts.append("Errors:\n" + "\n".join(err_lines))
     if improvement_text:
         parts.append("Improvements Playbook:\n" + improvement_text)
+        # Extract high-signal tags for future retrieval and reuse
+        try:
+            tags: List[str] = []
+            tlow = improvement_text.lower()
+            if any(k in tlow for k in ["no module named", "importerror", "cannot import"]):
+                tags.append("dependency")
+            if any(k in tlow for k in ["image", "png", "jpg", "jpeg", "webp", "cannot identify image file", "head request", "license"]):
+                tags.append("image")
+            if any(k in tlow for k in ["pptx", "categorychartdata", "radarchart", "antialias", "resampling.lanczos"]):
+                tags.append("pptx_api")
+            if tags:
+                parts.append("Tags:\n" + ", ".join(sorted(set(tags))))
+        except Exception:
+            pass
     if final_snippet:
         parts.append("Final Output Snippet:\n" + _truncate(redact(final_snippet), 2000))
     # Include external source URLs (not SAS) for provenance; exclude Azure blob SAS links
@@ -399,7 +438,9 @@ def build_run_document(
 
 async def summarize_prior_learnings(similar_docs: List[Dict[str, Any]], model_client) -> str:
     """
-    Build <=8 bullets of lessons from prior docs. Prefer extracting Best Practices/Antipatterns from content.
+    Build <=8 fast-path directives from prior docs aimed at minimizing steps next time.
+    Preference order: Improvements Playbook sections; fallback to Best Practices/Antipatterns.
+    Output: short bullets (≤18 words) that can be directly embedded into planning as constraints.
     """
     # Extract bullets from prior content
     bullets: List[str] = []
@@ -408,15 +449,38 @@ async def summarize_prior_learnings(similar_docs: List[Dict[str, Any]], model_cl
             content = str(d.get("content") or "")
             if not content:
                 continue
-            # Parse Best Practices and Antipatterns sections
-            for section in ("Best Practices:", "Antipatterns:"):
+            # Prefer fast-path sections from Improvements Playbook
+            sections = [
+                "Key Failures & Fixes:",
+                "Effective Tool/Code Patterns:",
+                "Reliability (retries, rate-limit, caching):",
+                "Guardrails & Preconditions:",
+                "Next-Time Plan Outline:",
+            ]
+            extracted = False
+            for section in sections:
                 idx = content.find(section)
                 if idx >= 0:
                     seg = content[idx:].split("\n\n", 1)[0]
                     for line in seg.splitlines()[1:]:
                         t = line.strip()
+                        if not t:
+                            continue
+                        if t[0].isdigit() and (t[1:2] == ")" or t[1:2] == "."):
+                            t = "- " + t
                         if t.startswith("-") and len(t) > 2:
                             bullets.append(t)
+                            extracted = True
+            if not extracted:
+                # Fallback: Best Practices / Antipatterns
+                for section in ("Best Practices:", "Antipatterns:"):
+                    idx = content.find(section)
+                    if idx >= 0:
+                        seg = content[idx:].split("\n\n", 1)[0]
+                        for line in seg.splitlines()[1:]:
+                            t = line.strip()
+                            if t.startswith("-") and len(t) > 2:
+                                bullets.append(t)
         except Exception:
             continue
 
@@ -435,16 +499,20 @@ async def summarize_prior_learnings(similar_docs: List[Dict[str, Any]], model_cl
             except Exception:
                 continue
 
-    # Summarize to <=8 bullets with the model if available
+    # Summarize into ≤8 concise, step-minimizing directives
     if model_client and bullets:
         try:
             prompt = f"""
-Condense these prior lessons into at most 8 bullets, clear and de-duplicated. Avoid secrets or environment-specific details.
+Condense these prior lessons into 5-8 FAST-PATH DIRECTIVES (≤18 words each) to minimize steps next time.
+Focus on dependency preflight, known API substitutions, asset/download validation, and deliverables verification.
+Avoid secrets and environment-specific details.
 
 LESSONS:
 {chr(10).join(bullets[:40])}
 
-Output 4-8 bullets only.
+Output bullets only (no headings):
+- ...
+- ...
 """
             msgs = [UserMessage(content=prompt, source="run_analyzer_prior")]
             resp = await model_client.create(messages=msgs)
