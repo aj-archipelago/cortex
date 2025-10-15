@@ -11,6 +11,15 @@ from autogen_core.models import UserMessage
 from autogen_agentchat.conditions import TextMentionTermination, HandoffTermination
 from services.azure_queue import get_queue_service
 from services.redis_publisher import get_redis_publisher
+from services.azure_ai_search import search_similar_rest, upsert_run_rest
+from services.run_analyzer import (
+    collect_run_metrics,
+    extract_errors,
+    redact,
+    summarize_learnings,
+    build_run_document,
+    summarize_prior_learnings,
+)
 from agents import get_agents
 from tools.azure_blob_tools import upload_file_to_azure_blob
 
@@ -28,6 +37,7 @@ class TaskProcessor:
         self.gpt41_model_client = None
         self.progress_tracker = None
         self.final_progress_sent = False
+        self.current_owner: Optional[str] = None
         # Background progress worker components
         self._progress_queue: Optional[asyncio.Queue] = None
         self._progress_worker_task: Optional[asyncio.Task] = None
@@ -375,13 +385,36 @@ Return ONLY the update line with emoji - nothing else:"""
             # Send initial progress update (transient only)
             await self.progress_tracker.set_transient_update(task_id, 0.05, "🚀 Starting your task...")
 
+            # Pre-run retrieval: ALWAYS gather lessons for planner (do not modify task text)
+            planner_learnings = None
+            try:
+                similar_docs = search_similar_rest(task, top=8)
+                if similar_docs:
+                    planner_learnings = await summarize_prior_learnings(similar_docs, self.gpt41_model_client)
+                    if planner_learnings:
+                        await self.progress_tracker.set_transient_update(task_id, 0.07, "🧭 Using lessons from similar past tasks")
+            except Exception as e:
+                logger.debug(f"Pre-run retrieval failed: {e}")
+
             termination = HandoffTermination(target="user") | TextMentionTermination("TERMINATE")
+
+            # Merge Azure AI Search lessons with structured hints for planner
+            try:
+                merged = []
+                if 'planner_learnings' in locals() and planner_learnings:
+                    merged.append(str(planner_learnings))
+                if 'planner_hints' in locals() and planner_hints:
+                    merged.append("\n".join([f"- {h}" for h in planner_hints][:6]))
+                merged_planner_learnings = "\n".join([m for m in merged if m]) or None
+            except Exception:
+                merged_planner_learnings = locals().get('planner_learnings')
 
             agents, presenter_agent, terminator_agent = await get_agents(
                 self.gpt41_model_client,
                 self.o3_model_client,
                 self.gpt41_model_client,
-                request_work_dir=request_work_dir_for_agents if 'request_work_dir_for_agents' in locals() else None
+                request_work_dir=request_work_dir_for_agents if 'request_work_dir_for_agents' in locals() else None,
+                planner_learnings=merged_planner_learnings
             )
 
             team = SelectorGroupChat(
@@ -656,6 +689,62 @@ Return ONLY the update line with emoji - nothing else:"""
 
             logger.info(f"🔍 TASK RESULT:\n{text_result}")
 
+            # Post-run analysis + indexing (best-effort, non-blocking on failure)
+            try:
+                metrics = collect_run_metrics(messages)
+                errors = extract_errors(messages)
+                # Build assets snapshot (redacted later in builder)
+                assets = {
+                    "uploaded_file_urls": dict(uploaded_file_urls) if isinstance(uploaded_file_urls, dict) else {},
+                    "external_media_urls": list(external_media_urls) if isinstance(external_media_urls, list) else [],
+                }
+                # Summarize learnings via model
+                combined_text = "\n".join([str(getattr(m, 'content', '')) for m in messages])
+                err_text = "\n".join([e.get("message", "") for e in errors])
+                best_text, anti_text = await summarize_learnings(redact(combined_text), err_text, self.gpt41_model_client)
+                # Build external non-blob sources list for the playbook
+                external_sources = []
+                try:
+                    for u in assets.get("external_media_urls") or []:
+                        if isinstance(u, str) and "blob.core.windows.net" not in u.lower():
+                            external_sources.append(u)
+                except Exception:
+                    pass
+                # Ask LLM to produce an improvements playbook
+                from services.run_analyzer import should_index_run, generate_improvement_playbook
+                playbook = await generate_improvement_playbook(
+                    messages_text=redact(combined_text),
+                    errors=errors,
+                    metrics=metrics,
+                    external_sources=external_sources,
+                    model_client=self.gpt41_model_client,
+                )
+                improvement_text = playbook.get("text") or ""
+                actionables = int(playbook.get("actionables") or 0)
+                improvement_score = int(playbook.get("improvement_score") or 0)
+                planner_hints = playbook.get("hints") or []
+
+                # Decide whether to index based on signal and playbook strength
+                if should_index_run(metrics, errors, best_text + "\n" + anti_text, "", assets) and (improvement_score >= 50 or actionables >= 5 or metrics.get("toolCallCount", 0) or errors):
+                    # Owner: prefer incoming task parameter (owner/request_owner), else omit
+                    owner = getattr(self, "current_owner", None)
+                    doc = build_run_document(
+                        task_id=str(task_id or ""),
+                        task_text=str(task_content or ""),
+                        owner=owner,
+                        models=None,
+                        assets=assets,
+                        metrics=metrics,
+                        errors=errors,
+                        improvement_text=improvement_text,
+                        final_snippet=str(text_result or ""),
+                    )
+                    _ = upsert_run_rest(doc)
+                else:
+                    logger.info("[Search] Skipping indexing: low-signal run (no errors and generic learnings)")
+            except Exception as e:
+                logger.debug(f"Post-run indexing failed or skipped: {e}")
+
             # Run terminator agent once presenter has produced final text
             try:
                 term_messages = []
@@ -691,7 +780,6 @@ Return ONLY the update line with emoji - nothing else:"""
             except Exception:
                 pass
             self.final_progress_sent = True
-            
             return text_result
         except Exception as e:
             logger.error(f"❌ Error during process_task for {task_id}: {e}", exc_info=True)
@@ -777,6 +865,14 @@ async def process_queue_message(message_data: Dict[str, Any]) -> Optional[str]:
                 logger.error(f"❌ Failed to parse message content as JSON after both attempts for message ID {task_id}: {e2}", exc_info=True)
                 await processor.publish_final(task_id or "", "❌ Invalid task format received. Processing has ended.")
                 return None
+
+        # capture optional owner from message payload
+        try:
+            possible_owner = task_data.get("owner") or task_data.get("request_owner") or task_data.get("user")
+        except Exception:
+            possible_owner = None
+        if possible_owner:
+            processor.current_owner = str(possible_owner)
 
         task_content = task_data.get("message") or task_data.get("content")
         if not task_content:
