@@ -769,7 +769,7 @@ Return ONLY the update line with emoji - nothing else:"""
                 if term_messages:
                     t_last = term_messages[-1].messages[-1]
                     t_text = t_last.content if hasattr(t_last, 'content') else ''
-                    logger.info(f"🛑 TERMINATOR: {t_text}")
+                    logger.info(f"# TERMINATOR: {t_text}")
                     # If it didn't say TERMINATE but we already have presenter output, proceed anyway
             except Exception as e:
                 logger.warning(f"⚠️ Terminator agent failed or unavailable: {e}")
@@ -857,7 +857,7 @@ async def process_queue_message(message_data: Dict[str, Any]) -> Optional[str]:
             task_data = json.loads(decoded_content)
             logger.debug(f"🔍 DEBUG: process_queue_message - Successfully base64 decoded and JSON parsed. Keys: {list(task_data.keys())}")
         except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.warning(f"⚠️ Failed to decode as base64, trying as raw JSON: {e}")
+            logger.debug(f"Base64 decode failed; falling back to raw JSON: {e}")
             try:
                 task_data = json.loads(raw_content)
                 logger.debug(f"🔍 DEBUG: process_queue_message - Successfully JSON parsed raw content. Keys: {list(task_data.keys())}")
@@ -880,8 +880,8 @@ async def process_queue_message(message_data: Dict[str, Any]) -> Optional[str]:
             await processor.publish_final(task_id or "", "⚠️ No actionable task content found. Processing has ended.")
             return None
 
-        logger.debug(f"🔍 DEBUG: process_queue_message - Extracted task_content (first 100 chars): {task_content[:100]}...")
-        logger.info(f"📩 Processing task: {task_content[:100]}...")
+        logger.debug(f"🔍 DEBUG: process_queue_message - Extracted task_content: {task_content}...")
+        logger.info(f"📩 Processing task: {task_content}...")
         
         result = await processor.process_task(task_id, task_content)
         return result
