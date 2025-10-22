@@ -273,12 +273,13 @@ REMEMBER:
         // }
         
         const result = await processChunksParallel(chunks, args);
+        const transcriptArray = result.map(item => item?.output_text || item);
         
         if (['srt','vtt'].includes(responseFormat.toLowerCase()) || wordTimestamped) { // align subtitles for formats
             const offsets = chunks.map((chunk, index) => chunk?.offset || index * OFFSET_CHUNK);
-            return alignSubtitles(result, responseFormat, offsets);
+            return alignSubtitles(transcriptArray, responseFormat, offsets);
         }
-        return result.join(` `);
+        return transcriptArray.join(` `);
     }catch(error){
         logger.error(`Error in transcribing: ${error}`);
         throw error;

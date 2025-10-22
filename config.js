@@ -965,6 +965,12 @@ const buildPathways = async (config) => {
                         continue;
                     }
 
+                    // Skip tool if explicitly disabled
+                    if (toolDef.enabled === false) {
+                        logger.info(`Skipping disabled tool in pathway ${key}`);
+                        continue;
+                    }
+
                     const { description, parameters } = toolDef.function;
                     const name = toolDef.function.name.toLowerCase();
 

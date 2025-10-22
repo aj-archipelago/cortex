@@ -21,7 +21,7 @@ export default {
         icon: "🔍",
         function: {
             name: "SearchXPlatform",
-            description: "This tool allows you to search the X platform (formerly Twitter) for current posts, discussions, and real-time information. Use this for finding recent social media content, trending topics, public opinions, and real-time updates. Always call this tool in parallel rather than serially if you have several searches to do as it will be faster.",
+            description: "This tool allows you to search the X platform (formerly Twitter) for current posts, discussions, and real-time information. Use this for finding recent social media content, trending topics, public opinions, and real-time updates. This tool can be slow - 10-60s per search, so only use it when you really want X platform information. Always call this tool in parallel rather than serially if you have several searches to do as it will be faster.",
             parameters: {
                 type: "object",
                 properties: {
