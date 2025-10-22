@@ -2,7 +2,7 @@
 // it should never try to call other pathways
 
 import { getv } from '../../../../lib/keyValueStorageClient.js';
-import { getvWithDoubleDecryption } from '../../../../lib/doubleEncryptionStorageClient.js';
+import { getvWithDoubleDecryption } from '../../../../lib/keyValueStorageClient.js';
 
 const isValidISOTimestamp = (timestamp) => {
     if (!timestamp) return false;

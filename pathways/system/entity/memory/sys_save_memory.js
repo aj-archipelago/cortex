@@ -1,5 +1,5 @@
 import { getv } from '../../../../lib/keyValueStorageClient.js';
-import { setvWithDoubleEncryption } from '../../../../lib/doubleEncryptionStorageClient.js';
+import { setvWithDoubleEncryption } from '../../../../lib/keyValueStorageClient.js';
 
 export default {
     inputParameters: {
