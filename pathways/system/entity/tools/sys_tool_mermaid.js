@@ -137,7 +137,7 @@ xychart-beta
     line [5000, 6000, 7500, 8200, 9500, 10500, 11000, 10200, 9200, 8500, 7000, 6000]
 \`\`\`
 
-Mermaid is very sensitive to syntax error, so carefully consider your syntax before producing mermaid code.
+Mermaid is very sensitive to syntax errors, so carefully consider your syntax before producing mermaid code.
 
 - All [] labels must be either quoted strings OR otherwise HTML-safe (no raw \\n or other special characters - this is the most common parsing issue - wonky labels)
 - No strings (e.g. null) in number series data
