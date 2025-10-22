@@ -1,5 +1,5 @@
 // doubleEncryptionStorageClient.test.js
-// Tests for the doubleEncryptionStorageClient integration with Keyv storage
+// Tests for context key encryption integration in keyValueStorageClient
 
 import test from 'ava';
 import { setvWithDoubleEncryption, getvWithDoubleDecryption, setv, getv } from '../../../lib/keyValueStorageClient.js';
