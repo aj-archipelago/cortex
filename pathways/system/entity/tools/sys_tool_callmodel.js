@@ -19,8 +19,9 @@ export default {
         model: "oai-gpt41"
     },
     
-    toolDefinition:     {
+    toolDefinition: {
         type: "function",
+        enabled: false,
         icon: "🤖",
         function: {
             name: "CallModel",

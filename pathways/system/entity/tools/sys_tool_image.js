@@ -12,6 +12,7 @@ export default {
     timeout: 300,
     toolDefinition: [{
         type: "function",
+        enabled: false,
         icon: "🎨",
         function: {
             name: "GenerateImage",
@@ -37,7 +38,7 @@ export default {
         icon: "🔄",
         function: {
             name: "ModifyImage",
-            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated. It takes up to two input images as a reference and outputs a new image based on the instructions. This tool does not display the image to the user - you need to do that with markdown in your response.",
+            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated. It takes up to three input images as a reference and outputs a new image based on the instructions. This tool does not display the image to the user - you need to do that with markdown in your response.",
             parameters: {
                 type: "object",
                 properties: {

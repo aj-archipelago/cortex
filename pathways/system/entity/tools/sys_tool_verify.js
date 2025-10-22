@@ -25,6 +25,7 @@ export default {
     timeout: 600,
     toolDefinition: [{
         type: "function",
+        enabled: false,
         icon: "🔍",
         function: {
             name: "VerifyResponse",
@@ -54,7 +55,6 @@ export default {
             }
         }
     }],
-    
     executePathway: async ({args, runAllPrompts, resolver}) => {        
         let result = await runAllPrompts({ ...args, stream: false });        
         resolver.tool = JSON.stringify({ toolUsed: "verification" });          
