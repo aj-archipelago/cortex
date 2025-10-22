@@ -25,7 +25,8 @@ export default {
         aiName: "Jarvis",
         contextId: ``,
         section: "",
-        operations: "[]"
+        operations: "[]",
+        contextKey: ``
     },
     model: 'oai-gpt41',
     useInputChunking: false,
@@ -39,7 +40,7 @@ export default {
             return "Memory not updated - no section specified";
         }
    
-        let sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section}); 
+        let sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section, contextKey: args.contextKey}); 
 
         sectionMemory = await normalizeMemoryFormat({contextId: args.contextId, section: args.section}, sectionMemory);
 
@@ -85,7 +86,7 @@ export default {
                 if (modifications.length > 0) {
                     sectionMemory = modifyText(sectionMemory, modifications);
                     sectionMemory = enforceTokenLimit(sectionMemory, 25000, args.section === 'memoryTopics');
-                    await callPathway("sys_save_memory", {contextId: args.contextId, section: args.section, aiMemory: sectionMemory});
+                    await callPathway("sys_save_memory", {contextId: args.contextId, section: args.section, aiMemory: sectionMemory, contextKey: args.contextKey});
                 }
             } catch (error) {
                 console.warn('Error processing modifications:', error);

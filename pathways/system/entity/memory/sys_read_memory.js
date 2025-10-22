@@ -2,6 +2,7 @@
 // it should never try to call other pathways
 
 import { getv } from '../../../../lib/keyValueStorageClient.js';
+import { getvWithDoubleDecryption } from '../../../../lib/doubleEncryptionStorageClient.js';
 
 const isValidISOTimestamp = (timestamp) => {
     if (!timestamp) return false;
@@ -77,12 +78,19 @@ export default {
         priority: 0,
         recentHours: 0,
         numResults: 0,
-        stripMetadata: false
+        stripMetadata: false,
+        contextKey: ``
     },
     model: 'oai-gpt4o',
 
     resolver: async (_parent, args, _contextValue, _info) => {
-        const { contextId, section = 'memoryAll', priority = 0, recentHours = 0, numResults = 0, stripMetadata = false } = args;
+        const { contextId, section = 'memoryAll', priority = 0, recentHours = 0, numResults = 0, stripMetadata = false, contextKey } = args;
+        
+        // Validate that contextId is provided
+        if (!contextId) {
+            return JSON.stringify({ error: 'Authentication error' }, null, 2);
+        }
+        
         const options = { priority, recentHours, numResults, stripMetadata };
 
         // this code helps migrate old memory formats
@@ -95,7 +103,7 @@ export default {
 
         if (section !== 'memoryAll') {
             if (validSections.includes(section)) {
-                const content = (getv && (await getv(`${contextId}-${section}`))) || "";
+                const content = (getvWithDoubleDecryption && (await getvWithDoubleDecryption(`${contextId}-${section}`, contextKey))) || "";
                 return processMemoryContent(content, options);
             }
             return "";
@@ -106,7 +114,7 @@ export default {
         for (const section of validSections) {
             if (section === 'memoryContext') continue;
 
-            const content = (getv && (await getv(`${contextId}-${section}`))) || "";
+            const content = (getvWithDoubleDecryption && (await getvWithDoubleDecryption(`${contextId}-${section}`, contextKey))) || "";
             memoryContents[section] = processMemoryContent(content, options);
         }
         
