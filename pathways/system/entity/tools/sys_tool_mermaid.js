@@ -182,7 +182,7 @@ Focus only on fixing the syntax issues mentioned in the error details. Return on
                     const validation = validateMermaidSyntax(mermaidCode);
                     
                     if (validation.isValid) {
-                        resolver.tool = JSON.stringify({ 
+                        pathwayResolver.tool = JSON.stringify({ 
                             toolUsed: "CreateMermaidChart", 
                             diagramType: validation.diagramType,
                             attempts: attempts,
@@ -218,7 +218,7 @@ Focus only on fixing the syntax issues mentioned in the error details. Return on
         }
         
         // If we've exhausted all retries, return the last result with error info
-        resolver.tool = JSON.stringify({ 
+        pathwayResolver.tool = JSON.stringify({ 
             toolUsed: "CreateMermaidChart", 
             error: lastError,
             attempts: attempts,
