@@ -1,11 +1,11 @@
-import redis
+import asyncio
 import json
 import logging
-import asyncio
-import time
-from typing import Dict, Any, Optional, List
-
 import os
+import time
+from typing import Any, Dict, List, Optional
+
+import redis
 
 logger = logging.getLogger(__name__)
 
@@ -13,45 +13,41 @@ logger = logging.getLogger(__name__)
 redis_client = None
 
 def connect_redis() -> bool:
-    """Check and ensure Redis connection is active - matches working version pattern"""
+    """Ensure Redis client exists and is connected; reconnect as needed."""
     global redis_client
-    
-    redis_conn_string = os.getenv("REDIS_CONNECTION_STRING")
 
-    # Initialize client if not exists
+    redis_conn_string = os.getenv("REDIS_CONNECTION_STRING")
+    if not redis_conn_string:
+        logger.warning("REDIS_CONNECTION_STRING is not set")
+        return False
+
+    # Lazily create the client if missing
     if redis_client is None:
         try:
             redis_client = redis.from_url(redis_conn_string)
-        except Exception as e:
-            logger.warning(f"Failed to create Redis client: {e}")
+        except Exception as exc:
+            logger.warning("Failed to create Redis client: %s", exc)
             return False
-    
-    # Test connection
+
+    # Ping existing client; if closed/errored try one reconnect
     try:
         redis_client.ping()
         return True
-    except redis.ConnectionError as e:
-        logger.warning(f"Redis connection error: {e}")
-        try:
-            # Try to reconnect
-            redis_client = redis.from_url(redis_conn_string)
-            redis_client.ping()
-            return True
-        except Exception as reconnect_error:
-            logger.error(f"Error reconnecting to Redis: {reconnect_error}")
-            return False
-    except Exception as e:
-        logger.warning(f"Redis ping failed: {e}")
-        # Handle the case where client is closed
-        if "Client must be connected" in str(e) or "closed" in str(e).lower():
-            logger.info("Redis client was closed, attempting to create new connection...")
-            try:
-                redis_client = redis.from_url(redis_conn_string)
-                redis_client.ping()
-                return True
-            except Exception as reconnect_error:
-                logger.error(f"Error creating new Redis connection: {reconnect_error}")
-                return False
+    except redis.ConnectionError as exc:
+        logger.warning("Redis connection error, attempting reconnect: %s", exc)
+    except Exception as exc:
+        logger.warning("Redis ping failed: %s", exc)
+    else:
+        return True
+
+    # One reconnect attempt
+    try:
+        redis_client = redis.from_url(redis_conn_string)
+        redis_client.ping()
+        logger.info("Redis reconnected successfully")
+        return True
+    except Exception as exc:
+        logger.error("Redis reconnect failed: %s", exc)
         return False
 
 _last_logged_progress: Dict[str, Any] = {}

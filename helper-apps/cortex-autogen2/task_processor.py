@@ -71,20 +71,27 @@ class RoleFixingModelClientWrapper:
 
             has_name = bool(name)
 
-            # Normalize content to string
+            # Normalize content and keep track if it was structured
+            content_was_structured = False
             if isinstance(content, list):
-                if content and all(isinstance(item, dict) and "type" in item and item.get("type") == "text" for item in content):
+                if content and all(isinstance(item, dict) and item.get("type") == "text" for item in content):
                     content_str = "\n".join(item.get("text", "") for item in content)
-                elif content and all(isinstance(item, dict) for item in content):
-                    content_str = json.dumps(content)
                 else:
-                    content_str = "\n".join(str(item) for item in content)
+                    try:
+                        content_str = json.dumps(content)
+                        content_was_structured = True
+                    except Exception:
+                        content_str = "\n".join(str(item) for item in content)
             elif isinstance(content, dict):
                 content_str = json.dumps(content)
+                content_was_structured = True
             elif content is None:
                 content_str = ""
             else:
                 content_str = str(content)
+
+            if content_was_structured and content_str and not content_str.strip().startswith("```"):
+                content_str = f"```json\n{content_str}\n```"
 
             # Determine proper role
             if role == "system" and not seen_system:
@@ -108,7 +115,10 @@ class RoleFixingModelClientWrapper:
             except Exception as exc:
                 import logging
                 logging.warning(f"Failed to normalize message {msg}: {exc}")
-                normalized.append(UserMessage(content=str(content_str or ""), source="user"))
+                fallback_content = content_str if isinstance(content_str, str) else str(content_str or "")
+                if fallback_content.strip() and fallback_content.strip().startswith("{"):
+                    fallback_content = f"```json\n{fallback_content}\n```"
+                normalized.append(UserMessage(content=fallback_content, source="user"))
 
         return normalized
     
