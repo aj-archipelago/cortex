@@ -26,6 +26,407 @@ from tools.azure_blob_tools import upload_file_to_azure_blob
 logger = logging.getLogger(__name__)
 
 
+class RoleFixingModelClientWrapper:
+    """Wraps an OpenAI model client to fix agent message roles before API calls."""
+    
+    def __init__(self, wrapped_client: OpenAIChatCompletionClient):
+        self.wrapped_client = wrapped_client
+        self.first_user_message_seen = False
+    
+    async def create(self, messages=None, **kwargs):
+        """Intercept create calls to fix message roles before sending to API.
+        
+        CRITICAL: Convert all messages to proper Pydantic objects with correct roles.
+        OpenAI's to_oai_type() function has a whitelist and only accepts:
+        - UserMessage
+        - AssistantMessage  
+        - SystemMessage
+        NOT plain dicts!
+        """
+        if messages:
+            messages = self._convert_to_pydantic_messages(messages)
+        
+        return await self.wrapped_client.create(messages=messages, **kwargs)
+
+    def _convert_to_pydantic_messages(self, messages):
+        """Normalize incoming AutoGen message objects into the Pydantic message types the OpenAI client expects."""
+        import json
+        from autogen_core.models import UserMessage, AssistantMessage, SystemMessage
+
+        normalized = []
+        first_user_seen = False
+        seen_system = False
+
+        for msg in messages:
+            if isinstance(msg, dict):
+                role = msg.get("role")
+                content = msg.get("content")
+                name = msg.get("name")
+                source = msg.get("source")
+            else:
+                role = getattr(msg, "role", None)
+                content = getattr(msg, "content", None)
+                name = getattr(msg, "name", None)
+                source = getattr(msg, "source", None)
+
+            has_name = bool(name)
+
+            # Normalize content to string
+            if isinstance(content, list):
+                if content and all(isinstance(item, dict) and "type" in item and item.get("type") == "text" for item in content):
+                    content_str = "\n".join(item.get("text", "") for item in content)
+                elif content and all(isinstance(item, dict) for item in content):
+                    content_str = json.dumps(content)
+                else:
+                    content_str = "\n".join(str(item) for item in content)
+            elif isinstance(content, dict):
+                content_str = json.dumps(content)
+            elif content is None:
+                content_str = ""
+            else:
+                content_str = str(content)
+
+            # Determine proper role
+            if role == "system" and not seen_system:
+                new_role = "system"
+                seen_system = True
+            elif not first_user_seen:
+                new_role = "user"
+                first_user_seen = True
+            elif has_name or role == "assistant":
+                new_role = "assistant"
+            else:
+                new_role = "assistant"
+
+            try:
+                if new_role == "system":
+                    normalized.append(SystemMessage(content=content_str))
+                elif new_role == "assistant":
+                    normalized.append(AssistantMessage(content=content_str, source=(source or name or "assistant"), name=name))
+                else:
+                    normalized.append(UserMessage(content=content_str, source=(source or "user")))
+            except Exception as exc:
+                import logging
+                logging.warning(f"Failed to normalize message {msg}: {exc}")
+                normalized.append(UserMessage(content=str(content_str or ""), source="user"))
+
+        return normalized
+    
+    def _pydantic_to_dicts(self, messages):
+        """Convert all Pydantic message objects to plain dicts for processing."""
+        converted = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                converted.append(msg)
+            else:
+                # Pydantic object - convert to dict
+                try:
+                    if hasattr(msg, 'model_dump'):
+                        msg_dict = msg.model_dump()
+                    elif hasattr(msg, '__dict__'):
+                        msg_dict = dict(msg.__dict__)
+                    else:
+                        msg_dict = msg
+                    converted.append(msg_dict)
+                except Exception as e:
+                    # If conversion fails, try casting to dict
+                    import logging
+                    logging.warning(f"Failed to convert Pydantic to dict: {e}, attempting dict cast")
+                    try:
+                        converted.append(dict(msg))
+                    except:
+                        converted.append(msg)
+        return converted
+    
+    def _fix_message_roles(self, messages):
+        """Fix message roles: agents (with name field) ALWAYS assistant, first user message stays user.
+        
+        CRITICAL: Only processes dict messages. Pydantic objects must pass through unchanged
+        because the OpenAI client requires them to be proper Pydantic types, not dicts.
+        
+        If a Pydantic object has wrong role, we cannot fix it without breaking the type system,
+        so we pass it through and let AutoGen's message validation handle it.
+        """
+        fixed_messages = []
+        first_user_seen = False
+        
+        for msg in messages:
+            # Only fix dicts - Pydantic objects MUST stay as-is for OpenAI API compatibility
+            if not isinstance(msg, dict):
+                # Pass through Pydantic objects unchanged
+                fixed_messages.append(msg)
+                continue
+            
+            # Get current values from dict
+            current_role = msg.get("role")
+            has_name = "name" in msg
+            
+            # Determine what the role SHOULD be
+            new_role = current_role  # Default: keep current role
+            
+            if has_name:
+                # CRITICAL: Messages with 'name' field ALWAYS get 'assistant' role
+                new_role = "assistant"
+            elif current_role == "user":
+                # For user role messages, check if this is the first one
+                if first_user_seen:
+                    # Subsequent user messages are likely agents - fix to assistant
+                    new_role = "assistant"
+                else:
+                    # First user message - keep it as user
+                    first_user_seen = True
+            elif not current_role:
+                # Missing role - assign default
+                if not first_user_seen:
+                    new_role = "user"
+                    first_user_seen = True
+                else:
+                    new_role = "assistant"
+            else:
+                # Role is set and no name - track first user message
+                if current_role == "user" and not first_user_seen:
+                    first_user_seen = True
+            
+            # Apply the role change to the dict
+            if new_role != current_role:
+                msg["role"] = new_role
+            
+            fixed_messages.append(msg)
+        
+        return fixed_messages
+    
+    def _normalize_content(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalize all messages to ensure content items have proper type fields for OpenAI API.
+        
+        This is a catch-all safety net for any messages that escape earlier normalization.
+        AutoGen sometimes wraps tool results without type fields, so we fix them here.
+        """
+        import json
+        normalized = []
+        is_first_user_message = True
+        
+        for msg in messages:
+            if not isinstance(msg, dict):
+                normalized.append(msg)
+                continue
+            
+            msg = dict(msg)  # Make a copy to avoid modifying original
+            
+            # CRITICAL FIX: Correct and default message roles
+            # Priority 1: If message has a 'name' field (agent name), role MUST ALWAYS be 'assistant'
+            # This takes precedence over everything else
+            if msg.get("name"):
+                msg["role"] = "assistant"
+            # Priority 2: If role is missing, assign based on whether it's the first user message
+            elif not msg.get("role"):
+                if is_first_user_message:
+                    msg["role"] = "user"
+                    is_first_user_message = False
+                else:
+                    msg["role"] = "assistant"
+            # Priority 3: If role='user' but message doesn't have a name, it's likely an agent response incorrectly marked
+            # Only correct it if it's NOT the first message we've seen
+            elif msg.get("role") == "user" and not is_first_user_message:
+                msg["role"] = "assistant"
+            else:
+                # First user message gets role='user', mark it as processed
+                if msg.get("role") == "user":
+                    is_first_user_message = False
+            
+            # CRITICAL FIX: If user role has tool_calls (shouldn't exist), merge into content and drop tool_calls
+            if msg.get("role") == "user" and msg.get("tool_calls"):
+                tool_calls_data = msg.pop("tool_calls")
+                tool_calls_str = json.dumps(tool_calls_data)
+                content = msg.get("content")
+                
+                # Merge tool_calls info into content based on current format
+                if not content:
+                    # No content: create from tool_calls
+                    msg["content"] = f"[Tool calls: {tool_calls_str}]"
+                elif isinstance(content, str):
+                    # String content: append tool_calls info
+                    msg["content"] = content + f"\n[Tool calls: {tool_calls_str}]"
+                elif isinstance(content, list):
+                    # List content: append as text item
+                    msg["content"] = content + [{"type": "text", "text": f"[Tool calls: {tool_calls_str}]"}]
+                else:
+                    # Dict or other: convert to string and append
+                    content_str = json.dumps(content) if not isinstance(content, str) else content
+                    msg["content"] = content_str + f"\n[Tool calls: {tool_calls_str}]"
+                
+            content = msg.get("content")
+            if not content:
+                normalized.append(msg)
+                continue
+            
+            # Ensure content is a list
+            if isinstance(content, str):
+                # String content - wrap with type
+                normalized_msg = dict(msg)
+                normalized_msg["content"] = [{"type": "text", "text": content}]
+                normalized.append(normalized_msg)
+            elif isinstance(content, list):
+                # Check if all items have type field
+                all_typed = all(
+                    isinstance(item, dict) and "type" in item and item.get("type") == "text"
+                    for item in content
+                    if isinstance(item, dict)
+                )
+                if all_typed:
+                    normalized.append(msg)
+                else:
+                    # Fix untyped items
+                    normalized_msg = dict(msg)
+                    fixed_content = []
+                    for item in content:
+                        if isinstance(item, dict) and "type" not in item:
+                            # Untyped dict - convert to JSON string with type
+                            try:
+                                text_val = json.dumps(item, ensure_ascii=False)
+                            except:
+                                text_val = str(item)
+                            fixed_content.append({"type": "text", "text": text_val})
+                        elif isinstance(item, dict):
+                            # Has type field, keep as-is
+                            fixed_content.append(item)
+                        else:
+                            # Non-dict, wrap with type
+                            fixed_content.append({"type": "text", "text": str(item)})
+                    normalized_msg["content"] = fixed_content
+                    normalized.append(normalized_msg)
+            elif isinstance(content, dict):
+                # Top-level dict without list - wrap
+                normalized_msg = dict(msg)
+                try:
+                    text_val = json.dumps(content, ensure_ascii=False)
+                except:
+                    text_val = str(content)
+                normalized_msg["content"] = [{"type": "text", "text": text_val}]
+                normalized.append(normalized_msg)
+            else:
+                normalized.append(msg)
+        
+        return normalized
+    
+    def __getattr__(self, name):
+        """Delegate all other attributes/methods to wrapped client."""
+        return getattr(self.wrapped_client, name)
+
+
+def _normalize_message_content_for_api(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize all messages to ensure content items have proper type fields for OpenAI API.
+    
+    This is a catch-all safety net for any messages that escape earlier normalization.
+    AutoGen sometimes wraps tool results without type fields, so we fix them here.
+    """
+    import json
+    normalized = []
+    is_first_user_message = True
+    
+    for msg in messages:
+        if not isinstance(msg, dict):
+            normalized.append(msg)
+            continue
+        
+        msg = dict(msg)  # Make a copy to avoid modifying original
+        
+        # CRITICAL FIX: Correct and default message roles
+        # Priority 1: If message has a 'name' field (agent name), role MUST ALWAYS be 'assistant'
+        # This takes precedence over everything else
+        if msg.get("name"):
+            msg["role"] = "assistant"
+        # Priority 2: If role is missing, assign based on whether it's the first user message
+        elif not msg.get("role"):
+            if is_first_user_message:
+                msg["role"] = "user"
+                is_first_user_message = False
+            else:
+                msg["role"] = "assistant"
+        # Priority 3: If role='user' but message doesn't have a name, it's likely an agent response incorrectly marked
+        # Only correct it if it's NOT the first message we've seen
+        elif msg.get("role") == "user" and not is_first_user_message:
+            msg["role"] = "assistant"
+        else:
+            # First user message gets role='user', mark it as processed
+            if msg.get("role") == "user":
+                is_first_user_message = False
+        
+        # CRITICAL FIX: If user role has tool_calls (shouldn't exist), merge into content and drop tool_calls
+        if msg.get("role") == "user" and msg.get("tool_calls"):
+            tool_calls_data = msg.pop("tool_calls")
+            tool_calls_str = json.dumps(tool_calls_data)
+            content = msg.get("content")
+            
+            # Merge tool_calls info into content based on current format
+            if not content:
+                # No content: create from tool_calls
+                msg["content"] = f"[Tool calls: {tool_calls_str}]"
+            elif isinstance(content, str):
+                # String content: append tool_calls info
+                msg["content"] = content + f"\n[Tool calls: {tool_calls_str}]"
+            elif isinstance(content, list):
+                # List content: append as text item
+                msg["content"] = content + [{"type": "text", "text": f"[Tool calls: {tool_calls_str}]"}]
+            else:
+                # Dict or other: convert to string and append
+                content_str = json.dumps(content) if not isinstance(content, str) else content
+                msg["content"] = content_str + f"\n[Tool calls: {tool_calls_str}]"
+            
+        content = msg.get("content")
+        if not content:
+            normalized.append(msg)
+            continue
+        
+        # Ensure content is a list
+        if isinstance(content, str):
+            # String content - wrap with type
+            normalized_msg = dict(msg)
+            normalized_msg["content"] = [{"type": "text", "text": content}]
+            normalized.append(normalized_msg)
+        elif isinstance(content, list):
+            # Check if all items have type field
+            all_typed = all(
+                isinstance(item, dict) and "type" in item and item.get("type") == "text"
+                for item in content
+                if isinstance(item, dict)
+            )
+            if all_typed:
+                normalized.append(msg)
+            else:
+                # Fix untyped items
+                normalized_msg = dict(msg)
+                fixed_content = []
+                for item in content:
+                    if isinstance(item, dict) and "type" not in item:
+                        # Untyped dict - convert to JSON string with type
+                        try:
+                            text_val = json.dumps(item, ensure_ascii=False)
+                        except:
+                            text_val = str(item)
+                        fixed_content.append({"type": "text", "text": text_val})
+                    elif isinstance(item, dict):
+                        # Has type field, keep as-is
+                        fixed_content.append(item)
+                    else:
+                        # Non-dict, wrap with type
+                        fixed_content.append({"type": "text", "text": str(item)})
+                normalized_msg["content"] = fixed_content
+                normalized.append(normalized_msg)
+        elif isinstance(content, dict):
+            # Top-level dict without list - wrap
+            normalized_msg = dict(msg)
+            try:
+                text_val = json.dumps(content, ensure_ascii=False)
+            except:
+                text_val = str(content)
+            normalized_msg["content"] = [{"type": "text", "text": text_val}]
+            normalized.append(normalized_msg)
+        else:
+            normalized.append(msg)
+    
+    return normalized
+
+
 class TaskProcessor:
     """
     Core task processing logic that can be used by both worker and Azure Function App.
@@ -409,17 +810,22 @@ Return ONLY the update line with emoji - nothing else:"""
             except Exception:
                 merged_planner_learnings = locals().get('planner_learnings')
 
+            # CRITICAL: Wrap model clients to fix agent message roles before API calls
+            wrapped_gpt41_client = RoleFixingModelClientWrapper(self.gpt41_model_client)
+            wrapped_o3_client = RoleFixingModelClientWrapper(self.o3_model_client)
+
             agents, presenter_agent, terminator_agent = await get_agents(
-                self.gpt41_model_client,
-                self.o3_model_client,
-                self.gpt41_model_client,
+                wrapped_gpt41_client,
+                wrapped_o3_client,
+                wrapped_gpt41_client,
                 request_work_dir=request_work_dir_for_agents if 'request_work_dir_for_agents' in locals() else None,
-                planner_learnings=merged_planner_learnings
+                planner_learnings=merged_planner_learnings,
+                task_context=task if 'task' in locals() else None
             )
 
             team = SelectorGroupChat(
                 participants=agents,
-                model_client=self.gpt41_model_client,
+                model_client=wrapped_gpt41_client,
                 termination_condition=termination,
                 max_turns=200
             )
@@ -635,6 +1041,18 @@ Return ONLY the update line with emoji - nothing else:"""
             except Exception:
                 pass
 
+            # Sanitize agent communications to remove malformed URLs before presenting
+            import re
+            def sanitize_malformed_urls(text: str) -> str:
+                """Remove URLs that start with @ or contain placeholder values like sig=12345"""
+                # Remove @https:// (malformed URL prefix)
+                text = re.sub(r'@https?://[^\s\)]+', '', text)
+                # Remove URLs with placeholder sig values (sig=12345)
+                text = re.sub(r'https?://[^\s\)]*sig=12345[^\s\)]*', '', text)
+                return text
+            
+            result_limited_to_fit = sanitize_malformed_urls(result_limited_to_fit)
+
             presenter_task = f"""
             Present the task result in a clean, professional Markdown/HTML that contains ONLY what the task requested. This will be shown in a React app.
             Use only the information provided.
@@ -667,6 +1085,14 @@ Return ONLY the update line with emoji - nothing else:"""
             - For links, prefer HTML anchor tags: <a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" download>FILENAME</a>.
             - Do NOT include code, tool usage, or internal logs.
             - Be detailed and user-facing. Include Overview, Visuals, Key Takeaways, and Next Actions sections. Do not create a Downloads section.
+            
+            **CRITICAL VALIDATION FOR URLs**:
+            - EVERY URL you use must be from either UPLOADED_FILES_SAS_URLS or EXTERNAL_MEDIA_URLS keys/values
+            - NEVER construct, guess, or modify URLs
+            - NEVER use URLs that contain placeholder values like sig=12345, se=..., or other SAS parameters that might be incomplete
+            - If a URL starts with @https, it is NOT valid - remove it
+            - If you cannot find a valid URL in the provided lists, DO NOT INCLUDE ANY URL - use text-only output
+            - Before each URL you use, verify it appears EXACTLY in UPLOADED_FILES_SAS_URLS/EXTERNAL_MEDIA_URLS
             """
             
             presenter_stream = presenter_agent.run_stream(task=presenter_task)

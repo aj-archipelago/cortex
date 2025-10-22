@@ -1,9 +1,9 @@
 """
 Web search tools (keyless).
 
-Implements DuckDuckGo-based search without API keys:
-- web_search: web results via HTML endpoint
-- image_search: image results via i.js JSON (requires vqd token)
+Implements Google CSE-based search for web and image results:
+- web_search: web results via Google CSE
+- image_search: image results via Google CSE
 - combined_search: combined web + image results
 """
 
@@ -180,44 +180,6 @@ def _extract_snippet_near(html: str, start_pos: int) -> Optional[str]:
     return text or None
 
 
-def _ddg_web(query: str, count: int = 25) -> List[Dict[str, Any]]:
-    url = f"https://duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
-    headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(url, headers=headers, timeout=20)
-    resp.raise_for_status()
-    html = resp.text
-
-    # Capture results: <a class="result__a" href="...">Title</a>
-    links_iter = re.finditer(r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, flags=re.I | re.S)
-    results: List[Dict[str, Any]] = []
-    for match in links_iter:
-        href = match.group(1)
-        title_html = match.group(2)
-        title_text = html_lib.unescape(re.sub('<[^<]+?>', '', title_html)).strip()
-        if not title_text or not href:
-            continue
-        # Resolve DDG redirect links and protocol-relative URLs
-        url_val = href
-        if url_val.startswith("//"):
-            url_val = "https:" + url_val
-        try:
-            parsed = urllib.parse.urlparse(url_val)
-            if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
-                qs = urllib.parse.parse_qs(parsed.query)
-                uddg = qs.get("uddg", [None])[0]
-                if uddg:
-                    url_val = urllib.parse.unquote(uddg)
-        except Exception:
-            pass
-        snippet = _extract_snippet_near(html, match.end())
-        results.append({
-            "title": title_text,
-            "url": url_val,
-            "snippet": snippet,
-        })
-        if len(results) >= max(1, count):
-            break
-    return _normalize_web_results(results)
 
 
 def _enrich_web_results_with_meta(results: List[Dict[str, Any]], max_fetch: int = 3, timeout_s: int = 8) -> List[Dict[str, Any]]:
@@ -366,73 +328,6 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
         return json.dumps({"error": f"Fetch failed: {str(exc)}"})
 
 
-# DuckDuckGo vqd token method removed - no API key needed, using HTML scraping only
-
-
-def _ddg_images_html(query: str, count: int = 25) -> List[Dict[str, Any]]:
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://duckduckgo.com/"}
-    url = f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}&ia=images&iar=images"
-    try:
-        resp = requests.get(url, headers=headers, timeout=20)
-        resp.raise_for_status()
-        html = resp.text
-        items: List[Dict[str, Any]] = []
-        
-        # Method 1: Look for external-content proxied URLs
-        for m in re.finditer(r'(?:src|data-src)="(https://external-content\.duckduckgo\.com/iu/\?u=[^"]+)"', html):
-            proxy = html_lib.unescape(m.group(1))
-            try:
-                parsed = urllib.parse.urlparse(proxy)
-                qs = urllib.parse.parse_qs(parsed.query)
-                orig = qs.get('u', [None])[0]
-                if not orig:
-                    continue
-                orig = urllib.parse.unquote(orig)
-                items.append({
-                    "title": None,
-                    "image": orig,
-                    "thumbnail": proxy,
-                    "width": None,
-                    "height": None,
-                    "source": None,
-                })
-                if len(items) >= count:
-                    break
-            except Exception:
-                continue
-        
-        # Method 2: Look for direct image URLs in the page
-        if len(items) < count // 2:
-            direct_patterns = [
-                r'"(https://[^"]+\.(?:jpg|jpeg|png|webp|gif))"',
-                r"'(https://[^']+\.(?:jpg|jpeg|png|webp|gif))'",
-            ]
-            for pattern in direct_patterns:
-                for m in re.finditer(pattern, html, re.I):
-                    img_url = m.group(1)
-                    if "duckduckgo.com" not in img_url and img_url not in [i["image"] for i in items]:
-                        items.append({
-                            "title": None,
-                            "image": img_url,
-                            "thumbnail": img_url,
-                            "width": None,
-                            "height": None,
-                            "source": None,
-                        })
-                        if len(items) >= count:
-                            break
-                if len(items) >= count:
-                    break
-        
-        logging.info(f"[_ddg_images_html] Found {len(items)} images for query: {query}")
-        return _normalize_image_results(items)
-    except Exception as e:
-        logging.error(f"[_ddg_images_html] Failed for query '{query}': {e}")
-        return []
-
-
-# DuckDuckGo JSON API method removed - no API key available, using HTML scraping only
-
 
 async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
     try:
@@ -449,8 +344,6 @@ async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
                 used_google = False
                 results = []
 
-        if not results:
-            results = _ddg_web(query, count)
 
         if enrich and results:
             # Enrich only for web-page items
@@ -549,15 +442,7 @@ async def image_search(query: str, count: int = 25, verify_download: bool = True
                 logging.warning(f"[image_search] Google CSE failed: {e}")
                 results = []
 
-        if not results:
-            # Fallback to DuckDuckGo HTML scraping if CSE disabled or empty
-            try:
-                logging.info(f"[image_search] Falling back to DuckDuckGo HTML scraping for query: {query}")
-                results = _ddg_images_html(query, count)
-                logging.info(f"[image_search] DuckDuckGo HTML returned {len(results)} results")
-            except Exception as e:
-                logging.error(f"[image_search] All methods failed for query '{query}': {e}")
-                results = []
+
 
         # Post-filtering and ranking for relevance and quality
         def score(item: Dict[str, Any]) -> int:
@@ -725,13 +610,8 @@ async def combined_search(query: str, count: int = 25, enrich: bool = True) -> s
             except Exception:
                 img_results = []
 
-        if not web_results:
-            web_results = _ddg_web(query, count)
-        if enrich and web_results:
-            web_results = _enrich_web_results_with_meta(web_results)
-        if not img_results:
-            img_results = _ddg_images_html(query, count)
-
+            if enrich and web_results:
+                web_results = _enrich_web_results_with_meta(web_results)
         combined.extend(web_results)
         combined.extend(img_results)
         if not combined:
