@@ -88,7 +88,7 @@ export default {
         
         // Validate that contextId is provided
         if (!contextId) {
-            return JSON.stringify({ error: 'Authentication error' }, null, 2);
+            return JSON.stringify({ error: 'Context error' }, null, 2);
         }
         
         const options = { priority, recentHours, numResults, stripMetadata };

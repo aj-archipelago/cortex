@@ -1,6 +1,5 @@
-import { setv, getv } from '../../../../lib/keyValueStorageClient.js';
+import { getv } from '../../../../lib/keyValueStorageClient.js';
 import { setvWithDoubleEncryption } from '../../../../lib/doubleEncryptionStorageClient.js';
-import { config } from '../../../../config.js';
 
 export default {
     inputParameters: {
@@ -15,7 +14,7 @@ export default {
 
         // Validate that contextId is provided
         if (!contextId) {
-            return JSON.stringify({ error: 'Authentication error' }, null, 2);
+            return JSON.stringify({ error: 'Context error' }, null, 2);
         }
 
         // this code helps migrate old memory formats

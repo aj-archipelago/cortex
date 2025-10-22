@@ -1,6 +1,6 @@
 import { Prompt } from '../../../../server/prompt.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { setv } from '../../../../lib/keyValueStorageClient.js';
+import { setvWithDoubleEncryption } from '../../../../lib/doubleEncryptionStorageClient.js';
 
 export default {
     prompt:
@@ -60,7 +60,7 @@ export default {
         }
 
         if (args.updateContext) {
-            await setv(`${args.contextId}-memoryContext`, result);
+            await setvWithDoubleEncryption(`${args.contextId}-memoryContext`, result, args.contextKey);
         }   
 
         return result;

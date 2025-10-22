@@ -6,6 +6,7 @@ import { getFirstNToken, getLastNToken, getSemanticChunks } from './chunker.js';
 import { PathwayResponseParser } from './pathwayResponseParser.js';
 import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
+import { getvWithDoubleDecryption, setvWithDoubleEncryption } from '../lib/doubleEncryptionStorageClient.js';
 import { requestState } from './requestState.js';
 import { callPathway, addCitationsToResolver } from '../lib/pathwayTools.js';
 import logger from '../lib/logger.js';
@@ -392,12 +393,12 @@ class PathwayResolver {
             try {
                 // Load saved context and core memory if it exists
                 const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
-                    (getv && await getv(this.savedContextId)) || {},
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1, stripMetadata: true }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1, stripMetadata: true }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryTopics', priority: 0, numResults: 10 }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1, stripMetadata: true }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryContext', priority: 0 }),
+                    (getvWithDoubleDecryption && await getvWithDoubleDecryption(this.savedContextId, this.args?.contextKey)) || {},
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1, stripMetadata: true, contextKey: this.args?.contextKey }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1, stripMetadata: true, contextKey: this.args?.contextKey }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryTopics', priority: 0, numResults: 10, contextKey: this.args?.contextKey }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1, stripMetadata: true, contextKey: this.args?.contextKey }),
+                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryContext', priority: 0, contextKey: this.args?.contextKey }),
                 ]).catch(error => {
                     this.logError(`Failed to load memory: ${error.message}`);
                     return [{},'','','','',''];
@@ -435,7 +436,7 @@ class PathwayResolver {
             };
 
             if (currentState.savedContext !== this.initialState.savedContext) {
-                setv && await setv(this.savedContextId, this.savedContext);
+                setvWithDoubleEncryption && await setvWithDoubleEncryption(this.savedContextId, this.savedContext, this.args?.contextKey);
             }
         };
 
