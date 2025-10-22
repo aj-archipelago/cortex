@@ -65,7 +65,8 @@ Each modification object should look like:
         aiName: "Jarvis",
         contextId: ``,
         section: "",
-        maxIterations: 5
+        maxIterations: 5,
+        contextKey: ``
     },
     model: 'oai-gpt41',
     useInputChunking: false,
@@ -79,7 +80,7 @@ Each modification object should look like:
             return "Memory not processed - no section specified";
         }
    
-        let sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section}); 
+        let sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section, contextKey: args.contextKey}); 
         sectionMemory = await normalizeMemoryFormat({contextId: args.contextId, section: args.section}, sectionMemory);
 
         let iteration = 0;
@@ -134,7 +135,7 @@ Each modification object should look like:
                 // Apply the modifications
                 sectionMemory = modifyText(sectionMemory, modifications);
                 sectionMemory = enforceTokenLimit(sectionMemory, 25000, args.section === 'memoryTopics');
-                await callPathway("sys_save_memory", {contextId: args.contextId, section: args.section, aiMemory: sectionMemory});
+                await callPathway("sys_save_memory", {contextId: args.contextId, section: args.section, aiMemory: sectionMemory, contextKey: args.contextKey});
 
                 totalModifications += modifications.length;
                 console.log(`Applied ${modifications.length} modifications in iteration ${iteration}`);
