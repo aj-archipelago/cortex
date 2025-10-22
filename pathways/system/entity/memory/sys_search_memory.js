@@ -1,6 +1,6 @@
 import { Prompt } from '../../../../server/prompt.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { setvWithDoubleEncryption } from '../../../../lib/doubleEncryptionStorageClient.js';
+import { setvWithDoubleEncryption } from '../../../../lib/keyValueStorageClient.js';
 
 export default {
     prompt:

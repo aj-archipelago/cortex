@@ -6,7 +6,7 @@ import { getFirstNToken, getLastNToken, getSemanticChunks } from './chunker.js';
 import { PathwayResponseParser } from './pathwayResponseParser.js';
 import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
-import { getvWithDoubleDecryption, setvWithDoubleEncryption } from '../lib/doubleEncryptionStorageClient.js';
+import { getvWithDoubleDecryption, setvWithDoubleEncryption } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
 import { callPathway, addCitationsToResolver } from '../lib/pathwayTools.js';
 import logger from '../lib/logger.js';
