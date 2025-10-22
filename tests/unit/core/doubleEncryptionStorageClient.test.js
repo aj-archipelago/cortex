@@ -13,7 +13,7 @@ const userKey = 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef123456789
 // Mock the config to provide test keys
 import { config } from '../../../config.js';
 const originalGet = config.get;
-config.get = (key) => {
+const mockGet = (key) => {
     switch (key) {
         case 'storageConnectionString':
             return 'redis://localhost:6379'; // Use in-memory Redis for tests
@@ -25,6 +25,7 @@ config.get = (key) => {
             return originalGet(key);
     }
 };
+config.get = mockGet;
 
 // Helper function to clear storage between tests
 async function clearStorage() {
@@ -115,8 +116,8 @@ test('should read unencrypted data with doubleDecryption', async t => {
     // Store unencrypted data
     await setv(key, testData);
     
-    // Restore original config
-    config.get = originalGet;
+    // Restore mock config
+    config.get = mockGet;
     
     // Read using doubleEncryptionStorageClient (should handle unencrypted data)
     const retrieved = await getvWithDoubleDecryption(key, userKey);
@@ -146,8 +147,8 @@ test('should read unencrypted data without contextKey', async t => {
     // Store unencrypted data
     await setv(key, testData);
     
-    // Restore original config
-    config.get = originalGet;
+    // Restore mock config
+    config.get = mockGet;
     
     // Read using doubleEncryptionStorageClient without contextKey
     const retrieved = await getvWithDoubleDecryption(key, null);
