@@ -603,23 +603,29 @@ Return ONLY the update line with emoji - nothing else:"""
             """
 
             stream = team.run_stream(task=task)
-            # Loop guard for repeating provider schema errors (e.g., tool_calls/MultiMessage)
+            # Loop guards for detecting stuck workflows
             repeated_schema_error_count = 0
             last_schema_error_seen = False
+            no_files_found_count = 0
+            no_code_blocks_count = 0
+            task_not_completed_count = 0
+
             async for message in stream:
                 messages.append(message)
                 source = message.source if hasattr(message, 'source') else None
-                content = message.content if hasattr(message, 'content') else None 
+                content = message.content if hasattr(message, 'content') else None
                 created_at = message.created_at if hasattr(message, 'created_at') else None
                 logger.info(f"\n\n#SOURCE: {source}\n#CONTENT: {content}\n#CREATED_AT: {created_at}\n")
-                
+
                 task_completed_percentage += 0.01
                 if task_completed_percentage >= 1.0:
                     task_completed_percentage = 0.99
-                    
-                # Loop-guard detection: break early if the same schema error repeats
+
+                # Circuit breaker: detect infinite loops
                 try:
                     ctext = str(content) if content is not None else ""
+
+                    # Schema error loop guard
                     is_schema_err = ("tool_calls" in ctext) and ("MultiMessage" in ctext)
                     if is_schema_err:
                         if last_schema_error_seen:
@@ -627,13 +633,34 @@ Return ONLY the update line with emoji - nothing else:"""
                         else:
                             repeated_schema_error_count = 1
                         last_schema_error_seen = True
-                        # If schema error repeats too many times, stop the loop to avoid getting stuck
                         if repeated_schema_error_count >= 3:
                             logger.warning("Breaking team.run_stream due to repeated MultiMessage/tool_calls schema errors.")
                             break
                     else:
                         last_schema_error_seen = False
                         repeated_schema_error_count = 0
+
+                    # File uploader stuck loop guard
+                    if "No files found" in ctext or "No output files" in ctext or "No files matching" in ctext:
+                        no_files_found_count += 1
+                        if no_files_found_count >= 5:
+                            logger.warning(f"Breaking: file_uploader repeated 'No files found' {no_files_found_count} times. Likely issue with coder agent file paths.")
+                            break
+
+                    # Code executor stuck loop guard
+                    if "No code blocks found" in ctext:
+                        no_code_blocks_count += 1
+                        if no_code_blocks_count >= 5:
+                            logger.warning(f"Breaking: code_executor repeated 'No code blocks' {no_code_blocks_count} times. Coder agent not handing off properly.")
+                            break
+
+                    # Terminator stuck loop guard
+                    if "TASK NOT COMPLETED" in ctext:
+                        task_not_completed_count += 1
+                        if task_not_completed_count >= 3:
+                            logger.warning(f"Breaking: terminator said 'TASK NOT COMPLETED' {task_not_completed_count} times. Workflow stuck.")
+                            break
+
                 except Exception:
                     pass
 
