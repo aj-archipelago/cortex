@@ -324,51 +324,89 @@ class TaskProcessor:
             if not cleaned_content:
                 return None
             
-            prompt = f"""Transform this agent activity into a delightful, crystal-clear progress update (8-15 words) that makes non-technical users feel excited about what's happening. Start with a perfect emoji.
+            prompt = f"""Create a professional progress update (8-12 words) showing expert work in action. User is watching a skilled professional handle their task.
 
-Context: This appears in a live progress indicator for end users who aren't coders.
+Activity: {cleaned_content}
+Role: {source if source else "Unknown"}
 
-Current Activity: {cleaned_content}
-Agent Role: {source if source else "Unknown"}
+═══════════════════════════════════════════════════════════════════
+🎯 CORE PRINCIPLES
+═══════════════════════════════════════════════════════════════════
 
-🎨 Emoji Guide (pick the most fitting):
-Planning/Thinking: 🧭 🗺️ 💡 🎯 🤔
-Research/Search: 🔎 🔍 🌐 📚 🕵️
-Data/Analysis: 📊 📈 📉 🧮 💹
-Writing/Creating: ✍️ 📝 🖊️ ✨ 🎨
-Images/Media: 🖼️ 📸 🎬 🌈 🖌️
-Code/Technical: 💻 ⚙️ 🛠️ 🔧 ⚡
-Files/Upload: 📁 ☁️ 📤 💾 🗂️
-Success/Done: ✅ 🎉 🏆 🎊 ⭐
+1. **SHOW CRAFT, NOT OUTCOME** - User watches expertise, not receives results
+   ❌ "Report ready for download"
+   ✅ "Compiling insights into executive summary"
 
-✨ Writing Style:
-- ENGAGING: Use vivid, active verbs that paint a picture (discovering, crafting, weaving, building, hunting)
-- HUMAN: Conversational and warm, like a helpful colleague updating you
-- CLEAR: Zero jargon, no technical terms, no agent/tool names
-- SPECIFIC: Say what's actually being created/found (not just "processing data")
-- UPBEAT: Positive energy, but not over-the-top
-- SHORT: 8-15 words max - every word must earn its place
+2. **PRESENT CONTINUOUS** - Always -ing verbs (happening right now)
+   ✅ "Analyzing... Designing... Building... Processing..."
 
-🌟 Great Examples (follow these patterns):
-- "🔍 Hunting down the perfect images for your presentation"
-- "📊 Crunching numbers to reveal hidden trends"
-- "✨ Weaving everything together into a polished report"
-- "🎨 Designing eye-catching charts that tell the story"
-- "📚 Diving deep into research to find golden insights"
-- "🖼️ Gathering stunning visuals to bring ideas to life"
-- "💡 Mapping out the smartest approach to tackle this"
-- "☁️ Packaging everything up for easy download"
-- "🔎 Exploring databases to uncover the answers"
-- "✍️ Crafting a compelling narrative from the data"
+3. **NEVER ADDRESS USER** - No "you/your", no "for you", no promises
+   ❌ "Gathering images for your presentation"
+   ❌ "Preparing your report"
+   ❌ "Finding what you need"
+   ✅ "Assembling presentation materials"
 
-❌ Avoid These (too boring/technical):
-- "Processing data" (vague)
-- "Executing SQL query" (jargon)
-- "Running code" (technical)
-- "Your report is ready" (premature/addressing user)
-- "Task terminated" (robotic)
+4. **PROFESSIONAL BUSINESS TONE** - Confident expert, not friendly helper
+   ✅ "Processing financial data across quarterly reports"
+   ❌ "Crunching numbers to find cool insights!"
 
-Return ONLY the update line with emoji - nothing else:"""
+5. **SPECIFIC = CREDIBLE** - What exactly is happening?
+   ✅ "Structuring analysis across 6 data dimensions"
+   ❌ "Processing information"
+
+═══════════════════════════════════════════════════════════════════
+📋 EMOJI + PATTERNS
+═══════════════════════════════════════════════════════════════════
+
+🧭 Planning/Strategy:
+- "Architecting multi-phase analysis framework"
+- "Structuring comprehensive research methodology"
+- "Mapping data relationships across sources"
+
+📊 Data/Analysis:
+- "Processing statistical patterns in time-series data"
+- "Analyzing trends across historical datasets"
+- "Computing correlations between key metrics"
+
+🖼️ Images/Media:
+- "Sourcing high-resolution assets from verified collections"
+- "Curating professional imagery meeting brand standards"
+- "Selecting licensed graphics from premium libraries"
+
+✨ Creating/Designing:
+- "Designing presentation with executive-level polish"
+- "Building interactive visualizations from raw data"
+- "Crafting report layout with professional typography"
+
+📝 Writing/Content:
+- "Synthesizing findings into coherent narrative"
+- "Structuring content with logical flow"
+- "Composing analysis with supporting evidence"
+
+🔍 Research/Search:
+- "Scanning authoritative sources for verified information"
+- "Cross-referencing multiple knowledge bases"
+- "Extracting relevant data from extensive archives"
+
+📦 Finalizing/Delivery:
+- "Applying final quality checks to deliverables"
+- "Packaging complete analysis suite"
+- "Validating output against requirements"
+
+═══════════════════════════════════════════════════════════════════
+❌ FORBIDDEN PATTERNS
+═══════════════════════════════════════════════════════════════════
+
+NEVER use:
+- "for you" / "your" / addressing user
+- "ready" / "complete" / "done" (premature)
+- "downloading" / "uploading" (technical mechanics)
+- "perfect" / "awesome" / "amazing" (overhype)
+- "just" / "simply" / "quickly" (undermines expertise)
+- Technical terms: SQL, API, database names, code
+- Vague verbs: "working on", "getting", "making"
+
+Return ONLY: [emoji] [professional update text]"""
             
             messages = [UserMessage(content=str(prompt), source="summarize_progress_function")]
             
