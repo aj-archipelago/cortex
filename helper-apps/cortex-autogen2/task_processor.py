@@ -617,7 +617,7 @@ Return ONLY the update line with emoji - nothing else:"""
                 created_at = message.created_at if hasattr(message, 'created_at') else None
                 logger.info(f"\n\n#SOURCE: {source}\n#CONTENT: {content}\n#CREATED_AT: {created_at}\n")
 
-                task_completed_percentage += 0.01
+                task_completed_percentage = round(task_completed_percentage + 0.01, 2)
                 if task_completed_percentage >= 1.0:
                     task_completed_percentage = 0.99
 
