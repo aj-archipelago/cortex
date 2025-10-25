@@ -1,9 +1,9 @@
 """
 Web search tools (keyless).
 
-Implements DuckDuckGo-based search without API keys:
-- web_search: web results via HTML endpoint
-- image_search: image results via i.js JSON (requires vqd token)
+Implements Google CSE-based search for web and image results:
+- web_search: web results via Google CSE
+- image_search: image results via Google CSE
 - combined_search: combined web + image results
 """
 
@@ -180,44 +180,6 @@ def _extract_snippet_near(html: str, start_pos: int) -> Optional[str]:
     return text or None
 
 
-def _ddg_web(query: str, count: int = 25) -> List[Dict[str, Any]]:
-    url = f"https://duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
-    headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(url, headers=headers, timeout=20)
-    resp.raise_for_status()
-    html = resp.text
-
-    # Capture results: <a class="result__a" href="...">Title</a>
-    links_iter = re.finditer(r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, flags=re.I | re.S)
-    results: List[Dict[str, Any]] = []
-    for match in links_iter:
-        href = match.group(1)
-        title_html = match.group(2)
-        title_text = html_lib.unescape(re.sub('<[^<]+?>', '', title_html)).strip()
-        if not title_text or not href:
-            continue
-        # Resolve DDG redirect links and protocol-relative URLs
-        url_val = href
-        if url_val.startswith("//"):
-            url_val = "https:" + url_val
-        try:
-            parsed = urllib.parse.urlparse(url_val)
-            if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
-                qs = urllib.parse.parse_qs(parsed.query)
-                uddg = qs.get("uddg", [None])[0]
-                if uddg:
-                    url_val = urllib.parse.unquote(uddg)
-        except Exception:
-            pass
-        snippet = _extract_snippet_near(html, match.end())
-        results.append({
-            "title": title_text,
-            "url": url_val,
-            "snippet": snippet,
-        })
-        if len(results) >= max(1, count):
-            break
-    return _normalize_web_results(results)
 
 
 def _enrich_web_results_with_meta(results: List[Dict[str, Any]], max_fetch: int = 3, timeout_s: int = 8) -> List[Dict[str, Any]]:
@@ -366,73 +328,6 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
         return json.dumps({"error": f"Fetch failed: {str(exc)}"})
 
 
-# DuckDuckGo vqd token method removed - no API key needed, using HTML scraping only
-
-
-def _ddg_images_html(query: str, count: int = 25) -> List[Dict[str, Any]]:
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://duckduckgo.com/"}
-    url = f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}&ia=images&iar=images"
-    try:
-        resp = requests.get(url, headers=headers, timeout=20)
-        resp.raise_for_status()
-        html = resp.text
-        items: List[Dict[str, Any]] = []
-        
-        # Method 1: Look for external-content proxied URLs
-        for m in re.finditer(r'(?:src|data-src)="(https://external-content\.duckduckgo\.com/iu/\?u=[^"]+)"', html):
-            proxy = html_lib.unescape(m.group(1))
-            try:
-                parsed = urllib.parse.urlparse(proxy)
-                qs = urllib.parse.parse_qs(parsed.query)
-                orig = qs.get('u', [None])[0]
-                if not orig:
-                    continue
-                orig = urllib.parse.unquote(orig)
-                items.append({
-                    "title": None,
-                    "image": orig,
-                    "thumbnail": proxy,
-                    "width": None,
-                    "height": None,
-                    "source": None,
-                })
-                if len(items) >= count:
-                    break
-            except Exception:
-                continue
-        
-        # Method 2: Look for direct image URLs in the page
-        if len(items) < count // 2:
-            direct_patterns = [
-                r'"(https://[^"]+\.(?:jpg|jpeg|png|webp|gif))"',
-                r"'(https://[^']+\.(?:jpg|jpeg|png|webp|gif))'",
-            ]
-            for pattern in direct_patterns:
-                for m in re.finditer(pattern, html, re.I):
-                    img_url = m.group(1)
-                    if "duckduckgo.com" not in img_url and img_url not in [i["image"] for i in items]:
-                        items.append({
-                            "title": None,
-                            "image": img_url,
-                            "thumbnail": img_url,
-                            "width": None,
-                            "height": None,
-                            "source": None,
-                        })
-                        if len(items) >= count:
-                            break
-                if len(items) >= count:
-                    break
-        
-        logging.info(f"[_ddg_images_html] Found {len(items)} images for query: {query}")
-        return _normalize_image_results(items)
-    except Exception as e:
-        logging.error(f"[_ddg_images_html] Failed for query '{query}': {e}")
-        return []
-
-
-# DuckDuckGo JSON API method removed - no API key available, using HTML scraping only
-
 
 async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
     try:
@@ -449,8 +344,6 @@ async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
                 used_google = False
                 results = []
 
-        if not results:
-            results = _ddg_web(query, count)
 
         if enrich and results:
             # Enrich only for web-page items
@@ -549,15 +442,7 @@ async def image_search(query: str, count: int = 25, verify_download: bool = True
                 logging.warning(f"[image_search] Google CSE failed: {e}")
                 results = []
 
-        if not results:
-            # Fallback to DuckDuckGo HTML scraping if CSE disabled or empty
-            try:
-                logging.info(f"[image_search] Falling back to DuckDuckGo HTML scraping for query: {query}")
-                results = _ddg_images_html(query, count)
-                logging.info(f"[image_search] DuckDuckGo HTML returned {len(results)} results")
-            except Exception as e:
-                logging.error(f"[image_search] All methods failed for query '{query}': {e}")
-                results = []
+
 
         # Post-filtering and ranking for relevance and quality
         def score(item: Dict[str, Any]) -> int:
@@ -725,13 +610,8 @@ async def combined_search(query: str, count: int = 25, enrich: bool = True) -> s
             except Exception:
                 img_results = []
 
-        if not web_results:
-            web_results = _ddg_web(query, count)
-        if enrich and web_results:
-            web_results = _enrich_web_results_with_meta(web_results)
-        if not img_results:
-            img_results = _ddg_images_html(query, count)
-
+            if enrich and web_results:
+                web_results = _enrich_web_results_with_meta(web_results)
         combined.extend(web_results)
         combined.extend(img_results)
         if not combined:
@@ -861,115 +741,150 @@ async def collect_task_images(
                 return False
             return False
 
-        used = 0
-        seen_hashes: set = set()
-        for it in filtered:
-            if used >= count:
-                break
-            # Prefer original_url if available
-            img_url = it.get("original_url") or it.get("url")
-            if not img_url:
-                skipped.append({"reason": "missing_url", "item": it})
-                continue
-            if not is_image_ok(img_url):
-                skipped.append({"reason": "verify_failed", "url": img_url})
-                continue
-
-            # Determine extension; if SVG, download as .svg then convert to PNG
-            base = re.sub(r"[^a-zA-Z0-9_-]+", "_", (it.get("title") or "image").strip())[:80] or "image"
-            url_lower = (img_url or "").lower()
-            is_svg = url_lower.endswith(".svg") or ".svg" in url_lower
-            filename = f"{base}_{used+1}.svg" if is_svg else f"{base}_{used+1}.jpg"
-            dl_json = await download_image(img_url, filename, work_dir)
-            dl = json.loads(dl_json)
-            if dl.get("status") != "success":
-                skipped.append({"reason": "download_error", "url": img_url, "detail": dl})
-                continue
-
-            file_path = dl.get("file_path")
-            # If SVG, convert to PNG for PIL compatibility
-            if is_svg and file_path and os.path.exists(file_path):
-                try:
-                    import cairosvg  # type: ignore
-                    png_path = os.path.splitext(file_path)[0] + ".png"
-                    cairosvg.svg2png(url=file_path, write_to=png_path)
-                    try:
-                        os.remove(file_path)
-                    except Exception:
-                        pass
-                    file_path = png_path
-                except Exception as e:
-                    skipped.append({"reason": "svg_convert_failed", "url": img_url, "error": str(e)})
-                    try:
-                        os.remove(file_path)
-                    except Exception:
-                        pass
-                    continue
-            # Optional dimension filter
+        # Parallel download/verification helper
+        async def process_single_image(it: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
+            """Download, verify, and process a single image. Returns accepted dict or None if skipped."""
             try:
-                if (min_width or min_height) and file_path and os.path.exists(file_path):
-                    with Image.open(file_path) as im:
-                        w, h = im.size
-                        if (min_width and w < min_width) or (min_height and h < min_height):
-                            skipped.append({"reason": "too_small", "url": img_url, "width": w, "height": h})
-                            try:
-                                os.remove(file_path)
-                            except Exception:
-                                pass
-                            continue
-            except Exception:
-                pass
+                img_url = it.get("original_url") or it.get("url")
+                if not img_url:
+                    skipped.append({"reason": "missing_url", "item": it})
+                    return None
+                if not is_image_ok(img_url):
+                    skipped.append({"reason": "verify_failed", "url": img_url})
+                    return None
 
-            # Optional content deduplication by hash
-            try:
-                if dedup_content and file_path and os.path.exists(file_path):
-                    hasher = hashlib.sha256()
-                    with open(file_path, "rb") as fh:
-                        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                            hasher.update(chunk)
-                    digest = hasher.hexdigest()
-                    if digest in seen_hashes:
-                        skipped.append({"reason": "content_duplicate", "url": img_url})
+                # Determine extension; if SVG, download as .svg then convert to PNG
+                base = re.sub(r"[^a-zA-Z0-9_-]+", "_", (it.get("title") or "image").strip())[:80] or "image"
+                url_lower = (img_url or "").lower()
+                is_svg = url_lower.endswith(".svg") or ".svg" in url_lower
+                filename = f"{base}_{idx+1}.svg" if is_svg else f"{base}_{idx+1}.jpg"
+                dl_json = await download_image(img_url, filename, work_dir)
+                dl = json.loads(dl_json)
+                if dl.get("status") != "success":
+                    skipped.append({"reason": "download_error", "url": img_url, "detail": dl})
+                    return None
+
+                file_path = dl.get("file_path")
+                # If SVG, convert to PNG for PIL compatibility
+                if is_svg and file_path and os.path.exists(file_path):
+                    try:
+                        import cairosvg  # type: ignore
+                        png_path = os.path.splitext(file_path)[0] + ".png"
+                        cairosvg.svg2png(url=file_path, write_to=png_path)
                         try:
                             os.remove(file_path)
                         except Exception:
                             pass
-                        continue
-                    seen_hashes.add(digest)
-            except Exception:
-                pass
-            # Upload if configured, else mark as local only
-            azure_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-            if azure_conn:
-                up_json = upload_file_to_azure_blob(file_path)
-                up = json.loads(up_json)
-                if "download_url" in up:
-                    accepted.append({
+                        file_path = png_path
+                    except Exception as e:
+                        skipped.append({"reason": "svg_convert_failed", "url": img_url, "error": str(e)})
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
+                        return None
+
+                # Optional dimension filter
+                try:
+                    if (min_width or min_height) and file_path and os.path.exists(file_path):
+                        with Image.open(file_path) as im:
+                            w, h = im.size
+                            if (min_width and w < min_width) or (min_height and h < min_height):
+                                skipped.append({"reason": "too_small", "url": img_url, "width": w, "height": h})
+                                try:
+                                    os.remove(file_path)
+                                except Exception:
+                                    pass
+                                return None
+                except Exception:
+                    pass
+
+                # Compute hash for deduplication (will filter later)
+                content_hash = None
+                try:
+                    if dedup_content and file_path and os.path.exists(file_path):
+                        hasher = hashlib.sha256()
+                        with open(file_path, "rb") as fh:
+                            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                                hasher.update(chunk)
+                        content_hash = hasher.hexdigest()
+                except Exception:
+                    pass
+
+                # Upload if configured, else mark as local only
+                azure_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+                if azure_conn:
+                    up_json = upload_file_to_azure_blob(file_path)
+                    up = json.loads(up_json)
+                    if "download_url" in up:
+                        return {
+                            "title": it.get("title"),
+                            "source_page": it.get("host_page_url"),
+                            "uploaded_url": up["download_url"],
+                            "local_path": file_path,
+                            "width": it.get("width"),
+                            "height": it.get("height"),
+                            "source_host": it.get("_host"),
+                            "_content_hash": content_hash,
+                        }
+                    else:
+                        skipped.append({"reason": "upload_error", "file_path": file_path, "detail": up})
+                        return None
+                else:
+                    return {
                         "title": it.get("title"),
                         "source_page": it.get("host_page_url"),
-                        "uploaded_url": up["download_url"],
+                        "uploaded_url": None,
                         "local_path": file_path,
                         "width": it.get("width"),
                         "height": it.get("height"),
                         "source_host": it.get("_host"),
-                    })
-                    used += 1
+                        "note": "AZURE_STORAGE_CONNECTION_STRING not set; upload skipped",
+                        "_content_hash": content_hash,
+                    }
+            except Exception as e:
+                skipped.append({"reason": "processing_error", "error": str(e)})
+                return None
+
+        # Process images in parallel batches
+        BATCH_SIZE = 10  # Download up to 10 images concurrently
+        all_results: List[Optional[Dict[str, Any]]] = []
+
+        for batch_start in range(0, min(len(filtered), count * 3), BATCH_SIZE):  # Over-fetch to handle failures
+            batch = filtered[batch_start:batch_start + BATCH_SIZE]
+            if len(accepted) >= count:
+                break
+
+            # Process batch in parallel
+            tasks = [process_single_image(it, batch_start + i) for i, it in enumerate(batch)]
+            batch_results = await asyncio.gather(*tasks)
+            all_results.extend(batch_results)
+
+        # Post-process: deduplicate by hash and limit to count
+        seen_hashes: set = set()
+        for result in all_results:
+            if result is None:
+                continue
+            if len(accepted) >= count:
+                break
+
+            # Deduplication check
+            if dedup_content and result.get("_content_hash"):
+                if result["_content_hash"] in seen_hashes:
+                    skipped.append({"reason": "content_duplicate", "url": result.get("source_page")})
+                    # Clean up duplicate file
+                    try:
+                        if result.get("local_path") and os.path.exists(result["local_path"]):
+                            os.remove(result["local_path"])
+                    except Exception:
+                        pass
                     continue
-                else:
-                    skipped.append({"reason": "upload_error", "file_path": file_path, "detail": up})
-                    continue
-            else:
-                accepted.append({
-                    "title": it.get("title"),
-                    "source_page": it.get("host_page_url"),
-                    "uploaded_url": None,
-                    "local_path": file_path,
-                    "width": it.get("width"),
-                    "height": it.get("height"),
-                    "source_host": it.get("_host"),
-                    "note": "AZURE_STORAGE_CONNECTION_STRING not set; upload skipped"
-                })
-                used += 1
+                seen_hashes.add(result["_content_hash"])
+
+            # Remove internal hash field before adding to accepted
+            if "_content_hash" in result:
+                del result["_content_hash"]
+            accepted.append(result)
 
         # No synthesis: if no accepted items, return zero results as-is
 

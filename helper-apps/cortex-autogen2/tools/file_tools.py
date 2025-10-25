@@ -213,7 +213,7 @@ async def download_image(url: str, filename: str, work_dir: Optional[str] = None
             "User-Agent": BROWSER_UA,
             "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://duckduckgo.com/",
+            "Referer": "https://www.google.com/",
             "Cache-Control": "no-cache",
         })
 

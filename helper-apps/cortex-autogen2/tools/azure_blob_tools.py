@@ -9,6 +9,8 @@ import mimetypes
 import uuid
 import time
 import hashlib
+import re
+import unicodedata
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions, ContentSettings
@@ -16,6 +18,24 @@ from azure.core.exceptions import AzureError, ServiceResponseError
 import requests
 
 logger = logging.getLogger(__name__)
+
+def _sanitize_blob_name(filename: str) -> str:
+    """
+    Sanitize filename to be Azure Blob Storage safe.
+    Removes special characters and converts to ASCII-safe format.
+    """
+    # Normalize unicode characters (e.g., é -> e)
+    normalized = unicodedata.normalize('NFKD', filename)
+    # Remove accents/diacritics
+    ascii_str = normalized.encode('ascii', 'ignore').decode('ascii')
+    # Replace any remaining problematic characters with underscore
+    # Keep only: alphanumeric, dots, dashes, underscores
+    safe_name = re.sub(r'[^a-zA-Z0-9._-]', '_', ascii_str)
+    # Remove consecutive underscores
+    safe_name = re.sub(r'_+', '_', safe_name)
+    # Remove leading/trailing underscores or dots
+    safe_name = safe_name.strip('_.')
+    return safe_name
 
 # Ensure correct MIME types for Office files, especially PPT/PPTX, for proper downloads in browsers
 try:
@@ -112,20 +132,42 @@ class AzureBlobUploader:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
+        # Determine if we should preserve the exact filename or add timestamp/UUID
+        preserve = (os.getenv("PRESERVE_BLOB_FILENAME", "false").lower() in ("1", "true", "yes"))
+        prefix = (os.getenv("AZURE_BLOB_PREFIX") or "").strip().strip("/")
+
         if blob_name is None:
+            # Use original filename from file_path
             original_base = os.path.basename(file_path)
             name, ext = os.path.splitext(original_base)
-            # Prefix support for virtual folders
-            prefix = (os.getenv("AZURE_BLOB_PREFIX") or "").strip().strip("/")
-            # Decide uniqueness policy: default add timestamp+short id to avoid static overwrites
-            preserve = (os.getenv("PRESERVE_BLOB_FILENAME", "false").lower() in ("1", "true", "yes"))
-            if preserve:
-                final_name = original_base
-            else:
-                timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-                short_id = uuid.uuid4().hex[:8]
-                final_name = f"{name}__{timestamp}_{short_id}{ext}"
-            blob_name = f"{prefix}/{final_name}" if prefix else final_name
+        else:
+            # Use provided blob_name (might have path components)
+            # Extract just the filename part
+            blob_base = os.path.basename(blob_name)
+            name, ext = os.path.splitext(blob_base)
+            # Keep any directory prefix from blob_name
+            blob_dir = os.path.dirname(blob_name).strip('/')
+            if blob_dir:
+                prefix = f"{prefix}/{blob_dir}" if prefix else blob_dir
+
+        # Sanitize filename to be Azure Blob safe (remove special chars like é, ñ, etc.)
+        name = _sanitize_blob_name(name)
+        # Extension already starts with dot, just sanitize the part after the dot
+        if ext:
+            ext_without_dot = ext.lstrip('.')
+            sanitized_ext = _sanitize_blob_name(ext_without_dot)
+            ext = f".{sanitized_ext}" if sanitized_ext else ext
+
+        # Add timestamp+UUID suffix unless preserve flag is set
+        if preserve:
+            final_name = f"{name}{ext}"
+        else:
+            timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+            short_id = uuid.uuid4().hex[:8]
+            final_name = f"{name}__{timestamp}_{short_id}{ext}"
+
+        # Construct final blob_name with prefix if provided
+        blob_name = f"{prefix}/{final_name}" if prefix else final_name
 
         # Normalize any accidental leading slashes in blob path
         normalized_blob_name = blob_name.lstrip("/")

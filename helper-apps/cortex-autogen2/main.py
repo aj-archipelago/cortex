@@ -72,7 +72,7 @@ async def main():
                             decoded_content = base64.b64decode(raw_content).decode('utf-8')
                             task_data = json.loads(decoded_content)
                         except (json.JSONDecodeError, TypeError, ValueError) as e:
-                            logger.warning(f"⚠️ Failed to decode as base64, trying as raw JSON: {e}")
+                            logger.debug(f"Base64 decode failed; falling back to raw JSON: {e}")
                             try:
                                 task_data = json.loads(raw_content)
                             except json.JSONDecodeError as e2:
