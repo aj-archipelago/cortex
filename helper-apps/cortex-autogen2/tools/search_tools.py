@@ -741,115 +741,150 @@ async def collect_task_images(
                 return False
             return False
 
-        used = 0
-        seen_hashes: set = set()
-        for it in filtered:
-            if used >= count:
-                break
-            # Prefer original_url if available
-            img_url = it.get("original_url") or it.get("url")
-            if not img_url:
-                skipped.append({"reason": "missing_url", "item": it})
-                continue
-            if not is_image_ok(img_url):
-                skipped.append({"reason": "verify_failed", "url": img_url})
-                continue
-
-            # Determine extension; if SVG, download as .svg then convert to PNG
-            base = re.sub(r"[^a-zA-Z0-9_-]+", "_", (it.get("title") or "image").strip())[:80] or "image"
-            url_lower = (img_url or "").lower()
-            is_svg = url_lower.endswith(".svg") or ".svg" in url_lower
-            filename = f"{base}_{used+1}.svg" if is_svg else f"{base}_{used+1}.jpg"
-            dl_json = await download_image(img_url, filename, work_dir)
-            dl = json.loads(dl_json)
-            if dl.get("status") != "success":
-                skipped.append({"reason": "download_error", "url": img_url, "detail": dl})
-                continue
-
-            file_path = dl.get("file_path")
-            # If SVG, convert to PNG for PIL compatibility
-            if is_svg and file_path and os.path.exists(file_path):
-                try:
-                    import cairosvg  # type: ignore
-                    png_path = os.path.splitext(file_path)[0] + ".png"
-                    cairosvg.svg2png(url=file_path, write_to=png_path)
-                    try:
-                        os.remove(file_path)
-                    except Exception:
-                        pass
-                    file_path = png_path
-                except Exception as e:
-                    skipped.append({"reason": "svg_convert_failed", "url": img_url, "error": str(e)})
-                    try:
-                        os.remove(file_path)
-                    except Exception:
-                        pass
-                    continue
-            # Optional dimension filter
+        # Parallel download/verification helper
+        async def process_single_image(it: Dict[str, Any], idx: int) -> Optional[Dict[str, Any]]:
+            """Download, verify, and process a single image. Returns accepted dict or None if skipped."""
             try:
-                if (min_width or min_height) and file_path and os.path.exists(file_path):
-                    with Image.open(file_path) as im:
-                        w, h = im.size
-                        if (min_width and w < min_width) or (min_height and h < min_height):
-                            skipped.append({"reason": "too_small", "url": img_url, "width": w, "height": h})
-                            try:
-                                os.remove(file_path)
-                            except Exception:
-                                pass
-                            continue
-            except Exception:
-                pass
+                img_url = it.get("original_url") or it.get("url")
+                if not img_url:
+                    skipped.append({"reason": "missing_url", "item": it})
+                    return None
+                if not is_image_ok(img_url):
+                    skipped.append({"reason": "verify_failed", "url": img_url})
+                    return None
 
-            # Optional content deduplication by hash
-            try:
-                if dedup_content and file_path and os.path.exists(file_path):
-                    hasher = hashlib.sha256()
-                    with open(file_path, "rb") as fh:
-                        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                            hasher.update(chunk)
-                    digest = hasher.hexdigest()
-                    if digest in seen_hashes:
-                        skipped.append({"reason": "content_duplicate", "url": img_url})
+                # Determine extension; if SVG, download as .svg then convert to PNG
+                base = re.sub(r"[^a-zA-Z0-9_-]+", "_", (it.get("title") or "image").strip())[:80] or "image"
+                url_lower = (img_url or "").lower()
+                is_svg = url_lower.endswith(".svg") or ".svg" in url_lower
+                filename = f"{base}_{idx+1}.svg" if is_svg else f"{base}_{idx+1}.jpg"
+                dl_json = await download_image(img_url, filename, work_dir)
+                dl = json.loads(dl_json)
+                if dl.get("status") != "success":
+                    skipped.append({"reason": "download_error", "url": img_url, "detail": dl})
+                    return None
+
+                file_path = dl.get("file_path")
+                # If SVG, convert to PNG for PIL compatibility
+                if is_svg and file_path and os.path.exists(file_path):
+                    try:
+                        import cairosvg  # type: ignore
+                        png_path = os.path.splitext(file_path)[0] + ".png"
+                        cairosvg.svg2png(url=file_path, write_to=png_path)
                         try:
                             os.remove(file_path)
                         except Exception:
                             pass
-                        continue
-                    seen_hashes.add(digest)
-            except Exception:
-                pass
-            # Upload if configured, else mark as local only
-            azure_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-            if azure_conn:
-                up_json = upload_file_to_azure_blob(file_path)
-                up = json.loads(up_json)
-                if "download_url" in up:
-                    accepted.append({
+                        file_path = png_path
+                    except Exception as e:
+                        skipped.append({"reason": "svg_convert_failed", "url": img_url, "error": str(e)})
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
+                        return None
+
+                # Optional dimension filter
+                try:
+                    if (min_width or min_height) and file_path and os.path.exists(file_path):
+                        with Image.open(file_path) as im:
+                            w, h = im.size
+                            if (min_width and w < min_width) or (min_height and h < min_height):
+                                skipped.append({"reason": "too_small", "url": img_url, "width": w, "height": h})
+                                try:
+                                    os.remove(file_path)
+                                except Exception:
+                                    pass
+                                return None
+                except Exception:
+                    pass
+
+                # Compute hash for deduplication (will filter later)
+                content_hash = None
+                try:
+                    if dedup_content and file_path and os.path.exists(file_path):
+                        hasher = hashlib.sha256()
+                        with open(file_path, "rb") as fh:
+                            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                                hasher.update(chunk)
+                        content_hash = hasher.hexdigest()
+                except Exception:
+                    pass
+
+                # Upload if configured, else mark as local only
+                azure_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+                if azure_conn:
+                    up_json = upload_file_to_azure_blob(file_path)
+                    up = json.loads(up_json)
+                    if "download_url" in up:
+                        return {
+                            "title": it.get("title"),
+                            "source_page": it.get("host_page_url"),
+                            "uploaded_url": up["download_url"],
+                            "local_path": file_path,
+                            "width": it.get("width"),
+                            "height": it.get("height"),
+                            "source_host": it.get("_host"),
+                            "_content_hash": content_hash,
+                        }
+                    else:
+                        skipped.append({"reason": "upload_error", "file_path": file_path, "detail": up})
+                        return None
+                else:
+                    return {
                         "title": it.get("title"),
                         "source_page": it.get("host_page_url"),
-                        "uploaded_url": up["download_url"],
+                        "uploaded_url": None,
                         "local_path": file_path,
                         "width": it.get("width"),
                         "height": it.get("height"),
                         "source_host": it.get("_host"),
-                    })
-                    used += 1
+                        "note": "AZURE_STORAGE_CONNECTION_STRING not set; upload skipped",
+                        "_content_hash": content_hash,
+                    }
+            except Exception as e:
+                skipped.append({"reason": "processing_error", "error": str(e)})
+                return None
+
+        # Process images in parallel batches
+        BATCH_SIZE = 10  # Download up to 10 images concurrently
+        all_results: List[Optional[Dict[str, Any]]] = []
+
+        for batch_start in range(0, min(len(filtered), count * 3), BATCH_SIZE):  # Over-fetch to handle failures
+            batch = filtered[batch_start:batch_start + BATCH_SIZE]
+            if len(accepted) >= count:
+                break
+
+            # Process batch in parallel
+            tasks = [process_single_image(it, batch_start + i) for i, it in enumerate(batch)]
+            batch_results = await asyncio.gather(*tasks)
+            all_results.extend(batch_results)
+
+        # Post-process: deduplicate by hash and limit to count
+        seen_hashes: set = set()
+        for result in all_results:
+            if result is None:
+                continue
+            if len(accepted) >= count:
+                break
+
+            # Deduplication check
+            if dedup_content and result.get("_content_hash"):
+                if result["_content_hash"] in seen_hashes:
+                    skipped.append({"reason": "content_duplicate", "url": result.get("source_page")})
+                    # Clean up duplicate file
+                    try:
+                        if result.get("local_path") and os.path.exists(result["local_path"]):
+                            os.remove(result["local_path"])
+                    except Exception:
+                        pass
                     continue
-                else:
-                    skipped.append({"reason": "upload_error", "file_path": file_path, "detail": up})
-                    continue
-            else:
-                accepted.append({
-                    "title": it.get("title"),
-                    "source_page": it.get("host_page_url"),
-                    "uploaded_url": None,
-                    "local_path": file_path,
-                    "width": it.get("width"),
-                    "height": it.get("height"),
-                    "source_host": it.get("_host"),
-                    "note": "AZURE_STORAGE_CONNECTION_STRING not set; upload skipped"
-                })
-                used += 1
+                seen_hashes.add(result["_content_hash"])
+
+            # Remove internal hash field before adding to accepted
+            if "_content_hash" in result:
+                del result["_content_hash"]
+            accepted.append(result)
 
         # No synthesis: if no accepted items, return zero results as-is
 

@@ -420,25 +420,34 @@ Return ONLY: [emoji] [professional update text]"""
         """Determine if a progress update should be skipped."""
         if not content:
             return True
-            
+
         content_str = str(content).strip().upper()
-        
+
         # Skip internal selector prompts or bare role names
         if self._is_internal_selector_message(content):
+            return True
+
+        # Skip HandoffMessage (agent transfers)
+        if message_type == "HandoffMessage":
+            return True
+
+        # Skip messages containing agent handoff keywords (internal coordination)
+        handoff_keywords = ["TRANSFERRED TO", "ADOPTING THE ROLE", "HANDOFF TO", "TRANSFER_TO_", "ASSUMING", "ROLE AND INITIATING"]
+        if any(keyword in content_str for keyword in handoff_keywords):
             return True
 
         # Skip termination messages
         if content_str == "TERMINATE" or "TERMINATE" in content_str:
             return True
-            
+
         # Skip empty or whitespace-only content
         if not content_str or content_str.isspace():
             return True
-            
+
         # Skip technical tool execution messages
         if message_type == "ToolCallExecutionEvent":
             return True
-            
+
         # Skip messages from terminator agent
         if source == "terminator_agent":
             return True
@@ -715,6 +724,12 @@ Return ONLY: [emoji] [professional update text]"""
                         try:
                             json_content = json.loads(content)
                             if isinstance(json_content, dict):
+                                # Handle upload_recent_deliverables format: {"uploads": [{blob_name, download_url}]}
+                                if "uploads" in json_content and isinstance(json_content["uploads"], list):
+                                    for upload_item in json_content["uploads"]:
+                                        if isinstance(upload_item, dict) and "download_url" in upload_item and "blob_name" in upload_item:
+                                            uploaded_file_urls[upload_item["blob_name"]] = upload_item["download_url"]
+                                # Handle direct format: {blob_name, download_url}
                                 if "download_url" in json_content and "blob_name" in json_content:
                                     uploaded_file_urls[json_content["blob_name"]] = json_content["download_url"]
                                 # collect external media from known keys

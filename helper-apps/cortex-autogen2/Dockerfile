@@ -49,6 +49,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         gdal-bin libgdal-dev python3-gdal \
         # ─ 7-Zip & RAR extractors (for patool / rarfile fall-back)
         unrar-free \
+        # ─ LibreOffice for PPTX → PDF conversion (slide previews)
+        libreoffice-core libreoffice-writer libreoffice-impress \
+        # ─ Poppler utilities for PDF → PNG conversion (pdf2image)
+        poppler-utils \
         # ─ Clean-up
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
