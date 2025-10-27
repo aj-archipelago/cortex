@@ -228,20 +228,25 @@ class AzureBlobUploader:
 # Keep a single function for external calls to use the singleton uploader
 def upload_file_to_azure_blob(file_path: str, blob_name: str = None) -> str:
     """
-    Uploads a file to Azure Blob Storage and returns a JSON string with the download URL.
-    This function uses the singleton AzureBlobUploader instance.
-
-    Reference local files in absolute path.
-
+    Uploads a file to Azure Blob Storage with automatic retry on transient failures.
+    Returns a JSON string with the download URL.
     """
-    try:
-        uploader = AzureBlobUploader()
-        result = uploader.upload_file(file_path, blob_name)
-        logger.info(f"✅ Successfully uploaded and got SAS URL for {file_path}")
-        return json.dumps(result)
-    except Exception as e:
-        logger.error(f"❌ Failed to upload {file_path}. Error: {e}", exc_info=True)
-        return json.dumps({"error": str(e)})
+    max_attempts = 3
+    retry_delay = 3
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            uploader = AzureBlobUploader()
+            result = uploader.upload_file(file_path, blob_name)
+            logger.info(f"✅ Successfully uploaded {file_path} (attempt {attempt}/{max_attempts})")
+            return json.dumps(result)
+        except Exception as e:
+            if attempt < max_attempts:
+                logger.warning(f"⚠️ Upload attempt {attempt}/{max_attempts} failed for {file_path}: {e}. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"❌ Upload failed after {max_attempts} attempts for {file_path}: {e}", exc_info=True)
+                return json.dumps({"error": str(e)})
 
 # This function is no longer needed as the class handles text uploads if necessary,
 # and direct calls should go through the singleton.

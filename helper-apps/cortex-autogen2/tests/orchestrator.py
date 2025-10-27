@@ -280,7 +280,9 @@ class TestOrchestrator:
             logger.info(f"\n✨ Evaluation complete:")
             logger.info(f"   Progress Score: {progress_eval['score']}/100")
             logger.info(f"   Output Score: {output_eval['score']}/100")
-            logger.info(f"   Overall Score: {int((progress_eval['score'] + output_eval['score']) / 2)}/100")
+            # Weighted: 75% output quality, 25% progress reporting (output matters most!)
+            overall = int((output_eval['score'] * 0.75) + (progress_eval['score'] * 0.25))
+            logger.info(f"   Overall Score: {overall}/100")
 
         except Exception as e:
             logger.error(f"❌ Evaluation error: {e}", exc_info=True)
@@ -300,7 +302,7 @@ class TestOrchestrator:
             'metrics': metrics,
             'progress_evaluation': progress_eval,
             'output_evaluation': output_eval,
-            'overall_score': int((progress_eval['score'] + output_eval['score']) / 2)
+            'overall_score': int((output_eval['score'] * 0.75) + (progress_eval['score'] * 0.25))
         }
 
         logger.info(f"\n{'='*80}")
