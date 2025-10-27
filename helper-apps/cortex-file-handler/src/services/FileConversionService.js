@@ -11,7 +11,7 @@ export class FileConversionService extends ConversionService {
   constructor(context, useAzure = true) {
     super(context);
     this.useAzure = useAzure;
-    this.storageFactory = new StorageFactory();
+    this.storageFactory = StorageFactory.getInstance();
   }
 
   async _getFileStoreMap(key) {

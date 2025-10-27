@@ -225,7 +225,7 @@ export const getBlobClient = async (containerName = null) => {
 
 async function saveFileToBlob(chunkPath, requestId, filename = null, containerName = null) {
   // Use provider for consistency with cache control headers
-  const storageFactory = new StorageFactory();
+  const storageFactory = StorageFactory.getInstance();
   const provider = await storageFactory.getAzureProvider(containerName);
   return await provider.uploadFile({}, chunkPath, requestId, null, filename);
 }
@@ -689,7 +689,7 @@ function uploadBlob(
 
 // Helper function to handle local file storage
 async function saveToLocalStorage(context, requestId, encodedFilename, file) {
-  const storageFactory = new StorageFactory();
+  const storageFactory = StorageFactory.getInstance();
   const localProvider = storageFactory.getLocalProvider();
   const contextWithRequestId = { ...context, requestId };
   return await localProvider.uploadStream(contextWithRequestId, encodedFilename, file);
@@ -697,7 +697,7 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
 
 // Helper function to handle Azure blob storage
 async function saveToAzureStorage(context, encodedFilename, file, containerName = null) {
-  const storageFactory = new StorageFactory();
+  const storageFactory = StorageFactory.getInstance();
   const provider = await storageFactory.getAzureProvider(containerName);
   return await provider.uploadStream(context, encodedFilename, file);
 }
@@ -707,7 +707,7 @@ async function saveToGoogleStorage(context, encodedFilename, file) {
   if (!gcs) {
     throw new Error("Google Cloud Storage is not initialized");
   }
-  const storageFactory = new StorageFactory();
+  const storageFactory = StorageFactory.getInstance();
   const gcsProvider = storageFactory.getGCSProvider();
   if (!gcsProvider) {
     throw new Error("GCS provider not available");
@@ -1117,7 +1117,7 @@ async function ensureGCSUpload(context, existingFile) {
       responseType: "stream",
     });
     
-    const storageFactory = new StorageFactory();
+    const storageFactory = StorageFactory.getInstance();
     const gcsProvider = storageFactory.getGCSProvider();
     if (gcsProvider) {
       existingFile.gcs = await gcsProvider.uploadStream(context, fileName, response.data);

@@ -13,9 +13,31 @@ async function getBlobHandlerConstants() {
   return blobHandlerConstants;
 }
 
+// Singleton instance for provider caching across the application
+let storageFactoryInstance = null;
+
 export class StorageFactory {
   constructor() {
     this.providers = new Map();
+  }
+
+  /**
+   * Get the singleton instance of StorageFactory
+   * This ensures provider caching works across the entire application
+   */
+  static getInstance() {
+    if (!storageFactoryInstance) {
+      storageFactoryInstance = new StorageFactory();
+    }
+    return storageFactoryInstance;
+  }
+
+  /**
+   * Reset the singleton instance (useful for testing)
+   * @internal
+   */
+  static resetInstance() {
+    storageFactoryInstance = null;
   }
 
   async getPrimaryProvider(containerName = null) {

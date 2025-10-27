@@ -144,7 +144,7 @@ export class AzureStorageProvider extends StorageProvider {
     const { containerClient } = await this.getBlobClient();
     const contentType = mime.lookup(encodedFilename);
 
-    // Create a safe blob name that is URI-encoded once (no double encoding)
+    // Normalize the blob name: sanitizeFilename decodes, cleans, then we encode for Azure
     let blobName = sanitizeFilename(encodedFilename);
     blobName = encodeURIComponent(blobName);
 
