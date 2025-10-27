@@ -7,13 +7,12 @@ async function createAzureContainers() {
       "UseDevelopmentStorage=true",
     );
     
-    // Get container names from environment variable
-    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "default,test-container,test1,test2,test3,container1,container2,container3";
-    const containerNames = containerStr.split(',').map(name => name.trim()).filter(name => name.length > 0);
+    // Always create all possible test containers to support dynamic test environments
+    const allTestContainers = ["default", "test-container", "test1", "test2", "test3", "container1", "container2", "container3"];
     
-    console.log(`Creating Azure containers: ${containerNames.join(', ')}`);
+    console.log(`Creating Azure containers: ${allTestContainers.join(', ')}`);
     
-    for (const containerName of containerNames) {
+    for (const containerName of allTestContainers) {
       try {
         const containerClient = blobServiceClient.getContainerClient(containerName);
         await containerClient.create();

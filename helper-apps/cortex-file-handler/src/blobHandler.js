@@ -6,7 +6,6 @@ import { pipeline as _pipeline } from "stream";
 import { v4 as uuidv4 } from "uuid";
 import Busboy from "busboy";
 import { PassThrough } from "stream";
-import mime from "mime-types";
 import { Storage } from "@google-cloud/storage";
 import {
   generateBlobSASQueryParameters,
@@ -23,6 +22,7 @@ import {
 import { publicFolder, port, ipAddress } from "./start.js";
 import { CONVERTED_EXTENSIONS, AZURITE_ACCOUNT_NAME } from "./constants.js";
 import { FileConversionService } from "./services/FileConversionService.js";
+import { StorageFactory } from "./services/storage/StorageFactory.js";
 
 const pipeline = promisify(_pipeline);
 
@@ -86,7 +86,10 @@ export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 
 // Validate if a container name is allowed
 export const isValidContainerName = (containerName) => {
-  return AZURE_STORAGE_CONTAINER_NAMES.includes(containerName);
+  // Read from environment at runtime to support dynamically changing env in tests
+  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+  const currentContainerNames = containerStr.split(',').map(name => name.trim());
+  return currentContainerNames.includes(containerName);
 };
 
 function isEncoded(str) {
@@ -221,32 +224,10 @@ export const getBlobClient = async (containerName = null) => {
 };
 
 async function saveFileToBlob(chunkPath, requestId, filename = null, containerName = null) {
-  const { containerClient } = await getBlobClient(containerName);
-  // Use provided filename or generate LLM-friendly naming
-  let blobName;
-  if (filename) {
-    blobName = generateBlobName(requestId, filename);
-  } else {
-    const fileExtension = path.extname(chunkPath);
-    const shortId = generateShortId();
-    blobName = generateBlobName(requestId, `${shortId}${fileExtension}`);
-  }
-
-  // Create a read stream for the chunk file
-  const fileStream = fs.createReadStream(chunkPath);
-
-  // Upload the chunk to Azure Blob Storage using the stream
-  const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-  await blockBlobClient.uploadStream(fileStream);
-
-  // Generate SAS token after successful upload
-  const sasToken = generateSASToken(containerClient, blobName);
-
-  // Return an object with the URL property
-  return {
-    url: `${blockBlobClient.url}?${sasToken}`,
-    blobName: blobName,
-  };
+  // Use provider for consistency with cache control headers
+  const storageFactory = new StorageFactory();
+  const provider = await storageFactory.getAzureProvider(containerName);
+  return await provider.uploadFile({}, chunkPath, requestId, null, filename);
 }
 
 const generateSASToken = (
@@ -396,8 +377,11 @@ function uploadBlob(
               hash = value;
             } else if (fieldname === "container") {
               if (value && !isValidContainerName(value)) {
+                // Read current containers from env for error message
+                const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+                const currentContainerNames = containerStr.split(',').map(name => name.trim());
                 errorOccurred = true;
-                const err = new Error(`Invalid container name '${value}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`);
+                const err = new Error(`Invalid container name '${value}'. Allowed containers: ${currentContainerNames.join(', ')}`);
                 err.status = 400;
                 reject(err);
                 return;
@@ -767,57 +751,17 @@ function uploadBlob(
 
 // Helper function to handle local file storage
 async function saveToLocalStorage(context, requestId, encodedFilename, file) {
-  const localPath = path.join(publicFolder, requestId);
-  fs.mkdirSync(localPath, { recursive: true });
-
-  // Sanitize filename by removing invalid characters
-  const sanitizedFilename = sanitizeFilename(encodedFilename);
-  const destinationPath = `${localPath}/${sanitizedFilename}`;
-
-  await pipeline(file, fs.createWriteStream(destinationPath));
-  return `http://${ipAddress}:${port}/files/${requestId}/${sanitizedFilename}`;
+  const storageFactory = new StorageFactory();
+  const localProvider = storageFactory.getLocalProvider();
+  const contextWithRequestId = { ...context, requestId };
+  return await localProvider.uploadStream(contextWithRequestId, encodedFilename, file);
 }
 
 // Helper function to handle Azure blob storage
 async function saveToAzureStorage(context, encodedFilename, file, containerName = null) {
-  const { containerClient } = await getBlobClient(containerName);
-  const contentType = mime.lookup(encodedFilename);
-
-  // Create a safe blob name that is URI-encoded once (no double encoding)
-  let blobName = sanitizeFilename(encodedFilename);
-  blobName = encodeURIComponent(blobName);
-
-  const options = {
-    blobHTTPHeaders: contentType ? { blobContentType: contentType } : {},
-    maxConcurrency: 50,
-    blockSize: 8 * 1024 * 1024,
-  };
-
-  const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-  console.log("Uploading to container:", containerName || "default");
-  context.log(`Uploading to Azure... ${blobName}`);
-  await blockBlobClient.uploadStream(file, undefined, undefined, options);
-  const sasToken = generateSASToken(containerClient, blobName);
-  return `${blockBlobClient.url}?${sasToken}`;
-}
-
-// Helper function to upload a file to Google Cloud Storage
-async function uploadToGCS(context, file, filename) {
-  const objectName = sanitizeFilename(filename);
-  const gcsFile = gcs.bucket(GCS_BUCKETNAME).file(objectName);
-  const writeStream = gcsFile.createWriteStream({
-    resumable: true,
-    validation: false,
-    metadata: {
-      contentType: mime.lookup(objectName) || "application/octet-stream",
-    },
-    chunkSize: 8 * 1024 * 1024,
-    numRetries: 3,
-    retryDelay: 1000,
-  });
-  context.log(`Uploading to GCS... ${objectName}`);
-  await pipeline(file, writeStream);
-  return `gs://${GCS_BUCKETNAME}/${objectName}`;
+  const storageFactory = new StorageFactory();
+  const provider = await storageFactory.getAzureProvider(containerName);
+  return await provider.uploadStream(context, encodedFilename, file);
 }
 
 // Wrapper that checks if GCS is configured
@@ -825,7 +769,12 @@ async function saveToGoogleStorage(context, encodedFilename, file) {
   if (!gcs) {
     throw new Error("Google Cloud Storage is not initialized");
   }
-  return uploadToGCS(context, file, encodedFilename);
+  const storageFactory = new StorageFactory();
+  const gcsProvider = storageFactory.getGCSProvider();
+  if (!gcsProvider) {
+    throw new Error("GCS provider not available");
+  }
+  return await gcsProvider.uploadStream(context, encodedFilename, file);
 }
 
 async function uploadFile(
@@ -1229,7 +1178,12 @@ async function ensureGCSUpload(context, existingFile) {
       url: existingFile.url,
       responseType: "stream",
     });
-    existingFile.gcs = await uploadToGCS(context, response.data, fileName);
+    
+    const storageFactory = new StorageFactory();
+    const gcsProvider = storageFactory.getGCSProvider();
+    if (gcsProvider) {
+      existingFile.gcs = await gcsProvider.uploadStream(context, fileName, response.data);
+    }
   }
   return existingFile;
 }
