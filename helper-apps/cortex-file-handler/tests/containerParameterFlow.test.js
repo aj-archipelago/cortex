@@ -71,11 +71,14 @@ test.after.always(async (t) => {
 
 // Test container parameter validation
 test("should validate container names correctly", (t) => {
+  // Get current container names
+  const currentContainers = AZURE_STORAGE_CONTAINER_NAMES;
+  
   // Test with valid container names from configuration
-  AZURE_STORAGE_CONTAINER_NAMES.forEach(containerName => {
+  currentContainers.forEach(containerName => {
     t.true(isValidContainerName(containerName), `${containerName} should be valid`);
   });
-
+  
   // Test with invalid container names
   const invalidNames = ["invalid-container", "", null, undefined, "nonexistent"];
   invalidNames.forEach(name => {
