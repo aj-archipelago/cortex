@@ -1,9 +1,9 @@
 """
 Web search tools (keyless).
 
-Implements DuckDuckGo-based search without API keys:
-- web_search: web results via HTML endpoint
-- image_search: image results via i.js JSON (requires vqd token)
+Implements Google CSE-based search for web and image results:
+- web_search: web results via Google CSE
+- image_search: image results via Google CSE
 - combined_search: combined web + image results
 """
 
@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional
 import hashlib
 from PIL import Image
 import asyncio # Import asyncio
+import aiohttp  # Add async HTTP client
 import matplotlib.pyplot as plt
 import pandas as pd
 import re
@@ -180,44 +181,6 @@ def _extract_snippet_near(html: str, start_pos: int) -> Optional[str]:
     return text or None
 
 
-def _ddg_web(query: str, count: int = 25) -> List[Dict[str, Any]]:
-    url = f"https://duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
-    headers = {"User-Agent": USER_AGENT}
-    resp = requests.get(url, headers=headers, timeout=20)
-    resp.raise_for_status()
-    html = resp.text
-
-    # Capture results: <a class="result__a" href="...">Title</a>
-    links_iter = re.finditer(r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, flags=re.I | re.S)
-    results: List[Dict[str, Any]] = []
-    for match in links_iter:
-        href = match.group(1)
-        title_html = match.group(2)
-        title_text = html_lib.unescape(re.sub('<[^<]+?>', '', title_html)).strip()
-        if not title_text or not href:
-            continue
-        # Resolve DDG redirect links and protocol-relative URLs
-        url_val = href
-        if url_val.startswith("//"):
-            url_val = "https:" + url_val
-        try:
-            parsed = urllib.parse.urlparse(url_val)
-            if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
-                qs = urllib.parse.parse_qs(parsed.query)
-                uddg = qs.get("uddg", [None])[0]
-                if uddg:
-                    url_val = urllib.parse.unquote(uddg)
-        except Exception:
-            pass
-        snippet = _extract_snippet_near(html, match.end())
-        results.append({
-            "title": title_text,
-            "url": url_val,
-            "snippet": snippet,
-        })
-        if len(results) >= max(1, count):
-            break
-    return _normalize_web_results(results)
 
 
 def _enrich_web_results_with_meta(results: List[Dict[str, Any]], max_fetch: int = 3, timeout_s: int = 8) -> List[Dict[str, Any]]:
@@ -366,73 +329,6 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
         return json.dumps({"error": f"Fetch failed: {str(exc)}"})
 
 
-# DuckDuckGo vqd token method removed - no API key needed, using HTML scraping only
-
-
-def _ddg_images_html(query: str, count: int = 25) -> List[Dict[str, Any]]:
-    headers = {"User-Agent": USER_AGENT, "Referer": "https://duckduckgo.com/"}
-    url = f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}&ia=images&iar=images"
-    try:
-        resp = requests.get(url, headers=headers, timeout=20)
-        resp.raise_for_status()
-        html = resp.text
-        items: List[Dict[str, Any]] = []
-        
-        # Method 1: Look for external-content proxied URLs
-        for m in re.finditer(r'(?:src|data-src)="(https://external-content\.duckduckgo\.com/iu/\?u=[^"]+)"', html):
-            proxy = html_lib.unescape(m.group(1))
-            try:
-                parsed = urllib.parse.urlparse(proxy)
-                qs = urllib.parse.parse_qs(parsed.query)
-                orig = qs.get('u', [None])[0]
-                if not orig:
-                    continue
-                orig = urllib.parse.unquote(orig)
-                items.append({
-                    "title": None,
-                    "image": orig,
-                    "thumbnail": proxy,
-                    "width": None,
-                    "height": None,
-                    "source": None,
-                })
-                if len(items) >= count:
-                    break
-            except Exception:
-                continue
-        
-        # Method 2: Look for direct image URLs in the page
-        if len(items) < count // 2:
-            direct_patterns = [
-                r'"(https://[^"]+\.(?:jpg|jpeg|png|webp|gif))"',
-                r"'(https://[^']+\.(?:jpg|jpeg|png|webp|gif))'",
-            ]
-            for pattern in direct_patterns:
-                for m in re.finditer(pattern, html, re.I):
-                    img_url = m.group(1)
-                    if "duckduckgo.com" not in img_url and img_url not in [i["image"] for i in items]:
-                        items.append({
-                            "title": None,
-                            "image": img_url,
-                            "thumbnail": img_url,
-                            "width": None,
-                            "height": None,
-                            "source": None,
-                        })
-                        if len(items) >= count:
-                            break
-                if len(items) >= count:
-                    break
-        
-        logging.info(f"[_ddg_images_html] Found {len(items)} images for query: {query}")
-        return _normalize_image_results(items)
-    except Exception as e:
-        logging.error(f"[_ddg_images_html] Failed for query '{query}': {e}")
-        return []
-
-
-# DuckDuckGo JSON API method removed - no API key available, using HTML scraping only
-
 
 async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
     try:
@@ -449,8 +345,6 @@ async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
                 used_google = False
                 results = []
 
-        if not results:
-            results = _ddg_web(query, count)
 
         if enrich and results:
             # Enrich only for web-page items
@@ -549,15 +443,7 @@ async def image_search(query: str, count: int = 25, verify_download: bool = True
                 logging.warning(f"[image_search] Google CSE failed: {e}")
                 results = []
 
-        if not results:
-            # Fallback to DuckDuckGo HTML scraping if CSE disabled or empty
-            try:
-                logging.info(f"[image_search] Falling back to DuckDuckGo HTML scraping for query: {query}")
-                results = _ddg_images_html(query, count)
-                logging.info(f"[image_search] DuckDuckGo HTML returned {len(results)} results")
-            except Exception as e:
-                logging.error(f"[image_search] All methods failed for query '{query}': {e}")
-                results = []
+
 
         # Post-filtering and ranking for relevance and quality
         def score(item: Dict[str, Any]) -> int:
@@ -725,13 +611,8 @@ async def combined_search(query: str, count: int = 25, enrich: bool = True) -> s
             except Exception:
                 img_results = []
 
-        if not web_results:
-            web_results = _ddg_web(query, count)
-        if enrich and web_results:
-            web_results = _enrich_web_results_with_meta(web_results)
-        if not img_results:
-            img_results = _ddg_images_html(query, count)
-
+            if enrich and web_results:
+                web_results = _enrich_web_results_with_meta(web_results)
         combined.extend(web_results)
         combined.extend(img_results)
         if not combined:
@@ -840,136 +721,197 @@ async def collect_task_images(
         accepted: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
 
-        session = None
-        if verify_download:
-            try:
-                import requests
-                session = requests.Session()
-                session.headers.update({"User-Agent": USER_AGENT})
-            except Exception:
-                session = None
-
-        def is_image_ok(url: str) -> bool:
-            if not verify_download or not session:
+        # Async verification using aiohttp for parallel checks
+        async def is_image_ok_async(url: str, session: aiohttp.ClientSession) -> bool:
+            """Async version of image verification for parallel execution."""
+            if not verify_download:
                 return True
             try:
-                r = session.get(url, stream=True, timeout=15, allow_redirects=True)
-                ct = (r.headers.get("content-type") or "").lower()
-                if r.status_code == 200 and (ct.startswith("image/") or next(r.iter_content(1024), b"")):
-                    return True
+                # Increased timeout from 5s to 15s - many image CDNs are slow (Reddit, eBay, etc.)
+                async with session.head(url, timeout=aiohttp.ClientTimeout(total=15), allow_redirects=True) as response:
+                    if response.status != 200:
+                        return False
+                    ct = (response.headers.get("content-type") or "").lower()
+                    if ct.startswith("image/"):
+                        return True
+                    # If HEAD doesn't give content-type, try GET with small range
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=15), allow_redirects=True) as get_resp:
+                        if get_resp.status == 200:
+                            first_chunk = await get_resp.content.read(2048)
+                            sigs = [b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"RIFF"]
+                            return any(first_chunk.startswith(sig) for sig in sigs)
+            except (asyncio.TimeoutError, aiohttp.ClientError):
+                return False
             except Exception:
                 return False
             return False
 
-        used = 0
-        seen_hashes: set = set()
-        for it in filtered:
-            if used >= count:
-                break
-            # Prefer original_url if available
-            img_url = it.get("original_url") or it.get("url")
-            if not img_url:
-                skipped.append({"reason": "missing_url", "item": it})
-                continue
-            if not is_image_ok(img_url):
-                skipped.append({"reason": "verify_failed", "url": img_url})
-                continue
-
-            # Determine extension; if SVG, download as .svg then convert to PNG
-            base = re.sub(r"[^a-zA-Z0-9_-]+", "_", (it.get("title") or "image").strip())[:80] or "image"
-            url_lower = (img_url or "").lower()
-            is_svg = url_lower.endswith(".svg") or ".svg" in url_lower
-            filename = f"{base}_{used+1}.svg" if is_svg else f"{base}_{used+1}.jpg"
-            dl_json = await download_image(img_url, filename, work_dir)
-            dl = json.loads(dl_json)
-            if dl.get("status") != "success":
-                skipped.append({"reason": "download_error", "url": img_url, "detail": dl})
-                continue
-
-            file_path = dl.get("file_path")
-            # If SVG, convert to PNG for PIL compatibility
-            if is_svg and file_path and os.path.exists(file_path):
-                try:
-                    import cairosvg  # type: ignore
-                    png_path = os.path.splitext(file_path)[0] + ".png"
-                    cairosvg.svg2png(url=file_path, write_to=png_path)
-                    try:
-                        os.remove(file_path)
-                    except Exception:
-                        pass
-                    file_path = png_path
-                except Exception as e:
-                    skipped.append({"reason": "svg_convert_failed", "url": img_url, "error": str(e)})
-                    try:
-                        os.remove(file_path)
-                    except Exception:
-                        pass
-                    continue
-            # Optional dimension filter
+        # Parallel download/verification helper
+        async def process_single_image(it: Dict[str, Any], idx: int, aio_session: aiohttp.ClientSession) -> Optional[Dict[str, Any]]:
+            """Download, verify, and process a single image. Returns accepted dict or None if skipped."""
             try:
-                if (min_width or min_height) and file_path and os.path.exists(file_path):
-                    with Image.open(file_path) as im:
-                        w, h = im.size
-                        if (min_width and w < min_width) or (min_height and h < min_height):
-                            skipped.append({"reason": "too_small", "url": img_url, "width": w, "height": h})
-                            try:
-                                os.remove(file_path)
-                            except Exception:
-                                pass
-                            continue
-            except Exception:
-                pass
+                img_url = it.get("original_url") or it.get("url")
+                if not img_url:
+                    skipped.append({"reason": "missing_url", "item": it})
+                    return None
+                if not await is_image_ok_async(img_url, aio_session):
+                    skipped.append({"reason": "verify_failed", "url": img_url})
+                    return None
 
-            # Optional content deduplication by hash
-            try:
-                if dedup_content and file_path and os.path.exists(file_path):
-                    hasher = hashlib.sha256()
-                    with open(file_path, "rb") as fh:
-                        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                            hasher.update(chunk)
-                    digest = hasher.hexdigest()
-                    if digest in seen_hashes:
-                        skipped.append({"reason": "content_duplicate", "url": img_url})
+                # Determine extension; if SVG, download as .svg then convert to PNG
+                base = re.sub(r"[^a-zA-Z0-9_-]+", "_", (it.get("title") or "image").strip())[:80] or "image"
+                url_lower = (img_url or "").lower()
+                is_svg = url_lower.endswith(".svg") or ".svg" in url_lower
+                filename = f"{base}_{idx+1}.svg" if is_svg else f"{base}_{idx+1}.jpg"
+                dl_json = await download_image(img_url, filename, work_dir)
+                dl = json.loads(dl_json)
+                if dl.get("status") != "success":
+                    skipped.append({"reason": "download_error", "url": img_url, "detail": dl})
+                    return None
+
+                file_path = dl.get("file_path")
+                # If SVG, convert to PNG for PIL compatibility
+                if is_svg and file_path and os.path.exists(file_path):
+                    try:
+                        import cairosvg  # type: ignore
+                        png_path = os.path.splitext(file_path)[0] + ".png"
+                        cairosvg.svg2png(url=file_path, write_to=png_path)
                         try:
                             os.remove(file_path)
                         except Exception:
                             pass
-                        continue
-                    seen_hashes.add(digest)
-            except Exception:
-                pass
-            # Upload if configured, else mark as local only
-            azure_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-            if azure_conn:
-                up_json = upload_file_to_azure_blob(file_path)
-                up = json.loads(up_json)
-                if "download_url" in up:
-                    accepted.append({
+                        file_path = png_path
+                    except Exception as e:
+                        skipped.append({"reason": "svg_convert_failed", "url": img_url, "error": str(e)})
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
+                        return None
+
+                # Optional dimension filter
+                try:
+                    if (min_width or min_height) and file_path and os.path.exists(file_path):
+                        with Image.open(file_path) as im:
+                            w, h = im.size
+                            if (min_width and w < min_width) or (min_height and h < min_height):
+                                skipped.append({"reason": "too_small", "url": img_url, "width": w, "height": h})
+                                try:
+                                    os.remove(file_path)
+                                except Exception:
+                                    pass
+                                return None
+                except Exception:
+                    pass
+
+                # Compute hash for deduplication (will filter later)
+                content_hash = None
+                try:
+                    if dedup_content and file_path and os.path.exists(file_path):
+                        hasher = hashlib.sha256()
+                        with open(file_path, "rb") as fh:
+                            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                                hasher.update(chunk)
+                        content_hash = hasher.hexdigest()
+                except Exception:
+                    pass
+
+                # Upload if configured, else mark as local only
+                azure_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+                if azure_conn:
+                    up_json = upload_file_to_azure_blob(file_path)
+                    up = json.loads(up_json)
+                    if "download_url" in up:
+                        return {
+                            "title": it.get("title"),
+                            "source_page": it.get("host_page_url"),
+                            "uploaded_url": up["download_url"],
+                            "local_path": file_path,
+                            "width": it.get("width"),
+                            "height": it.get("height"),
+                            "source_host": it.get("_host"),
+                            "_content_hash": content_hash,
+                        }
+                    else:
+                        skipped.append({"reason": "upload_error", "file_path": file_path, "detail": up})
+                        return None
+                else:
+                    return {
                         "title": it.get("title"),
                         "source_page": it.get("host_page_url"),
-                        "uploaded_url": up["download_url"],
+                        "uploaded_url": None,
                         "local_path": file_path,
                         "width": it.get("width"),
                         "height": it.get("height"),
                         "source_host": it.get("_host"),
-                    })
-                    used += 1
+                        "note": "AZURE_STORAGE_CONNECTION_STRING not set; upload skipped",
+                        "_content_hash": content_hash,
+                    }
+            except Exception as e:
+                skipped.append({"reason": "processing_error", "error": str(e)})
+                return None
+
+        # Process images in parallel batches with connection pooling
+        BATCH_SIZE = 15  # Balanced for connection pool (limit_per_host=10)
+        all_results: List[Optional[Dict[str, Any]]] = []
+
+        # Create aiohttp session with connection pooling for performance
+        connector = aiohttp.TCPConnector(limit=30, limit_per_host=10)
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=timeout,
+            headers={"User-Agent": USER_AGENT, "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"}
+        ) as aio_session:
+            for batch_start in range(0, min(len(filtered), count * 3), BATCH_SIZE):  # Over-fetch to handle failures
+                batch = filtered[batch_start:batch_start + BATCH_SIZE]
+                # Early exit: stop processing new batches once we have enough
+                if len(accepted) >= count:
+                    logging.info(f"[collect_task_images] Early exit: {len(accepted)} images collected (target: {count})")
+                    break
+
+                # Process batch in parallel with shared session
+                tasks = [process_single_image(it, batch_start + i, aio_session) for i, it in enumerate(batch)]
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Filter out exceptions and add successful results
+                for result in batch_results:
+                    if not isinstance(result, Exception) and result is not None:
+                        all_results.append(result)
+
+        # Post-process: deduplicate by hash and limit to count
+        seen_hashes: set = set()
+        for result in all_results:
+            if result is None:
+                continue
+            # Early exit once we have enough images
+            if len(accepted) >= count:
+                # Clean up any extra downloaded files beyond what we need
+                try:
+                    if result.get("local_path") and os.path.exists(result["local_path"]):
+                        os.remove(result["local_path"])
+                except Exception:
+                    pass
+                break
+
+            # Deduplication check
+            if dedup_content and result.get("_content_hash"):
+                if result["_content_hash"] in seen_hashes:
+                    skipped.append({"reason": "content_duplicate", "url": result.get("source_page")})
+                    # Clean up duplicate file
+                    try:
+                        if result.get("local_path") and os.path.exists(result["local_path"]):
+                            os.remove(result["local_path"])
+                    except Exception:
+                        pass
                     continue
-                else:
-                    skipped.append({"reason": "upload_error", "file_path": file_path, "detail": up})
-                    continue
-            else:
-                accepted.append({
-                    "title": it.get("title"),
-                    "source_page": it.get("host_page_url"),
-                    "uploaded_url": None,
-                    "local_path": file_path,
-                    "width": it.get("width"),
-                    "height": it.get("height"),
-                    "source_host": it.get("_host"),
-                    "note": "AZURE_STORAGE_CONNECTION_STRING not set; upload skipped"
-                })
-                used += 1
+                seen_hashes.add(result["_content_hash"])
+
+            # Remove internal hash field before adding to accepted
+            if "_content_hash" in result:
+                del result["_content_hash"]
+            accepted.append(result)
 
         # No synthesis: if no accepted items, return zero results as-is
 
@@ -1200,4 +1142,260 @@ async def azure_cognitive_search(
         tasks.append(_perform_single_cognitive_search(**q_params))
     
     results = await asyncio.gather(*tasks)
-    return json.dumps(results, indent=2) 
+    return json.dumps(results, indent=2)
+
+
+def _extract_json_path(data: Any, path: str) -> Optional[Any]:
+    """
+    Extract nested value from JSON using dot notation path.
+    Supports array indices like '[0]' and nested paths like 'sprites.other.official-artwork.front_default'.
+    Returns None if path is invalid or key doesn't exist.
+
+    Examples:
+        >>> _extract_json_path({'a': {'b': [1, 2]}}, 'a.b.[0]')
+        1
+        >>> _extract_json_path({'x': {'y': {'z': 42}}}, 'x.y.z')
+        42
+    """
+    try:
+        current = data
+        parts = path.replace('[', '.[').split('.')
+        for part in parts:
+            if not part:
+                continue
+            if part.startswith('[') and part.endswith(']'):
+                # Array index
+                idx = int(part[1:-1])
+                current = current[idx]
+            else:
+                # Dictionary key
+                current = current[part]
+        return current
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+async def fetch_entity_images(
+    entities: List[str],
+    entity_type: str = "pokemon",
+    count_per_entity: int = 1,
+    work_dir: Optional[str] = None,
+    force_web_search: bool = False
+) -> str:
+    """
+    Multi-tier entity image fetcher with automatic fallback:
+    1. Try entity API registry (fast, reliable for known types)
+    2. Fallback to web search (flexible, works for any entity)
+
+    This generic tool works for ANY structured entity type (Pokemon, countries, movies, etc.)
+
+    Args:
+        entities: List of entity names to fetch images for (e.g., ["Gengar", "Mewtwo", "Alakazam"])
+        entity_type: Type of entity (e.g., "pokemon", "country", "movie")
+        count_per_entity: Number of images to fetch per entity (default: 1)
+        work_dir: Directory to save downloaded images
+        force_web_search: Skip API registry and go straight to web search fallback
+
+    Returns:
+        JSON with fetched entities, images, and fallback status
+    """
+    try:
+        if not work_dir:
+            work_dir = os.getcwd()
+        os.makedirs(work_dir, exist_ok=True)
+
+        from .file_tools import download_image
+        from .azure_blob_tools import upload_file_to_azure_blob
+
+        results: List[Dict[str, Any]] = []
+        fallback_stats = {"api_success": 0, "api_failed": 0, "web_search_used": 0}
+
+        # Load entity API registry
+        registry_path = os.path.join(os.path.dirname(__file__), "entity_api_registry.json")
+        registry = {}
+        api_config = None
+
+        if not force_web_search and os.path.exists(registry_path):
+            try:
+                with open(registry_path, 'r') as f:
+                    registry = json.load(f)
+                api_config = registry.get(entity_type.lower())
+                if api_config and not api_config.get("enabled", True):
+                    logging.info(f"[fetch_entity_images] API config for '{entity_type}' is disabled, using web search")
+                    api_config = None
+            except Exception as e:
+                logging.warning(f"[fetch_entity_images] Failed to load registry: {e}")
+
+        # Process each entity
+        for entity_idx, entity_name in enumerate(entities):
+            entity_result = {
+                "entity": entity_name,
+                "entity_type": entity_type,
+                "images": [],
+                "method": None,
+                "error": None
+            }
+
+            # === TIER 1: Try API Registry ===
+            if api_config and not force_web_search:
+                try:
+                    logging.info(f"[fetch_entity_images] Trying API for {entity_name} ({api_config.get('name')})")
+
+                    # Check required env vars
+                    if api_config.get("requires_env"):
+                        missing_vars = [v for v in api_config["requires_env"] if not os.getenv(v)]
+                        if missing_vars:
+                            raise Exception(f"Missing required env vars: {missing_vars}")
+
+                    # Transform entity name
+                    transform = api_config.get("entity_transform", "none")
+                    transformed_entity = entity_name
+                    if transform == "lowercase":
+                        transformed_entity = entity_name.lower()
+                    elif transform == "uppercase":
+                        transformed_entity = entity_name.upper()
+                    elif transform == "slug":
+                        transformed_entity = entity_name.lower().replace(" ", "-")
+
+                    # Build URL
+                    url_pattern = api_config["url_pattern"]
+                    # Replace env vars in pattern
+                    for env_var in re.findall(r'\{([A-Z_]+)\}', url_pattern):
+                        if env_var != "entity":
+                            url_pattern = url_pattern.replace(f"{{{env_var}}}", os.getenv(env_var, ""))
+                    url = url_pattern.replace("{entity}", transformed_entity)
+
+                    # Fetch API data
+                    headers = {"User-Agent": USER_AGENT}
+                    response = requests.get(url, headers=headers, timeout=15)
+                    response.raise_for_status()
+                    api_data = response.json()
+
+                    # Extract image URLs using configured paths
+                    image_fields = api_config.get("image_fields", [])
+                    image_urls = []
+                    for field_path in image_fields:
+                        img_url = _extract_json_path(api_data, field_path)
+                        if img_url and isinstance(img_url, str) and img_url.startswith("http"):
+                            image_urls.append(img_url)
+                            if len(image_urls) >= count_per_entity:
+                                break
+
+                    if not image_urls:
+                        raise Exception(f"No valid image URLs found in API response (tried paths: {image_fields})")
+
+                    # Download images from API
+                    for img_idx, img_url in enumerate(image_urls[:count_per_entity]):
+                        try:
+                            # Determine extension
+                            ext = "png"
+                            if img_url.lower().endswith((".jpg", ".jpeg")):
+                                ext = "jpg"
+                            elif img_url.lower().endswith(".svg"):
+                                ext = "svg"
+
+                            safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", entity_name)[:50]
+                            filename = f"{entity_type}_{safe_name}_{entity_idx+1}_{img_idx+1}.{ext}"
+
+                            dl_json = await download_image(img_url, filename, work_dir)
+                            dl = json.loads(dl_json)
+
+                            if dl.get("status") == "success":
+                                file_path = dl.get("file_path")
+
+                                # Upload if Azure configured
+                                azure_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+                                uploaded_url = None
+                                if azure_conn:
+                                    try:
+                                        up_json = upload_file_to_azure_blob(file_path)
+                                        up = json.loads(up_json)
+                                        uploaded_url = up.get("download_url")
+                                    except Exception:
+                                        pass
+
+                                entity_result["images"].append({
+                                    "source_url": img_url,
+                                    "local_path": file_path,
+                                    "uploaded_url": uploaded_url
+                                })
+                        except Exception as img_err:
+                            logging.warning(f"[fetch_entity_images] Image download failed for {entity_name}: {img_err}")
+
+                    if entity_result["images"]:
+                        entity_result["method"] = f"api:{api_config.get('name')}"
+                        fallback_stats["api_success"] += 1
+                        logging.info(f"[fetch_entity_images] ✓ API success for {entity_name}: {len(entity_result['images'])} images")
+                    else:
+                        raise Exception("All image downloads failed")
+
+                except Exception as api_error:
+                    logging.warning(f"[fetch_entity_images] API failed for {entity_name}: {api_error}")
+                    fallback_stats["api_failed"] += 1
+                    entity_result["error"] = str(api_error)
+                    # Will fall through to web search below
+
+            # === TIER 2: Fallback to Web Search ===
+            if not entity_result["images"]:
+                try:
+                    logging.info(f"[fetch_entity_images] Falling back to web search for {entity_name}")
+
+                    # Use fallback search query if configured, otherwise construct generic query
+                    if api_config and api_config.get("fallback_search_query"):
+                        search_query = api_config["fallback_search_query"].replace("{entity}", entity_name)
+                    else:
+                        search_query = f"{entity_name} {entity_type} official image"
+
+                    # Use existing collect_task_images function
+                    web_result_json = await collect_task_images(
+                        query=search_query,
+                        count=count_per_entity,
+                        verify_download=True,
+                        work_dir=work_dir,
+                        required_terms=[entity_name.split()[0]],  # At least first word of entity name must match
+                        strict_entity=False
+                    )
+
+                    web_result = json.loads(web_result_json)
+                    accepted = web_result.get("accepted", [])
+
+                    if accepted:
+                        # Map web search results to our format
+                        for img in accepted[:count_per_entity]:
+                            entity_result["images"].append({
+                                "source_url": img.get("source_page"),
+                                "local_path": img.get("local_path"),
+                                "uploaded_url": img.get("uploaded_url")
+                            })
+
+                        entity_result["method"] = "web_search_fallback"
+                        fallback_stats["web_search_used"] += 1
+                        logging.info(f"[fetch_entity_images] ✓ Web search success for {entity_name}: {len(entity_result['images'])} images")
+                    else:
+                        entity_result["error"] = "Web search found no suitable images"
+                        logging.warning(f"[fetch_entity_images] Web search found no images for {entity_name}")
+
+                except Exception as web_error:
+                    entity_result["error"] = f"Web search failed: {str(web_error)}"
+                    logging.error(f"[fetch_entity_images] Web search failed for {entity_name}: {web_error}")
+
+            results.append(entity_result)
+
+        # Count total images from all entities
+        total_images_found = sum(len(entity_res.get("images", [])) for entity_res in results)
+        fallback_stats["total_images"] = total_images_found
+
+        # Calculate success - at least one image found
+        success = total_images_found > 0 or len(entities) == 0  # Empty list is also "successful"
+
+        return json.dumps({
+            "success": success,
+            "entity_type": entity_type,
+            "total_entities": len(entities),
+            "results": results,
+            "stats": fallback_stats,
+            "registry_available": api_config is not None
+        }, indent=2)
+
+    except Exception as exc:
+        return json.dumps({"error": f"fetch_entity_images failed: {str(exc)}"}, indent=2) 

@@ -1,0 +1,38 @@
+{
+  "pokemon": {
+    "name": "PokeAPI",
+    "description": "Official Pokemon data API with sprites and artwork",
+    "url_pattern": "https://pokeapi.co/api/v2/pokemon/{entity}",
+    "entity_transform": "lowercase",
+    "image_fields": [
+      "sprites.other.official-artwork.front_default",
+      "sprites.front_default"
+    ],
+    "fallback_search_query": "{entity} pokemon official artwork",
+    "enabled": true
+  },
+  "country": {
+    "name": "REST Countries",
+    "description": "Country data including flags",
+    "url_pattern": "https://restcountries.com/v3.1/name/{entity}",
+    "entity_transform": "none",
+    "image_fields": [
+      "[0].flags.png",
+      "[0].flags.svg"
+    ],
+    "fallback_search_query": "{entity} country flag",
+    "enabled": true
+  },
+  "movie": {
+    "name": "OMDB API",
+    "description": "Movie database with posters (requires API key in OMDB_API_KEY env var)",
+    "url_pattern": "http://www.omdbapi.com/?apikey={OMDB_API_KEY}&t={entity}",
+    "entity_transform": "none",
+    "image_fields": [
+      "Poster"
+    ],
+    "fallback_search_query": "{entity} movie poster",
+    "enabled": false,
+    "requires_env": ["OMDB_API_KEY"]
+  }
+}

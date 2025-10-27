@@ -426,7 +426,7 @@ def build_run_document(
     doc = {
         "id": task_id,
         "date": now_iso,
-        "task": _truncate(redact(task_text), 4000),
+        "task": redact(task_text),
         "content": content_blob,
         "requestId": task_id,
     }

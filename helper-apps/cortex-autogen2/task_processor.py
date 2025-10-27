@@ -3,9 +3,9 @@ import json
 import base64
 import logging
 import os
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple, Union
 from autogen_ext.models.openai import OpenAIChatCompletionClient
-from autogen_core.models import ModelInfo # Import ModelInfo
+from autogen_core.models import ModelInfo, UserMessage, AssistantMessage, SystemMessage
 from autogen_agentchat.teams import SelectorGroupChat
 from autogen_core.models import UserMessage
 from autogen_agentchat.conditions import TextMentionTermination, HandoffTermination
@@ -24,6 +24,167 @@ from agents import get_agents
 from tools.azure_blob_tools import upload_file_to_azure_blob
 
 logger = logging.getLogger(__name__)
+
+
+def _message_to_dict(msg: Any) -> Optional[Dict[str, Any]]:
+    """Best-effort conversion of chat message objects to a plain dict."""
+    if isinstance(msg, dict):
+        return dict(msg)
+
+    for attr in ("model_dump", "dict", "to_dict", "as_dict"):
+        if hasattr(msg, attr):
+            try:
+                candidate = getattr(msg, attr)()
+                if isinstance(candidate, dict):
+                    return dict(candidate)
+            except TypeError:
+                try:
+                    candidate = getattr(msg, attr)(exclude_none=False)
+                    if isinstance(candidate, dict):
+                        return dict(candidate)
+                except Exception:
+                    continue
+            except Exception:
+                continue
+
+    if hasattr(msg, "__dict__"):
+        try:
+            return {k: v for k, v in vars(msg).items() if not k.startswith("__")}
+        except Exception:
+            return None
+
+    return None
+
+
+class RoleFixingModelClientWrapper:
+    """Wraps an OpenAI model client to fix agent message roles before API calls."""
+    
+    def __init__(self, wrapped_client: OpenAIChatCompletionClient):
+        self.wrapped_client = wrapped_client
+    
+    async def create(self, messages=None, **kwargs):
+        """Intercept create calls to fix message roles before sending to API."""
+        if messages:
+            normalized_messages: List[Dict[str, Any]] = []
+            first_user_seen = False
+            for raw_msg in messages:
+                normalized, first_user_seen = _normalize_single_message(raw_msg, first_user_seen)
+                normalized_messages.append(normalized)
+            messages = normalized_messages
+        return await self.wrapped_client.create(messages=messages, **kwargs)
+    
+    def __getattr__(self, name):
+        """Delegate all other attributes/methods to wrapped client."""
+        return getattr(self.wrapped_client, name)
+
+
+def _stringify_content(content: Any) -> str:
+    import json
+
+    if content is None:
+        return ""
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts: List[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text", "")))
+            elif isinstance(item, dict):
+                try:
+                    parts.append(json.dumps(item, ensure_ascii=False))
+                except Exception:
+                    parts.append(str(item))
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+
+    if isinstance(content, dict):
+        try:
+            return json.dumps(content, ensure_ascii=False)
+        except Exception:
+            return str(content)
+
+    return str(content)
+
+
+def _wrap_json_if_needed(text: str) -> str:
+    import json
+
+    if not isinstance(text, str):
+        text = str(text)
+
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        return text
+
+    looks_like_json = False
+    if (stripped.startswith("{") and stripped.endswith("}")) or (
+        stripped.startswith("[") and stripped.endswith("]")
+    ):
+        try:
+            json.loads(stripped)
+            looks_like_json = True
+        except Exception:
+            looks_like_json = False
+
+    if looks_like_json:
+        return f"```json\n{stripped}\n```"
+
+    return text
+
+
+def _normalize_single_message(raw_message: Any, first_user_seen: bool) -> Tuple[Dict[str, Any], bool]:
+    import json
+
+    msg = _message_to_dict(raw_message) or {}
+
+    # Determine role
+    if msg.get("name"):
+        msg["role"] = "assistant"
+    elif not msg.get("role"):
+        if not first_user_seen:
+            msg["role"] = "user"
+            first_user_seen = True
+        else:
+            msg["role"] = "assistant"
+    elif msg.get("role") == "user" and first_user_seen:
+        msg["role"] = "assistant"
+    elif msg.get("role") == "user" and not first_user_seen:
+        first_user_seen = True
+    elif msg.get("role") not in {"assistant", "system"}:
+        msg["role"] = "assistant"
+
+    role = msg.get("role", "assistant")
+    name = msg.get("name") or msg.get("source") or ("user" if role == "user" else "assistant")
+
+    base_content = _stringify_content(msg.get("content"))
+
+    tool_calls = msg.get("tool_calls") if isinstance(msg.get("tool_calls"), list) else None
+    if tool_calls:
+        role = "assistant"
+        try:
+            tool_json = json.dumps(tool_calls, ensure_ascii=False)
+        except Exception:
+            tool_json = str(tool_calls)
+        tool_text = _wrap_json_if_needed(tool_json)
+        if base_content:
+            base_content = f"{base_content}\n\nTool calls:\n{tool_text}"
+        else:
+            base_content = f"Tool calls:\n{tool_text}"
+
+    content_text = _wrap_json_if_needed(base_content) if role != "system" else base_content
+
+    if role == "system":
+        message_obj = SystemMessage(content=content_text)
+    elif role == "user":
+        message_obj = UserMessage(content=content_text, source=str(name))
+    else:
+        message_obj = AssistantMessage(content=content_text, source=str(name))
+
+    return message_obj, first_user_seen
 
 
 class TaskProcessor:
@@ -163,51 +324,89 @@ class TaskProcessor:
             if not cleaned_content:
                 return None
             
-            prompt = f"""Transform this agent activity into a delightful, crystal-clear progress update (8-15 words) that makes non-technical users feel excited about what's happening. Start with a perfect emoji.
+            prompt = f"""Create a professional progress update (8-12 words) showing expert work in action. User is watching a skilled professional handle their task.
 
-Context: This appears in a live progress indicator for end users who aren't coders.
+Activity: {cleaned_content}
+Role: {source if source else "Unknown"}
 
-Current Activity: {cleaned_content}
-Agent Role: {source if source else "Unknown"}
+═══════════════════════════════════════════════════════════════════
+🎯 CORE PRINCIPLES
+═══════════════════════════════════════════════════════════════════
 
-🎨 Emoji Guide (pick the most fitting):
-Planning/Thinking: 🧭 🗺️ 💡 🎯 🤔
-Research/Search: 🔎 🔍 🌐 📚 🕵️
-Data/Analysis: 📊 📈 📉 🧮 💹
-Writing/Creating: ✍️ 📝 🖊️ ✨ 🎨
-Images/Media: 🖼️ 📸 🎬 🌈 🖌️
-Code/Technical: 💻 ⚙️ 🛠️ 🔧 ⚡
-Files/Upload: 📁 ☁️ 📤 💾 🗂️
-Success/Done: ✅ 🎉 🏆 🎊 ⭐
+1. **SHOW CRAFT, NOT OUTCOME** - User watches expertise, not receives results
+   ❌ "Report ready for download"
+   ✅ "Compiling insights into executive summary"
 
-✨ Writing Style:
-- ENGAGING: Use vivid, active verbs that paint a picture (discovering, crafting, weaving, building, hunting)
-- HUMAN: Conversational and warm, like a helpful colleague updating you
-- CLEAR: Zero jargon, no technical terms, no agent/tool names
-- SPECIFIC: Say what's actually being created/found (not just "processing data")
-- UPBEAT: Positive energy, but not over-the-top
-- SHORT: 8-15 words max - every word must earn its place
+2. **PRESENT CONTINUOUS** - Always -ing verbs (happening right now)
+   ✅ "Analyzing... Designing... Building... Processing..."
 
-🌟 Great Examples (follow these patterns):
-- "🔍 Hunting down the perfect images for your presentation"
-- "📊 Crunching numbers to reveal hidden trends"
-- "✨ Weaving everything together into a polished report"
-- "🎨 Designing eye-catching charts that tell the story"
-- "📚 Diving deep into research to find golden insights"
-- "🖼️ Gathering stunning visuals to bring ideas to life"
-- "💡 Mapping out the smartest approach to tackle this"
-- "☁️ Packaging everything up for easy download"
-- "🔎 Exploring databases to uncover the answers"
-- "✍️ Crafting a compelling narrative from the data"
+3. **NEVER ADDRESS USER** - No "you/your", no "for you", no promises
+   ❌ "Gathering images for your presentation"
+   ❌ "Preparing your report"
+   ❌ "Finding what you need"
+   ✅ "Assembling presentation materials"
 
-❌ Avoid These (too boring/technical):
-- "Processing data" (vague)
-- "Executing SQL query" (jargon)
-- "Running code" (technical)
-- "Your report is ready" (premature/addressing user)
-- "Task terminated" (robotic)
+4. **PROFESSIONAL BUSINESS TONE** - Confident expert, not friendly helper
+   ✅ "Processing financial data across quarterly reports"
+   ❌ "Crunching numbers to find cool insights!"
 
-Return ONLY the update line with emoji - nothing else:"""
+5. **SPECIFIC = CREDIBLE** - What exactly is happening?
+   ✅ "Structuring analysis across 6 data dimensions"
+   ❌ "Processing information"
+
+═══════════════════════════════════════════════════════════════════
+📋 EMOJI + PATTERNS
+═══════════════════════════════════════════════════════════════════
+
+🧭 Planning/Strategy:
+- "Architecting multi-phase analysis framework"
+- "Structuring comprehensive research methodology"
+- "Mapping data relationships across sources"
+
+📊 Data/Analysis:
+- "Processing statistical patterns in time-series data"
+- "Analyzing trends across historical datasets"
+- "Computing correlations between key metrics"
+
+🖼️ Images/Media:
+- "Sourcing high-resolution assets from verified collections"
+- "Curating professional imagery meeting brand standards"
+- "Selecting licensed graphics from premium libraries"
+
+✨ Creating/Designing:
+- "Designing presentation with executive-level polish"
+- "Building interactive visualizations from raw data"
+- "Crafting report layout with professional typography"
+
+📝 Writing/Content:
+- "Synthesizing findings into coherent narrative"
+- "Structuring content with logical flow"
+- "Composing analysis with supporting evidence"
+
+🔍 Research/Search:
+- "Scanning authoritative sources for verified information"
+- "Cross-referencing multiple knowledge bases"
+- "Extracting relevant data from extensive archives"
+
+📦 Finalizing/Delivery:
+- "Applying final quality checks to deliverables"
+- "Packaging complete analysis suite"
+- "Validating output against requirements"
+
+═══════════════════════════════════════════════════════════════════
+❌ FORBIDDEN PATTERNS
+═══════════════════════════════════════════════════════════════════
+
+NEVER use:
+- "for you" / "your" / addressing user
+- "ready" / "complete" / "done" (premature)
+- "downloading" / "uploading" (technical mechanics)
+- "perfect" / "awesome" / "amazing" (overhype)
+- "just" / "simply" / "quickly" (undermines expertise)
+- Technical terms: SQL, API, database names, code
+- Vague verbs: "working on", "getting", "making"
+
+Return ONLY: [emoji] [professional update text]"""
             
             messages = [UserMessage(content=str(prompt), source="summarize_progress_function")]
             
@@ -221,25 +420,34 @@ Return ONLY the update line with emoji - nothing else:"""
         """Determine if a progress update should be skipped."""
         if not content:
             return True
-            
+
         content_str = str(content).strip().upper()
-        
+
         # Skip internal selector prompts or bare role names
         if self._is_internal_selector_message(content):
+            return True
+
+        # Skip HandoffMessage (agent transfers)
+        if message_type == "HandoffMessage":
+            return True
+
+        # Skip messages containing agent handoff keywords (internal coordination)
+        handoff_keywords = ["TRANSFERRED TO", "ADOPTING THE ROLE", "HANDOFF TO", "TRANSFER_TO_", "ASSUMING", "ROLE AND INITIATING"]
+        if any(keyword in content_str for keyword in handoff_keywords):
             return True
 
         # Skip termination messages
         if content_str == "TERMINATE" or "TERMINATE" in content_str:
             return True
-            
+
         # Skip empty or whitespace-only content
         if not content_str or content_str.isspace():
             return True
-            
+
         # Skip technical tool execution messages
         if message_type == "ToolCallExecutionEvent":
             return True
-            
+
         # Skip messages from terminator agent
         if source == "terminator_agent":
             return True
@@ -392,7 +600,7 @@ Return ONLY the update line with emoji - nothing else:"""
                 if similar_docs:
                     planner_learnings = await summarize_prior_learnings(similar_docs, self.gpt41_model_client)
                     if planner_learnings:
-                        await self.progress_tracker.set_transient_update(task_id, 0.07, "🧭 Using lessons from similar past tasks")
+                        await self.progress_tracker.set_transient_update(task_id, 0.05, "🧭 Using lessons from similar past tasks")
             except Exception as e:
                 logger.debug(f"Pre-run retrieval failed: {e}")
 
@@ -409,19 +617,24 @@ Return ONLY the update line with emoji - nothing else:"""
             except Exception:
                 merged_planner_learnings = locals().get('planner_learnings')
 
+            # CRITICAL: Wrap model clients to fix agent message roles before API calls
+            wrapped_gpt41_client = RoleFixingModelClientWrapper(self.gpt41_model_client)
+            wrapped_o3_client = RoleFixingModelClientWrapper(self.o3_model_client)
+
             agents, presenter_agent, terminator_agent = await get_agents(
-                self.gpt41_model_client,
-                self.o3_model_client,
-                self.gpt41_model_client,
+                wrapped_gpt41_client,
+                wrapped_o3_client,
+                wrapped_gpt41_client,
                 request_work_dir=request_work_dir_for_agents if 'request_work_dir_for_agents' in locals() else None,
-                planner_learnings=merged_planner_learnings
+                planner_learnings=merged_planner_learnings,
+                task_context=task if 'task' in locals() else None
             )
 
             team = SelectorGroupChat(
                 participants=agents,
-                model_client=self.gpt41_model_client,
+                model_client=wrapped_gpt41_client,
                 termination_condition=termination,
-                max_turns=200
+                max_turns=500  # Increased to 500 - very complex tasks (word clouds, multi-database queries, extensive processing) need more turns
             )
 
             messages = []
@@ -437,23 +650,29 @@ Return ONLY the update line with emoji - nothing else:"""
             """
 
             stream = team.run_stream(task=task)
-            # Loop guard for repeating provider schema errors (e.g., tool_calls/MultiMessage)
+            # Loop guards for detecting stuck workflows
             repeated_schema_error_count = 0
             last_schema_error_seen = False
+            no_files_found_count = 0
+            no_code_blocks_count = 0
+            task_not_completed_count = 0
+
             async for message in stream:
                 messages.append(message)
                 source = message.source if hasattr(message, 'source') else None
-                content = message.content if hasattr(message, 'content') else None 
+                content = message.content if hasattr(message, 'content') else None
                 created_at = message.created_at if hasattr(message, 'created_at') else None
                 logger.info(f"\n\n#SOURCE: {source}\n#CONTENT: {content}\n#CREATED_AT: {created_at}\n")
-                
-                task_completed_percentage += 0.01
+
+                task_completed_percentage = round(task_completed_percentage + 0.01, 2)
                 if task_completed_percentage >= 1.0:
                     task_completed_percentage = 0.99
-                    
-                # Loop-guard detection: break early if the same schema error repeats
+
+                # Circuit breaker: detect infinite loops
                 try:
                     ctext = str(content) if content is not None else ""
+
+                    # Schema error loop guard
                     is_schema_err = ("tool_calls" in ctext) and ("MultiMessage" in ctext)
                     if is_schema_err:
                         if last_schema_error_seen:
@@ -461,13 +680,34 @@ Return ONLY the update line with emoji - nothing else:"""
                         else:
                             repeated_schema_error_count = 1
                         last_schema_error_seen = True
-                        # If schema error repeats too many times, stop the loop to avoid getting stuck
                         if repeated_schema_error_count >= 3:
                             logger.warning("Breaking team.run_stream due to repeated MultiMessage/tool_calls schema errors.")
                             break
                     else:
                         last_schema_error_seen = False
                         repeated_schema_error_count = 0
+
+                    # File uploader stuck loop guard
+                    if "No files found" in ctext or "No output files" in ctext or "No files matching" in ctext:
+                        no_files_found_count += 1
+                        if no_files_found_count >= 5:
+                            logger.warning(f"Breaking: file_uploader repeated 'No files found' {no_files_found_count} times. Likely issue with coder agent file paths.")
+                            break
+
+                    # Code executor stuck loop guard
+                    if "No code blocks found" in ctext:
+                        no_code_blocks_count += 1
+                        if no_code_blocks_count >= 5:
+                            logger.warning(f"Breaking: code_executor repeated 'No code blocks' {no_code_blocks_count} times. Coder agent not handing off properly.")
+                            break
+
+                    # Terminator stuck loop guard
+                    if "TASK NOT COMPLETED" in ctext:
+                        task_not_completed_count += 1
+                        if task_not_completed_count >= 3:
+                            logger.warning(f"Breaking: terminator said 'TASK NOT COMPLETED' {task_not_completed_count} times. Workflow stuck.")
+                            break
+
                 except Exception:
                     pass
 
@@ -484,8 +724,35 @@ Return ONLY the update line with emoji - nothing else:"""
                         try:
                             json_content = json.loads(content)
                             if isinstance(json_content, dict):
+                                # Handle upload_recent_deliverables format: {"uploads": [{blob_name, download_url}]}
+                                if "uploads" in json_content and isinstance(json_content["uploads"], list):
+                                    upload_count_before = len(uploaded_file_urls)
+                                    for upload_item in json_content["uploads"]:
+                                        if isinstance(upload_item, dict) and "download_url" in upload_item and "blob_name" in upload_item:
+                                            uploaded_file_urls[upload_item["blob_name"]] = upload_item["download_url"]
+                                    # Progress update when files are uploaded
+                                    new_uploads = len(uploaded_file_urls) - upload_count_before
+                                    if new_uploads > 0:
+                                        try:
+                                            asyncio.create_task(self.progress_tracker.set_transient_update(
+                                                task_id,
+                                                min(0.90, task_completed_percentage + 0.05),
+                                                f"📤 Uploaded {new_uploads} file{'s' if new_uploads > 1 else ''} to cloud storage"
+                                            ))
+                                        except Exception:
+                                            pass
+                                # Handle direct format: {blob_name, download_url}
                                 if "download_url" in json_content and "blob_name" in json_content:
                                     uploaded_file_urls[json_content["blob_name"]] = json_content["download_url"]
+                                    # Progress update for single file upload
+                                    try:
+                                        asyncio.create_task(self.progress_tracker.set_transient_update(
+                                            task_id,
+                                            min(0.90, task_completed_percentage + 0.05),
+                                            f"📤 Uploaded {json_content.get('blob_name', 'file')} to cloud storage"
+                                        ))
+                                    except Exception:
+                                        pass
                                 # collect external media from known keys
                                 for k in ("images", "image_urls", "media", "videos", "thumbnails", "assets"):
                                     try:
@@ -539,145 +806,87 @@ Return ONLY the update line with emoji - nothing else:"""
                 # Catch-all for the outer deliverables-referencing try block
                 pass
 
-            # Per-request auto-upload: select best deliverables (avoid multiple near-identical PPTX)
-            try:
-                deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf", ".zip"}
-                req_dir = os.getenv("CORTEX_WORK_DIR", "/tmp/coding")
-                selected_paths: List[str] = []
-                if os.path.isdir(req_dir):
-                    # Gather candidates by extension
-                    candidates_by_ext: Dict[str, List[Dict[str, Any]]] = {}
-                    for root, _, files in os.walk(req_dir):
-                        for name in files:
-                            try:
-                                _, ext = os.path.splitext(name)
-                                ext = ext.lower()
-                                if ext not in deliverable_exts:
-                                    continue
-                                fp = os.path.join(root, name)
-                                size = 0
-                                mtime = 0.0
-                                try:
-                                    st = os.stat(fp)
-                                    size = int(getattr(st, 'st_size', 0))
-                                    mtime = float(getattr(st, 'st_mtime', 0.0))
-                                except Exception:
-                                    pass
-                                lst = candidates_by_ext.setdefault(ext, [])
-                                lst.append({"path": fp, "size": size, "mtime": mtime})
-                            except Exception:
-                                continue
-
-                    # Selection policy:
-                    # - For .pptx and .ppt: choose the single largest file (assume most complete)
-                    # - For other ext: include all
-                    for ext, items in candidates_by_ext.items():
-                        if ext in (".pptx", ".ppt"):
-                            if items:
-                                best = max(items, key=lambda x: (x.get("size", 0), x.get("mtime", 0.0)))
-                                selected_paths.append(best["path"])
-                        else:
-                            for it in items:
-                                selected_paths.append(it["path"])
-
-                # Upload only selected paths
-                for fp in selected_paths:
-                    try:
-                        up_json = upload_file_to_azure_blob(fp, blob_name=None)
-                        up = json.loads(up_json)
-                        if "download_url" in up and "blob_name" in up:
-                            uploaded_file_urls[up["blob_name"]] = up["download_url"]
-                            try:
-                                bname = os.path.basename(str(up.get("blob_name") or ""))
-                                extl = os.path.splitext(bname)[1].lower()
-                                is_img = extl in (".png", ".jpg", ".jpeg", ".webp", ".gif")
-                                uploaded_files_list.append({
-                                    "file_name": bname,
-                                    "url": up["download_url"],
-                                    "ext": extl,
-                                    "is_image": is_img,
-                                })
-                                if is_img:
-                                    external_media_urls.append(up["download_url"])
-                            except Exception:
-                                pass
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-
-            # Deduplicate and cap external media to a reasonable number
-            try:
-                dedup_media = []
-                seen = set()
-                for u in external_media_urls:
-                    if u in seen:
-                        continue
-                    seen.add(u)
-                    dedup_media.append(u)
-                external_media_urls = dedup_media[:24]
-            except Exception:
-                pass
-
             result_limited_to_fit = "\n".join(final_result_content)
 
-            # Provide the presenter with explicit file list to avoid duplication and downloads sections
-            uploaded_files_list = []
-            try:
-                for blob_name, url in (uploaded_file_urls.items() if isinstance(uploaded_file_urls, dict) else []):
-                    try:
-                        fname = os.path.basename(str(blob_name))
-                    except Exception:
-                        fname = str(blob_name)
-                    extl = os.path.splitext(fname)[1].lower()
-                    is_image = extl in (".png", ".jpg", ".jpeg", ".webp", ".gif")
-                    uploaded_files_list.append({"file_name": fname, "url": url, "ext": extl, "is_image": is_image})
-            except Exception:
-                pass
-
             presenter_task = f"""
-            Present the task result in a clean, professional Markdown/HTML that contains ONLY what the task requested. This will be shown in a React app.
-            Use only the information provided.
+            Present the final task result to the user.
 
             TASK:
             {task}
 
-            RAW_AGENT_COMMUNICATIONS:
+            AGENT_WORK_COMPLETED:
             {result_limited_to_fit}
 
-            UPLOADED_FILES_SAS_URLS:
-            {json.dumps(uploaded_file_urls, indent=2)}
+            WORK_DIRECTORY:
+            {request_work_dir}
 
-            EXTERNAL_MEDIA_URLS:
-            {json.dumps(external_media_urls, indent=2)}
-
-            UPLOADED_FILES_LIST:
-            {json.dumps(uploaded_files_list, indent=2)}
-
-            STRICT OUTPUT RULES:
-            - Use UPLOADED_FILES_LIST (SAS URLs) and EXTERNAL_MEDIA_URLS to present assets. Always use the SAS URL provided in UPLOADED_FILES_LIST for any uploaded file.
-            - Images (png, jpg, jpeg, webp, gif): embed inline in a Visuals section using <figure><img/></figure> with captions. Do NOT provide links for images.
-            - Non-image files (pptx, pdf, csv): insert a SINGLE inline anchor (<a href=\"...\">filename</a>) at the first natural mention; do NOT create a 'Downloads' section; do NOT repeat links.
-            - For media: do NOT use grid or containers.
-              - SINGLE media: wrap in <figure style=\"margin: 12px 0;\"> with <img style=\"display:block;width:100%;max-width:960px;height:auto;margin:0 auto;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.12)\"> and a <figcaption style=\"margin-top:8px;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;\">.
-              - MULTIPLE media: output consecutive <figure> elements, one per row; no wrapping <div>.
-            - Avoid framework classes in HTML; rely on inline styles only. Do NOT include any class attributes. Use color: inherit for captions to respect dark/light mode.
-            - Never fabricate URLs, images, or content; use only links present in UPLOADED_FILES_LIST or EXTERNAL_MEDIA_URLS.
-            - Present each uploaded non-image file ONCE only (no duplicate links), using its filename as the link text.
-            - For links, prefer HTML anchor tags: <a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" download>FILENAME</a>.
-            - Do NOT include code, tool usage, or internal logs.
-            - Be detailed and user-facing. Include Overview, Visuals, Key Takeaways, and Next Actions sections. Do not create a Downloads section.
+            Remember: Users cannot access local file paths. Upload any deliverable files to get SAS URLs, then present with those URLs.
             """
             
-            presenter_stream = presenter_agent.run_stream(task=presenter_task)
-            presenter_messages = []
-            async for message in presenter_stream:
-                logger.info(f"#PRESENTER MESSAGE: {message.content if hasattr(message, 'content') else ''}")
-                presenter_messages.append(message)
+            # Add progress update for file upload/presentation phase
+            try:
+                await self.progress_tracker.set_transient_update(task_id, 0.92, "📤 Uploading deliverable files to cloud storage...")
+            except Exception:
+                pass
 
-            task_result = presenter_messages[-1]
-            last_message = task_result.messages[-1]
-            text_result = last_message.content if hasattr(last_message, 'content') else None
+            # Run presenter with explicit tool call handling
+            from autogen_core import CancellationToken
+            from autogen_agentchat.messages import TextMessage
+            from autogen_agentchat.base import Response
+
+            text_result = None
+
+            # Build initial messages
+            conversation_messages = [TextMessage(source="user", content=presenter_task)]
+
+            max_turns = 5
+            for turn_num in range(max_turns):
+                logger.info(f"🎭 PRESENTER TURN {turn_num + 1}/{max_turns}")
+
+                # Update progress during presenter turns (file uploads happening)
+                try:
+                    if turn_num == 0:
+                        await self.progress_tracker.set_transient_update(task_id, 0.93, "📤 Processing file uploads...")
+                    elif turn_num == 1:
+                        await self.progress_tracker.set_transient_update(task_id, 0.94, "🎨 Preparing final presentation...")
+                except Exception:
+                    pass
+
+                try:
+                    response: Response = await presenter_agent.on_messages(conversation_messages, CancellationToken())
+
+                    if not response or not hasattr(response, 'chat_message'):
+                        logger.warning(f"No response from presenter on turn {turn_num + 1}")
+                        break
+
+                    # Add the response to conversation
+                    response_msg = response.chat_message
+                    conversation_messages.append(response_msg)
+
+                    # Check what type of response we got
+                    has_function_calls = (hasattr(response_msg, 'content') and
+                                         isinstance(response_msg.content, list) and
+                                         any(hasattr(item, 'call_id') for item in response_msg.content if hasattr(item, 'call_id')))
+
+                    # If it's a text response (not function calls)
+                    if hasattr(response_msg, 'content') and isinstance(response_msg.content, str):
+                        text_content = response_msg.content.strip()
+                        # Make sure it's not just raw JSON from tool
+                        if text_content and not text_content.startswith('```json') and not text_content.startswith('{"blob_name"'):
+                            text_result = text_content
+                            logger.info(f"✅ Got final presentation text ({len(text_result)} chars)")
+                            break
+
+                    # Don't manually add inner_messages - on_messages() handles tool execution internally
+                    # Just continue to next turn which will process the tool results
+
+                except Exception as e:
+                    logger.error(f"Error in presenter turn {turn_num + 1}: {e}")
+                    break
+
+            if not text_result:
+                logger.warning("⚠️ Presenter didn't generate final text after all turns")
+                text_result = "Task completed. Please check uploaded files."
 
             # No presenter normalization or auto-upload based on text; rely on strict prompts
             try:
@@ -745,34 +954,7 @@ Return ONLY the update line with emoji - nothing else:"""
             except Exception as e:
                 logger.debug(f"Post-run indexing failed or skipped: {e}")
 
-            # Run terminator agent once presenter has produced final text
-            try:
-                term_messages = []
-                term_task = f"""
-                Check if the task is completed and output TERMINATE if and only if done.
-                Latest presenter output:
-                {text_result}
-
-                Uploaded files (SAS URLs):
-                {json.dumps(uploaded_file_urls, indent=2)}
-
-                TASK:
-                {task}
-
-                Reminder:
-                - If the TASK explicitly requires downloadable files, ensure at least one clickable download URL is present.
-                - If the TASK does not require files (e.g., simple answer, calculation, summary, troubleshooting), terminate when the presenter has clearly delivered the requested content. Do not require downloads in that case.
-                """
-                term_stream = terminator_agent.run_stream(task=term_task)
-                async for message in term_stream:
-                    term_messages.append(message)
-                if term_messages:
-                    t_last = term_messages[-1].messages[-1]
-                    t_text = t_last.content if hasattr(t_last, 'content') else ''
-                    logger.info(f"🛑 TERMINATOR: {t_text}")
-                    # If it didn't say TERMINATE but we already have presenter output, proceed anyway
-            except Exception as e:
-                logger.warning(f"⚠️ Terminator agent failed or unavailable: {e}")
+            # Publish final result
             final_data = text_result or "🎉 Your task is complete!"
             await self.progress_tracker.publish_progress(task_id, 1.0, "🎉 Your task is complete!", data=final_data)
             try:
@@ -857,7 +1039,7 @@ async def process_queue_message(message_data: Dict[str, Any]) -> Optional[str]:
             task_data = json.loads(decoded_content)
             logger.debug(f"🔍 DEBUG: process_queue_message - Successfully base64 decoded and JSON parsed. Keys: {list(task_data.keys())}")
         except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.warning(f"⚠️ Failed to decode as base64, trying as raw JSON: {e}")
+            logger.debug(f"Base64 decode failed; falling back to raw JSON: {e}")
             try:
                 task_data = json.loads(raw_content)
                 logger.debug(f"🔍 DEBUG: process_queue_message - Successfully JSON parsed raw content. Keys: {list(task_data.keys())}")
@@ -880,8 +1062,8 @@ async def process_queue_message(message_data: Dict[str, Any]) -> Optional[str]:
             await processor.publish_final(task_id or "", "⚠️ No actionable task content found. Processing has ended.")
             return None
 
-        logger.debug(f"🔍 DEBUG: process_queue_message - Extracted task_content (first 100 chars): {task_content[:100]}...")
-        logger.info(f"📩 Processing task: {task_content[:100]}...")
+        logger.debug(f"🔍 DEBUG: process_queue_message - Extracted task_content: {task_content}...")
+        logger.info(f"📩 Processing task: {task_content}...")
         
         result = await processor.process_task(task_id, task_content)
         return result

@@ -75,7 +75,7 @@ def publish_request_progress(data: Dict[str, Any]) -> bool:
                     pct_bucket = None
                 if not prev or prev.get('info') != info or prev.get('pct_bucket') != pct_bucket:
                     _last_logged_progress[rid] = {'info': info, 'pct_bucket': pct_bucket}
-                    logger.info(f"Published progress update for request {rid}: progress={pct}, subscribers={result}")
+                    logger.info(f"Published progress update for request {rid}: info='{info}', progress={pct}, subscribers={result}")
             except Exception:
                 # Safe fallback if logging diff fails
                 logger.debug("Progress publish logged without diff due to exception")
