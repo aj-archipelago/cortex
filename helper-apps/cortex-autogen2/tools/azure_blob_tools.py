@@ -35,6 +35,9 @@ def _sanitize_blob_name(filename: str) -> str:
     safe_name = re.sub(r'_+', '_', safe_name)
     # Remove leading/trailing underscores or dots
     safe_name = safe_name.strip('_.')
+    # Prevent empty filename (e.g., if all chars were special)
+    if not safe_name:
+        return "file"
     return safe_name
 
 # Ensure correct MIME types for Office files, especially PPT/PPTX, for proper downloads in browsers

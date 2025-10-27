@@ -852,7 +852,7 @@ async def collect_task_images(
                 return None
 
         # Process images in parallel batches with connection pooling
-        BATCH_SIZE = 20  # Increased from 10 to 20 for faster parallel downloads
+        BATCH_SIZE = 15  # Balanced for connection pool (limit_per_host=10)
         all_results: List[Optional[Dict[str, Any]]] = []
 
         # Create aiohttp session with connection pooling for performance
@@ -1148,7 +1148,14 @@ async def azure_cognitive_search(
 def _extract_json_path(data: Any, path: str) -> Optional[Any]:
     """
     Extract nested value from JSON using dot notation path.
-    Supports array indices like '[0]' and nested paths like 'sprites.other.official-artwork.front_default'
+    Supports array indices like '[0]' and nested paths like 'sprites.other.official-artwork.front_default'.
+    Returns None if path is invalid or key doesn't exist.
+
+    Examples:
+        >>> _extract_json_path({'a': {'b': [1, 2]}}, 'a.b.[0]')
+        1
+        >>> _extract_json_path({'x': {'y': {'z': 42}}}, 'x.y.z')
+        42
     """
     try:
         current = data
