@@ -27,8 +27,8 @@ export class StorageFactory {
 
   async getAzureProvider(containerName = null) {
     // Read container names from environment directly to get current values
-    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
-    const azureStorageContainerNames = containerStr.split(',').map(name => name.trim());
+    const { getCurrentContainerNames } = await getBlobHandlerConstants();
+    const azureStorageContainerNames = getCurrentContainerNames();
     const defaultAzureStorageContainerName = azureStorageContainerNames[0];
     
     // Use provided container name or default to first in whitelist

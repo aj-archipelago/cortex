@@ -7,11 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import Busboy from "busboy";
 import { PassThrough } from "stream";
 import { Storage } from "@google-cloud/storage";
-import {
-  generateBlobSASQueryParameters,
-  StorageSharedKeyCredential,
-  BlobServiceClient,
-} from "@azure/storage-blob";
+import { BlobServiceClient } from "@azure/storage-blob";
 import axios from "axios";
 
 import {
@@ -80,6 +76,11 @@ const parseContainerNames = () => {
   return containerStr.split(',').map(name => name.trim());
 };
 
+// Helper function to get current container names at runtime
+export const getCurrentContainerNames = () => {
+  return parseContainerNames();
+};
+
 export const AZURE_STORAGE_CONTAINER_NAMES = parseContainerNames();
 export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = AZURE_STORAGE_CONTAINER_NAMES[0];
 export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
@@ -87,8 +88,7 @@ export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 // Validate if a container name is allowed
 export const isValidContainerName = (containerName) => {
   // Read from environment at runtime to support dynamically changing env in tests
-  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
-  const currentContainerNames = containerStr.split(',').map(name => name.trim());
+  const currentContainerNames = getCurrentContainerNames();
   return currentContainerNames.includes(containerName);
 };
 
@@ -230,67 +230,6 @@ async function saveFileToBlob(chunkPath, requestId, filename = null, containerNa
   return await provider.uploadFile({}, chunkPath, requestId, null, filename);
 }
 
-const generateSASToken = (
-  containerClient,
-  blobName,
-  options = {},
-) => {
-  // Handle Azurite (development storage) credentials with fallback
-  let accountName, accountKey;
-  
-  if (containerClient.credential && containerClient.credential.accountName) {
-    // Regular Azure Storage credentials
-    accountName = containerClient.credential.accountName;
-    
-    // Handle Buffer case (Azurite) vs string case (real Azure)
-    if (Buffer.isBuffer(containerClient.credential.accountKey)) {
-      accountKey = containerClient.credential.accountKey.toString('base64');
-    } else {
-      accountKey = containerClient.credential.accountKey;
-    }
-  } else {
-    // Azurite development storage fallback
-    accountName = AZURITE_ACCOUNT_NAME;
-    accountKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
-  }
-  
-  const sharedKeyCredential = new StorageSharedKeyCredential(
-    accountName,
-    accountKey,
-  );
-
-  // Support custom duration: minutes, hours, or fall back to default
-  let expirationTime;
-  if (options.minutes) {
-    expirationTime = new Date(new Date().valueOf() + options.minutes * 60 * 1000);
-  } else if (options.hours) {
-    expirationTime = new Date(new Date().valueOf() + options.hours * 60 * 60 * 1000);
-  } else if (options.days) {
-    expirationTime = new Date(new Date().valueOf() + options.days * 24 * 60 * 60 * 1000);
-  } else if (options.expiryTimeSeconds !== undefined) {
-    // Legacy support for existing parameter
-    expirationTime = new Date(new Date().valueOf() + options.expiryTimeSeconds * 1000);
-  } else {
-    // Default to SAS_TOKEN_LIFE_DAYS environment variable
-    const defaultExpirySeconds = parseInt(SAS_TOKEN_LIFE_DAYS) * 24 * 60 * 60;
-    expirationTime = new Date(new Date().valueOf() + defaultExpirySeconds * 1000);
-  }
-
-  const sasOptions = {
-    containerName: containerClient.containerName,
-    blobName: blobName,
-    permissions: options.permissions || "r", // Read permission
-    startsOn: new Date(),
-    expiresOn: expirationTime,
-  };
-
-  const sasToken = generateBlobSASQueryParameters(
-    sasOptions,
-    sharedKeyCredential,
-  ).toString();
-  return sasToken;
-};
-
 //deletes blob that has the requestId
 async function deleteBlob(requestId, containerName = null) {
   if (!requestId) throw new Error("Missing requestId parameter");
@@ -378,8 +317,7 @@ function uploadBlob(
             } else if (fieldname === "container") {
               if (value && !isValidContainerName(value)) {
                 // Read current containers from env for error message
-                const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
-                const currentContainerNames = containerStr.split(',').map(name => name.trim());
+                const currentContainerNames = getCurrentContainerNames();
                 errorOccurred = true;
                 const err = new Error(`Invalid container name '${value}'. Allowed containers: ${currentContainerNames.join(', ')}`);
                 err.status = 400;
