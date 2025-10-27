@@ -600,7 +600,7 @@ Return ONLY: [emoji] [professional update text]"""
                 if similar_docs:
                     planner_learnings = await summarize_prior_learnings(similar_docs, self.gpt41_model_client)
                     if planner_learnings:
-                        await self.progress_tracker.set_transient_update(task_id, 0.07, "🧭 Using lessons from similar past tasks")
+                        await self.progress_tracker.set_transient_update(task_id, 0.05, "🧭 Using lessons from similar past tasks")
             except Exception as e:
                 logger.debug(f"Pre-run retrieval failed: {e}")
 
@@ -634,7 +634,7 @@ Return ONLY: [emoji] [professional update text]"""
                 participants=agents,
                 model_client=wrapped_gpt41_client,
                 termination_condition=termination,
-                max_turns=200
+                max_turns=500  # Increased to 500 - very complex tasks (word clouds, multi-database queries, extensive processing) need more turns
             )
 
             messages = []
@@ -726,12 +726,33 @@ Return ONLY: [emoji] [professional update text]"""
                             if isinstance(json_content, dict):
                                 # Handle upload_recent_deliverables format: {"uploads": [{blob_name, download_url}]}
                                 if "uploads" in json_content and isinstance(json_content["uploads"], list):
+                                    upload_count_before = len(uploaded_file_urls)
                                     for upload_item in json_content["uploads"]:
                                         if isinstance(upload_item, dict) and "download_url" in upload_item and "blob_name" in upload_item:
                                             uploaded_file_urls[upload_item["blob_name"]] = upload_item["download_url"]
+                                    # Progress update when files are uploaded
+                                    new_uploads = len(uploaded_file_urls) - upload_count_before
+                                    if new_uploads > 0:
+                                        try:
+                                            asyncio.create_task(self.progress_tracker.set_transient_update(
+                                                task_id,
+                                                min(0.90, task_completed_percentage + 0.05),
+                                                f"📤 Uploaded {new_uploads} file{'s' if new_uploads > 1 else ''} to cloud storage"
+                                            ))
+                                        except Exception:
+                                            pass
                                 # Handle direct format: {blob_name, download_url}
                                 if "download_url" in json_content and "blob_name" in json_content:
                                     uploaded_file_urls[json_content["blob_name"]] = json_content["download_url"]
+                                    # Progress update for single file upload
+                                    try:
+                                        asyncio.create_task(self.progress_tracker.set_transient_update(
+                                            task_id,
+                                            min(0.90, task_completed_percentage + 0.05),
+                                            f"📤 Uploaded {json_content.get('blob_name', 'file')} to cloud storage"
+                                        ))
+                                    except Exception:
+                                        pass
                                 # collect external media from known keys
                                 for k in ("images", "image_urls", "media", "videos", "thumbnails", "assets"):
                                     try:
@@ -785,165 +806,87 @@ Return ONLY: [emoji] [professional update text]"""
                 # Catch-all for the outer deliverables-referencing try block
                 pass
 
-            # Per-request auto-upload: select best deliverables (avoid multiple near-identical PPTX)
-            try:
-                deliverable_exts = {".pptx", ".ppt", ".csv", ".png", ".jpg", ".jpeg", ".pdf", ".zip"}
-                req_dir = os.getenv("CORTEX_WORK_DIR", "/tmp/coding")
-                selected_paths: List[str] = []
-                if os.path.isdir(req_dir):
-                    # Gather candidates by extension
-                    candidates_by_ext: Dict[str, List[Dict[str, Any]]] = {}
-                    for root, _, files in os.walk(req_dir):
-                        for name in files:
-                            try:
-                                _, ext = os.path.splitext(name)
-                                ext = ext.lower()
-                                if ext not in deliverable_exts:
-                                    continue
-                                fp = os.path.join(root, name)
-                                size = 0
-                                mtime = 0.0
-                                try:
-                                    st = os.stat(fp)
-                                    size = int(getattr(st, 'st_size', 0))
-                                    mtime = float(getattr(st, 'st_mtime', 0.0))
-                                except Exception:
-                                    pass
-                                lst = candidates_by_ext.setdefault(ext, [])
-                                lst.append({"path": fp, "size": size, "mtime": mtime})
-                            except Exception:
-                                continue
-
-                    # Selection policy:
-                    # - For .pptx and .ppt: choose the single largest file (assume most complete)
-                    # - For other ext: include all
-                    for ext, items in candidates_by_ext.items():
-                        if ext in (".pptx", ".ppt"):
-                            if items:
-                                best = max(items, key=lambda x: (x.get("size", 0), x.get("mtime", 0.0)))
-                                selected_paths.append(best["path"])
-                        else:
-                            for it in items:
-                                selected_paths.append(it["path"])
-
-                # Upload only selected paths
-                for fp in selected_paths:
-                    try:
-                        up_json = upload_file_to_azure_blob(fp, blob_name=None)
-                        up = json.loads(up_json)
-                        if "download_url" in up and "blob_name" in up:
-                            uploaded_file_urls[up["blob_name"]] = up["download_url"]
-                            try:
-                                bname = os.path.basename(str(up.get("blob_name") or ""))
-                                extl = os.path.splitext(bname)[1].lower()
-                                is_img = extl in (".png", ".jpg", ".jpeg", ".webp", ".gif")
-                                uploaded_files_list.append({
-                                    "file_name": bname,
-                                    "url": up["download_url"],
-                                    "ext": extl,
-                                    "is_image": is_img,
-                                })
-                                if is_img:
-                                    external_media_urls.append(up["download_url"])
-                            except Exception:
-                                pass
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-
-            # Deduplicate and cap external media to a reasonable number
-            try:
-                dedup_media = []
-                seen = set()
-                for u in external_media_urls:
-                    if u in seen:
-                        continue
-                    seen.add(u)
-                    dedup_media.append(u)
-                external_media_urls = dedup_media[:24]
-            except Exception:
-                pass
-
             result_limited_to_fit = "\n".join(final_result_content)
 
-            # Provide the presenter with explicit file list to avoid duplication and downloads sections
-            uploaded_files_list = []
-            try:
-                for blob_name, url in (uploaded_file_urls.items() if isinstance(uploaded_file_urls, dict) else []):
-                    try:
-                        fname = os.path.basename(str(blob_name))
-                    except Exception:
-                        fname = str(blob_name)
-                    extl = os.path.splitext(fname)[1].lower()
-                    is_image = extl in (".png", ".jpg", ".jpeg", ".webp", ".gif")
-                    uploaded_files_list.append({"file_name": fname, "url": url, "ext": extl, "is_image": is_image})
-            except Exception:
-                pass
-
-            # Sanitize agent communications to remove malformed URLs before presenting
-            import re
-            def sanitize_malformed_urls(text: str) -> str:
-                """Remove URLs that start with @ or contain placeholder values like sig=12345"""
-                # Remove @https:// (malformed URL prefix)
-                text = re.sub(r'@https?://[^\s\)]+', '', text)
-                # Remove URLs with placeholder sig values (sig=12345)
-                text = re.sub(r'https?://[^\s\)]*sig=12345[^\s\)]*', '', text)
-                return text
-            
-            result_limited_to_fit = sanitize_malformed_urls(result_limited_to_fit)
-
             presenter_task = f"""
-            Present the task result in a clean, professional Markdown/HTML that contains ONLY what the task requested. This will be shown in a React app.
-            Use only the information provided.
+            Present the final task result to the user.
 
             TASK:
             {task}
 
-            RAW_AGENT_COMMUNICATIONS:
+            AGENT_WORK_COMPLETED:
             {result_limited_to_fit}
 
-            UPLOADED_FILES_SAS_URLS:
-            {json.dumps(uploaded_file_urls, indent=2)}
+            WORK_DIRECTORY:
+            {request_work_dir}
 
-            EXTERNAL_MEDIA_URLS:
-            {json.dumps(external_media_urls, indent=2)}
-
-            UPLOADED_FILES_LIST:
-            {json.dumps(uploaded_files_list, indent=2)}
-
-            STRICT OUTPUT RULES:
-            - Use UPLOADED_FILES_LIST (SAS URLs) and EXTERNAL_MEDIA_URLS to present assets. Always use the SAS URL provided in UPLOADED_FILES_LIST for any uploaded file.
-            - Images (png, jpg, jpeg, webp, gif): embed inline in a Visuals section using <figure><img/></figure> with captions. Do NOT provide links for images.
-            - Non-image files (pptx, pdf, csv): insert a SINGLE inline anchor (<a href=\"...\">filename</a>) at the first natural mention; do NOT create a 'Downloads' section; do NOT repeat links.
-            - For media: do NOT use grid or containers.
-              - SINGLE media: wrap in <figure style=\"margin: 12px 0;\"> with <img style=\"display:block;width:100%;max-width:960px;height:auto;margin:0 auto;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.12)\"> and a <figcaption style=\"margin-top:8px;font-size:0.92em;color:inherit;opacity:0.8;text-align:center;\">.
-              - MULTIPLE media: output consecutive <figure> elements, one per row; no wrapping <div>.
-            - Avoid framework classes in HTML; rely on inline styles only. Do NOT include any class attributes. Use color: inherit for captions to respect dark/light mode.
-            - Never fabricate URLs, images, or content; use only links present in UPLOADED_FILES_LIST or EXTERNAL_MEDIA_URLS.
-            - Present each uploaded non-image file ONCE only (no duplicate links), using its filename as the link text.
-            - For links, prefer HTML anchor tags: <a href=\"URL\" target=\"_blank\" rel=\"noopener noreferrer\" download>FILENAME</a>.
-            - Do NOT include code, tool usage, or internal logs.
-            - Be detailed and user-facing. Include Overview, Visuals, Key Takeaways, and Next Actions sections. Do not create a Downloads section.
-            
-            **CRITICAL VALIDATION FOR URLs**:
-            - EVERY URL you use must be from either UPLOADED_FILES_SAS_URLS or EXTERNAL_MEDIA_URLS keys/values
-            - NEVER construct, guess, or modify URLs
-            - NEVER use URLs that contain placeholder values like sig=12345, se=..., or other SAS parameters that might be incomplete
-            - If a URL starts with @https, it is NOT valid - remove it
-            - If you cannot find a valid URL in the provided lists, DO NOT INCLUDE ANY URL - use text-only output
-            - Before each URL you use, verify it appears EXACTLY in UPLOADED_FILES_SAS_URLS/EXTERNAL_MEDIA_URLS
+            Remember: Users cannot access local file paths. Upload any deliverable files to get SAS URLs, then present with those URLs.
             """
             
-            presenter_stream = presenter_agent.run_stream(task=presenter_task)
-            presenter_messages = []
-            async for message in presenter_stream:
-                logger.info(f"#PRESENTER MESSAGE: {message.content if hasattr(message, 'content') else ''}")
-                presenter_messages.append(message)
+            # Add progress update for file upload/presentation phase
+            try:
+                await self.progress_tracker.set_transient_update(task_id, 0.92, "📤 Uploading deliverable files to cloud storage...")
+            except Exception:
+                pass
 
-            task_result = presenter_messages[-1]
-            last_message = task_result.messages[-1]
-            text_result = last_message.content if hasattr(last_message, 'content') else None
+            # Run presenter with explicit tool call handling
+            from autogen_core import CancellationToken
+            from autogen_agentchat.messages import TextMessage
+            from autogen_agentchat.base import Response
+
+            text_result = None
+
+            # Build initial messages
+            conversation_messages = [TextMessage(source="user", content=presenter_task)]
+
+            max_turns = 5
+            for turn_num in range(max_turns):
+                logger.info(f"🎭 PRESENTER TURN {turn_num + 1}/{max_turns}")
+
+                # Update progress during presenter turns (file uploads happening)
+                try:
+                    if turn_num == 0:
+                        await self.progress_tracker.set_transient_update(task_id, 0.93, "📤 Processing file uploads...")
+                    elif turn_num == 1:
+                        await self.progress_tracker.set_transient_update(task_id, 0.94, "🎨 Preparing final presentation...")
+                except Exception:
+                    pass
+
+                try:
+                    response: Response = await presenter_agent.on_messages(conversation_messages, CancellationToken())
+
+                    if not response or not hasattr(response, 'chat_message'):
+                        logger.warning(f"No response from presenter on turn {turn_num + 1}")
+                        break
+
+                    # Add the response to conversation
+                    response_msg = response.chat_message
+                    conversation_messages.append(response_msg)
+
+                    # Check what type of response we got
+                    has_function_calls = (hasattr(response_msg, 'content') and
+                                         isinstance(response_msg.content, list) and
+                                         any(hasattr(item, 'call_id') for item in response_msg.content if hasattr(item, 'call_id')))
+
+                    # If it's a text response (not function calls)
+                    if hasattr(response_msg, 'content') and isinstance(response_msg.content, str):
+                        text_content = response_msg.content.strip()
+                        # Make sure it's not just raw JSON from tool
+                        if text_content and not text_content.startswith('```json') and not text_content.startswith('{"blob_name"'):
+                            text_result = text_content
+                            logger.info(f"✅ Got final presentation text ({len(text_result)} chars)")
+                            break
+
+                    # Don't manually add inner_messages - on_messages() handles tool execution internally
+                    # Just continue to next turn which will process the tool results
+
+                except Exception as e:
+                    logger.error(f"Error in presenter turn {turn_num + 1}: {e}")
+                    break
+
+            if not text_result:
+                logger.warning("⚠️ Presenter didn't generate final text after all turns")
+                text_result = "Task completed. Please check uploaded files."
 
             # No presenter normalization or auto-upload based on text; rely on strict prompts
             try:
@@ -1011,34 +954,7 @@ Return ONLY: [emoji] [professional update text]"""
             except Exception as e:
                 logger.debug(f"Post-run indexing failed or skipped: {e}")
 
-            # Run terminator agent once presenter has produced final text
-            try:
-                term_messages = []
-                term_task = f"""
-                Check if the task is completed and output TERMINATE if and only if done.
-                Latest presenter output:
-                {text_result}
-
-                Uploaded files (SAS URLs):
-                {json.dumps(uploaded_file_urls, indent=2)}
-
-                TASK:
-                {task}
-
-                Reminder:
-                - If the TASK explicitly requires downloadable files, ensure at least one clickable download URL is present.
-                - If the TASK does not require files (e.g., simple answer, calculation, summary, troubleshooting), terminate when the presenter has clearly delivered the requested content. Do not require downloads in that case.
-                """
-                term_stream = terminator_agent.run_stream(task=term_task)
-                async for message in term_stream:
-                    term_messages.append(message)
-                if term_messages:
-                    t_last = term_messages[-1].messages[-1]
-                    t_text = t_last.content if hasattr(t_last, 'content') else ''
-                    logger.info(f"# TERMINATOR: {t_text}")
-                    # If it didn't say TERMINATE but we already have presenter output, proceed anyway
-            except Exception as e:
-                logger.warning(f"⚠️ Terminator agent failed or unavailable: {e}")
+            # Publish final result
             final_data = text_result or "🎉 Your task is complete!"
             await self.progress_tracker.publish_progress(task_id, 1.0, "🎉 Your task is complete!", data=final_data)
             try:

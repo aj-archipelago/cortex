@@ -1,0 +1,253 @@
+# Cortex AutoGen2 Test Cases
+# Predefined test tasks for automated quality testing
+
+test_cases:
+  - id: tc001_pokemon_pptx
+    name: "Most Powerful Gen 1 Pokemon PowerPoint"
+    description: "Creates a PowerPoint about the most powerful Gen 1 Pokemon with their images"
+    task: "Create a PowerPoint presentation about the Most Powerful Gen 1 Pokemon. Include images of each Pokemon from the same source."
+    timeout_seconds: 420
+    requires_ajsql: false
+    expected_deliverables:
+      - type: pptx
+        pattern: "*.pptx"
+        min_count: 1
+        description: "PowerPoint presentation file"
+      - type: preview_images
+        pattern: "preview_slide_*.png"
+        min_count: 2
+        description: "Slide preview images"
+      - type: images
+        pattern: "*.png"
+        min_count: 10
+        description: "Pokemon images used in presentation"
+    min_progress_updates: 8
+    quality_criteria:
+      - "CRITICAL: Presentation MUST include actual Pokemon character images (NOT just logos or text)"
+      - "CRITICAL: Each slide about a Pokemon MUST show THAT SPECIFIC Pokemon's image (e.g., Gengar slide shows Gengar, NOT Pikachu or any other Pokemon)"
+      - "CRITICAL: NO REUSING THE SAME IMAGE on multiple slides - each Pokemon needs its own unique character image"
+      - "CRITICAL: Verify in preview images that each Pokemon name matches its image (e.g., if slide says 'Alakazam', the image must show Alakazam)"
+      - "Each Pokemon mentioned MUST have its corresponding character image on the slide"
+      - "All Pokemon images from SAME consistent source (pokemon.com, bulbapedia.net, or pokemondb.net)"
+      - "Images show the actual Pokemon characters (Mewtwo, Dragonite, Alakazam, Gengar, etc.) - NOT generic Pokemon logos"
+      - "Images are high-quality official artwork or game sprites (NO fan art, NO thumbnails)"
+      - "NO watermarked images unless from official Pokemon source"
+      - "Consistent art style throughout (all game sprites OR all official artwork)"
+      - "At least 10-12 DIFFERENT Gen 1 Pokemon featured, each with their OWN unique character image"
+      - "Professional slide design with Pokemon-themed colors (red, blue, yellow)"
+      - "CRITICAL: Images must NOT cover or overlap text - all text must be readable"
+      - "Images positioned properly beside or above text, never covering content"
+      - "Each slide shows: Pokemon name, stats/power info, AND that Pokemon's specific character image"
+      - "Images properly sized and centered (not too small, easily visible)"
+      - "Preview slides generated showing Pokemon images are visible and MATCH the Pokemon names"
+      - "Gen 1 Pokemon ONLY (original 151, including evolutions)"
+      - "Power ranking or stats included (HP, Attack, Special, etc.)"
+    expected_agents:
+      - planner_agent
+      - web_search_agent
+      - coder_agent
+      - code_executor
+      - file_cloud_uploader_agent
+      - presenter_agent
+
+  - id: tc002_pdf_with_images
+    name: "PDF Report with Images and Charts"
+    description: "Generates a PDF report with images and charts"
+    task: "Generate a PDF report about renewable energy trends in 2024. Include charts and images."
+    timeout_seconds: 300
+    requires_ajsql: false
+    expected_deliverables:
+      - type: pdf
+        pattern: "*.pdf"
+        min_count: 1
+        description: "PDF report file"
+      - type: images
+        pattern: "*.png"
+        min_count: 5
+        description: "Images and charts included in report"
+    min_progress_updates: 6
+    quality_criteria:
+      - "PDF contains both text content and images"
+      - "Charts and graphs are professionally designed"
+      - "Real data used, no placeholder or dummy content"
+      - "Proper document formatting with headers and page numbers"
+      - "Images are relevant to renewable energy topic"
+      - "Preview images or thumbnails provided"
+    expected_agents:
+      - planner_agent
+      - web_search_agent
+      - coder_agent
+      - code_executor
+      - file_cloud_uploader_agent
+      - presenter_agent
+
+  - id: tc003_random_csv
+    name: "Random Sales Data CSV Generation"
+    description: "Generates random sales data CSV with summary statistics"
+    task: "Generate a CSV with 100 rows of random sales data and a summary CSV with statistics."
+    timeout_seconds: 180
+    requires_ajsql: false
+    expected_deliverables:
+      - type: csv
+        pattern: "*sales*.csv"
+        min_count: 1
+        description: "Main sales data CSV"
+      - type: csv
+        pattern: "*summary*.csv"
+        min_count: 1
+        description: "Summary statistics CSV"
+    min_progress_updates: 3
+    quality_criteria:
+      - "Main CSV contains exactly 100 rows of sales data"
+      - "Dates span the last 90 days as specified"
+      - "Realistic product names and prices (no generic 'Product1', 'Product2')"
+      - "Summary statistics calculated correctly from the main data"
+      - "Proper CSV formatting (headers, no missing values)"
+      - "Files uploaded with SAS URLs provided"
+    expected_agents:
+      - planner_agent
+      - coder_agent
+      - code_executor
+      - file_cloud_uploader_agent
+      - presenter_agent
+
+  - id: tc004_aje_aja_comparison
+    name: "AJE vs AJA Daily Article Count Comparison"
+    description: "Compares daily article counts between AJE and AJA"
+    task: "Compare daily article counts for AJE and AJA from the last 30 days. Give me a chart and CSV."
+    timeout_seconds: 300
+    requires_ajsql: true
+    expected_deliverables:
+      - type: chart
+        pattern: "*.png"
+        min_count: 1
+        description: "Comparison chart showing AJE vs AJA daily counts"
+      - type: csv
+        pattern: "*.csv"
+        min_count: 1
+        description: "Raw data CSV with daily counts"
+    min_progress_updates: 5
+    quality_criteria:
+      - "Data queried from UCMS AJE and AJA databases"
+      - "Exactly 30 days of data (excluding today)"
+      - "Chart clearly shows both AJE and AJA trends"
+      - "CSV contains date, aje_count, aja_count columns"
+      - "No missing dates in the 30-day period"
+      - "Professional chart with legend, labels, and title"
+    expected_agents:
+      - planner_agent
+      - aj_sql_agent
+      - coder_agent
+      - code_executor
+      - file_cloud_uploader_agent
+      - presenter_agent
+
+  - id: tc005_aje_trump_trend
+    name: "AJE Trump Headlines - 6 Month Trend Analysis"
+    description: "Analyzes Trump headline trends in AJE"
+    task: "Plot Trump headline percentage trends for AJE over the last 6 months by week. Give me a chart and CSV."
+    timeout_seconds: 360
+    requires_ajsql: true
+    expected_deliverables:
+      - type: chart
+        pattern: "*.png"
+        min_count: 1
+        description: "Weekly trend chart with 3 metrics"
+      - type: csv
+        pattern: "*.csv"
+        min_count: 1
+        description: "Weekly data CSV"
+    min_progress_updates: 6
+    quality_criteria:
+      - "Data covers full 6 months from UCMS AJE database"
+      - "Chart shows 3 lines: trump count, total count, and % trump"
+      - "Data aggregated by week (ISO weeks recommended)"
+      - "CSV contains columns: week, trump_count, total_count, percent_trump"
+      - "Case-insensitive Trump matching in headlines"
+      - "Professional multi-line chart with legend and axis labels"
+      - "All weeks in 6-month period represented"
+    expected_agents:
+      - planner_agent
+      - aj_sql_agent
+      - coder_agent
+      - code_executor
+      - file_cloud_uploader_agent
+      - presenter_agent
+
+  - id: tc006_aje_trump_daily
+    name: "AJE Trump Headlines - Last Month Daily Chart"
+    description: "Daily Trump headline chart for AJE"
+    task: "Chart Trump headlines from AJE for the last month by day. Give me the chart and CSV with the headlines."
+    timeout_seconds: 300
+    requires_ajsql: true
+    expected_deliverables:
+      - type: chart
+        pattern: "*.png"
+        min_count: 1
+        description: "Daily Trump headline count chart"
+      - type: csv
+        pattern: "*headlines*.csv"
+        min_count: 1
+        description: "All Trump headlines with dates"
+      - type: csv
+        pattern: "*daily*.csv"
+        min_count: 1
+        description: "Daily count summary"
+    min_progress_updates: 5
+    quality_criteria:
+      - "Headlines queried from UCMS AJE wp_posts table"
+      - "Last 30 days of data"
+      - "Chart shows daily Trump headline counts"
+      - "CSV includes actual headline text, not just counts"
+      - "Headlines CSV has columns: date, headline (minimum)"
+      - "Daily summary CSV shows Trump count per day"
+      - "Case-insensitive Trump matching"
+      - "All data properly dated and sorted"
+    expected_agents:
+      - planner_agent
+      - aj_sql_agent
+      - coder_agent
+      - code_executor
+      - file_cloud_uploader_agent
+      - presenter_agent
+
+  - id: tc007_aja_aje_wordclouds
+    name: "AJA & AJE Last Month Word Clouds"
+    description: "Generate word clouds from AJA and AJE headlines"
+    task: "Generate word clouds from AJA and AJE headlines for the last month. Give me word frequency CSVs too."
+    timeout_seconds: 360
+    requires_ajsql: true
+    expected_deliverables:
+      - type: wordcloud
+        pattern: "*aja*.png"
+        min_count: 1
+        description: "AJA word cloud visualization"
+      - type: wordcloud
+        pattern: "*aje*.png"
+        min_count: 1
+        description: "AJE word cloud visualization"
+      - type: csv
+        pattern: "*aja*freq*.csv"
+        min_count: 1
+        description: "AJA word frequency data"
+      - type: csv
+        pattern: "*aje*freq*.csv"
+        min_count: 1
+        description: "AJE word frequency data"
+    min_progress_updates: 6
+    quality_criteria:
+      - "Headlines queried from UCMS databases (both AJA and AJE)"
+      - "Data covers last 30 days"
+      - "Two separate word clouds generated (one for AJA, one for AJE)"
+      - "Word clouds are visually clear and professional"
+      - "Common/stop words filtered out (the, a, an, etc.)"
+      - "CSV files contain word frequency data for both outlets"
+      - "All files uploaded with SAS URLs"
+      - "Word clouds show meaningful topic differences between outlets"
+    expected_agents:
+      - planner_agent
+      - aj_sql_agent
+      - coder_agent
+      - code_executor
+      - file_cloud_uploader_agent
+      - presenter_agent

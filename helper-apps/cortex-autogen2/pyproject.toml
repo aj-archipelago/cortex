@@ -54,6 +54,10 @@ lxml              = "^5.3.0"
 reportlab         = "^4.2.5"
 fpdf2             = "^2.7.9"
 wordcloud         = "^1.9.3"
+arabic-reshaper   = "^3.0.0"
+python-bidi       = "^0.4.2"
+nltk              = "^3.9.1"
+spacy             = "^3.8.4"
 
 # ─────────────────────────────────────────────────
 # Optional groups (install with: poetry install --with media,archives,science …)

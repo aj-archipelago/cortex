@@ -1,0 +1,32 @@
+# SQLite database - contains test results
+database/test_results.db
+database/*.db
+database/*.db-journal
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test outputs (if any)
+*.tmp
+*.temp
