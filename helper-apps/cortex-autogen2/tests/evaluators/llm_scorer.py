@@ -8,6 +8,7 @@ providing scores (0-100) and detailed reasoning.
 import os
 import json
 import logging
+import asyncio
 import httpx
 from typing import Dict, List, Optional, Tuple
 from .prompts import (
@@ -255,22 +256,39 @@ class LLMEvaluator:
             "max_tokens": 2000
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
+        max_retries = 3
+        base_delay = 2.0
 
-            data = response.json()
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=180.0) as client:
+                    response = await client.post(url, headers=headers, json=payload)
+                    response.raise_for_status()
 
-            # Extract content from OpenAI-format response
-            content = data['choices'][0]['message']['content']
+                    data = response.json()
 
-            # Remove markdown code fences if present
-            content = content.strip()
-            if content.startswith('```json'):
-                content = content[7:]
-            if content.startswith('```'):
-                content = content[3:]
-            if content.endswith('```'):
-                content = content[:-3]
+                    # Extract content from OpenAI-format response
+                    content = data['choices'][0]['message']['content']
 
-            return content.strip()
+                    # Remove markdown code fences if present
+                    content = content.strip()
+                    if content.startswith('```json'):
+                        content = content[7:]
+                    if content.startswith('```'):
+                        content = content[3:]
+                    if content.endswith('```'):
+                        content = content[:-3]
+
+                    return content.strip()
+
+            except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"LLM call timeout (attempt {attempt + 1}/{max_retries}), retrying in {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"LLM call failed after {max_retries} attempts: {e}")
+                    raise
+            except Exception as e:
+                # Re-raise non-timeout exceptions immediately
+                raise
