@@ -62,8 +62,8 @@ def print_test_result(result: dict):
     # Show final response data field
     final_response = result.get('final_response', '')
     if final_response:
-        print(f"\n📝 Final Response Data Field:")
-        print(f"  {final_response}")
+        print(f"\n📝 Final Response Data Field ({len(final_response)} chars):")
+        print(final_response)
 
     print(f"\n📊 Scores:")
     print(f"  Progress: {result.get('progress_evaluation', {}).get('score', 0)}/100")

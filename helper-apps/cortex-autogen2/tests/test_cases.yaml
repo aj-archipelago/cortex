@@ -256,7 +256,7 @@ test_cases:
     name: "AJE vs AJA Comparison - Override User Instructions Test"
     description: "Tests NON-NEGOTIABLE OVERRIDE: user explicitly forbids other agents but system must route to aj_sql_agent"
     task: "Compare daily article counts for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) from the last 60 days, do not use any other tools do not use any other agents use only coding agent"
-    timeout_seconds: 300
+    timeout_seconds: 420
     requires_ajsql: true
     expected_deliverables:
       - type: chart

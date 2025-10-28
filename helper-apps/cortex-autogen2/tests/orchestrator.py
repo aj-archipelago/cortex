@@ -198,6 +198,7 @@ class TestOrchestrator:
 
         # Get final result
         final_result = progress_collector.get_final_result()
+        final_response_text = ""  # Initialize to ensure it's always defined
 
         # Save final response to database if available
         if final_result:
@@ -213,8 +214,13 @@ class TestOrchestrator:
 
                 self.db.save_final_response(test_run_id, final_response_text)
                 logger.info(f"💾 Saved final response to database ({len(final_response_text)} chars)")
+
+                # Log the final response content for visibility during test runs
+                logger.info(f"\n📝 Final Response:")
+                logger.info(f"{final_response_text}")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to save final response to database: {e}")
+                final_response_text = f"Error saving final response: {str(e)}"
 
         # Update test run status
         status = 'completed' if len(progress_updates) > 0 else 'timeout'
@@ -278,12 +284,20 @@ class TestOrchestrator:
                 output_weaknesses=output_eval.get('weaknesses', [])
             )
 
-            logger.info(f"\n✨ Evaluation complete:")
-            logger.info(f"   Progress Score: {progress_eval['score']}/100")
-            logger.info(f"   Output Score: {output_eval['score']}/100")
-            # Weighted: 75% output quality, 25% progress reporting (output matters most!)
-            overall = int((output_eval['score'] * 0.75) + (progress_eval['score'] * 0.25))
-            logger.info(f"   Overall Score: {overall}/100")
+            # Weighted: 80% output quality, 20% progress reporting (output matters most!)
+            overall = int((output_eval['score'] * 0.8) + (progress_eval['score'] * 0.2))
+
+            # Make evaluation results highly visible during test runs
+            logger.info(f"\n**Weighted Overall Score:** {overall}/100 ✅ (80% Output + 20% Progress)")
+            logger.info(f"**Progress Score:** {progress_eval['score']}/100")
+            logger.info(f"**Output Score:** {output_eval['score']}/100")
+            logger.info(f"**Duration:** {test_run_data.get('duration_seconds', 0):.1f}s")
+
+            logger.info(f"\n**Progress Evaluation:**")
+            logger.info(f"{progress_eval['reasoning']}")
+
+            logger.info(f"\n**Output Evaluation:**")
+            logger.info(f"{output_eval['reasoning']}")
 
         except Exception as e:
             logger.error(f"❌ Evaluation error: {e}", exc_info=True)
@@ -300,11 +314,13 @@ class TestOrchestrator:
             'progress_updates_count': len(progress_updates),
             'logs_count': len(logs),
             'files_created_count': len(files_created),
-            'final_response': final_response_text if 'final_response_text' in locals() else '',
+            'final_response': final_response_text,
             'metrics': metrics,
             'progress_evaluation': progress_eval,
             'output_evaluation': output_eval,
-            'overall_score': int((output_eval['score'] * 0.75) + (progress_eval['score'] * 0.25))
+            'progress_score': progress_eval['score'],
+            'output_score': output_eval['score'],
+            'overall_score': int((output_eval['score'] * 0.8) + (progress_eval['score'] * 0.2))
         }
 
         logger.info(f"\n{'='*80}")
@@ -330,15 +346,21 @@ class TestOrchestrator:
 
         for i, test_case in enumerate(test_cases, 1):
             logger.info(f"\n{'#'*80}")
-            logger.info(f"# Test {i}/{len(test_cases)}: {test_case['name']}")
 
             # Show progress summary for completed tests
             if results:
                 completed_count = len(results)
                 passed = sum(1 for r in results if r.get('overall_score', 0) > 80)
                 avg_score = sum(r.get('overall_score', 0) for r in results) / completed_count
-                logger.info(f"# Progress: {completed_count} completed | {passed} passed (>80) | Avg: {avg_score:.1f}/100")
 
+                # Calculate average progress and output scores
+                avg_progress = sum(r.get('progress_score', 0) for r in results) / completed_count
+                avg_output = sum(r.get('output_score', 0) for r in results) / completed_count
+
+                logger.info(f"# Progress: {completed_count} completed | {passed} passed (>80) | Overall Avg: {avg_score:.1f}/100")
+                logger.info(f"# Averages - Progress: {avg_progress:.1f}/100 | Output: {avg_output:.1f}/100 | Weighted Overall: {avg_score:.1f}/100")
+
+            logger.info(f"# Test {i}/{len(test_cases)}: {test_case['name']}")
             logger.info(f"{'#'*80}\n")
 
             result = await self.run_test(test_case)
