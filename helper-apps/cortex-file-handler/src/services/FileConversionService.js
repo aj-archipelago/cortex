@@ -3,7 +3,7 @@ import { getFileStoreMap, setFileStoreMap } from "../redis.js";
 import { urlExists } from "../helper.js";
 import { gcsUrlExists, uploadChunkToGCS, gcs } from "../blobHandler.js";
 import { downloadFile } from "../fileChunker.js";
-import { saveFileToBlob } from "../blobHandler.js";
+import { StorageFactory } from "./storage/StorageFactory.js";
 import { moveFileToPublicFolder } from "../localFileHandler.js";
 import { v4 as uuidv4 } from "uuid";
 
@@ -11,6 +11,7 @@ export class FileConversionService extends ConversionService {
   constructor(context, useAzure = true) {
     super(context);
     this.useAzure = useAzure;
+    this.storageFactory = StorageFactory.getInstance();
   }
 
   async _getFileStoreMap(key) {
@@ -39,8 +40,9 @@ export class FileConversionService extends ConversionService {
 
     let fileUrl;
     if (this.useAzure) {
-      const savedBlob = await saveFileToBlob(filePath, reqId, filename, containerName);
-      fileUrl = savedBlob.url;
+      const provider = await this.storageFactory.getAzureProvider(containerName);
+      const result = await provider.uploadFile({}, filePath, reqId, null, filename);
+      fileUrl = result.url;
     } else {
       fileUrl = await moveFileToPublicFolder(filePath, reqId);
     }

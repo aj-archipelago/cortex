@@ -5,12 +5,14 @@ import {
 } from "@azure/storage-blob";
 import fs from "fs";
 import path from "path";
+import mime from "mime-types";
 
 import { StorageProvider } from "./StorageProvider.js";
 import { AZURITE_ACCOUNT_NAME } from "../../constants.js";
 import {
   generateShortId,
   generateBlobName,
+  sanitizeFilename,
 } from "../../utils/filenameUtils.js";
 
 export class AzureStorageProvider extends StorageProvider {
@@ -122,7 +124,12 @@ export class AzureStorageProvider extends StorageProvider {
 
     // Upload the file to Azure Blob Storage using the stream
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-    await blockBlobClient.uploadStream(fileStream);
+    const uploadOptions = {
+      blobHTTPHeaders: {
+        blobCacheControl: 'public, max-age=2592000, immutable',
+      },
+    };
+    await blockBlobClient.uploadStream(fileStream, undefined, undefined, uploadOptions);
 
     // Generate SAS token after successful upload
     const sasToken = this.generateSASToken(containerClient, blobName);
@@ -131,6 +138,32 @@ export class AzureStorageProvider extends StorageProvider {
       url: `${blockBlobClient.url}?${sasToken}`,
       blobName: blobName,
     };
+  }
+
+  async uploadStream(context, encodedFilename, stream) {
+    const { containerClient } = await this.getBlobClient();
+    const contentType = mime.lookup(encodedFilename);
+
+    // Normalize the blob name: sanitizeFilename decodes, cleans, then we encode for Azure
+    let blobName = sanitizeFilename(encodedFilename);
+    blobName = encodeURIComponent(blobName);
+
+    const options = {
+      blobHTTPHeaders: {
+        ...(contentType ? { blobContentType: contentType } : {}),
+        blobCacheControl: 'public, max-age=2592000, immutable',
+      },
+      maxConcurrency: 50,
+      blockSize: 8 * 1024 * 1024,
+    };
+
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    if (context.log) context.log(`Uploading to Azure... ${blobName}`);
+    
+    await blockBlobClient.uploadStream(stream, undefined, undefined, options);
+    const sasToken = this.generateSASToken(containerClient, blobName);
+    
+    return `${blockBlobClient.url}?${sasToken}`;
   }
 
   async deleteFiles(requestId) {

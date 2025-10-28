@@ -4,6 +4,7 @@ import path from "path";
 import {
   generateShortId,
   generateBlobName,
+  sanitizeFilename,
 } from "../../utils/filenameUtils.js";
 import axios from "axios";
 
@@ -70,6 +71,27 @@ export class GCSStorageProvider extends StorageProvider {
       url: `gs://${this.bucketName}/${blobName}`,
       blobName,
     };
+  }
+
+  async uploadStream(context, encodedFilename, stream) {
+    const bucket = this.storage.bucket(this.bucketName);
+    const blobName = sanitizeFilename(encodedFilename);
+
+    const file = bucket.file(blobName);
+    const writeStream = file.createWriteStream({
+      metadata: {
+        contentType: this.getContentType(encodedFilename) || "application/octet-stream",
+      },
+      resumable: false,
+    });
+
+    await new Promise((resolve, reject) => {
+      stream.pipe(writeStream)
+        .on('finish', resolve)
+        .on('error', reject);
+    });
+
+    return `gs://${this.bucketName}/${blobName}`;
   }
 
   async deleteFiles(requestId) {

@@ -404,6 +404,12 @@ test.serial("checkHash should maintain consistent behavior across multiple calls
 
       t.is(checkResponse.status, 200, `checkHash call ${i + 1} should succeed`);
       responses.push(checkResponse.data);
+      
+      // Add small delay to ensure different timestamps in SAS tokens
+      // Azure SAS tokens have second-level precision
+      if (i < 2 && isUsingAzureStorage()) {
+        await new Promise(resolve => setTimeout(resolve, 1100));
+      }
     }
 
     // All responses should have the required fields
@@ -415,8 +421,9 @@ test.serial("checkHash should maintain consistent behavior across multiple calls
       t.truthy(response.url, `Response ${index + 1} should have original URL`);
     }
 
-    if (isAzureConfigured()) {
+    if (isUsingAzureStorage()) {
       // All shortLivedUrls should be different (new SAS tokens each time)
+      // Azure (including Azurite) generates new SAS tokens with current timestamp
       const shortLivedUrls = responses.map(r => r.shortLivedUrl);
       const uniqueUrls = new Set(shortLivedUrls);
       t.is(uniqueUrls.size, shortLivedUrls.length, "Each call should generate unique short-lived URL with Azure");

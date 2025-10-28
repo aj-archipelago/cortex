@@ -394,8 +394,11 @@ test("Conversion should use default container when no container specified", asyn
 
     // Verify the URL indicates it was uploaded to the default container
     const containerFromUrl = getContainerFromUrl(result.url);
-    t.is(containerFromUrl, AZURE_STORAGE_CONTAINER_NAMES[0],
-      `File should be uploaded to default container ${AZURE_STORAGE_CONTAINER_NAMES[0]}, but was uploaded to ${containerFromUrl}`);
+    // Read current default from environment (not the cached module value)
+    const currentContainerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+    const currentDefaultContainer = currentContainerStr.split(',').map(name => name.trim())[0];
+    t.is(containerFromUrl, currentDefaultContainer,
+      `File should be uploaded to default container ${currentDefaultContainer}, but was uploaded to ${containerFromUrl}`);
 
     // Cleanup
     await cleanupHashAndFile(null, result.url, baseUrl);

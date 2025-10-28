@@ -6,7 +6,7 @@ import { generateShortId } from "../../utils/filenameUtils.js";
 
 export class StorageService {
   constructor(factory) {
-    this.factory = factory || new StorageFactory();
+    this.factory = factory || StorageFactory.getInstance();
     this.primaryProvider = null;
     this.backupProvider = null;
     this._initialized = false;

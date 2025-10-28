@@ -13,9 +13,31 @@ async function getBlobHandlerConstants() {
   return blobHandlerConstants;
 }
 
+// Singleton instance for provider caching across the application
+let storageFactoryInstance = null;
+
 export class StorageFactory {
   constructor() {
     this.providers = new Map();
+  }
+
+  /**
+   * Get the singleton instance of StorageFactory
+   * This ensures provider caching works across the entire application
+   */
+  static getInstance() {
+    if (!storageFactoryInstance) {
+      storageFactoryInstance = new StorageFactory();
+    }
+    return storageFactoryInstance;
+  }
+
+  /**
+   * Reset the singleton instance (useful for testing)
+   * @internal
+   */
+  static resetInstance() {
+    storageFactoryInstance = null;
   }
 
   async getPrimaryProvider(containerName = null) {
@@ -26,14 +48,17 @@ export class StorageFactory {
   }
 
   async getAzureProvider(containerName = null) {
-    const { AZURE_STORAGE_CONTAINER_NAMES, DEFAULT_AZURE_STORAGE_CONTAINER_NAME, isValidContainerName } = await getBlobHandlerConstants();
+    // Read container names from environment directly to get current values
+    const { getCurrentContainerNames } = await getBlobHandlerConstants();
+    const azureStorageContainerNames = getCurrentContainerNames();
+    const defaultAzureStorageContainerName = azureStorageContainerNames[0];
     
     // Use provided container name or default to first in whitelist
-    const finalContainerName = containerName || DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
+    const finalContainerName = containerName || defaultAzureStorageContainerName;
     
     // Validate container name
-    if (!isValidContainerName(finalContainerName)) {
-      throw new Error(`Invalid container name '${finalContainerName}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`);
+    if (!azureStorageContainerNames.includes(finalContainerName)) {
+      throw new Error(`Invalid container name '${finalContainerName}'. Allowed containers: ${azureStorageContainerNames.join(', ')}`);
     }
     
     // Create unique key for each container
