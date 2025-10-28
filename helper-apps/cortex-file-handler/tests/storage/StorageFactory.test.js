@@ -123,19 +123,27 @@ test("should get azure provider with specific container name", async (t) => {
     return;
   }
 
-  const factory = new StorageFactory();
+  // Save original env value
+  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
   
-  // Mock the blobHandler constants for this test
-  const mockConstants = {
-    AZURE_STORAGE_CONTAINER_NAMES: ["container1", "container2", "container3"],
-    DEFAULT_AZURE_STORAGE_CONTAINER_NAME: "container1",
-    isValidContainerName: (name) => ["container1", "container2", "container3"].includes(name)
-  };
-  
-  // Test with valid container name
-  const provider = await factory.getAzureProvider("container2");
-  t.truthy(provider);
-  t.is(provider.containerName, "container2");
+  try {
+    // Set test container names in environment
+    process.env.AZURE_STORAGE_CONTAINER_NAME = "container1,container2,container3";
+    
+    const factory = new StorageFactory();
+    
+    // Test with valid container name
+    const provider = await factory.getAzureProvider("container2");
+    t.truthy(provider);
+    t.is(provider.containerName, "container2");
+  } finally {
+    // Restore original env
+    if (originalEnv) {
+      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
+    } else {
+      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
+    }
+  }
 });
 
 test("should throw error for invalid container name", async (t) => {
@@ -159,21 +167,25 @@ test("should cache providers by container name", async (t) => {
     return;
   }
 
-  const factory = new StorageFactory();
-  
-  // Mock valid container names for testing
+  // Save original env value
   const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-  process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
   
   try {
-    const provider1 = await factory.getAzureProvider("test1");
-    const provider2 = await factory.getAzureProvider("test1");
-    const provider3 = await factory.getAzureProvider("test2");
+    // Set test container names in environment
+    process.env.AZURE_STORAGE_CONTAINER_NAME = "container1,container2,container3";
+    
+    const factory = new StorageFactory();
+    
+    const provider1 = await factory.getAzureProvider("container1");
+    const provider2 = await factory.getAzureProvider("container1");
+    const provider3 = await factory.getAzureProvider("container2");
     
     // Same container should return same instance
     t.is(provider1, provider2);
     // Different container should return different instance
     t.not(provider1, provider3);
+    t.is(provider1.containerName, "container1");
+    t.is(provider3.containerName, "container2");
   } finally {
     // Restore original env
     if (originalEnv) {

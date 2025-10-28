@@ -52,7 +52,6 @@ test('OpenAI vendor streaming over subscriptions emits OAI-style deltas', async 
 
   t.true(events.length > 0);
 
-  // Ensure streamed chunks (when they include model) use gpt-4.1 (not mini)
   const models = events
     .map(e => {
       try {
@@ -64,8 +63,7 @@ test('OpenAI vendor streaming over subscriptions emits OAI-style deltas', async 
     .filter(Boolean);
 
   if (models.length > 0) {
-    t.truthy(models.find(m => /gpt-4\.1(?!-mini)/.test(m)));
-    t.falsy(models.find(m => /gpt-4\.1-mini/.test(m)));
+    t.truthy(models.find(m => /gpt-5-chat/.test(m)));
   }
 });
 

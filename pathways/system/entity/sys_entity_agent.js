@@ -31,7 +31,8 @@ export default {
         skipCallbackMessage: false,
         entityId: ``,
         researchMode: false, 
-        model: 'oai-gpt41'
+        model: 'oai-gpt41',
+        contextKey: ``
     },
     timeout: 600,
 

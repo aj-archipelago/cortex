@@ -18,6 +18,7 @@ export default {
         chatHistory: [{role: '', content: []}],
         contextId: '',
         aiName: "Jarvis",
+        contextKey: ``
     },
     model: 'oai-gpt4o',
     useInputChunking: false,

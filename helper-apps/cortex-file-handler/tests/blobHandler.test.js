@@ -337,8 +337,9 @@ test("DEFAULT_AZURE_STORAGE_CONTAINER_NAME should be the first container", (t) =
 });
 
 test("isValidContainerName should validate container names correctly", (t) => {
-  // All configured containers should be valid
-  AZURE_STORAGE_CONTAINER_NAMES.forEach(containerName => {
+  // All configured containers should be valid (getCurrentContainerNames reads from env at runtime)
+  const currentContainers = AZURE_STORAGE_CONTAINER_NAMES;
+  currentContainers.forEach(containerName => {
     t.true(isValidContainerName(containerName), `${containerName} should be valid`);
   });
   

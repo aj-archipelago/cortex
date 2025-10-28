@@ -23,9 +23,9 @@ export default {
     enableDuplicateRequests: false,
     timeout: 600,
     // Tool disabled for now
-    /*
     toolDefinition: [{
         type: "function",
+        enabled: false,
         icon: "💻",
         function: {
             name: "Code",
@@ -46,7 +46,6 @@ export default {
             }
         }
     }],
-    */
     
     executePathway: async ({args, runAllPrompts, resolver}) => {
         if (args.detailedInstructions) {

@@ -24,6 +24,7 @@ export default {
     timeout: 600,
     toolDefinition: [{
         type: "function",
+        enabled: false,
         icon: "🗺️",
         function: {
             name: "PlanMultiStepTask",
@@ -46,6 +47,7 @@ export default {
     },
     {
         type: "function",
+        enabled: false,
         icon: "🧠",
         function: {
             name: "ApplyAdvancedReasoning",

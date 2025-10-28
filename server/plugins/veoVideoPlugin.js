@@ -20,7 +20,9 @@ class VeoVideoPlugin extends ModelPlugin {
     const availableModels = {
       'veo-2.0-generate': 'GA',
       'veo-3.0-generate': 'Preview',
-      'veo-3.0-fast-generate': 'Preview'
+      'veo-3.0-fast-generate': 'Preview',
+      'veo-3.1-generate': 'Preview',
+      'veo-3.1-fast-generate': 'Preview'
     };
 
     // Get the model ID from the pathway or use default
@@ -53,6 +55,8 @@ class VeoVideoPlugin extends ModelPlugin {
         // generateAudio is required for 3.0 and not supported by 2.0
         ...(model === 'veo-3.0-generate' && { generateAudio: combinedParameters.generateAudio !== undefined ? combinedParameters.generateAudio : true }),
         ...(model === 'veo-3.0-fast-generate' && { generateAudio: combinedParameters.generateAudio !== undefined ? combinedParameters.generateAudio : true }),
+        ...(model === 'veo-3.1-generate' && { generateAudio: combinedParameters.generateAudio !== undefined ? combinedParameters.generateAudio : true }),
+        ...(model === 'veo-3.1-fast-generate' && { generateAudio: combinedParameters.generateAudio !== undefined ? combinedParameters.generateAudio : true }),
         ...(combinedParameters.negativePrompt && { negativePrompt: combinedParameters.negativePrompt }),
         ...(combinedParameters.personGeneration && { personGeneration: combinedParameters.personGeneration }),
         ...(combinedParameters.sampleCount && { sampleCount: combinedParameters.sampleCount }),
@@ -74,6 +78,12 @@ class VeoVideoPlugin extends ModelPlugin {
       if (model === 'veo-3.0-fast-generate' && parameters.durationSeconds !== 8) {
         throw new Error(`Veo 3.0 only supports durationSeconds: 8, got: ${parameters.durationSeconds}`);
       }
+      if (model === 'veo-3.1-generate' && parameters.durationSeconds !== 8) {
+        throw new Error(`Veo 3.1 only supports durationSeconds: 8, got: ${parameters.durationSeconds}`);
+      }
+      if (model === 'veo-3.1-fast-generate' && parameters.durationSeconds !== 8) {
+        throw new Error(`Veo 3.1 only supports durationSeconds: 8, got: ${parameters.durationSeconds}`);
+      }
       if (model === 'veo-2.0-generate' && (parameters.durationSeconds < 5 || parameters.durationSeconds > 8)) {
         throw new Error(`Veo 2.0 supports durationSeconds between 5-8, got: ${parameters.durationSeconds}`);
       }
@@ -93,6 +103,18 @@ class VeoVideoPlugin extends ModelPlugin {
       if (model === 'veo-3.0-fast-generate' && parameters.video) {
         throw new Error('video parameter is not supported in Veo 3.0');
       }
+      if (model === 'veo-3.1-generate' && parameters.lastFrame) {
+        throw new Error('lastFrame parameter is not supported in Veo 3.1');
+      }
+      if (model === 'veo-3.1-generate' && parameters.video) {
+        throw new Error('video parameter is not supported in Veo 3.1');
+      }
+      if (model === 'veo-3.1-fast-generate' && parameters.lastFrame) {
+        throw new Error('lastFrame parameter is not supported in Veo 3.1');
+      }
+      if (model === 'veo-3.1-fast-generate' && parameters.video) {
+        throw new Error('video parameter is not supported in Veo 3.1');
+      }
     }
 
     // generateAudio constraints
@@ -104,6 +126,12 @@ class VeoVideoPlugin extends ModelPlugin {
     }
     if (model === 'veo-3.0-fast-generate' && parameters.generateAudio === undefined) {
       logger.warn('generateAudio is required for Veo 3.0, defaulting to true');
+    }
+    if (model === 'veo-3.1-generate' && parameters.generateAudio === undefined) {
+      logger.warn('generateAudio is required for Veo 3.1, defaulting to true');
+    }
+    if (model === 'veo-3.1-fast-generate' && parameters.generateAudio === undefined) {
+      logger.warn('generateAudio is required for Veo 3.1, defaulting to true');
     }
   }
 

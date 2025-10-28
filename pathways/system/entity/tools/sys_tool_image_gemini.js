@@ -11,9 +11,9 @@ export default {
         model: 'oai-gpt4o',
     },
     timeout: 300,
-    /*
     toolDefinition: [{
         type: "function",
+        enabled: true,
         icon: "🎨",
         function: {
             name: "GenerateImage",
@@ -30,12 +30,13 @@ export default {
                         description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["detailedInstructions", "renderText", "userMessage"]
+                required: ["detailedInstructions", "userMessage"]
             }
         }
     },
     {
         type: "function",
+        enabled: false,
         icon: "🔄",
         function: {
             name: "ModifyImage",
@@ -68,7 +69,6 @@ export default {
             }
         }
     }],
-    */
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
 

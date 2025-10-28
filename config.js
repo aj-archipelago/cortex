@@ -190,6 +190,21 @@ var config = convict({
                 },
                 "maxTokenLength": 8192,
             },
+            "oai-gpt5-chat": {
+                "type": "OPENAI-VISION",
+                "url": "https://api.openai.com/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "gpt-5-chat-latest"
+                },
+                "requestsPerSecond": 50,
+                "maxTokenLength": 128000,
+                "maxReturnTokens": 16384,
+                "supportsStreaming": true
+            },
             "oai-gpt5": {
                 "type": "OPENAI-REASONING-VISION",
                 "url": "https://api.openai.com/v1/chat/completions",
@@ -201,8 +216,8 @@ var config = convict({
                     "model": "gpt-5"
                 },
                 "requestsPerSecond": 50,
-                "maxTokenLength": 1000000,
-                "maxReturnTokens": 16384,
+                "maxTokenLength": 400000,
+                "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
             "oai-gpt5-mini": {
@@ -216,8 +231,8 @@ var config = convict({
                     "model": "gpt-5-mini"
                 },
                 "requestsPerSecond": 50,
-                "maxTokenLength": 1000000,
-                "maxReturnTokens": 16384,
+                "maxTokenLength": 400000,
+                "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
             "oai-gpt4o": {
@@ -962,6 +977,12 @@ const buildPathways = async (config) => {
                     // Validate tool definition format
                     if (!toolDef.type || !toolDef.function) {
                         logger.warn(`Invalid tool definition in pathway ${key} - missing required fields`);
+                        continue;
+                    }
+
+                    // Skip tool if explicitly disabled
+                    if (toolDef.enabled === false) {
+                        logger.info(`Skipping disabled tool in pathway ${key}`);
                         continue;
                     }
 

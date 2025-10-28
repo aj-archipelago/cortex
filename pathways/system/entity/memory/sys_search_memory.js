@@ -1,6 +1,6 @@
 import { Prompt } from '../../../../server/prompt.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { setv } from '../../../../lib/keyValueStorageClient.js';
+import { setvWithDoubleEncryption } from '../../../../lib/keyValueStorageClient.js';
 
 export default {
     prompt:
@@ -24,7 +24,8 @@ export default {
         aiName: "Jarvis",
         contextId: ``,
         section: "memoryAll",
-        updateContext: false
+        updateContext: false,
+        contextKey: ``
     },
     model: 'oai-gpt41-mini',
     useInputChunking: false,
@@ -54,12 +55,12 @@ export default {
             result = `${result}\n\nThe last time you spoke to the user was ${new Date().toISOString()}.`;
 
         } else {
-            sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section, stripMetadata: (args.section !== 'memoryTopics')}); 
+            sectionMemory = await callPathway("sys_read_memory", {contextId: args.contextId, section: args.section, stripMetadata: (args.section !== 'memoryTopics'), contextKey: args.contextKey}); 
             result = await runAllPrompts({...args, sectionMemory});
         }
 
         if (args.updateContext) {
-            await setv(`${args.contextId}-memoryContext`, result);
+            await setvWithDoubleEncryption(`${args.contextId}-memoryContext`, result, args.contextKey);
         }   
 
         return result;

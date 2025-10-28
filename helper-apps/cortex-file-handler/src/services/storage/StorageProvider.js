@@ -16,6 +16,17 @@ export class StorageProvider {
   }
 
   /**
+   * Upload a stream to storage
+   * @param {Object} context - The context object
+   * @param {string} encodedFilename - The filename for the uploaded file
+   * @param {stream.Readable} stream - The stream to upload
+   * @returns {Promise<string>} The URL of the uploaded file with SAS token
+   */
+  async uploadStream(context, encodedFilename, stream) {
+    throw new Error("Method not implemented");
+  }
+
+  /**
    * Delete files associated with a request ID
    * @param {string} requestId - The request ID to delete files for
    * @returns {Promise<string[]>} Array of deleted file URLs

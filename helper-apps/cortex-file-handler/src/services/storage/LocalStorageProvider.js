@@ -1,9 +1,13 @@
 import fs from "fs";
 import path from "path";
-import { generateShortId } from "../../utils/filenameUtils.js";
+import { promisify } from "util";
+import { pipeline as _pipeline } from "stream";
+import { generateShortId, sanitizeFilename } from "../../utils/filenameUtils.js";
 import { ipAddress, port } from "../../start.js";
 
 import { StorageProvider } from "./StorageProvider.js";
+
+const pipeline = promisify(_pipeline);
 
 export class LocalStorageProvider extends StorageProvider {
   constructor(publicFolder) {
@@ -50,6 +54,29 @@ export class LocalStorageProvider extends StorageProvider {
       url,
       blobName: path.join(requestId, uniqueFileName),
     };
+  }
+
+  async uploadStream(context, encodedFilename, stream) {
+    // For local storage, we need a requestId to create a folder
+    // Extract from context or generate one
+    const requestId = context.requestId || "default";
+    
+    // Create request folder if it doesn't exist
+    const requestFolder = path.join(this.publicFolder, requestId);
+    if (!fs.existsSync(requestFolder)) {
+      fs.mkdirSync(requestFolder, { recursive: true });
+    }
+
+    const sanitizedFilename = sanitizeFilename(encodedFilename);
+    const destinationPath = path.join(requestFolder, sanitizedFilename);
+    const writeStream = fs.createWriteStream(destinationPath);
+
+    await pipeline(stream, writeStream);
+
+    // Generate full URL
+    const url = `http://${ipAddress}:${port}/files/${requestId}/${sanitizedFilename}`;
+
+    return url;
   }
 
   async deleteFiles(requestId) {
