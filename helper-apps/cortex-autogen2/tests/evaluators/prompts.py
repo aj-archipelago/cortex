@@ -103,10 +103,10 @@ OUTPUT_EVALUATION_PROMPT = """You are an expert evaluator assessing the quality 
    - Poor: Disorganized, unprofessional, hard to read
 
 4. **Deliverable Integration (25 points)**
-   - Excellent: Files woven naturally into insights (charts described before shown), evidence supports story
-   - Good: Files provided but could be better integrated into narrative
-   - Fair: Files listed but not well connected to insights
-   - Poor: Files dumped at end without context or integration
+   - Excellent: Primary deliverable prominently highlighted with hero treatment; preview images are clickable and link to main file; supporting files clearly separated; professional visual styling (borders, formatting)
+   - Good: Primary deliverable identified but could be more prominent; preview images shown but not interactive; files somewhat organized
+   - Fair: Files listed but primary deliverable not clearly distinguished from supporting files; preview images shown as regular images without download links
+   - Poor: Files dumped without organization; no distinction between primary and supporting deliverables; preview images missing or not utilized
 
 **Special Considerations:**
 - **Answer First**: Prioritize how well it answers the original question over file completeness
@@ -115,6 +115,8 @@ OUTPUT_EVALUATION_PROMPT = """You are an expert evaluator assessing the quality 
 - **Engagement**: Strategic use of formatting, emojis, clear confident language (avoid "I think", "maybe")
 - **Chart Integration**: Charts should illustrate insights, not just be separate dumps
 - **SAS URLs**: All files must have working SAS URLs for download
+- **PRIMARY DELIVERABLE PROMINENCE**: When task requests specific file type (PPTX, PDF, Excel), that file must be prominently featured with hero treatment, clear download link, and preview images that link to the main file
+- **PREVIEW IMAGE INTERACTIVITY**: Preview images for PPTX/PDF should be clickable and link to the main deliverable file with visual styling (borders, hover indication)
 - **BONUS +5-10 points**: Award extra for proactive helpful visualizations or analysis not explicitly requested
 
 **Instructions:**
@@ -144,14 +146,17 @@ OUTPUT_EVALUATION_PROMPT = """You are an expert evaluator assessing the quality 
 ```json
 {{
   "score": 98,
-  "reasoning": "Perfect example of insight-focused presentation. Task was to compare AJE vs AJA article counts, and response starts with direct answer: 'AJA publishes 40% more articles daily.' Provides key insights, trends, and analysis before showing evidence. Charts are described in context ('This trend chart reveals...') rather than dumped. Professional structure with executive summary, insights, evidence, and next steps. Bonus +5 points for proactive additional chart created.",
+  "reasoning": "Perfect example of insight-focused presentation with excellent primary deliverable highlighting. Task requested PowerPoint, and response features it prominently with hero treatment: dedicated section, clickable preview images linking to PPTX download, clear download button with file size. Preview images have professional styling (borders, rounded corners). Supporting files (PDF, data) clearly separated in 'Additional Resources' section. Provides meaningful insights before showing deliverables. Professional structure with executive summary, insights, evidence, and next steps. Bonus +5 points for proactive PDF version and additional charts.",
   "strengths": [
-    "Answers question immediately: 'AJA publishes 40% more articles daily'",
-    "Provides meaningful insights: volume differences, weekday patterns, content strategy",
-    "Professional structure: hook → insights → visual evidence → deliverables → next steps",
-    "Charts integrated into narrative with descriptions",
+    "Primary deliverable (PPTX) prominently featured with hero treatment in dedicated section",
+    "Preview images are clickable and link to main PPTX file for instant download",
+    "Professional visual styling on previews (borders, rounded corners, cursor indication)",
+    "Clear download button with file size (2.1 MB) for transparency",
+    "Supporting files clearly separated in 'Additional Resources' section",
+    "Answers question immediately with executive summary",
+    "Provides meaningful insights before showing deliverables",
+    "Professional structure: hook → insights → primary deliverable → supporting files → next steps",
     "Strategic use of emojis and formatting",
-    "Proactive additional visualization (pie chart) not requested",
     "All files with working SAS URLs"
   ],
   "weaknesses": []

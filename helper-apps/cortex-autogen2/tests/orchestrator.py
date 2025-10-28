@@ -288,7 +288,7 @@ class TestOrchestrator:
             overall = int((output_eval['score'] * 0.8) + (progress_eval['score'] * 0.2))
 
             # Make evaluation results highly visible during test runs
-            logger.info(f"\n**Weighted Overall Score:** {overall}/100 ✅ (80% Output + 20% Progress)")
+            logger.info(f"\n**Overall Score:** {overall}/100 ✅")
             logger.info(f"**Progress Score:** {progress_eval['score']}/100")
             logger.info(f"**Output Score:** {output_eval['score']}/100")
             logger.info(f"**Duration:** {test_run_data.get('duration_seconds', 0):.1f}s")
@@ -357,8 +357,8 @@ class TestOrchestrator:
                 avg_progress = sum(r.get('progress_score', 0) for r in results) / completed_count
                 avg_output = sum(r.get('output_score', 0) for r in results) / completed_count
 
-                logger.info(f"# Progress: {completed_count} completed | {passed} passed (>80) | Overall Avg: {avg_score:.1f}/100")
-                logger.info(f"# Averages - Progress: {avg_progress:.1f}/100 | Output: {avg_output:.1f}/100 | Weighted Overall: {avg_score:.1f}/100")
+                logger.info(f"# Progress: {completed_count} completed | {passed} passed (>80) | Avg: {avg_score:.1f}/100")
+                logger.info(f"# Scores - Progress: {avg_progress:.1f}/100 | Output: {avg_output:.1f}/100 | Overall: {avg_score:.1f}/100")
 
             logger.info(f"# Test {i}/{len(test_cases)}: {test_case['name']}")
             logger.info(f"{'#'*80}\n")

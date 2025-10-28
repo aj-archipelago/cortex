@@ -53,7 +53,7 @@ test_cases:
   - id: tc002_pdf_with_images
     name: "PDF Report with Images and Charts"
     description: "Generates a PDF report with images and charts"
-    task: "Generate a PDF report about renewable energy trends in 2024. Include charts and images."
+    task: "Generate a PDF report about renewable energy trends in 2026. Include charts and images."
     timeout_seconds: 300
     requires_ajsql: false
     expected_deliverables:
