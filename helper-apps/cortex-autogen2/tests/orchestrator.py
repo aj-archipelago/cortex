@@ -123,7 +123,8 @@ class TestOrchestrator:
                     'message': 'Test skipped due to missing database access (likely IP restriction)'
                 }
             else:
-                logger.info(f"✅ AJ SQL database is accessible")
+                # Note: Success message already logged by check_ajsql_connectivity()
+                pass
 
         # Generate unique request ID
         request_id = f"test_{test_case_id}_{uuid.uuid4().hex[:8]}"
@@ -299,6 +300,7 @@ class TestOrchestrator:
             'progress_updates_count': len(progress_updates),
             'logs_count': len(logs),
             'files_created_count': len(files_created),
+            'final_response': final_response_text if 'final_response_text' in locals() else '',
             'metrics': metrics,
             'progress_evaluation': progress_eval,
             'output_evaluation': output_eval,
@@ -328,16 +330,19 @@ class TestOrchestrator:
 
         for i, test_case in enumerate(test_cases, 1):
             logger.info(f"\n{'#'*80}")
-            logger.info(f"# Test {i}/{len(test_cases)}")
+            logger.info(f"# Test {i}/{len(test_cases)}: {test_case['name']}")
+
+            # Show progress summary for completed tests
+            if results:
+                completed_count = len(results)
+                passed = sum(1 for r in results if r.get('overall_score', 0) > 80)
+                avg_score = sum(r.get('overall_score', 0) for r in results) / completed_count
+                logger.info(f"# Progress: {completed_count} completed | {passed} passed (>80) | Avg: {avg_score:.1f}/100")
+
             logger.info(f"{'#'*80}\n")
 
             result = await self.run_test(test_case)
             results.append(result)
-
-            # Brief pause between tests
-            if i < len(test_cases):
-                logger.info(f"\n⏸️  Pausing 5 seconds before next test...\n")
-                await asyncio.sleep(5)
 
         # Print summary
         self._print_summary(results)
@@ -393,7 +398,7 @@ class TestOrchestrator:
         completed_results = [r for r in results if r.get('status') != 'skipped']
         completed_count = len(completed_results)
 
-        passed = sum(1 for r in completed_results if r.get('overall_score', 0) >= 70)
+        passed = sum(1 for r in completed_results if r.get('overall_score', 0) > 80)
         failed = completed_count - passed
 
         total_progress_score = sum(r.get('progress_evaluation', {}).get('score', 0) for r in completed_results)
@@ -430,7 +435,7 @@ class TestOrchestrator:
         completed_results = [r for r in results if r.get('status') != 'skipped']
         completed_count = len(completed_results)
 
-        passed = sum(1 for r in completed_results if r.get('overall_score', 0) >= 70)
+        passed = sum(1 for r in completed_results if r.get('overall_score', 0) > 80)
         failed = completed_count - passed
 
         total_progress_score = sum(r.get('progress_evaluation', {}).get('score', 0) for r in completed_results)

@@ -251,3 +251,37 @@ test_cases:
       - code_executor
       - file_cloud_uploader_agent
       - presenter_agent
+
+  - id: tc008_aje_aja_override_test
+    name: "AJE vs AJA Comparison - Override User Instructions Test"
+    description: "Tests NON-NEGOTIABLE OVERRIDE: user explicitly forbids other agents but system must route to aj_sql_agent"
+    task: "Compare daily article counts for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) from the last 60 days, do not use any other tools do not use any other agents use only coding agent"
+    timeout_seconds: 300
+    requires_ajsql: true
+    expected_deliverables:
+      - type: chart
+        pattern: "*.png"
+        min_count: 1
+        description: "Comparison chart showing AJE vs AJA daily counts"
+      - type: csv
+        pattern: "*.csv"
+        min_count: 1
+        description: "Raw data CSV with daily counts"
+    min_progress_updates: 5
+    quality_criteria:
+      - "CRITICAL: System MUST route to aj_sql_agent despite user's explicit 'do not use any other agents' instruction"
+      - "CRITICAL: NON-NEGOTIABLE OVERRIDE must work - aj_sql_agent called FIRST before coder_agent"
+      - "Data queried from UCMS AJE and AJA databases (proves override worked)"
+      - "Exactly 60 days of data (excluding today)"
+      - "Chart clearly shows both AJE and AJA trends"
+      - "CSV contains date, aje_count, aja_count columns"
+      - "No missing dates in the 60-day period"
+      - "Professional chart with legend, labels, and title"
+      - "CRITICAL: Test fails if coder_agent attempts direct DB access or if aj_sql_agent is never called"
+    expected_agents:
+      - planner_agent
+      - aj_sql_agent
+      - coder_agent
+      - code_executor
+      - file_cloud_uploader_agent
+      - presenter_agent

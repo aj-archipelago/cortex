@@ -68,7 +68,7 @@ PROGRESS_EVALUATION_PROMPT = """You are an expert evaluator assessing the qualit
 Now evaluate the progress updates above and return ONLY the JSON response."""
 
 
-OUTPUT_EVALUATION_PROMPT = """You are an expert evaluator assessing the quality of outputs from an AI agent system that creates presentations, reports, and data files.
+OUTPUT_EVALUATION_PROMPT = """You are an expert evaluator assessing the quality of outputs from an AI agent system that creates professional, insightful presentations and deliverables.
 
 **Original Task:**
 {task}
@@ -84,38 +84,38 @@ OUTPUT_EVALUATION_PROMPT = """You are an expert evaluator assessing the quality 
 
 **Evaluation Criteria (0-100 points):**
 
-1. **Completeness (25 points)**
-   - Excellent: All requested deliverables present and correct
-   - Good: Most deliverables present, minor omissions
-   - Fair: Some deliverables missing
-   - Poor: Major deliverables missing
+1. **Answer Quality (25 points)**
+   - Excellent: Directly answers user's question with clear insights, no file dumps
+   - Good: Provides useful information but could be more focused on the question
+   - Fair: Includes some answer but mostly lists files
+   - Poor: Just dumps files without answering the question
 
-2. **Quality (25 points)**
-   - Excellent: Professional design, polished, publication-ready
-   - Good: Good quality but minor design issues
-   - Fair: Basic quality, looks unfinished
-   - Poor: Placeholder content, dummy data, unprofessional
+2. **Insight & Analysis (25 points)**
+   - Excellent: Extracts key findings, trends, surprises; explains "why it matters"
+   - Good: Provides some analysis but could go deeper
+   - Fair: Basic facts without interpretation
+   - Poor: No analysis, just raw data or file lists
 
-3. **Correctness (25 points)**
-   - Excellent: Accurate data, no hallucinations, factually correct
-   - Good: Mostly accurate with minor issues
-   - Fair: Some incorrect information
-   - Poor: Significant errors, hallucinated content, dummy data
+3. **Professional Presentation (25 points)**
+   - Excellent: Structured like great article (hook→insights→evidence→next steps), strategic emojis, engaging tone
+   - Good: Well-organized but could be more engaging
+   - Fair: Basic structure, functional but not compelling
+   - Poor: Disorganized, unprofessional, hard to read
 
-4. **Presentation (25 points)**
-   - Excellent: SAS URLs provided, preview images generated, clear results, BONUS for proactive visualizations
-   - Good: Files uploaded but missing previews
-   - Fair: Files created but not uploaded properly
-   - Poor: No proper file delivery or presentation
-   - BONUS: Award +5-10 extra points if system proactively creates helpful visualizations (charts, graphs, word clouds) even when not explicitly requested. Users love visuals!
+4. **Deliverable Integration (25 points)**
+   - Excellent: Files woven naturally into insights (charts described before shown), evidence supports story
+   - Good: Files provided but could be better integrated into narrative
+   - Fair: Files listed but not well connected to insights
+   - Poor: Files dumped at end without context or integration
 
 **Special Considerations:**
-- **Images**: Check if images were actually collected (not placeholders/shapes)
-- **Data**: Check if data is realistic (not "Product1", "Product2" or all zeros)
-- **Design**: Check for professional styling (colors, fonts, layout)
-- **Preview Images**: For PPTX/PDF, check if preview images were generated
-- **Preview Links**: If progress updates or final result mentions "preview" or "preview image", verify actual preview files with SAS URLs are provided. Penalize heavily if previews are mentioned but not delivered.
-- **Charts/Visualizations vs Data-Only**: If task asks for "chart", "graph", "plot", "visualization", "trend", or "comparison chart", verify actual image files (.png, .jpg) exist. CSV/data files alone do NOT satisfy a chart request. Score must be ≤40 if charts requested but only CSV delivered.
+- **Answer First**: Prioritize how well it answers the original question over file completeness
+- **Insight Focus**: Reward analysis, trends, surprises over raw data dumps
+- **Professional Structure**: Executive summary → Key insights → Visual evidence → Clean deliverables → Next steps
+- **Engagement**: Strategic use of formatting, emojis, clear confident language (avoid "I think", "maybe")
+- **Chart Integration**: Charts should illustrate insights, not just be separate dumps
+- **SAS URLs**: All files must have working SAS URLs for download
+- **BONUS +5-10 points**: Award extra for proactive helpful visualizations or analysis not explicitly requested
 
 **Instructions:**
 1. Analyze all aspects of the output
@@ -126,66 +126,73 @@ OUTPUT_EVALUATION_PROMPT = """You are an expert evaluator assessing the quality 
 **Return JSON format:**
 ```json
 {{
-  "score": 92,
-  "reasoning": "Excellent Pokemon presentation with 12 high-quality images collected. Professional slide design with themed colors. Progress updates mentioned 'preview images generated' and all preview files with SAS URLs were actually provided in deliverables. Only minor issue: one slide had slightly cramped layout.",
+  "score": 95,
+  "reasoning": "Outstanding Pokemon presentation that directly answers the question with professional insights. Starts with executive summary highlighting 12 Pokemon collected, then provides specific design highlights and visual evidence woven throughout. Files are presented as supporting evidence, not the main event. Professional structure with strategic emojis and engaging tone.",
   "strengths": [
-    "12 Pokemon images successfully collected (exceeded minimum of 10)",
-    "Professional themed design with consistent colors",
-    "Preview slide images mentioned AND actually delivered with SAS URLs",
-    "All SAS URLs provided correctly"
-  ],
-  "weaknesses": [
-    "Slide 4 layout slightly cramped with overlapping text",
-    "Could use more variety in slide layouts"
-  ]
-}}
-```
-
-**Example with bonus for proactive visualizations:**
-```json
-{{
-  "score": 98,
-  "reasoning": "Task asked for sales data CSV. System delivered CSV AND proactively created a beautiful sales trend chart and category breakdown pie chart without being asked. This shows excellent initiative and user-focused design. Bonus +8 points for proactive visualizations that add significant value.",
-  "strengths": [
-    "All requested CSV data delivered correctly",
-    "Proactively created sales trend line chart (not requested but very helpful!)",
-    "Proactively created category pie chart (excellent initiative!)",
-    "Professional chart design with clear labels",
-    "All files with SAS URLs provided"
+    "Directly answers user's request for 'Most Powerful Gen 1 Pokemon PowerPoint'",
+    "Professional structure: summary → insights → evidence → deliverables",
+    "Charts/images integrated into narrative (described before shown)",
+    "Clear insights about design choices and image quality",
+    "All SAS URLs provided with descriptive names",
+    "Engaging, confident tone throughout"
   ],
   "weaknesses": []
 }}
 ```
 
-**Example of penalty for missing preview links:**
+**Example of EXCELLENT new presentation style:**
+```json
+{{
+  "score": 98,
+  "reasoning": "Perfect example of insight-focused presentation. Task was to compare AJE vs AJA article counts, and response starts with direct answer: 'AJA publishes 40% more articles daily.' Provides key insights, trends, and analysis before showing evidence. Charts are described in context ('This trend chart reveals...') rather than dumped. Professional structure with executive summary, insights, evidence, and next steps. Bonus +5 points for proactive additional chart created.",
+  "strengths": [
+    "Answers question immediately: 'AJA publishes 40% more articles daily'",
+    "Provides meaningful insights: volume differences, weekday patterns, content strategy",
+    "Professional structure: hook → insights → visual evidence → deliverables → next steps",
+    "Charts integrated into narrative with descriptions",
+    "Strategic use of emojis and formatting",
+    "Proactive additional visualization (pie chart) not requested",
+    "All files with working SAS URLs"
+  ],
+  "weaknesses": []
+}}
+```
+
+**Example of POOR old-style file dump:**
 ```json
 {{
   "score": 45,
-  "reasoning": "Progress updates claimed 'preview images generated and uploaded' but no preview files found in deliverables. This is misleading and reduces output quality score significantly.",
+  "reasoning": "Traditional file dump approach that doesn't answer the user's question. Just lists deliverables without insights or analysis. No attempt to explain what the data shows or why it matters. User asked for comparison but got file inventory instead.",
   "strengths": [
-    "Main PPTX file was created"
+    "All requested files were created",
+    "SAS URLs provided for downloads"
   ],
   "weaknesses": [
-    "Progress updates mentioned preview images but none were delivered",
-    "No SAS URLs for previews despite claiming they were uploaded",
-    "Misleading status updates reduce trust in system output"
+    "No answer to user's question about AJE vs AJA comparison",
+    "No insights or analysis of the data",
+    "Just dumps files without context or explanation",
+    "No professional structure or engagement",
+    "Missing opportunity to explain trends and findings"
   ]
 }}
 ```
 
-**Example of penalty for missing charts when requested:**
+**Example of MEDIOCRE insight attempt:**
 ```json
 {{
-  "score": 35,
-  "reasoning": "Task explicitly requested 'comparison chart showing AJE vs AJA article counts' but only CSV file was delivered. CSV data alone does not fulfill the visualization requirement. This is a critical missing deliverable.",
+  "score": 72,
+  "reasoning": "Makes some attempt at insights but lacks professional structure. Starts with basic facts but doesn't provide deep analysis or explain significance. Files are listed rather than integrated into narrative. Could be much more engaging and comprehensive.",
   "strengths": [
-    "CSV data file was created with correct columns",
-    "Data appears accurate for the 30-day period"
+    "Provides some basic insights about article counts",
+    "Files are uploaded with SAS URLs",
+    "Attempts to answer the comparison question"
   ],
   "weaknesses": [
-    "No chart/visualization provided despite explicit request in task",
-    "Task asked for 'comparison chart' but only raw CSV delivered",
-    "Missing critical visual deliverable significantly reduces utility"
+    "Insights are surface-level without deep analysis",
+    "No professional structure (no executive summary, poor flow)",
+    "Files dumped at end without integration into story",
+    "Lacks engaging tone and strategic formatting",
+    "Missing explanation of why findings matter"
   ]
 }}
 ```
