@@ -2,7 +2,8 @@ import test from "ava";
 import { 
   AZURE_STORAGE_CONTAINER_NAMES, 
   DEFAULT_AZURE_STORAGE_CONTAINER_NAME,
-  isValidContainerName 
+  isValidContainerName,
+  getCurrentContainerNames
 } from "../src/blobHandler.js";
 
 // Mock environment variables for testing
@@ -131,7 +132,7 @@ test("DEFAULT_AZURE_STORAGE_CONTAINER_NAME should be the first container in the 
 
 test("isValidContainerName should return true for valid container names", (t) => {
   // Get current container names at runtime (not cached)
-  const currentContainers = AZURE_STORAGE_CONTAINER_NAMES;
+  const currentContainers = getCurrentContainerNames();
   
   // Test with each container name from the current configuration
   currentContainers.forEach(containerName => {
@@ -166,12 +167,14 @@ test("isValidContainerName should handle edge cases", (t) => {
 });
 
 test("container configuration should have at least one container", (t) => {
-  t.true(AZURE_STORAGE_CONTAINER_NAMES.length > 0, "Should have at least one container configured");
-  t.truthy(AZURE_STORAGE_CONTAINER_NAMES[0], "First container should not be empty");
+  const currentContainers = getCurrentContainerNames();
+  t.true(currentContainers.length > 0, "Should have at least one container configured");
+  t.truthy(currentContainers[0], "First container should not be empty");
 });
 
 test("all configured container names should be non-empty strings", (t) => {
-  AZURE_STORAGE_CONTAINER_NAMES.forEach((containerName, index) => {
+  const currentContainers = getCurrentContainerNames();
+  currentContainers.forEach((containerName, index) => {
     t.is(typeof containerName, 'string', `Container at index ${index} should be a string`);
     t.true(containerName.length > 0, `Container at index ${index} should not be empty`);
     t.true(containerName.trim().length > 0, `Container at index ${index} should not be only whitespace`);
@@ -179,8 +182,9 @@ test("all configured container names should be non-empty strings", (t) => {
 });
 
 test("container names should not contain duplicates", (t) => {
-  const uniqueNames = new Set(AZURE_STORAGE_CONTAINER_NAMES);
-  t.is(uniqueNames.size, AZURE_STORAGE_CONTAINER_NAMES.length, "Container names should be unique");
+  const currentContainers = getCurrentContainerNames();
+  const uniqueNames = new Set(currentContainers);
+  t.is(uniqueNames.size, currentContainers.length, "Container names should be unique");
 });
 
 // Integration test with actual environment simulation
