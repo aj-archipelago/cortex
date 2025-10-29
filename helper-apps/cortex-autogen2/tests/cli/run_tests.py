@@ -58,6 +58,13 @@ def print_test_result(result: dict):
     print(f"Duration: {result.get('duration_seconds', 0):.1f}s")
     print(f"Progress Updates: {result.get('progress_updates_count', 0)}")
     print(f"Files Created: {result.get('files_created_count', 0)}")
+
+    # Show final response data field
+    final_response = result.get('final_response', '')
+    if final_response:
+        print(f"\n📝 Final Response Data Field ({len(final_response)} chars):")
+        print(final_response)
+
     print(f"\n📊 Scores:")
     print(f"  Progress: {result.get('progress_evaluation', {}).get('score', 0)}/100")
     print(f"  Output: {result.get('output_evaluation', {}).get('score', 0)}/100")
@@ -184,12 +191,12 @@ async def run_all_tests():
     print("📊 Final Summary")
     print("=" * 80 + "\n")
 
-    passed = sum(1 for r in results if r.get('overall_score', 0) >= 70)
+    passed = sum(1 for r in results if r.get('overall_score', 0) > 80)
     failed = len(results) - passed
 
     print(f"Total Tests: {len(results)}")
-    print(f"Passed (≥70): {passed}")
-    print(f"Failed (<70): {failed}")
+    print(f"Passed (>80): {passed}")
+    print(f"Failed (≤80): {failed}")
 
     avg_overall = sum(r.get('overall_score', 0) for r in results) / len(results) if results else 0
     print(f"Average Overall Score: {avg_overall:.1f}/100")

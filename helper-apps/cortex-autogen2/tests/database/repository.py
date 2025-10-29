@@ -301,7 +301,7 @@ class TestRepository:
         output_weaknesses: Optional[List[str]] = None
     ):
         """Save evaluation scores and reasoning."""
-        overall_score = int((progress_score + output_score) / 2)
+        overall_score = int((output_score * 0.8) + (progress_score * 0.2))
 
         conn = self._get_connection()
         cursor = conn.cursor()
