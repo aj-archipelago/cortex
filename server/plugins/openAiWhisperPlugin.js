@@ -19,13 +19,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
     // Minimal 429 retry wrapper for Whisper API calls
     async executeWhisperRequest(cortexRequest) {
         const maxRetries = 9;
-        let lastError;
         
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
                 return await this.executeRequest(cortexRequest);
             } catch (error) {
-                lastError = error;
                 
                 // Check if it's a 429 error
                 const is429 = error?.status === 429 || 
@@ -39,7 +37,10 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 
                 // Calculate backoff delay (exponential with jitter)
                 const retryAfter = error?.response?.headers?.['retry-after'];
-                const baseDelay = retryAfter ? parseInt(retryAfter) * 1000 : 2000 * Math.pow(2, attempt);
+                // Fix: Validate parseInt result to prevent NaN
+                const baseDelay = retryAfter && !isNaN(parseInt(retryAfter)) 
+                    ? parseInt(retryAfter) * 1000 
+                    : 2000 * Math.pow(2, attempt);
                 const jitter = baseDelay * 0.2 * Math.random();
                 const delay = baseDelay + jitter;
                 
@@ -48,7 +49,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             }
         }
         
-        throw lastError;
+        // Remove unreachable code - this line was never reached
     }
 
     // Execute the request to the OpenAI Whisper API
