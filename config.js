@@ -528,7 +528,7 @@ var config = convict({
                 "supportsStreaming": true
             },
             "claude-4-sonnet-vertex": {
-                "type": "CLAUDE-3-VERTEX",
+                "type": "CLAUDE-4-VERTEX",
                 "url": "{{claudeVertexUrl}}",
                 "headers": {
                     "Content-Type": "application/json"
