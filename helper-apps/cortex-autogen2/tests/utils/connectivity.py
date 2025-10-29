@@ -66,11 +66,7 @@ def check_ajsql_connectivity() -> Tuple[bool, str]:
             port = 3306
 
         # Try to connect with a short timeout
-        db_info = f"{database}" if database else "no database (multi-db access)"
-        logger.info(f"Testing AJ SQL connectivity to {host}:{port}/{db_info}")
-
-        # AJ MySQL server requires SSL (always enable it)
-        logger.info("Enabling SSL for AJ MySQL connection")
+        logger.info(f"Testing AJ SQL connectivity to {host}:{port}")
 
         # Build connection params
         connect_params = {
