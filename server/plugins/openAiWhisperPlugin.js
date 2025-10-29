@@ -16,6 +16,42 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         super(pathway, model);
     }
 
+    // Minimal 429 retry wrapper for Whisper API calls
+    async executeWhisperRequest(cortexRequest) {
+        const maxRetries = 9;
+        
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                return await this.executeRequest(cortexRequest);
+            } catch (error) {
+                
+                // Check if it's a 429 error
+                const is429 = error?.status === 429 || 
+                             error?.response?.status === 429 ||
+                             error?.message?.includes('429');
+                
+                if (!is429 || attempt === maxRetries - 1) {
+                    // Not a 429 or max retries reached, rethrow
+                    throw error;
+                }
+                
+                // Calculate backoff delay (exponential with jitter)
+                const retryAfter = error?.response?.headers?.['retry-after'];
+                // Fix: Validate parseInt result to prevent NaN
+                const baseDelay = retryAfter && !isNaN(parseInt(retryAfter)) 
+                    ? parseInt(retryAfter) * 1000 
+                    : 2000 * Math.pow(2, attempt);
+                const jitter = baseDelay * 0.2 * Math.random();
+                const delay = baseDelay + jitter;
+                
+                logger.warn(`Whisper 429 error (attempt ${attempt + 1}/${maxRetries}). Retrying in ${Math.round(delay)}ms`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+        
+        // Remove unreachable code - this line was never reached
+    }
+
     // Execute the request to the OpenAI Whisper API
     async execute(text, parameters, prompt, cortexRequest) {
         const { pathwayResolver } = cortexRequest;
@@ -47,7 +83,9 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 };
 
                 cortexRequest.initCallback = whisperInitCallback;
-                return this.executeRequest(cortexRequest);
+                
+                // return this.executeRequest(cortexRequest);
+                return this.executeWhisperRequest(cortexRequest);
 
             } catch (err) {
                 logger.error(`Error getting word timestamped data from api: ${err}`);
@@ -72,7 +110,10 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             cortexRequest.initCallback = whisperInitCallback;
 
             sendProgress(true, true);
-            const res = await this.executeRequest(cortexRequest);
+            
+            // const res = await this.executeRequest(cortexRequest);
+            const res = await this.executeWhisperRequest(cortexRequest);
+            
             if (!res) {
                 throw new Error('Received null or empty response');
             }
