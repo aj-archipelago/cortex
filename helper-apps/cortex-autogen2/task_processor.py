@@ -507,7 +507,7 @@ Return ONLY: [emoji] [professional update text]"""
 
         role_names = {
             "planner_agent", "coder_agent", "code_executor", "terminator_agent",
-            "presenter_agent", "file_cloud_uploader_agent", "aj_sql_agent",
+            "presenter_agent", "aj_sql_agent",
             "aj_article_writer_agent", "cognitive_search_agent", "web_search_agent"
         }
         # If the entire content is just a role name, treat as internal
@@ -846,9 +846,9 @@ Return ONLY: [emoji] [professional update text]"""
                 # Update progress during presenter turns (file uploads happening)
                 try:
                     if turn_num == 0:
-                        await self.progress_tracker.set_transient_update(task_id, 0.93, "📤 Processing file uploads...")
+                        await self.progress_tracker.set_transient_update(task_id, 0.94, "📤 Processing file uploads...")
                     elif turn_num == 1:
-                        await self.progress_tracker.set_transient_update(task_id, 0.94, "🎨 Preparing final presentation...")
+                        await self.progress_tracker.set_transient_update(task_id, 0.95, "🎨 Preparing final presentation...")
                 except Exception:
                     pass
 
@@ -888,11 +888,31 @@ Return ONLY: [emoji] [professional update text]"""
                 logger.warning("⚠️ Presenter didn't generate final text after all turns")
                 text_result = "Task completed. Please check uploaded files."
 
-            # No presenter normalization or auto-upload based on text; rely on strict prompts
-            try:
-                pass
-            except Exception:
-                pass
+            # Auto-upload files marked as "Ready for upload" by code_executor
+            uploaded_files = {}
+            if presenter_agent and hasattr(presenter_agent, '_tools'):
+                # Scan all conversation messages for "Ready for upload" markers
+                for message in conversation_messages:
+                    content = str(getattr(message, 'content', ''))
+                    import re
+                    upload_markers = re.findall(r'📁 Ready for upload: ([^\s]+)', content)
+                    for file_path in upload_markers:
+                        if file_path not in uploaded_files and os.path.exists(file_path):
+                            try:
+                                # Use the enhanced upload function directly
+                                from tools.azure_blob_tools import upload_file_to_azure_blob
+                                upload_result = upload_file_to_azure_blob(file_path)
+                                parsed_result = json.loads(upload_result) if isinstance(upload_result, str) else upload_result
+                                if 'sas_url' in parsed_result:
+                                    uploaded_files[file_path] = parsed_result['sas_url']
+                                    logger.info(f"✅ Auto-uploaded: {file_path} -> {parsed_result['sas_url']}")
+                                else:
+                                    logger.warning(f"❌ Upload failed for: {file_path} - {parsed_result}")
+                            except Exception as e:
+                                logger.error(f"❌ Upload error for {file_path}: {e}")
+
+                if uploaded_files:
+                    logger.info(f"📁 Auto-uploaded {len(uploaded_files)} files from code_executor output")
 
             # No post-sanitization here; enforce via presenter prompt only per user request
 

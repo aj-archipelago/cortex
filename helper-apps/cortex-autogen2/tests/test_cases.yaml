@@ -47,7 +47,6 @@ test_cases:
       - web_search_agent
       - coder_agent
       - code_executor
-      - file_cloud_uploader_agent
       - presenter_agent
 
   - id: tc002_pdf_with_images
@@ -78,7 +77,6 @@ test_cases:
       - web_search_agent
       - coder_agent
       - code_executor
-      - file_cloud_uploader_agent
       - presenter_agent
 
   - id: tc003_random_csv
@@ -108,7 +106,6 @@ test_cases:
       - planner_agent
       - coder_agent
       - code_executor
-      - file_cloud_uploader_agent
       - presenter_agent
 
   - id: tc004_aje_aja_comparison
@@ -139,7 +136,6 @@ test_cases:
       - aj_sql_agent
       - coder_agent
       - code_executor
-      - file_cloud_uploader_agent
       - presenter_agent
 
   - id: tc005_aje_trump_trend
@@ -171,7 +167,6 @@ test_cases:
       - aj_sql_agent
       - coder_agent
       - code_executor
-      - file_cloud_uploader_agent
       - presenter_agent
 
   - id: tc006_aje_trump_daily
@@ -208,7 +203,6 @@ test_cases:
       - aj_sql_agent
       - coder_agent
       - code_executor
-      - file_cloud_uploader_agent
       - presenter_agent
 
   - id: tc007_aja_aje_wordclouds
@@ -249,7 +243,6 @@ test_cases:
       - aj_sql_agent
       - coder_agent
       - code_executor
-      - file_cloud_uploader_agent
       - presenter_agent
 
   - id: tc008_aje_aja_override_test
@@ -283,5 +276,4 @@ test_cases:
       - aj_sql_agent
       - coder_agent
       - code_executor
-      - file_cloud_uploader_agent
       - presenter_agent
