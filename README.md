@@ -540,6 +540,7 @@ Models are configured in the `models` section of the config. Each model can have
 - `GEMINI-1.5-CHAT`: For Gemini 1.5 Pro chat models
 - `GEMINI-1.5-VISION`: For Gemini vision models (including 2.0 Flash experimental)
 - `CLAUDE-3-VERTEX`: For Claude-3 and 3.5 models (Haiku, Opus, Sonnet)
+- `CLAUDE-4-VERTEX`: For Claude-4 models (Sonnet 4, Sonnet 4.5, Opus 4.1, Haiku 4.5) with enhanced support for PDFs and text files
 - `GROK-VISION`: For XAI Grok models (Grok-3, Grok-4, fast-reasoning, code-fast) with multimodal/vision and reasoning
 - `AZURE-TRANSLATE`: For Azure translation services
 
