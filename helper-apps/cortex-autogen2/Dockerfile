@@ -23,10 +23,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         fonts-noto-core fonts-noto-ui-core \
         fonts-noto-color-emoji fonts-noto-cjk \
         fonts-dejavu fonts-dejavu-core fonts-dejavu-extra \
-        fonts-freefont-ttf fonts-liberation2 \
-        # ─ Arabic fonts specifically for matplotlib/reportlab
-        fonts-arabeyes fonts-farsiweb fonts-kacst fonts-kacst-one \
-        fonts-hosny-amiri fonts-sil-scheherazade fonts-sil-lateef \
+        fonts-freefont-ttf fonts-liberation \
         # ─ Build chain for packages that still compile C/C++
         build-essential gcc g++ make \
         # ─ libmagic for `python-magic`
@@ -40,13 +37,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
         # ─ Computer-vision helpers sometimes needed by OpenCV
         libsm6 libxext6 libglib2.0-0 \
         # ─ HDF5 stack for `h5py`
-        libhdf5-serial-dev hdf5-tools \
+        libhdf5-dev hdf5-tools \
         # ─ Cairo / Pango / GDK-PixBuf for SVG->PNG rendering (CairoSVG optional deps)
         libcairo2 libcairo2-dev \
         libpango-1.0-0 libpangoft2-1.0-0 libpangocairo-1.0-0 \
         libgdk-pixbuf-2.0-0 libgdk-pixbuf2.0-bin \
-        # ─ GDAL for GIS formats (and Python bindings)
-        gdal-bin libgdal-dev python3-gdal \
         # ─ 7-Zip & RAR extractors (for patool / rarfile fall-back)
         unrar-free \
         # ─ LibreOffice for PPTX → PDF conversion (slide previews)
@@ -57,9 +52,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Allow GDAL Python wheels to find headers
-ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
-ENV C_INCLUDE_PATH=/usr/include/gdal
 
 # ------------------------------------------------------------------------------
 # 3. Python dependencies
