@@ -2,6 +2,9 @@ import Claude3VertexPlugin from "./claude3VertexPlugin.js";
 import logger from "../../lib/logger.js";
 import axios from 'axios';
 
+// Claude 4 default maximum file size limit (30MB) for both images and PDFs
+const CLAUDE4_DEFAULT_MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
+
 // Helper function to detect file type from URL or content
 function detectFileType(url, contentType) {
   const lowerUrl = url.toLowerCase();
@@ -168,6 +171,12 @@ async function convertContentItemClaude4(item, maxImageSize, plugin) {
                 // Fetch the PDF from the URL (Azure Blob Storage or http/https)
                 const pdfData = await fetchFileAsDataURL(imageUrl, 'pdf');
                 const base64Pdf = pdfData.split(",")[1];
+                const pdfSize = Buffer.from(base64Pdf, 'base64').length;
+                
+                if (pdfSize > maxImageSize) {
+                  logger.warn(`PDF size ${pdfSize} bytes exceeds maximum allowed size ${maxImageSize} - skipping PDF content.`);
+                  return null;
+                }
                 
                 return {
                   type: "document",
@@ -252,6 +261,12 @@ async function convertContentItemClaude4(item, maxImageSize, plugin) {
                 // Fetch PDF and convert to base64
                 const pdfData = await fetchFileAsDataURL(documentUrl, 'pdf');
                 const base64Pdf = pdfData.split(",")[1];
+                const pdfSize = Buffer.from(base64Pdf, 'base64').length;
+                
+                if (pdfSize > maxImageSize) {
+                  logger.warn(`PDF size ${pdfSize} bytes exceeds maximum allowed size ${maxImageSize} - skipping PDF content.`);
+                  return null;
+                }
                 
                 return {
                   type: "document",
@@ -278,6 +293,13 @@ async function convertContentItemClaude4(item, maxImageSize, plugin) {
               const mediaType = item.media_type || item.source?.media_type || "application/pdf";
               
               if (mediaType.includes('pdf')) {
+                const pdfSize = Buffer.from(documentData, 'base64').length;
+                
+                if (pdfSize > maxImageSize) {
+                  logger.warn(`PDF size ${pdfSize} bytes exceeds maximum allowed size ${maxImageSize} - skipping PDF content.`);
+                  return null;
+                }
+                
                 return {
                   type: "document",
                   source: {
@@ -317,6 +339,11 @@ class Claude4VertexPlugin extends Claude3VertexPlugin {
   constructor(pathway, model) {
     super(pathway, model);
     this.isMultiModal = true;
+  }
+  
+  // Override to use 30MB default for Claude 4 (instead of 20MB)
+  getModelMaxImageSize() {
+    return (this.promptParameters.maxImageSize ?? this.model.maxImageSize ?? CLAUDE4_DEFAULT_MAX_FILE_SIZE);
   }
   
   // Override convertMessagesToClaudeVertex to use the extended content conversion
