@@ -1,7 +1,6 @@
 import test from 'ava';
 import Claude4VertexPlugin from '../../../server/plugins/claude4VertexPlugin.js';
 import { mockPathwayResolverMessages } from '../../helpers/mocks.js';
-import { config } from '../../../config.js';
 
 const { pathway, modelName, model } = mockPathwayResolverMessages;
 

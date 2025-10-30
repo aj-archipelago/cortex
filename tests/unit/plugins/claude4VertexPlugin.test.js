@@ -11,9 +11,8 @@ function loadTestData(filename) {
     const filePath = path.join(process.cwd(), 'tests', 'data', filename);
     return fs.readFileSync(filePath, 'utf8');
   } catch (error) {
-    console.error(`Error loading test data file ${filename}:`, error);
-    // Return a smaller fallback test string if file loading fails
-    return 'a '.repeat(1000); 
+    // Throw error to make test failures explicit when required data is missing
+    throw new Error(`Failed to load required test data file ${filename}: ${error.message}`);
   }
 }
 

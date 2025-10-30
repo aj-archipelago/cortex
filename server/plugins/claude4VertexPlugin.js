@@ -16,10 +16,12 @@ function detectFileType(url, contentType) {
     }
   }
   
-  // Check URL extension
-  if (lowerUrl.includes('.pdf')) return 'pdf';
-  if (lowerUrl.includes('.txt') || lowerUrl.includes('.text')) return 'text';
-  if (lowerUrl.includes('.md') || lowerUrl.includes('.markdown')) return 'text';
+  // Check URL extension - extract path before query string/fragment and check if it ends with extension
+  // Remove query string and fragment for more accurate extension detection
+  const urlPath = lowerUrl.split('?')[0].split('#')[0];
+  if (urlPath.endsWith('.pdf')) return 'pdf';
+  if (urlPath.endsWith('.txt') || urlPath.endsWith('.text')) return 'text';
+  if (urlPath.endsWith('.md') || urlPath.endsWith('.markdown')) return 'text';
   
   // Check content type parameter
   if (contentType) {
@@ -156,7 +158,7 @@ async function convertContentItemClaude4(item, maxImageSize, plugin) {
             // Check if this is actually a PDF document (by filename or URL extension)
             // Do this BEFORE image validation since PDFs are not images
             const isPDF = originalFilename.toLowerCase().endsWith('.pdf') || 
-                          imageUrl.toLowerCase().includes('.pdf');
+                          detectFileType(imageUrl) === 'pdf';
             const isTxt = originalFilename.toLowerCase().endsWith('.txt') ||
                           originalFilename.toLowerCase().endsWith('.md');
 
