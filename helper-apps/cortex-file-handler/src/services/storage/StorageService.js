@@ -163,9 +163,10 @@ export class StorageService {
   /**
    * Delete a single file by its hash from both primary and backup storage
    * @param {string} hash - The hash of the file to delete
+   * @param {string} containerName - Optional container name for scoping the hash
    * @returns {Promise<Object>} Object containing deletion results and file info
    */
-  async deleteFileByHash(hash) {
+  async deleteFileByHash(hash, containerName = null) {
     await this._initialize();
     
     if (!hash) {
@@ -175,11 +176,12 @@ export class StorageService {
     const results = [];
 
     // Get and remove file information from Redis map (non-atomic operations)
-    const { getFileStoreMap, removeFromFileStoreMap } = await import("../../redis.js");
-    const hashResult = await getFileStoreMap(hash);
+    const { getFileStoreMap, removeFromFileStoreMap, getScopedHashKey } = await import("../../redis.js");
+    const scopedHash = getScopedHashKey(hash, containerName);
+    const hashResult = await getFileStoreMap(scopedHash);
     
     if (hashResult) {
-      await removeFromFileStoreMap(hash);
+      await removeFromFileStoreMap(scopedHash);
     }
     
     if (!hashResult) {

@@ -2,6 +2,33 @@ import redis from "ioredis";
 
 const connectionString = process.env["REDIS_CONNECTION_STRING"];
 
+/**
+ * Generate a scoped hash key for Redis storage
+ * If container is the default container or not provided, returns just the hash
+ * Otherwise, returns hash:container to scope by container
+ * @param {string} hash - The file hash
+ * @param {string} containerName - The container name (optional)
+ * @returns {string} The scoped hash key
+ */
+export const getScopedHashKey = (hash, containerName = null) => {
+  if (!hash) return hash;
+  
+  // Get default container name
+  const parseContainerNames = () => {
+    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+    return containerStr.split(',').map(name => name.trim());
+  };
+  const defaultContainer = parseContainerNames()[0];
+  
+  // If no container provided or it's the default, return just the hash
+  if (!containerName || containerName === defaultContainer) {
+    return hash;
+  }
+  
+  // Otherwise, scope by container
+  return `${hash}:${containerName}`;
+};
+
 // Create a mock client for test environment when Redis is not configured
 const createMockClient = () => {
   const store = new Map();

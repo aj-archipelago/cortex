@@ -82,7 +82,7 @@ export const getCurrentContainerNames = () => {
 };
 
 export const AZURE_STORAGE_CONTAINER_NAMES = parseContainerNames();
-export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = AZURE_STORAGE_CONTAINER_NAMES[0];
+export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME || AZURE_STORAGE_CONTAINER_NAMES[0];
 export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
 
 // Validate if a container name is allowed
@@ -826,6 +826,10 @@ async function uploadFile(
 
     if (hash) {
       result.hash = hash;
+    }
+    
+    if (containerName) {
+      result.container = containerName;
     }
 
     // Initialize conversion service
