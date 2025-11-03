@@ -209,7 +209,10 @@ test.serial("should scope hash for default container with container name", async
   }
 
   const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
+  const originalDefaultEnv = process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
   process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
+  // Ensure test1 is the default container
+  delete process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
 
   try {
     const testHash = `hash-default-test-${uuidv4()}`;
@@ -254,6 +257,11 @@ test.serial("should scope hash for default container with container name", async
     } else {
       delete process.env.AZURE_STORAGE_CONTAINER_NAME;
     }
+    if (originalDefaultEnv) {
+      process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME = originalDefaultEnv;
+    } else {
+      delete process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
+    }
   }
 });
 
@@ -265,7 +273,10 @@ test.serial("should support backwards compatibility for legacy hashes in default
   }
 
   const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
+  const originalDefaultEnv = process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
   process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
+  // Ensure test1 is the default container for backwards compatibility logic
+  delete process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
 
   try {
     const testHash = `hash-legacy-test-${uuidv4()}`;
@@ -335,6 +346,11 @@ test.serial("should support backwards compatibility for legacy hashes in default
       process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
     } else {
       delete process.env.AZURE_STORAGE_CONTAINER_NAME;
+    }
+    if (originalDefaultEnv) {
+      process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME = originalDefaultEnv;
+    } else {
+      delete process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
     }
   }
 });
