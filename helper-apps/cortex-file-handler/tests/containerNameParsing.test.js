@@ -1,7 +1,7 @@
 import test from "ava";
 import { 
   AZURE_STORAGE_CONTAINER_NAMES, 
-  DEFAULT_AZURE_STORAGE_CONTAINER_NAME,
+  getDefaultContainerName,
   isValidContainerName,
   getCurrentContainerNames
 } from "../src/blobHandler.js";
@@ -119,15 +119,16 @@ test("parseContainerNames should handle only commas", (t) => {
   t.is(result[3], "");
 });
 
-test("DEFAULT_AZURE_STORAGE_CONTAINER_NAME should be the first container in the list", (t) => {
+test("getDefaultContainerName should return the first container in the list", (t) => {
   // Test with current module exports (these are loaded at import time)
   // The default should be the first item in the array
-  t.is(DEFAULT_AZURE_STORAGE_CONTAINER_NAME, AZURE_STORAGE_CONTAINER_NAMES[0]);
+  const defaultContainer = getDefaultContainerName();
+  t.is(defaultContainer, AZURE_STORAGE_CONTAINER_NAMES[0]);
   
   // Additional validation that it's a non-empty string
-  t.truthy(DEFAULT_AZURE_STORAGE_CONTAINER_NAME);
-  t.is(typeof DEFAULT_AZURE_STORAGE_CONTAINER_NAME, 'string');
-  t.true(DEFAULT_AZURE_STORAGE_CONTAINER_NAME.length > 0);
+  t.truthy(defaultContainer);
+  t.is(typeof defaultContainer, 'string');
+  t.true(defaultContainer.length > 0);
 });
 
 test("isValidContainerName should return true for valid container names", (t) => {

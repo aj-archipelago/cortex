@@ -22,7 +22,7 @@ import {
   parseContainerNames,
   getCurrentContainerNames,
   AZURE_STORAGE_CONTAINER_NAMES,
-  DEFAULT_AZURE_STORAGE_CONTAINER_NAME,
+  getDefaultContainerName,
   GCS_BUCKETNAME,
   isValidContainerName
 } from "./constants.js";
@@ -181,7 +181,7 @@ async function downloadFromGCS(gcsUrl, destinationPath) {
 
 export const getBlobClient = async (containerName = null) => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  const finalContainerName = containerName || DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
+  const finalContainerName = containerName || getDefaultContainerName();
 
   // Validate container name is in whitelist
   if (!isValidContainerName(finalContainerName)) {
@@ -1150,7 +1150,7 @@ export {
   // Re-export container constants for backward compatibility
   getCurrentContainerNames,
   AZURE_STORAGE_CONTAINER_NAMES,
-  DEFAULT_AZURE_STORAGE_CONTAINER_NAME,
+  getDefaultContainerName,
   GCS_BUCKETNAME,
   isValidContainerName,
 };

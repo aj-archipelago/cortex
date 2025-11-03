@@ -6,7 +6,7 @@ import cors from "cors";
 import { readFileSync } from "fs";
 
 import { publicIpv4 } from "public-ip";
-import { AZURE_STORAGE_CONTAINER_NAMES, DEFAULT_AZURE_STORAGE_CONTAINER_NAME } from "./blobHandler.js";
+import { AZURE_STORAGE_CONTAINER_NAMES, getDefaultContainerName } from "./blobHandler.js";
 
 // When running under tests we want all generated URLs to resolve to the
 // locally-running server, otherwise checks like HEAD requests inside the
@@ -97,7 +97,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       
       // Debug: Show configured container names
       console.log(`Configured container names: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`);
-      console.log(`Default container name: ${DEFAULT_AZURE_STORAGE_CONTAINER_NAME}`);
+      console.log(`Default container name: ${getDefaultContainerName()}`);
     });
   });
 }

@@ -1,5 +1,5 @@
 import redis from "ioredis";
-import { DEFAULT_AZURE_STORAGE_CONTAINER_NAME } from "./constants.js";
+import { getDefaultContainerName } from "./constants.js";
 
 const connectionString = process.env["REDIS_CONNECTION_STRING"];
 
@@ -14,8 +14,11 @@ const connectionString = process.env["REDIS_CONNECTION_STRING"];
 export const getScopedHashKey = (hash, containerName = null) => {
   if (!hash) return hash;
   
+  // Get the default container name at runtime to support dynamic env changes in tests
+  const defaultContainerName = getDefaultContainerName();
+  
   // If no container provided or it's the default, return just the hash
-  if (!containerName || containerName === DEFAULT_AZURE_STORAGE_CONTAINER_NAME) {
+  if (!containerName || containerName === defaultContainerName) {
     return hash;
   }
   

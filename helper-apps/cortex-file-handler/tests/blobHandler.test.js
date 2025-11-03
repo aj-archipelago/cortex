@@ -12,7 +12,7 @@ import {
   deleteGCS,
   getBlobClient,
   AZURE_STORAGE_CONTAINER_NAMES,
-  DEFAULT_AZURE_STORAGE_CONTAINER_NAME,
+  getDefaultContainerName,
   isValidContainerName,
 } from "../src/blobHandler.js";
 import { urlExists } from "../src/helper.js";
@@ -330,10 +330,11 @@ test("AZURE_STORAGE_CONTAINER_NAMES should be an array with at least one contain
   });
 });
 
-test("DEFAULT_AZURE_STORAGE_CONTAINER_NAME should be the first container", (t) => {
-  t.is(DEFAULT_AZURE_STORAGE_CONTAINER_NAME, AZURE_STORAGE_CONTAINER_NAMES[0]);
-  t.truthy(DEFAULT_AZURE_STORAGE_CONTAINER_NAME);
-  t.is(typeof DEFAULT_AZURE_STORAGE_CONTAINER_NAME, 'string');
+test("getDefaultContainerName should return the first container", (t) => {
+  const defaultContainer = getDefaultContainerName();
+  t.is(defaultContainer, AZURE_STORAGE_CONTAINER_NAMES[0]);
+  t.truthy(defaultContainer);
+  t.is(typeof defaultContainer, 'string');
 });
 
 test("isValidContainerName should validate container names correctly", (t) => {

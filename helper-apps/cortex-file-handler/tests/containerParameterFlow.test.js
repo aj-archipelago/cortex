@@ -11,7 +11,7 @@ import {
   uploadBlob,
   isValidContainerName,
   AZURE_STORAGE_CONTAINER_NAMES,
-  DEFAULT_AZURE_STORAGE_CONTAINER_NAME,
+  getDefaultContainerName,
 } from "../src/blobHandler.js";
 import CortexFileHandler from "../src/index.js";
 import {
@@ -315,8 +315,9 @@ test("should use default container when no container specified", async (t) => {
   }
 
   // Test that default container is first in the list
-  t.is(DEFAULT_AZURE_STORAGE_CONTAINER_NAME, AZURE_STORAGE_CONTAINER_NAMES[0]);
-  t.true(isValidContainerName(DEFAULT_AZURE_STORAGE_CONTAINER_NAME));
+  const defaultContainer = getDefaultContainerName();
+  t.is(defaultContainer, AZURE_STORAGE_CONTAINER_NAMES[0]);
+  t.true(isValidContainerName(defaultContainer));
 
   // Create a test file
   const testContent = "test content for default container";
