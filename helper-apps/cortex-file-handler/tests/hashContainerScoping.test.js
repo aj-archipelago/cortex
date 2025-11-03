@@ -5,21 +5,19 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import { port } from "../src/start.js";
+import { startTestServer } from "./testUtils.helper.js";
 
 // Test server setup
-let port;
 let baseUrl;
 let server;
 
 // Start test server before running tests
 test.before(async (t) => {
-  // Use a dynamic port for testing
-  port = 7073;
   baseUrl = `http://localhost:${port}/api/CortexFileHandler`;
 
   // Start the test server
-  const { startTestServer } = await import("./testUtils.helper.js");
-  server = await startTestServer(port);
+  server = await startTestServer();
 });
 
 // Clean up server after tests
