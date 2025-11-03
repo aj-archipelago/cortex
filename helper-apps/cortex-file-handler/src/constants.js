@@ -150,7 +150,7 @@ export const AZURE_STORAGE_CONTAINER_NAMES = parseContainerNames();
 // Helper function to get the default container name at runtime
 // This allows tests to change the environment variable and have the correct default
 export const getDefaultContainerName = () => {
-  return process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME || getCurrentContainerNames()[0];
+  return process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME || AZURE_STORAGE_CONTAINER_NAMES[0];
 };
 
 export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME || AZURE_STORAGE_CONTAINER_NAMES[0];
