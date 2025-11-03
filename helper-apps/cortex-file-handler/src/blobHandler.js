@@ -16,7 +16,16 @@ import {
   generateBlobName,
 } from "./utils/filenameUtils.js";
 import { publicFolder, port, ipAddress } from "./start.js";
-import { CONVERTED_EXTENSIONS, AZURITE_ACCOUNT_NAME } from "./constants.js";
+import { 
+  CONVERTED_EXTENSIONS, 
+  AZURITE_ACCOUNT_NAME,
+  parseContainerNames,
+  getCurrentContainerNames,
+  AZURE_STORAGE_CONTAINER_NAMES,
+  getDefaultContainerName,
+  GCS_BUCKETNAME,
+  isValidContainerName
+} from "./constants.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageFactory } from "./services/storage/StorageFactory.js";
 
@@ -69,28 +78,6 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
     );
   }
 }
-
-// Parse comma-separated container names from environment variable
-const parseContainerNames = () => {
-  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
-  return containerStr.split(',').map(name => name.trim());
-};
-
-// Helper function to get current container names at runtime
-export const getCurrentContainerNames = () => {
-  return parseContainerNames();
-};
-
-export const AZURE_STORAGE_CONTAINER_NAMES = parseContainerNames();
-export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = AZURE_STORAGE_CONTAINER_NAMES[0];
-export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
-
-// Validate if a container name is allowed
-export const isValidContainerName = (containerName) => {
-  // Read from environment at runtime to support dynamically changing env in tests
-  const currentContainerNames = getCurrentContainerNames();
-  return currentContainerNames.includes(containerName);
-};
 
 function isEncoded(str) {
   // Checks for any percent-encoded sequence
@@ -194,7 +181,7 @@ async function downloadFromGCS(gcsUrl, destinationPath) {
 
 export const getBlobClient = async (containerName = null) => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  const finalContainerName = containerName || DEFAULT_AZURE_STORAGE_CONTAINER_NAME;
+  const finalContainerName = containerName || getDefaultContainerName();
 
   // Validate container name is in whitelist
   if (!isValidContainerName(finalContainerName)) {
@@ -350,10 +337,12 @@ function uploadBlob(
             
             if (errorOccurred) return; // Check again after waiting
 
-            await processFile(fieldname, file, info);
+            // Capture containerName value to avoid closure issues
+            const capturedContainerName = containerName;
+            await processFile(fieldname, file, info, capturedContainerName);
           });
 
-          const processFile = async (fieldname, file, info) => {
+          const processFile = async (fieldname, file, info, capturedContainerName) => {
             if (errorOccurred) return;
 
             // Validate file
@@ -449,7 +438,7 @@ function uploadBlob(
                 context,
                 uploadName,
                 azureStream,
-                containerName,
+                capturedContainerName,
               ).catch(async (err) => {
                 cloudUploadError = err;
                 // Fallback: try from disk if available
@@ -459,7 +448,7 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToAzureStorage(context, uploadName, diskStream, containerName);
+                  return saveToAzureStorage(context, uploadName, diskStream, capturedContainerName);
                 }
                 throw err;
               });
@@ -511,6 +500,7 @@ function uploadBlob(
                 }, {}),
               };
               if (hash) result.hash = hash;
+              if (capturedContainerName) result.container = capturedContainerName;
 
               // If saving locally, wait for disk write to finish and then move to public folder
               if (saveToLocal) {
@@ -582,7 +572,7 @@ function uploadBlob(
                         conversion.convertedPath,
                         requestId,
                         null,
-                        containerName,
+                        capturedContainerName,
                       );
 
                     // Optionally save to GCS
@@ -826,6 +816,10 @@ async function uploadFile(
 
     if (hash) {
       result.hash = hash;
+    }
+    
+    if (containerName) {
+      result.container = containerName;
     }
 
     // Initialize conversion service
@@ -1156,4 +1150,10 @@ export {
   gcs,
   uploadChunkToGCS,
   downloadFromGCS,
+  // Re-export container constants for backward compatibility
+  getCurrentContainerNames,
+  AZURE_STORAGE_CONTAINER_NAMES,
+  getDefaultContainerName,
+  GCS_BUCKETNAME,
+  isValidContainerName,
 };

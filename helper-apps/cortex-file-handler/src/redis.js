@@ -1,6 +1,27 @@
 import redis from "ioredis";
+import { getDefaultContainerName } from "./constants.js";
 
 const connectionString = process.env["REDIS_CONNECTION_STRING"];
+
+/**
+ * Generate a scoped hash key for Redis storage
+ * Always includes the container name in the format hash:container
+ * @param {string} hash - The file hash
+ * @param {string} containerName - The container name (optional, defaults to default container)
+ * @returns {string} The scoped hash key
+ */
+export const getScopedHashKey = (hash, containerName = null) => {
+  if (!hash) return hash;
+  
+  // Get the default container name at runtime to support dynamic env changes in tests
+  const defaultContainerName = getDefaultContainerName();
+  
+  // Use default container if not provided
+  const container = containerName || defaultContainerName;
+  
+  // Always scope by container
+  return `${hash}:${container}`;
+};
 
 // Create a mock client for test environment when Redis is not configured
 const createMockClient = () => {
@@ -123,7 +144,28 @@ const setFileStoreMap = async (key, value) => {
 
 const getFileStoreMap = async (key, skipLazyCleanup = false) => {
   try {
-    const value = await client.hget("FileStoreMap", key);
+    let value = await client.hget("FileStoreMap", key);
+    
+    // Backwards compatibility: if not found and key is for default container, try legacy key
+    if (!value && key && key.includes(':')) {
+      const [hash, containerName] = key.split(':', 2);
+      const defaultContainerName = getDefaultContainerName();
+      
+      // If this is the default container, try the legacy key (hash without container)
+      if (containerName === defaultContainerName) {
+        console.log(`Key ${key} not found, trying legacy key ${hash} for backwards compatibility`);
+        value = await client.hget("FileStoreMap", hash);
+        
+        // If found with legacy key, migrate it to the new scoped key
+        if (value) {
+          console.log(`Found value with legacy key ${hash}, migrating to new key ${key}`);
+          await client.hset("FileStoreMap", key, value);
+          // Optionally remove the old key after migration
+          // await client.hdel("FileStoreMap", hash);
+        }
+      }
+    }
+    
     if (value) {
       try {
         // parse the value back to an object before returning

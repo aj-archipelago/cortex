@@ -132,3 +132,33 @@ export const CONVERTED_EXTENSIONS = [
 
 // Azure Storage constants
 export const AZURITE_ACCOUNT_NAME = "devstoreaccount1";
+
+// Parse comma-separated container names from environment variable
+export const parseContainerNames = () => {
+  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+  return containerStr.split(',').map(name => name.trim());
+};
+
+// Helper function to get current container names at runtime
+// Useful for runtime validation when env vars might change (e.g., in tests)
+export const getCurrentContainerNames = () => {
+  return parseContainerNames();
+};
+
+export const AZURE_STORAGE_CONTAINER_NAMES = parseContainerNames();
+
+// Helper function to get the default container name at runtime
+// This allows tests to change the environment variable and have the correct default
+export const getDefaultContainerName = () => {
+  return process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME || getCurrentContainerNames()[0];
+};
+
+export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME || AZURE_STORAGE_CONTAINER_NAMES[0];
+export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
+
+// Validate if a container name is allowed
+export const isValidContainerName = (containerName) => {
+  // Read from environment at runtime to support dynamically changing env in tests
+  const currentContainerNames = getCurrentContainerNames();
+  return currentContainerNames.includes(containerName);
+};

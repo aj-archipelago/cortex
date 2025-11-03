@@ -14,6 +14,7 @@ import {
   removeFromFileStoreMap,
   setFileStoreMap,
   cleanupRedisFileStoreMapAge,
+  getScopedHashKey,
 } from "./redis.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageService } from "./services/storage/StorageService.js";
@@ -141,7 +142,7 @@ async function CortexFileHandler(context, req) {
     // If only hash is provided, delete single file by hash
     if (deleteHash && !deleteRequestId) {
       try {
-        const deleted = await storageService.deleteFileByHash(deleteHash);
+        const deleted = await storageService.deleteFileByHash(deleteHash, container);
         context.res = {
           status: 200,
           body: { 
@@ -170,10 +171,11 @@ async function CortexFileHandler(context, req) {
 
     // First, get the hash from the map if it exists
     if (deleteHash) {
-      const hashResult = await getFileStoreMap(deleteHash);
+      const scopedHash = getScopedHashKey(deleteHash, container);
+      const hashResult = await getFileStoreMap(scopedHash);
       if (hashResult) {
-        context.log(`Found hash in map for deletion: ${deleteHash}`);
-        await removeFromFileStoreMap(deleteHash);
+        context.log(`Found hash in map for deletion: ${deleteHash} (scoped key: ${scopedHash})`);
+        await removeFromFileStoreMap(scopedHash);
       }
     }
 
@@ -201,7 +203,8 @@ async function CortexFileHandler(context, req) {
       }
 
       // Check if file already exists (using hash or URL as the key)
-      const cacheKey = hash || remoteUrl;
+      // If hash is provided, scope it by container; otherwise use URL as-is
+      const cacheKey = hash ? getScopedHashKey(hash, container) : remoteUrl;
       const exists = await getFileStoreMap(cacheKey);
       if (exists) {
         context.res = {
@@ -255,9 +258,10 @@ async function CortexFileHandler(context, req) {
 
   if (hash && clearHash) {
     try {
-      const hashValue = await getFileStoreMap(hash);
+      const scopedHash = getScopedHashKey(hash, container);
+      const hashValue = await getFileStoreMap(scopedHash);
       if (hashValue) {
-        await removeFromFileStoreMap(hash);
+        await removeFromFileStoreMap(scopedHash);
         context.res = {
           status: 200,
           body: `Hash ${hash} removed`,
@@ -279,10 +283,11 @@ async function CortexFileHandler(context, req) {
   }
 
   if (hash && checkHash) {
-    let hashResult = await getFileStoreMap(hash, true); // Skip lazy cleanup to handle it ourselves
+    const scopedHash = getScopedHashKey(hash, container);
+    let hashResult = await getFileStoreMap(scopedHash, true); // Skip lazy cleanup to handle it ourselves
 
     if (hashResult) {
-      context.log(`File exists in map: ${hash}`);
+      context.log(`File exists in map: ${hash} (scoped key: ${scopedHash})`);
 
       // Log the URL retrieved from Redis before checking existence
       context.log(`Checking existence of URL from Redis: ${hashResult?.url}`);
@@ -301,7 +306,7 @@ async function CortexFileHandler(context, req) {
           context.log(
             `File not found in any storage. Removing from map: ${hash}`,
           );
-          await removeFromFileStoreMap(hash);
+          await removeFromFileStoreMap(scopedHash);
           context.res = {
             status: 404,
             body: `Hash ${hash} not found in storage`,
@@ -320,7 +325,7 @@ async function CortexFileHandler(context, req) {
           } catch (error) {
             context.log(`Error restoring to GCS: ${error}`);
             // If restoration fails, remove the hash from the map
-            await removeFromFileStoreMap(hash);
+            await removeFromFileStoreMap(scopedHash);
             context.res = {
               status: 404,
               body: `Hash ${hash} not found`,
@@ -378,7 +383,7 @@ async function CortexFileHandler(context, req) {
           } catch (error) {
             console.error("Error restoring from GCS:", error);
             // If restoration fails, remove the hash from the map
-            await removeFromFileStoreMap(hash);
+            await removeFromFileStoreMap(scopedHash);
             context.res = {
               status: 404,
               body: `Hash ${hash} not found`,
@@ -396,7 +401,7 @@ async function CortexFileHandler(context, req) {
           : false;
         if (!finalPrimaryCheck && !finalGCSCheck) {
           context.log(`Failed to restore file. Removing from map: ${hash}`);
-          await removeFromFileStoreMap(hash);
+          await removeFromFileStoreMap(scopedHash);
           context.res = {
             status: 404,
             body: `Hash ${hash} not found`,
@@ -498,7 +503,7 @@ async function CortexFileHandler(context, req) {
         }
 
         //update redis timestamp with current time
-        await setFileStoreMap(hash, hashResult);
+        await setFileStoreMap(scopedHash, hashResult);
 
         context.res = {
           status: 200,
@@ -508,7 +513,7 @@ async function CortexFileHandler(context, req) {
       } catch (error) {
         context.log(`Error checking file existence: ${error}`);
         // If there's an error checking file existence, remove the hash from the map
-        await removeFromFileStoreMap(hash);
+        await removeFromFileStoreMap(scopedHash);
         context.res = {
           status: 404,
           body: `Hash ${hash} not found`,
@@ -532,7 +537,8 @@ async function CortexFileHandler(context, req) {
     // Use uploadBlob to handle multipart/form-data
     const result = await uploadBlob(context, req, saveToLocal, null, hash, container);
     if (result?.hash && context?.res?.body) {
-      await setFileStoreMap(result.hash, context.res.body);
+      const scopedHash = getScopedHashKey(result.hash, result.container || container);
+      await setFileStoreMap(scopedHash, context.res.body);
     }
     return;
   }
