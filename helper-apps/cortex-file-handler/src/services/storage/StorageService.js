@@ -176,12 +176,24 @@ export class StorageService {
     const results = [];
 
     // Get and remove file information from Redis map (non-atomic operations)
-    const { getFileStoreMap, removeFromFileStoreMap, getScopedHashKey } = await import("../../redis.js");
+    const { getFileStoreMap, removeFromFileStoreMap, getScopedHashKey, getDefaultContainerName } = await import("../../redis.js");
+    const { getDefaultContainerName: getDefaultContainerNameFromConstants } = await import("../../constants.js");
     const scopedHash = getScopedHashKey(hash, containerName);
     const hashResult = await getFileStoreMap(scopedHash);
     
     if (hashResult) {
+      // Remove from scoped key
       await removeFromFileStoreMap(scopedHash);
+      
+      // Also check and remove legacy key (unscoped) if this is the default container
+      // This handles backwards compatibility with old entries stored without container scoping
+      const defaultContainerName = getDefaultContainerNameFromConstants();
+      const effectiveContainer = containerName || defaultContainerName;
+      if (effectiveContainer === defaultContainerName && scopedHash.includes(':')) {
+        const [legacyHash] = scopedHash.split(':', 2);
+        // Try to remove legacy key - it's okay if it doesn't exist
+        await removeFromFileStoreMap(legacyHash);
+      }
     }
     
     if (!hashResult) {
