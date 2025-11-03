@@ -269,16 +269,35 @@ test.serial("should support backwards compatibility for legacy hashes in default
 
   try {
     const testHash = `hash-legacy-test-${uuidv4()}`;
+    const content = "Content for legacy test";
+    const file = await createTestFile(content, "txt", "fileLegacy.txt");
+
+    // Upload file to default container (test1) with hash - this creates the scoped entry
+    const upload = await uploadFileWithHashAndContainer(file, testHash, "test1");
+    t.is(upload.status, 200, "Upload to test1 should succeed");
+    t.truthy(upload.data.url, "Upload should have URL");
+
+    // Wait for Redis to update
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Now simulate a legacy entry by also storing the hash WITHOUT container scope
+    // This mimics the old behavior before container scoping was added
+    const { client } = await import("../src/redis.js");
     const legacyData = {
-      url: "https://example.com/legacy-file.txt",
+      url: upload.data.url, // Use the real uploaded URL
       timestamp: new Date().toISOString(),
     };
-
-    // Manually insert a legacy entry (without container in key) into Redis
-    const { client } = await import("../src/redis.js");
     await client.hset("FileStoreMap", testHash, JSON.stringify(legacyData));
 
     // Wait for Redis to update
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Delete the scoped key to simulate only having the legacy entry
+    const { getScopedHashKey } = await import("../src/redis.js");
+    const scopedKey = getScopedHashKey(testHash, "test1");
+    await client.hdel("FileStoreMap", scopedKey);
+
+    // Wait a bit for Redis
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Check hash with default container parameter - should find the legacy entry
@@ -292,15 +311,24 @@ test.serial("should support backwards compatibility for legacy hashes in default
     t.is(checkWithoutContainer.data.url, legacyData.url, "Should return URL from legacy entry");
 
     // After migration, the new scoped key should exist
-    const { getFileStoreMap, getScopedHashKey } = await import("../src/redis.js");
-    const scopedKey = getScopedHashKey(testHash, "test1");
+    const { getFileStoreMap } = await import("../src/redis.js");
     const migratedValue = await getFileStoreMap(scopedKey, true); // Skip lazy cleanup
     t.truthy(migratedValue, "Migrated value should exist with new scoped key");
     t.is(migratedValue.url, legacyData.url, "Migrated value should have same URL");
 
     // Cleanup
+    fs.unlinkSync(file);
     await cleanupHash(testHash, "test1");
     await cleanupHash(testHash, null);
+
+    // Delete the actual file
+    await axios.delete(baseUrl, {
+      params: {
+        hash: testHash,
+        container: "test1",
+      },
+      validateStatus: (status) => true,
+    });
   } finally {
     // Restore environment
     if (originalEnv) {

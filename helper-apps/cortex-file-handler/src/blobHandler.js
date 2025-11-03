@@ -337,10 +337,12 @@ function uploadBlob(
             
             if (errorOccurred) return; // Check again after waiting
 
-            await processFile(fieldname, file, info);
+            // Capture containerName value to avoid closure issues
+            const capturedContainerName = containerName;
+            await processFile(fieldname, file, info, capturedContainerName);
           });
 
-          const processFile = async (fieldname, file, info) => {
+          const processFile = async (fieldname, file, info, capturedContainerName) => {
             if (errorOccurred) return;
 
             // Validate file
@@ -436,7 +438,7 @@ function uploadBlob(
                 context,
                 uploadName,
                 azureStream,
-                containerName,
+                capturedContainerName,
               ).catch(async (err) => {
                 cloudUploadError = err;
                 // Fallback: try from disk if available
@@ -446,7 +448,7 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToAzureStorage(context, uploadName, diskStream, containerName);
+                  return saveToAzureStorage(context, uploadName, diskStream, capturedContainerName);
                 }
                 throw err;
               });
@@ -498,7 +500,7 @@ function uploadBlob(
                 }, {}),
               };
               if (hash) result.hash = hash;
-              if (containerName) result.container = containerName;
+              if (capturedContainerName) result.container = capturedContainerName;
 
               // If saving locally, wait for disk write to finish and then move to public folder
               if (saveToLocal) {
@@ -570,7 +572,7 @@ function uploadBlob(
                         conversion.convertedPath,
                         requestId,
                         null,
-                        containerName,
+                        capturedContainerName,
                       );
 
                     // Optionally save to GCS
