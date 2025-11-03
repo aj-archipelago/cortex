@@ -52,11 +52,12 @@ async function createTestFile(content, extension = "txt", filename = null) {
 // Helper to upload a file with hash and container
 async function uploadFileWithHashAndContainer(filePath, hash, containerName) {
   const form = new FormData();
-  form.append("file", fs.createReadStream(filePath));
+  // Append hash and container BEFORE file so they're processed first
   form.append("hash", hash);
   if (containerName) {
     form.append("container", containerName);
   }
+  form.append("file", fs.createReadStream(filePath));
 
   const response = await axios.post(baseUrl, form, {
     headers: {
@@ -202,8 +203,8 @@ test.serial("should scope hash by container - same hash different containers sho
   }
 });
 
-// Test: Hash in default container should not be scoped
-test.serial("should not scope hash for default container", async (t) => {
+// Test: Hash in default container should be scoped with container name
+test.serial("should scope hash for default container with container name", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
@@ -219,6 +220,7 @@ test.serial("should not scope hash for default container", async (t) => {
 
     // Upload file to default container (test1) with hash
     // We upload WITHOUT specifying container, so it should use default
+    // Now it will be stored as hash:test1 (always scoped)
     const uploadDefault = await uploadFileWithHashAndContainer(file, testHash, null);
     t.is(uploadDefault.status, 200, "Upload to default should succeed");
     t.truthy(uploadDefault.data.url, "Upload should have URL");
@@ -247,6 +249,60 @@ test.serial("should not scope hash for default container", async (t) => {
       },
       validateStatus: (status) => true,
     });
+  } finally {
+    // Restore environment
+    if (originalEnv) {
+      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
+    } else {
+      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
+    }
+  }
+});
+
+// Test: Backwards compatibility - legacy hash without container should be found for default container
+test.serial("should support backwards compatibility for legacy hashes in default container", async (t) => {
+  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
+    t.pass("Skipping test - Azure not configured");
+    return;
+  }
+
+  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
+  process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
+
+  try {
+    const testHash = `hash-legacy-test-${uuidv4()}`;
+    const legacyData = {
+      url: "https://example.com/legacy-file.txt",
+      timestamp: new Date().toISOString(),
+    };
+
+    // Manually insert a legacy entry (without container in key) into Redis
+    const { client } = await import("../src/redis.js");
+    await client.hset("FileStoreMap", testHash, JSON.stringify(legacyData));
+
+    // Wait for Redis to update
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Check hash with default container parameter - should find the legacy entry
+    const checkWithDefaultContainer = await checkHashExists(testHash, "test1");
+    t.is(checkWithDefaultContainer.status, 200, "Legacy hash should be found with default container param");
+    t.is(checkWithDefaultContainer.data.url, legacyData.url, "Should return URL from legacy entry");
+
+    // Check hash without container parameter - should also find the legacy entry
+    const checkWithoutContainer = await checkHashExists(testHash, null);
+    t.is(checkWithoutContainer.status, 200, "Legacy hash should be found without container param");
+    t.is(checkWithoutContainer.data.url, legacyData.url, "Should return URL from legacy entry");
+
+    // After migration, the new scoped key should exist
+    const { getFileStoreMap, getScopedHashKey } = await import("../src/redis.js");
+    const scopedKey = getScopedHashKey(testHash, "test1");
+    const migratedValue = await getFileStoreMap(scopedKey, true); // Skip lazy cleanup
+    t.truthy(migratedValue, "Migrated value should exist with new scoped key");
+    t.is(migratedValue.url, legacyData.url, "Migrated value should have same URL");
+
+    // Cleanup
+    await cleanupHash(testHash, "test1");
+    await cleanupHash(testHash, null);
   } finally {
     // Restore environment
     if (originalEnv) {
