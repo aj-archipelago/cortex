@@ -6,7 +6,7 @@ import cors from "cors";
 import { readFileSync } from "fs";
 
 import { publicIpv4 } from "public-ip";
-import { AZURE_STORAGE_CONTAINER_NAMES, DEFAULT_AZURE_STORAGE_CONTAINER_NAME, getCurrentContainerNames } from "./blobHandler.js";
+import { AZURE_STORAGE_CONTAINER_NAMES, DEFAULT_AZURE_STORAGE_CONTAINER_NAME } from "./blobHandler.js";
 
 // When running under tests we want all generated URLs to resolve to the
 // locally-running server, otherwise checks like HEAD requests inside the
