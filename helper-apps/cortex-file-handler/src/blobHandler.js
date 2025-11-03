@@ -498,6 +498,7 @@ function uploadBlob(
                 }, {}),
               };
               if (hash) result.hash = hash;
+              if (containerName) result.container = containerName;
 
               // If saving locally, wait for disk write to finish and then move to public folder
               if (saveToLocal) {
