@@ -123,7 +123,7 @@ test("getDefaultContainerName should return the first container in the list", (t
   // Test with current module exports (these are loaded at import time)
   // The default should be the first item in the array
   const defaultContainer = getDefaultContainerName();
-  t.is(defaultContainer, AZURE_STORAGE_CONTAINER_NAMES[0]);
+  t.is(defaultContainer, getCurrentContainerNames()[0]);
   
   // Additional validation that it's a non-empty string
   t.truthy(defaultContainer);
