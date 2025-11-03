@@ -16,7 +16,16 @@ import {
   generateBlobName,
 } from "./utils/filenameUtils.js";
 import { publicFolder, port, ipAddress } from "./start.js";
-import { CONVERTED_EXTENSIONS, AZURITE_ACCOUNT_NAME } from "./constants.js";
+import { 
+  CONVERTED_EXTENSIONS, 
+  AZURITE_ACCOUNT_NAME,
+  parseContainerNames,
+  getCurrentContainerNames,
+  AZURE_STORAGE_CONTAINER_NAMES,
+  DEFAULT_AZURE_STORAGE_CONTAINER_NAME,
+  GCS_BUCKETNAME,
+  isValidContainerName
+} from "./constants.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageFactory } from "./services/storage/StorageFactory.js";
 
@@ -69,28 +78,6 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
     );
   }
 }
-
-// Parse comma-separated container names from environment variable
-const parseContainerNames = () => {
-  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
-  return containerStr.split(',').map(name => name.trim());
-};
-
-// Helper function to get current container names at runtime
-export const getCurrentContainerNames = () => {
-  return parseContainerNames();
-};
-
-export const AZURE_STORAGE_CONTAINER_NAMES = parseContainerNames();
-export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME || AZURE_STORAGE_CONTAINER_NAMES[0];
-export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
-
-// Validate if a container name is allowed
-export const isValidContainerName = (containerName) => {
-  // Read from environment at runtime to support dynamically changing env in tests
-  const currentContainerNames = getCurrentContainerNames();
-  return currentContainerNames.includes(containerName);
-};
 
 function isEncoded(str) {
   // Checks for any percent-encoded sequence
@@ -1160,4 +1147,10 @@ export {
   gcs,
   uploadChunkToGCS,
   downloadFromGCS,
+  // Re-export container constants for backward compatibility
+  getCurrentContainerNames,
+  AZURE_STORAGE_CONTAINER_NAMES,
+  DEFAULT_AZURE_STORAGE_CONTAINER_NAME,
+  GCS_BUCKETNAME,
+  isValidContainerName,
 };

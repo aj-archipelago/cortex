@@ -1,17 +1,9 @@
 import { AzureStorageProvider } from "./AzureStorageProvider.js";
 import { GCSStorageProvider } from "./GCSStorageProvider.js";
 import { LocalStorageProvider } from "./LocalStorageProvider.js";
+import { getCurrentContainerNames, GCS_BUCKETNAME } from "../../constants.js";
 import path from "path";
 import { fileURLToPath } from "url";
-
-// Lazy-load blob handler constants to avoid blocking module import
-let blobHandlerConstants = null;
-async function getBlobHandlerConstants() {
-  if (!blobHandlerConstants) {
-    blobHandlerConstants = await import("../../blobHandler.js");
-  }
-  return blobHandlerConstants;
-}
 
 // Singleton instance for provider caching across the application
 let storageFactoryInstance = null;
@@ -49,7 +41,6 @@ export class StorageFactory {
 
   async getAzureProvider(containerName = null) {
     // Read container names from environment directly to get current values
-    const { getCurrentContainerNames } = await getBlobHandlerConstants();
     const azureStorageContainerNames = getCurrentContainerNames();
     const defaultAzureStorageContainerName = azureStorageContainerNames[0];
     
@@ -82,7 +73,7 @@ export class StorageFactory {
       }
       const provider = new GCSStorageProvider(
         credentials,
-        process.env.GCS_BUCKETNAME || "cortextempfiles",
+        GCS_BUCKETNAME,
       );
       this.providers.set(key, provider);
     }

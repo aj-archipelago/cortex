@@ -1,4 +1,5 @@
 import redis from "ioredis";
+import { DEFAULT_AZURE_STORAGE_CONTAINER_NAME } from "./constants.js";
 
 const connectionString = process.env["REDIS_CONNECTION_STRING"];
 
@@ -13,15 +14,8 @@ const connectionString = process.env["REDIS_CONNECTION_STRING"];
 export const getScopedHashKey = (hash, containerName = null) => {
   if (!hash) return hash;
   
-  // Get default container name
-  const parseContainerNames = () => {
-    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
-    return containerStr.split(',').map(name => name.trim());
-  };
-  const defaultContainer = parseContainerNames()[0];
-  
   // If no container provided or it's the default, return just the hash
-  if (!containerName || containerName === defaultContainer) {
+  if (!containerName || containerName === DEFAULT_AZURE_STORAGE_CONTAINER_NAME) {
     return hash;
   }
   
