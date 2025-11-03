@@ -296,6 +296,8 @@ test.serial("should support backwards compatibility for legacy hashes in default
     const { client } = await import("../src/redis.js");
     const legacyData = {
       url: upload.data.url, // Use the real uploaded URL
+      blobName: upload.data.blobName || upload.data.filename, // Include blobName for proper restoration
+      filename: upload.data.filename,
       timestamp: new Date().toISOString(),
     };
     await client.hset("FileStoreMap", testHash, JSON.stringify(legacyData));
