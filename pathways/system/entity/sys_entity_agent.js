@@ -10,6 +10,30 @@ import { Prompt } from '../../../server/prompt.js';
 import { getToolsForEntity, loadEntityConfig } from './tools/shared/sys_entity_tools.js';
 import CortexResponse from '../../../lib/cortexResponse.js';
 
+// Helper function to generate a smart error response using the agent
+async function generateErrorResponse(error, args, pathwayResolver) {
+    const errorMessage = error?.message || error?.toString() || String(error);
+    
+    // Clear any accumulated errors since we're handling them intelligently
+    pathwayResolver.errors = [];
+    
+    // Use sys_generator_error to create a smart response
+    try {
+        const errorResponse = await callPathway('sys_generator_error', {
+            ...args,
+            text: errorMessage,
+            chatHistory: args.chatHistory || [],
+            stream: false
+        }, pathwayResolver);
+        
+        return errorResponse;
+    } catch (errorResponseError) {
+        // Fallback if sys_generator_error itself fails
+        logger.error(`Error generating error response: ${errorResponseError.message}`);
+        return `I apologize, but I encountered an error while processing your request: ${errorMessage}. Please try again or contact support if the issue persists.`;
+    }
+}
+
 export default {
     emulateOpenAIChatModel: 'cortex-agent',
     useInputChunking: false,
@@ -234,11 +258,20 @@ export default {
             // Add a line break to avoid running output together
             await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `\n`, 1000, false, false);
 
-            return await pathwayResolver.promptAndParse({
-                ...args,
-                tools: entityToolsOpenAiFormat,
-                tool_choice: "auto",
-            });
+            try {
+                return await pathwayResolver.promptAndParse({
+                    ...args,
+                    tools: entityToolsOpenAiFormat,
+                    tool_choice: "auto",
+                });
+            } catch (parseError) {
+                // If promptAndParse fails, generate error response instead of re-throwing
+                logger.error(`Error in promptAndParse during tool callback: ${parseError.message}`);
+                const errorResponse = await generateErrorResponse(parseError, args, pathwayResolver);
+                // Ensure errors are cleared before returning
+                pathwayResolver.errors = [];
+                return errorResponse;
+            }
         }
     },
   
@@ -396,6 +429,11 @@ export default {
                 tool_choice: memoryLookupRequired ? "required" : "auto"
             });
 
+            // Handle null response (can happen when ModelExecutor catches an error)
+            if (!response) {
+                throw new Error('Model execution returned null - the model request likely failed');
+            }
+
             let toolCallback = pathwayResolver.pathway.toolCallback;
 
             // Handle both CortexResponse objects and plain responses
@@ -403,15 +441,38 @@ export default {
                 (response instanceof CortexResponse && response.hasToolCalls()) ||
                 (typeof response === 'object' && response.tool_calls)
             )) {
-                response = await toolCallback(args, response, pathwayResolver);
+                try {
+                    response = await toolCallback(args, response, pathwayResolver);
+                    
+                    // Handle null response from tool callback
+                    if (!response) {
+                        throw new Error('Tool callback returned null - a model request likely failed');
+                    }
+                } catch (toolError) {
+                    // Handle errors in tool callback
+                    logger.error(`Error in tool callback: ${toolError.message}`);
+                    // Generate error response for tool callback errors
+                    const errorResponse = await generateErrorResponse(toolError, args, pathwayResolver);
+                    // Ensure errors are cleared before returning
+                    pathwayResolver.errors = [];
+                    return errorResponse;
+                }
             }
 
             return response;
 
         } catch (e) {
-            pathwayResolver.logError(e);
-            const chatResponse = await callPathway('sys_generator_quick', {...args, model: styleModel, stream: false}, pathwayResolver);
-            return chatResponse;
+            logger.error(`Error in sys_entity_agent: ${e.message}`);
+            
+            // Generate a smart error response instead of throwing
+            // Note: We don't call logError here because generateErrorResponse will clear errors
+            // and we want to handle the error gracefully rather than tracking it
+            const errorResponse = await generateErrorResponse(e, args, pathwayResolver);
+            
+            // Ensure errors are cleared before returning (in case any were added during error response generation)
+            pathwayResolver.errors = [];
+            
+            return errorResponse;
         }
     }
 }; 
