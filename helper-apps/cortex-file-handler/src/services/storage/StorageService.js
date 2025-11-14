@@ -210,6 +210,7 @@ export class StorageService {
         console.log(`Deleting file from primary storage - hash: ${hash}, url: ${hashResult.url}`);
         const primaryResult = await this.deleteFile(hashResult.url);
         if (primaryResult) {
+          console.log(`Successfully deleted from primary storage - hash: ${hash}, result: ${primaryResult}`);
           results.push({ provider: 'primary', result: primaryResult });
         } else {
           // deleteFile returned null, which means the URL was invalid
