@@ -6,7 +6,8 @@ import fs from 'fs';
 import { publishRequestProgress } from '../../lib/redisSubscription.js';
 import logger from '../../lib/logger.js';
 import CortexRequest from '../../lib/cortexRequest.js';
-import { downloadFile, deleteTempPath, convertSrtToText, alignSubtitles, getMediaChunks, markCompletedForCleanUp  } from '../../lib/util.js';
+import { convertSrtToText, alignSubtitles } from '../../lib/util.js';
+import { downloadFile, deleteTempPath, getMediaChunks, markCompletedForCleanUp } from '../../lib/fileUtils.js';
 
 
 const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide

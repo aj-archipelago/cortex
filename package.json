@@ -33,7 +33,7 @@
   "type": "module",
   "homepage": "https://github.com/aj-archipelago/cortex#readme",
   "dependencies": {
-    "@aj-archipelago/merval": "^1.0.3",
+    "@aj-archipelago/merval": "^1.0.4",
     "@aj-archipelago/subvibe": "^1.0.12",
     "@apollo/server": "^4.7.3",
     "@apollo/server-plugin-response-cache": "^4.1.2",
@@ -67,7 +67,8 @@
     "mime-types": "^2.1.35",
     "uuid": "^9.0.0",
     "winston": "^3.11.0",
-    "ws": "^8.12.0"
+    "ws": "^8.12.0",
+    "xxhash-wasm": "^1.1.0"
   },
   "devDependencies": {
     "@faker-js/faker": "^8.4.1",
