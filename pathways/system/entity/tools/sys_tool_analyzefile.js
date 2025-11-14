@@ -155,9 +155,10 @@ export default {
         // Generate file message content and inject file if provided
         if (args.file) {
             const fileContent = await generateFileMessageContent(args.file, args.contextId, args.contextKey);
-            if (fileContent) {
-                args.chatHistory = injectFileIntoChatHistory(args.chatHistory, fileContent);
+            if (!fileContent) {
+                throw new Error(`File not found: "${args.file}". Use ListFileCollection or SearchFileCollection to find available files.`);
             }
+            args.chatHistory = injectFileIntoChatHistory(args.chatHistory, fileContent);
         }
 
         if (args.detailedInstructions) {

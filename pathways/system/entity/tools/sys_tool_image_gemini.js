@@ -1,7 +1,7 @@
 // sys_tool_image_gemini.js
 // Entity tool that creates and modifies images for the entity to show to the user
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { uploadImageToCloud, addFileToCollection } from '../../../../lib/fileUtils.js';
+import { uploadImageToCloud, addFileToCollection, resolveFileParameter } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -59,15 +59,15 @@ export default {
                 properties: {
                     inputImage: {
                         type: "string",
-                        description: "The first image URL copied exactly from your available files."
+                        description: "An image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification."
                     },
                     inputImage2: {
                         type: "string",
-                        description: "The second input image URL copied exactly from your available files if there is one."
+                        description: "A second image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification if there is one."
                     },
                     inputImage3: {
                         type: "string",
-                        description: "The third input image URL copied exactly from your available files if there is one."
+                        description: "A third image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification if there is one."
                     },
                     detailedInstructions: {
                         type: "string",
@@ -100,15 +100,55 @@ export default {
             let model = "gemini-25-flash-image";
             let prompt = args.detailedInstructions || "";
             
+            // Resolve input images to URLs using the common utility
+            // For Gemini, prefer GCS URLs over Azure URLs
+            // Fail early if any provided image parameter cannot be resolved
+            if (args.inputImage) {
+                if (!args.contextId) {
+                    throw new Error("contextId is required when using the 'inputImage' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                }
+                const resolved = await resolveFileParameter(args.inputImage, args.contextId, args.contextKey, { preferGcs: true });
+                if (!resolved) {
+                    throw new Error(`File not found: "${args.inputImage}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                }
+                args.inputImage = resolved;
+            }
+            
+            if (args.inputImage2) {
+                if (!args.contextId) {
+                    throw new Error("contextId is required when using the 'inputImage2' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                }
+                const resolved = await resolveFileParameter(args.inputImage2, args.contextId, args.contextKey, { preferGcs: true });
+                if (!resolved) {
+                    throw new Error(`File not found: "${args.inputImage2}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                }
+                args.inputImage2 = resolved;
+            }
+            
+            if (args.inputImage3) {
+                if (!args.contextId) {
+                    throw new Error("contextId is required when using the 'inputImage3' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                }
+                const resolved = await resolveFileParameter(args.inputImage3, args.contextId, args.contextKey, { preferGcs: true });
+                if (!resolved) {
+                    throw new Error(`File not found: "${args.inputImage3}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                }
+                args.inputImage3 = resolved;
+            }
+            
+            const resolvedInputImage = args.inputImage;
+            const resolvedInputImage2 = args.inputImage2;
+            const resolvedInputImage3 = args.inputImage3;
+            
             // Call the image generation pathway
             let result = await callPathway('image_gemini_25', {
                 ...args, 
                 text: prompt,
                 model, 
                 stream: false,
-                input_image: args.inputImage,
-                input_image_2: args.inputImage2,
-                input_image_3: args.inputImage3,
+                input_image: resolvedInputImage,
+                input_image_2: resolvedInputImage2,
+                input_image_3: resolvedInputImage3,
                 optimizePrompt: true,
             }, pathwayResolver);
 

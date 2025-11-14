@@ -1,7 +1,7 @@
 // sys_tool_image.js
 // Entity tool that creates and modifies images for the entity to show to the user
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { uploadFileToCloud, addFileToCollection, getMimeTypeFromFilename } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, addFileToCollection, resolveFileParameter } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -56,15 +56,15 @@ export default {
                 properties: {
                     inputImage: {
                         type: "string",
-                        description: "The first image URL copied exactly from your available files."
+                        description: "An image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification."
                     },
                     inputImage2: {
                         type: "string",
-                        description: "The second input image URL copied exactly from your available files if there is one."
+                        description: "A second image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification if there is one."
                     },
                     inputImage3: {
                         type: "string",
-                        description: "The third input image URL copied exactly from your available files if there is one."
+                        description: "A third image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification if there is one."
                     },
                     detailedInstructions: {
                         type: "string",
@@ -105,6 +105,45 @@ export default {
 
             pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
             
+            // Resolve all input images to URLs using the common utility
+            // Fail early if any provided image parameter cannot be resolved
+            if (args.inputImage) {
+                if (!args.contextId) {
+                    throw new Error("contextId is required when using the 'inputImage' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                }
+                const resolved = await resolveFileParameter(args.inputImage, args.contextId, args.contextKey);
+                if (!resolved) {
+                    throw new Error(`File not found: "${args.inputImage}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                }
+                args.inputImage = resolved;
+            }
+            
+            if (args.inputImage2) {
+                if (!args.contextId) {
+                    throw new Error("contextId is required when using the 'inputImage2' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                }
+                const resolved = await resolveFileParameter(args.inputImage2, args.contextId, args.contextKey);
+                if (!resolved) {
+                    throw new Error(`File not found: "${args.inputImage2}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                }
+                args.inputImage2 = resolved;
+            }
+            
+            if (args.inputImage3) {
+                if (!args.contextId) {
+                    throw new Error("contextId is required when using the 'inputImage3' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                }
+                const resolved = await resolveFileParameter(args.inputImage3, args.contextId, args.contextKey);
+                if (!resolved) {
+                    throw new Error(`File not found: "${args.inputImage3}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                }
+                args.inputImage3 = resolved;
+            }
+            
+            const resolvedInputImage = args.inputImage;
+            const resolvedInputImage2 = args.inputImage2;
+            const resolvedInputImage3 = args.inputImage3;
+            
             // Build parameters object, only including image parameters if they have non-empty values
             const params = {
                 ...args, 
@@ -113,19 +152,19 @@ export default {
                 stream: false,
             };
             
-            if (args.inputImage && args.inputImage.trim()) {
-                params.input_image = args.inputImage;
+            if (resolvedInputImage) {
+                params.input_image = resolvedInputImage;
             }
-            if (args.inputImage2 && args.inputImage2.trim()) {
-                params.input_image_2 = args.inputImage2;
+            if (resolvedInputImage2) {
+                params.input_image_2 = resolvedInputImage2;
             }
-            if (args.inputImage3 && args.inputImage3.trim()) {
-                params.input_image_3 = args.inputImage3;
+            if (resolvedInputImage3) {
+                params.input_image_3 = resolvedInputImage3;
             }
             
             // Call appropriate pathway based on model
             const pathwayName = model.includes('seedream') ? 'image_seedream4' : 'image_qwen';
-            let result = await callPathway(pathwayName, params);
+            let result = await callPathway(pathwayName, params, pathwayResolver);
 
             // Process artifacts from Replicate (which come as URLs, not base64 data)
             if (pathwayResolver.pathwayResultData) {
@@ -221,84 +260,6 @@ export default {
                     if (uploadedImages.length > 0) {
                         const imageUrls = uploadedImages.map(image => image.url || image).filter(Boolean);
                         result = imageUrls.join('\n');
-                    }
-                } else {
-                    // Try to parse image URLs from the result text if artifacts aren't available
-                    // Replicate sometimes returns URLs directly in the response text
-                    try {
-                        const resultText = typeof result === 'string' ? result : JSON.stringify(result);
-                        const urlPattern = /https?:\/\/[^\s\)]+\.(jpg|jpeg|png|gif|webp)(\?[^\s\)]*)?/gi;
-                        const imageUrls = resultText.match(urlPattern);
-                        
-                        if (imageUrls && imageUrls.length > 0) {
-                            const uploadedImages = [];
-                            
-                            for (const imageUrl of imageUrls) {
-                                try {
-                                    // Determine MIME type from URL using utility function
-                                    // Extract filename from URL (remove query params)
-                                    const urlPath = imageUrl.split('?')[0];
-                                    const mimeType = getMimeTypeFromFilename(urlPath, 'image/png');
-                                    
-                                    // Upload image to cloud storage
-                                    const uploadResult = await uploadFileToCloud(
-                                        imageUrl,
-                                        mimeType,
-                                        null,
-                                        pathwayResolver
-                                    );
-                                    
-                                    const uploadedUrl = uploadResult.url || uploadResult;
-                                    const uploadedGcs = uploadResult.gcs || null;
-                                    const uploadedHash = uploadResult.hash || null;
-                                    
-                                    uploadedImages.push(uploadedUrl);
-                                    
-                                    // Add to file collection if contextId is available
-                                    if (args.contextId && uploadedUrl) {
-                                        try {
-                                            const uniqueId = uploadedHash ? uploadedHash.substring(0, 8) : `${Date.now()}-${uploadedImages.length}`;
-                                            const isModification = args.inputImage || args.inputImage2 || args.inputImage3;
-                                            const defaultPrefix = isModification ? 'modified-image' : 'generated-image';
-                                            const filenamePrefix = args.filenamePrefix || defaultPrefix;
-                                            const sanitizedPrefix = filenamePrefix.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-                                            const filename = `${sanitizedPrefix}-${uniqueId}.${extension}`;
-                                            
-                                            // Merge provided tags with default tags
-                                            const defaultTags = ['image', isModification ? 'modified' : 'generated'];
-                                            const providedTags = Array.isArray(args.tags) ? args.tags : [];
-                                            const allTags = [...defaultTags, ...providedTags.filter(tag => !defaultTags.includes(tag))];
-                                            
-                                            await addFileToCollection(
-                                                args.contextId,
-                                                args.contextKey || '',
-                                                uploadedUrl,
-                                                uploadedGcs,
-                                                filename,
-                                                allTags,
-                                                isModification 
-                                                    ? `Modified image from prompt: ${args.detailedInstructions || 'image modification'}`
-                                                    : `Generated image from prompt: ${args.detailedInstructions || 'image generation'}`,
-                                                uploadedHash
-                                            );
-                                        } catch (collectionError) {
-                                            pathwayResolver.logWarning(`Failed to add image to file collection: ${collectionError.message}`);
-                                        }
-                                    }
-                                } catch (uploadError) {
-                                    pathwayResolver.logError(`Failed to upload image URL: ${uploadError.message}`);
-                                    // Keep original URL as fallback
-                                    uploadedImages.push(imageUrl);
-                                }
-                            }
-                            
-                            if (uploadedImages.length > 0) {
-                                // Replace the result with uploaded cloud URLs (not the original Replicate URLs)
-                                result = uploadedImages.join('\n');
-                            }
-                        }
-                    } catch (parseError) {
-                        pathwayResolver.logWarning(`Failed to parse image URLs from result: ${parseError.message}`);
                     }
                 }
             }

@@ -5,7 +5,7 @@ import test from 'ava';
 import serverFactory from '../../../../index.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import { getvWithDoubleDecryption, setvWithDoubleEncryption } from '../../../../lib/keyValueStorageClient.js';
-import { generateFileMessageContent } from '../../../../lib/fileUtils.js';
+import { generateFileMessageContent, resolveFileParameter } from '../../../../lib/fileUtils.js';
 
 let testServer;
 
@@ -596,3 +596,245 @@ test('generateFileMessageContent should detect image type', async t => {
     }
 });
 
+// Tests for resolveFileParameter
+test('resolveFileParameter: Resolve by file ID', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a file to collection
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test-doc.pdf',
+            gcs: 'gs://bucket/test-doc.pdf',
+            filename: 'test-doc.pdf',
+            userMessage: 'Adding test file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        const fileId = addParsed.fileId;
+        
+        // Resolve by file ID
+        const resolved = await resolveFileParameter(fileId, contextId);
+        t.is(resolved, 'https://example.com/test-doc.pdf');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Resolve by filename', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a file to collection
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/my-file.txt',
+            gcs: 'gs://bucket/my-file.txt',
+            filename: 'my-file.txt',
+            userMessage: 'Adding test file'
+        });
+        
+        // Resolve by filename
+        const resolved = await resolveFileParameter('my-file.txt', contextId);
+        t.is(resolved, 'https://example.com/my-file.txt');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Resolve by hash', async t => {
+    const contextId = createTestContext();
+    const testHash = 'abc123def456';
+    
+    try {
+        // Add a file to collection with hash
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/hashed-file.jpg',
+            gcs: 'gs://bucket/hashed-file.jpg',
+            filename: 'hashed-file.jpg',
+            hash: testHash,
+            userMessage: 'Adding test file'
+        });
+        
+        // Resolve by hash
+        const resolved = await resolveFileParameter(testHash, contextId);
+        t.is(resolved, 'https://example.com/hashed-file.jpg');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Resolve by Azure URL', async t => {
+    const contextId = createTestContext();
+    const testUrl = 'https://example.com/existing-file.pdf';
+    
+    try {
+        // Add a file to collection
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: testUrl,
+            gcs: 'gs://bucket/existing-file.pdf',
+            filename: 'existing-file.pdf',
+            userMessage: 'Adding test file'
+        });
+        
+        // Resolve by Azure URL
+        const resolved = await resolveFileParameter(testUrl, contextId);
+        t.is(resolved, testUrl);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Resolve by GCS URL', async t => {
+    const contextId = createTestContext();
+    const testGcsUrl = 'gs://bucket/gcs-file.pdf';
+    
+    try {
+        // Add a file to collection
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/gcs-file.pdf',
+            gcs: testGcsUrl,
+            filename: 'gcs-file.pdf',
+            userMessage: 'Adding test file'
+        });
+        
+        // Resolve by GCS URL
+        const resolved = await resolveFileParameter(testGcsUrl, contextId);
+        t.is(resolved, 'https://example.com/gcs-file.pdf');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Prefer GCS URL when preferGcs is true', async t => {
+    const contextId = createTestContext();
+    const testGcsUrl = 'gs://bucket/prefer-gcs-file.pdf';
+    const testAzureUrl = 'https://example.com/prefer-gcs-file.pdf';
+    
+    try {
+        // Add a file to collection with both URLs
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: testAzureUrl,
+            gcs: testGcsUrl,
+            filename: 'prefer-gcs-file.pdf',
+            userMessage: 'Adding test file'
+        });
+        
+        // Resolve by filename without preferGcs (should return Azure URL)
+        const resolvedDefault = await resolveFileParameter('prefer-gcs-file.pdf', contextId);
+        t.is(resolvedDefault, testAzureUrl);
+        
+        // Resolve by filename with preferGcs (should return GCS URL)
+        const resolvedGcs = await resolveFileParameter('prefer-gcs-file.pdf', contextId, null, { preferGcs: true });
+        t.is(resolvedGcs, testGcsUrl);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Return null when file not found', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Try to resolve a non-existent file
+        const resolved = await resolveFileParameter('non-existent-file.txt', contextId);
+        t.is(resolved, null);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Return null when contextId is missing', async t => {
+    // Try to resolve without contextId
+    const resolved = await resolveFileParameter('some-file.txt', null);
+    t.is(resolved, null);
+});
+
+test('resolveFileParameter: Return null when fileParam is empty', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Try with empty string
+        const resolved1 = await resolveFileParameter('', contextId);
+        t.is(resolved1, null);
+        
+        // Try with null
+        const resolved2 = await resolveFileParameter(null, contextId);
+        t.is(resolved2, null);
+        
+        // Try with undefined
+        const resolved3 = await resolveFileParameter(undefined, contextId);
+        t.is(resolved3, null);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Fuzzy filename matching', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a file with a specific filename
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/my-document.pdf',
+            gcs: 'gs://bucket/my-document.pdf',
+            filename: 'my-document.pdf',
+            userMessage: 'Adding test file'
+        });
+        
+        // Resolve by partial filename (fuzzy match)
+        const resolved = await resolveFileParameter('document.pdf', contextId);
+        t.is(resolved, 'https://example.com/my-document.pdf');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Fallback to Azure URL when GCS not available and preferGcs is true', async t => {
+    const contextId = createTestContext();
+    const testAzureUrl = 'https://example.com/no-gcs-file.pdf';
+    
+    try {
+        // Add a file without GCS URL
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: testAzureUrl,
+            filename: 'no-gcs-file.pdf',
+            userMessage: 'Adding test file'
+        });
+        
+        // Resolve with preferGcs=true, but no GCS available (should fallback to Azure URL)
+        const resolved = await resolveFileParameter('no-gcs-file.pdf', contextId, null, { preferGcs: true });
+        t.is(resolved, testAzureUrl);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Handle contextKey for encrypted collections', async t => {
+    const contextId = createTestContext();
+    const contextKey = 'test-encryption-key';
+    
+    try {
+        // Add a file to collection with contextKey
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            contextKey,
+            url: 'https://example.com/encrypted-file.pdf',
+            gcs: 'gs://bucket/encrypted-file.pdf',
+            filename: 'encrypted-file.pdf',
+            userMessage: 'Adding test file'
+        });
+        
+        // Resolve with contextKey
+        const resolved = await resolveFileParameter('encrypted-file.pdf', contextId, contextKey);
+        t.is(resolved, 'https://example.com/encrypted-file.pdf');
+    } finally {
+        await cleanup(contextId);
+    }
+});

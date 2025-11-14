@@ -3,7 +3,7 @@
 import logger from '../../../../lib/logger.js';
 import { config } from '../../../../config.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { findFileInCollection, loadFileCollection } from '../../../../lib/fileUtils.js';
+import { resolveFileParameter } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -17,13 +17,9 @@ export default {
             parameters: {
                 type: "object",
                 properties: {
-                    cloudUrl: {
-                        type: "string",
-                        description: "The cloud storage URL of the file to read (from your file collection or AddFileToCollection). You can also use the 'file' parameter instead to reference a file from your collection."
-                    },
                     file: {
                         type: "string",
-                        description: "Optional: File URL (Azure or GCS), file ID from your file collection, or file hash. If provided, this will be used instead of cloudUrl. You can find available files in the availableFiles section."
+                        description: "The file to read: can be the file ID, filename, URL, or hash from your file collection. You can find available files in the Available Files section or ListFileCollection or SearchFileCollection."
                     },
                     startLine: {
                         type: "number",
@@ -48,55 +44,80 @@ export default {
     },
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        let { cloudUrl, file, startLine, endLine, maxLines = 1000, contextId, contextKey } = args;
-        
-        // If file parameter is provided, look it up in the collection and extract cloudUrl
-        if (file) {
-            if (contextId) {
-                // Try to find the file in the collection
-                const collection = await loadFileCollection(contextId, contextKey, true);
-                const foundFile = findFileInCollection(file, collection);
-                if (foundFile) {
-                    cloudUrl = foundFile.url;
-                } else {
-                    // File not found in collection, but might be a direct URL
-                    cloudUrl = file;
-                }
-            } else {
-                // No contextId, treat as direct URL
-                cloudUrl = file;
-            }
-        }
-        
-        if (!cloudUrl || typeof cloudUrl !== 'string') {
-            throw new Error("Either cloudUrl or file parameter is required and must be a string");
-        }
-
-        if (startLine !== undefined && (typeof startLine !== 'number' || startLine < 1)) {
-            throw new Error("startLine must be a positive integer");
-        }
-
-        if (endLine !== undefined && (typeof endLine !== 'number' || endLine < 1)) {
-            throw new Error("endLine must be a positive integer");
-        }
-
-        if (startLine !== undefined && endLine !== undefined && endLine < startLine) {
-            throw new Error("endLine must be >= startLine");
-        }
-
         try {
+            let { cloudUrl, file, startLine, endLine, maxLines = 1000, contextId, contextKey } = args;
+            
+            // If file parameter is provided, resolve it to a URL using the common utility
+            if (file) {
+                if (!contextId) {
+                    const errorResult = {
+                        success: false,
+                        error: "contextId is required when using the 'file' parameter. Use ListFileCollection or SearchFileCollection to find available files."
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+                const resolvedUrl = await resolveFileParameter(file, contextId, contextKey);
+                if (!resolvedUrl) {
+                    const errorResult = {
+                        success: false,
+                        error: `File not found: "${file}". Use ListFileCollection or SearchFileCollection to find available files.`
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+                cloudUrl = resolvedUrl;
+            }
+            
+            if (!cloudUrl || typeof cloudUrl !== 'string') {
+                const errorResult = {
+                    success: false,
+                    error: "Either cloudUrl or file parameter is required and must be a string"
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
+
+            if (startLine !== undefined && (typeof startLine !== 'number' || startLine < 1)) {
+                const errorResult = {
+                    success: false,
+                    error: "startLine must be a positive integer"
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
+
+            if (endLine !== undefined && (typeof endLine !== 'number' || endLine < 1)) {
+                const errorResult = {
+                    success: false,
+                    error: "endLine must be a positive integer"
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
+
+            if (startLine !== undefined && endLine !== undefined && endLine < startLine) {
+                const errorResult = {
+                    success: false,
+                    error: "endLine must be >= startLine"
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
             // Download file content directly from the URL (don't use file handler for content)
+            // Use arraybuffer and explicitly decode as UTF-8 to avoid encoding issues
             const response = await axios.get(cloudUrl, {
-                responseType: 'text',
+                responseType: 'arraybuffer',
                 timeout: 30000,
                 validateStatus: (status) => status >= 200 && status < 400
             });
 
-            if (response.status !== 200 || typeof response.data !== 'string') {
+            if (response.status !== 200 || !response.data) {
                 throw new Error(`Failed to download file content: ${response.status}`);
             }
 
-            const textContent = response.data;
+            // Explicitly decode as UTF-8 to prevent mojibake (encoding corruption)
+            const textContent = Buffer.from(response.data).toString('utf8');
             const allLines = textContent.split(/\r?\n/);
             const totalLines = allLines.length;
 

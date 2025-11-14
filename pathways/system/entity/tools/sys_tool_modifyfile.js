@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -18,7 +18,7 @@ export default {
                 properties: {
                     file: {
                         type: "string",
-                        description: "The file to modify: can be the file ID, filename, URL, or hash from your file collection. You can find available files in the availableFiles section."
+                        description: "The file to modify: can be the file ID, filename, URL, or hash from your file collection. You can find available files in the Available Files section or ListFileCollection or SearchFileCollection."
                     },
                     startLine: {
                         type: "number",
@@ -101,43 +101,36 @@ export default {
         }
 
         try {
-            // Find the file in the collection
-            const collection = await loadFileCollection(contextId, contextKey, true);
-            const foundFile = findFileInCollection(file, collection);
+            // Resolve the file parameter to a URL using the common utility
+            const fileUrl = await resolveFileParameter(file, contextId, contextKey);
             
-            if (!foundFile) {
+            if (!fileUrl) {
                 const errorResult = {
                     success: false,
-                    error: `File not found in collection: ${file}. Use ListFileCollection or SearchFileCollection to find available files.`
+                    error: `File not found: "${file}". Use ListFileCollection or SearchFileCollection to find available files.`
                 };
                 resolver.tool = JSON.stringify({ toolUsed: "ModifyFile" });
                 return JSON.stringify(errorResult);
             }
 
-            // Get the file URL (prefer converted URL if available)
-            const fileUrl = foundFile.url;
-            if (!fileUrl) {
-                const errorResult = {
-                    success: false,
-                    error: "File found but has no URL"
-                };
-                resolver.tool = JSON.stringify({ toolUsed: "ModifyFile" });
-                return JSON.stringify(errorResult);
-            }
+            // Find the file in the collection to get metadata (for updating later)
+            const collection = await loadFileCollection(contextId, contextKey, true);
+            const foundFile = findFileInCollection(file, collection);
 
             // Download the current file content
             logger.info(`Downloading file for modification: ${fileUrl}`);
             const downloadResponse = await axios.get(fileUrl, {
-                responseType: 'text',
+                responseType: 'arraybuffer',
                 timeout: 60000,
                 validateStatus: (status) => status >= 200 && status < 400
             });
 
-            if (downloadResponse.status !== 200 || typeof downloadResponse.data !== 'string') {
+            if (downloadResponse.status !== 200 || !downloadResponse.data) {
                 throw new Error(`Failed to download file: ${downloadResponse.status}`);
             }
 
-            const originalContent = downloadResponse.data;
+            // Explicitly decode as UTF-8 to prevent mojibake (encoding corruption)
+            const originalContent = Buffer.from(downloadResponse.data).toString('utf8');
             const allLines = originalContent.split(/\r?\n/);
             const totalLines = allLines.length;
 
