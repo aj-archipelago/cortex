@@ -346,3 +346,290 @@ test.serial("should delete file uploaded with different filename", async (t) => 
     }
   }
 });
+
+// Tests for DELETE with hash in request body
+test.serial("should delete file by hash from request body params", async (t) => {
+  const testContent = "test content for body params deletion";
+  const testHash = `test-body-${uuidv4()}`;
+  const filePath = await createTestFile(testContent, "txt");
+  let uploadResponse;
+
+  try {
+    // Upload file with hash
+    uploadResponse = await uploadFile(filePath, null, testHash);
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+
+    // Delete file by hash using body params
+    const deleteResponse = await axios.delete(baseUrl, {
+      data: { params: { hash: testHash } },
+      validateStatus: (status) => true,
+      timeout: 10000,
+    });
+    
+    t.is(deleteResponse.status, 200, "Delete should succeed");
+    t.truthy(deleteResponse.data.message, "Should have success message");
+    t.true(deleteResponse.data.message.includes(testHash), "Message should include hash");
+    t.is(deleteResponse.data.deleted.hash, testHash, "Should include deleted hash");
+
+    // Verify hash is gone
+    const hashCheckAfter = await checkHashExists(testHash);
+    t.is(hashCheckAfter.status, 404, "Hash should not exist after deletion");
+
+  } finally {
+    fs.unlinkSync(filePath);
+    try {
+      await removeFromFileStoreMap(testHash);
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+});
+
+test.serial("should delete file by hash from request body (direct)", async (t) => {
+  const testContent = "test content for direct body deletion";
+  const testHash = `test-direct-body-${uuidv4()}`;
+  const filePath = await createTestFile(testContent, "txt");
+  let uploadResponse;
+
+  try {
+    // Upload file with hash
+    uploadResponse = await uploadFile(filePath, null, testHash);
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+
+    // Delete file by hash using direct body (not in params)
+    const deleteResponse = await axios.delete(baseUrl, {
+      data: { hash: testHash },
+      validateStatus: (status) => true,
+      timeout: 10000,
+    });
+    
+    t.is(deleteResponse.status, 200, "Delete should succeed");
+    t.truthy(deleteResponse.data.message, "Should have success message");
+    t.is(deleteResponse.data.deleted.hash, testHash, "Should include deleted hash");
+
+    // Verify hash is gone
+    const hashCheckAfter = await checkHashExists(testHash);
+    t.is(hashCheckAfter.status, 404, "Hash should not exist after deletion");
+
+  } finally {
+    fs.unlinkSync(filePath);
+    try {
+      await removeFromFileStoreMap(testHash);
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+});
+
+test.serial("should prioritize query string over body params for hash", async (t) => {
+  const testContent = "test content for priority test";
+  const queryHash = `test-query-${uuidv4()}`;
+  const bodyHash = `test-body-${uuidv4()}`;
+  const filePath = await createTestFile(testContent, "txt");
+  let uploadResponse;
+
+  try {
+    // Upload file with query hash
+    uploadResponse = await uploadFile(filePath, null, queryHash);
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+
+    // Try to delete with hash in both query and body - query should take priority
+    const deleteResponse = await axios.delete(`${baseUrl}?hash=${queryHash}`, {
+      data: { params: { hash: bodyHash } },
+      validateStatus: (status) => true,
+      timeout: 10000,
+    });
+    
+    t.is(deleteResponse.status, 200, "Delete should succeed");
+    t.is(deleteResponse.data.deleted.hash, queryHash, "Should use query hash, not body hash");
+
+    // Verify query hash is gone
+    const queryHashCheck = await checkHashExists(queryHash);
+    t.is(queryHashCheck.status, 404, "Query hash should not exist after deletion");
+
+  } finally {
+    fs.unlinkSync(filePath);
+    try {
+      await removeFromFileStoreMap(queryHash);
+      await removeFromFileStoreMap(bodyHash);
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+});
+
+test.serial("should delete file by requestId from body params", async (t) => {
+  const testContent = "test content for requestId body deletion";
+  const requestId = uuidv4();
+  const filePath = await createTestFile(testContent, "txt");
+  let uploadResponse;
+
+  try {
+    // Upload file with requestId
+    uploadResponse = await uploadFile(filePath, requestId, null);
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+
+    // Delete file by requestId using body params
+    const deleteResponse = await axios.delete(baseUrl, {
+      data: { params: { requestId: requestId } },
+      validateStatus: (status) => true,
+      timeout: 10000,
+    });
+    
+    t.is(deleteResponse.status, 200, "Delete should succeed");
+    t.truthy(deleteResponse.data.body, "Should have deletion body");
+    t.true(Array.isArray(deleteResponse.data.body), "Deletion body should be array");
+
+  } finally {
+    fs.unlinkSync(filePath);
+  }
+});
+
+test.serial("should handle standard Azure URL format correctly", async (t) => {
+  const testContent = "test content for standard URL format";
+  const testHash = `test-standard-url-${uuidv4()}`;
+  const filePath = await createTestFile(testContent, "txt");
+  let uploadResponse;
+
+  try {
+    // Upload file
+    uploadResponse = await uploadFile(filePath, null, testHash);
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+    t.truthy(uploadResponse.data.url, "Should have file URL");
+    
+    // Verify URL format is standard Azure format (container/blob)
+    const url = uploadResponse.data.url;
+    const urlObj = new URL(url);
+    const pathParts = urlObj.pathname.split('/').filter(p => p.length > 0);
+    t.true(pathParts.length >= 2, "URL should have at least container and blob name");
+
+    // Delete file - should parse URL correctly
+    const deleteResponse = await deleteFileByHash(testHash);
+    t.is(deleteResponse.status, 200, "Delete should succeed");
+    
+    // Verify deletion was successful
+    const hashCheckAfter = await checkHashExists(testHash);
+    t.is(hashCheckAfter.status, 404, "Hash should not exist after deletion");
+
+  } finally {
+    fs.unlinkSync(filePath);
+    try {
+      await removeFromFileStoreMap(testHash);
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+});
+
+test.serial("should handle backwards compatibility key removal correctly", async (t) => {
+  const testContent = "test content for legacy key test";
+  const testHash = `test-legacy-${uuidv4()}`;
+  const filePath = await createTestFile(testContent, "txt");
+  let uploadResponse;
+
+  try {
+    // Upload file
+    uploadResponse = await uploadFile(filePath, null, testHash);
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+
+    // Manually create a legacy unscoped key to test backwards compatibility
+    const { setFileStoreMap, getFileStoreMap, getScopedHashKey } = await import("../src/redis.js");
+    const { getDefaultContainerName } = await import("../src/constants.js");
+    const defaultContainer = getDefaultContainerName();
+    const scopedHash = getScopedHashKey(testHash, defaultContainer);
+    const hashResult = await getFileStoreMap(scopedHash);
+    
+    if (hashResult) {
+      // Create legacy unscoped key
+      await setFileStoreMap(testHash, hashResult);
+      
+      // Verify both keys exist
+      const scopedExists = await getFileStoreMap(scopedHash);
+      const legacyExists = await getFileStoreMap(testHash);
+      t.truthy(scopedExists, "Scoped key should exist");
+      t.truthy(legacyExists, "Legacy key should exist");
+
+      // Delete file - should remove both keys
+      const deleteResponse = await deleteFileByHash(testHash);
+      t.is(deleteResponse.status, 200, "Delete should succeed");
+
+      // Verify both keys are removed
+      const scopedAfter = await getFileStoreMap(scopedHash);
+      const legacyAfter = await getFileStoreMap(testHash);
+      t.falsy(scopedAfter, "Scoped key should be removed");
+      t.falsy(legacyAfter, "Legacy key should be removed");
+    }
+
+  } finally {
+    fs.unlinkSync(filePath);
+    try {
+      await removeFromFileStoreMap(testHash);
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+});
+
+test.serial("should not log 'does not exist' when legacy key doesn't exist", async (t) => {
+  const testContent = "test content for no legacy key test";
+  const testHash = `test-no-legacy-${uuidv4()}`;
+  const filePath = await createTestFile(testContent, "txt");
+  let uploadResponse;
+
+  try {
+    // Upload file (this creates only the scoped key, no legacy key)
+    uploadResponse = await uploadFile(filePath, null, testHash);
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+
+    // Verify only scoped key exists
+    const { getFileStoreMap, getScopedHashKey } = await import("../src/redis.js");
+    const { getDefaultContainerName } = await import("../src/constants.js");
+    const defaultContainer = getDefaultContainerName();
+    const scopedHash = getScopedHashKey(testHash, defaultContainer);
+    const scopedExists = await getFileStoreMap(scopedHash);
+    const legacyExists = await getFileStoreMap(testHash);
+    t.truthy(scopedExists, "Scoped key should exist");
+    t.falsy(legacyExists, "Legacy key should not exist");
+
+    // Delete file - should not try to remove non-existent legacy key
+    // (This test verifies the fix doesn't log "does not exist" unnecessarily)
+    const deleteResponse = await deleteFileByHash(testHash);
+    t.is(deleteResponse.status, 200, "Delete should succeed");
+
+    // Verify scoped key is removed
+    const scopedAfter = await getFileStoreMap(scopedHash);
+    t.falsy(scopedAfter, "Scoped key should be removed");
+
+  } finally {
+    fs.unlinkSync(filePath);
+    try {
+      await removeFromFileStoreMap(testHash);
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+});
+
+test.serial("should handle error message for missing hash/requestId correctly", async (t) => {
+  // Test with no parameters at all
+  const deleteResponse1 = await axios.delete(baseUrl, {
+    validateStatus: (status) => true,
+    timeout: 10000,
+  });
+  
+  t.is(deleteResponse1.status, 400, "Should return 400 for missing parameters");
+  t.truthy(deleteResponse1.data, "Should have error message");
+  t.true(
+    deleteResponse1.data.includes("query string or request body"),
+    "Error should mention both query string and request body"
+  );
+
+  // Test with empty body
+  const deleteResponse2 = await axios.delete(baseUrl, {
+    data: {},
+    validateStatus: (status) => true,
+    timeout: 10000,
+  });
+  
+  t.is(deleteResponse2.status, 400, "Should return 400 for missing parameters");
+});

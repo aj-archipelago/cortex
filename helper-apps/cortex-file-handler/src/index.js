@@ -47,6 +47,27 @@ async function cleanupInactive(context) {
 }
 
 async function CortexFileHandler(context, req) {
+  // Parse body if it's a string (Azure Functions sometimes doesn't auto-parse DELETE bodies)
+  let parsedBody = req.body;
+  if (typeof req.body === 'string' && req.body.length > 0) {
+    try {
+      parsedBody = JSON.parse(req.body);
+    } catch (e) {
+      // If parsing fails, treat as empty object
+      parsedBody = {};
+    }
+  }
+  
+  // For GET requests, prioritize query string. For other methods, check body first, then query
+  // Also check if parsedBody actually has content (not just empty object)
+  const hasBodyContent = parsedBody && typeof parsedBody === 'object' && Object.keys(parsedBody).length > 0;
+  const bodySource = hasBodyContent ? (parsedBody.params || parsedBody) : {};
+  const querySource = req.query || {};
+  
+  // Merge sources: for GET, query takes priority; for others, body takes priority
+  const isGet = req.method?.toLowerCase() === 'get';
+  const source = isGet ? { ...bodySource, ...querySource } : { ...querySource, ...bodySource };
+  
   const {
     uri,
     requestId,
@@ -59,7 +80,7 @@ async function CortexFileHandler(context, req) {
     load,
     restore,
     container,
-  } = req.body?.params || req.query;
+  } = source;
 
   // Normalize boolean parameters
   const shouldSave = save === true || save === "true";
@@ -136,8 +157,10 @@ async function CortexFileHandler(context, req) {
   // 1. Delete multiple files by requestId (existing behavior)
   // 2. Delete single file by hash (new behavior)
   if (operation === "delete") {
-    const deleteRequestId = req.query.requestId || requestId;
-    const deleteHash = req.query.hash || hash;
+    // Check both query string and body params for delete parameters
+    // Handle both req.body.params.hash and req.body.hash formats
+    const deleteRequestId = req.query.requestId || parsedBody?.params?.requestId || parsedBody?.requestId || requestId;
+    const deleteHash = req.query.hash || parsedBody?.params?.hash || parsedBody?.hash || hash;
     
     // If only hash is provided, delete single file by hash
     if (deleteHash && !deleteRequestId) {
@@ -164,7 +187,7 @@ async function CortexFileHandler(context, req) {
     if (!deleteRequestId) {
       context.res = {
         status: 400,
-        body: "Please pass either a requestId or hash on the query string",
+        body: "Please pass either a requestId or hash in the query string or request body",
       };
       return;
     }

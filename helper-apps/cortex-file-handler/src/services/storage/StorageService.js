@@ -191,8 +191,11 @@ export class StorageService {
       const effectiveContainer = containerName || defaultContainerName;
       if (effectiveContainer === defaultContainerName && scopedHash.includes(':')) {
         const [legacyHash] = scopedHash.split(':', 2);
-        // Try to remove legacy key - it's okay if it doesn't exist
-        await removeFromFileStoreMap(legacyHash);
+        // Try to remove legacy key - only attempt if it exists to avoid unnecessary "does not exist" logs
+        const legacyExists = await getFileStoreMap(legacyHash);
+        if (legacyExists) {
+          await removeFromFileStoreMap(legacyHash);
+        }
       }
     }
     
@@ -203,9 +206,15 @@ export class StorageService {
     // Delete from primary storage
     if (hashResult.url) {
       try {
+        // Log the URL being deleted for debugging
+        console.log(`Deleting file from primary storage - hash: ${hash}, url: ${hashResult.url}`);
         const primaryResult = await this.deleteFile(hashResult.url);
         if (primaryResult) {
           results.push({ provider: 'primary', result: primaryResult });
+        } else {
+          // deleteFile returned null, which means the URL was invalid
+          console.warn(`Invalid or empty URL for hash ${hash}: ${hashResult.url}`);
+          results.push({ provider: 'primary', error: 'Invalid URL (container-only or empty blob name)' });
         }
       } catch (error) {
         console.error(`Error deleting file from primary storage:`, error);
@@ -216,13 +225,24 @@ export class StorageService {
     // Delete from backup storage (GCS)
     if (hashResult.gcs && this.backupProvider) {
       try {
+        console.log(`Deleting file from backup storage - hash: ${hash}, gcs: ${hashResult.gcs}`);
         const backupResult = await this.deleteFileFromBackup(hashResult.gcs);
         if (backupResult) {
+          console.log(`Successfully deleted from backup storage - hash: ${hash}, result: ${backupResult}`);
           results.push({ provider: 'backup', result: backupResult });
+        } else {
+          console.warn(`Backup deletion returned null for hash ${hash}: ${hashResult.gcs}`);
+          results.push({ provider: 'backup', error: 'Deletion returned null' });
         }
       } catch (error) {
         console.error(`Error deleting file from backup storage:`, error);
         results.push({ provider: 'backup', error: error.message });
+      }
+    } else {
+      if (!hashResult.gcs) {
+        console.log(`No GCS URL found for hash ${hash}, skipping backup deletion`);
+      } else if (!this.backupProvider) {
+        console.log(`Backup provider not configured, skipping backup deletion for hash ${hash}`);
       }
     }
 
