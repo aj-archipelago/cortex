@@ -167,8 +167,15 @@ test('formatFilesForTemplate should limit to 10 files and show note', t => {
     }));
     
     const result = formatFilesForTemplate(collection);
-    // Should only show 10 files
-    const fileCount = (result.match(/\|/g) || []).length - 1; // Subtract 1 for header
+    // Should only show 10 files - count file lines (excluding header, separator, and note)
+    const lines = result.split('\n');
+    // Find the separator line index
+    const separatorIndex = lines.findIndex(line => line.startsWith('-'));
+    // Count file lines (between separator and note, or end of result)
+    const fileLines = lines.slice(separatorIndex + 1).filter(line => 
+        line.includes('|') && !line.startsWith('Note:')
+    );
+    const fileCount = fileLines.length;
     t.is(fileCount, 10);
     // Should include note about more files
     t.true(result.includes('Note: Showing the last 10 most recently used files'));
