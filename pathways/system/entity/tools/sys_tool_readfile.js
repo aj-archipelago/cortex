@@ -78,22 +78,26 @@ export default {
                 return JSON.stringify(errorResult);
             }
 
-            if (startLine !== undefined && (typeof startLine !== 'number' || startLine < 1)) {
+            if (startLine !== undefined) {
+                if (typeof startLine !== 'number' || !Number.isInteger(startLine) || startLine < 1) {
                 const errorResult = {
                     success: false,
-                    error: "startLine must be a positive integer"
+                        error: "startLine must be a positive integer (1-indexed)"
                 };
                 resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
                 return JSON.stringify(errorResult);
+                }
             }
 
-            if (endLine !== undefined && (typeof endLine !== 'number' || endLine < 1)) {
+            if (endLine !== undefined) {
+                if (typeof endLine !== 'number' || !Number.isInteger(endLine) || endLine < 1) {
                 const errorResult = {
                     success: false,
-                    error: "endLine must be a positive integer"
+                        error: "endLine must be a positive integer (1-indexed)"
                 };
                 resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
                 return JSON.stringify(errorResult);
+                }
             }
 
             if (startLine !== undefined && endLine !== undefined && endLine < startLine) {
@@ -103,6 +107,17 @@ export default {
                 };
                 resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
                 return JSON.stringify(errorResult);
+            }
+
+            if (maxLines !== undefined) {
+                if (typeof maxLines !== 'number' || !Number.isInteger(maxLines) || maxLines < 1) {
+                    const errorResult = {
+                        success: false,
+                        error: "maxLines must be a positive integer"
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
             }
             // Download file content directly from the URL (don't use file handler for content)
             // Use arraybuffer and explicitly decode as UTF-8 to avoid encoding issues
@@ -121,17 +136,53 @@ export default {
             const allLines = textContent.split(/\r?\n/);
             const totalLines = allLines.length;
 
+            // Handle empty file
+            if (totalLines === 0 || (totalLines === 1 && allLines[0] === '')) {
+                const result = {
+                    success: true,
+                    cloudUrl: cloudUrl,
+                    totalLines: 0,
+                    returnedLines: 0,
+                    startLine: 1,
+                    endLine: 0,
+                    content: '',
+                    truncated: false,
+                    isEmpty: true
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(result);
+            }
+
             // Apply line range filtering
             let selectedLines = allLines;
+            let actualStartLine = 1;
+            let actualEndLine = totalLines;
+            let wasTruncatedByRange = false;
+
             if (startLine !== undefined || endLine !== undefined) {
-                const start = startLine !== undefined ? Math.max(1, startLine) - 1 : 0; // Convert to 0-indexed
-                const end = endLine !== undefined ? Math.min(totalLines, endLine) : totalLines;
+                const start = startLine !== undefined ? Math.max(1, Math.min(startLine, totalLines)) - 1 : 0; // Convert to 0-indexed, clamp to valid range
+                const end = endLine !== undefined ? Math.min(totalLines, Math.max(1, endLine)) : totalLines; // Clamp to valid range
+                
+                if (startLine !== undefined && startLine > totalLines) {
+                    const errorResult = {
+                        success: false,
+                        error: `startLine (${startLine}) exceeds file length (${totalLines} lines)`
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+
                 selectedLines = allLines.slice(start, end);
+                actualStartLine = start + 1; // Convert back to 1-indexed
+                actualEndLine = end;
+                wasTruncatedByRange = (endLine !== undefined && endLine < totalLines) || (startLine !== undefined && startLine > 1);
             }
 
             // Apply maxLines limit
+            let wasTruncatedByMaxLines = false;
             if (selectedLines.length > maxLines) {
                 selectedLines = selectedLines.slice(0, maxLines);
+                wasTruncatedByMaxLines = true;
             }
 
             const result = {
@@ -139,22 +190,46 @@ export default {
                 cloudUrl: cloudUrl,
                 totalLines: totalLines,
                 returnedLines: selectedLines.length,
-                startLine: startLine || 1,
-                endLine: endLine || totalLines,
+                startLine: actualStartLine,
+                endLine: actualEndLine,
                 content: selectedLines.join('\n'),
-                truncated: selectedLines.length < allLines.length || (endLine !== undefined && endLine < totalLines)
+                truncated: wasTruncatedByRange || wasTruncatedByMaxLines,
+                truncatedByRange: wasTruncatedByRange,
+                truncatedByMaxLines: wasTruncatedByMaxLines
             };
 
             resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
             return JSON.stringify(result);
 
         } catch (e) {
-            logger.error(`Error reading cloud file ${cloudUrl}: ${e.message}`);
+            let errorMsg = 'Unknown error occurred while reading file';
+            if (e?.message) {
+                errorMsg = e.message;
+            } else if (e?.response) {
+                // Handle HTTP errors
+                const status = e.response.status;
+                const statusText = e.response.statusText || '';
+                errorMsg = `HTTP ${status}${statusText ? ` ${statusText}` : ''}: Failed to download file`;
+            } else if (e?.code === 'ECONNABORTED' || e?.code === 'ETIMEDOUT') {
+                errorMsg = 'Request timeout: File download took too long';
+            } else if (e?.code === 'ENOTFOUND' || e?.code === 'ECONNREFUSED') {
+                errorMsg = `Connection error: ${e.message || 'Unable to reach file server'}`;
+            } else if (typeof e === 'string') {
+                errorMsg = e;
+            } else if (e?.errors && Array.isArray(e.errors)) {
+                // Handle AggregateError
+                errorMsg = e.errors.map(err => err?.message || String(err)).join('; ');
+            } else if (e) {
+                errorMsg = String(e);
+            }
+
+            logger.error(`Error reading cloud file ${cloudUrl || file || 'unknown'}: ${errorMsg}`);
             
             const errorResult = {
                 success: false,
-                cloudUrl: cloudUrl,
-                error: e.message || "Unknown error occurred while reading file"
+                cloudUrl: cloudUrl || null,
+                file: file || null,
+                error: errorMsg
             };
 
             resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });

@@ -3,7 +3,7 @@
 // Uses memory system endpoints (memoryFiles section) for storage
 import logger from '../../../../lib/logger.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { addFileToCollection, loadFileCollection, saveFileCollection, findFileInCollection } from '../../../../lib/fileUtils.js';
+import { addFileToCollection, loadFileCollection, saveFileCollection, findFileInCollection, deleteFileByHash } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -124,7 +124,7 @@ export default {
             icon: "🗑️",
             function: {
                 name: "RemoveFileFromCollection",
-                description: "Remove one or more files from your collection. Use a file ID to remove a specific file, or use '*' to remove all files.",
+                description: "Remove one or more files from your collection and delete them from cloud storage. Use a file ID to remove a specific file, or use '*' to remove all files. The file will be deleted from cloud storage (if a hash is available) and removed from your collection.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -254,7 +254,7 @@ export default {
                 });
 
             } else if (isRemove) {
-                // Remove file(s) from collection
+                // Remove file(s) from collection and delete from cloud storage
                 const { fileId } = args;
                 
                 if (!fileId || typeof fileId !== 'string') {
@@ -263,14 +263,35 @@ export default {
 
                 let removedCount = 0;
                 let removedFiles = [];
+                let deletedFromCloud = 0;
+                let deletionErrors = [];
 
                 if (fileId === '*') {
-                    // Remove all files
+                    // Remove all files - delete each from cloud storage first
                     removedCount = collection.length;
                     removedFiles = collection.map(f => ({
                         id: f.id,
-                        filename: f.filename
+                        filename: f.filename,
+                        hash: f.hash || null
                     }));
+                    
+                    // Delete all files from cloud storage
+                    for (const file of collection) {
+                        if (file.hash) {
+                            try {
+                                logger.info(`Deleting file from cloud storage: ${file.filename} (hash: ${file.hash})`);
+                                const deleted = await deleteFileByHash(file.hash, resolver);
+                                if (deleted) {
+                                    deletedFromCloud++;
+                                }
+                            } catch (error) {
+                                const errorMsg = error?.message || String(error);
+                                logger.warn(`Failed to delete file ${file.filename} (hash: ${file.hash}) from cloud storage: ${errorMsg}`);
+                                deletionErrors.push({ filename: file.filename, error: errorMsg });
+                            }
+                        }
+                    }
+                    
                     collection = [];
                 } else {
                     // Remove specific file by ID, filename, URL, or hash using shared matching logic
@@ -280,12 +301,30 @@ export default {
                         throw new Error(`File with ID, filename, URL, or hash "${fileId}" not found in collection`);
                     }
                     
+                    // Delete from cloud storage if hash exists
+                    if (foundFile.hash) {
+                        try {
+                            logger.info(`Deleting file from cloud storage: ${foundFile.filename} (hash: ${foundFile.hash})`);
+                            const deleted = await deleteFileByHash(foundFile.hash, resolver);
+                            if (deleted) {
+                                deletedFromCloud = 1;
+                            }
+                        } catch (error) {
+                            const errorMsg = error?.message || String(error);
+                            logger.warn(`Failed to delete file ${foundFile.filename} (hash: ${foundFile.hash}) from cloud storage: ${errorMsg}`);
+                            deletionErrors.push({ filename: foundFile.filename, error: errorMsg });
+                        }
+                    } else {
+                        logger.info(`No hash found for file ${foundFile.filename}, skipping cloud storage deletion`);
+                    }
+                    
                     removedFiles.push({
                         id: foundFile.id,
-                        filename: foundFile.filename
+                        filename: foundFile.filename,
+                        hash: foundFile.hash || null
                     });
                     
-                    // Remove the matched file
+                    // Remove the matched file from collection
                     collection = collection.filter(file => file.id !== foundFile.id);
                     removedCount = 1;
                 }
@@ -293,15 +332,34 @@ export default {
                 // Save updated collection using utility function
                 await saveFileCollection(contextId, contextKey, collection);
 
+                // Build result message
+                let message;
+                if (fileId === '*') {
+                    message = `All ${removedCount} file(s) removed from collection`;
+                    if (deletedFromCloud > 0) {
+                        message += ` (${deletedFromCloud} deleted from cloud storage)`;
+                    }
+                    if (deletionErrors.length > 0) {
+                        message += `. ${deletionErrors.length} deletion error(s) occurred`;
+                    }
+                } else {
+                    message = `File "${removedFiles[0]?.filename || fileId}" removed from collection`;
+                    if (deletedFromCloud > 0) {
+                        message += ` and deleted from cloud storage`;
+                    } else if (removedFiles[0]?.hash) {
+                        message += ` (cloud storage deletion failed or file not found)`;
+                    }
+                }
+
                 resolver.tool = JSON.stringify({ toolUsed: "RemoveFileFromCollection" });
                 return JSON.stringify({
                     success: true,
                     removedCount: removedCount,
+                    deletedFromCloud: deletedFromCloud,
                     remainingFiles: collection.length,
-                    message: fileId === '*' 
-                        ? `All ${removedCount} file(s) removed from collection`
-                        : `File "${removedFiles[0]?.filename || fileId}" removed from collection`,
-                    removedFiles: removedFiles
+                    message: message,
+                    removedFiles: removedFiles,
+                    deletionErrors: deletionErrors.length > 0 ? deletionErrors : undefined
                 });
 
             } else {

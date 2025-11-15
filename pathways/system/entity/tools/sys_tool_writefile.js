@@ -3,6 +3,15 @@
 import logger from '../../../../lib/logger.js';
 import { uploadFileToCloud, addFileToCollection, getMimeTypeFromFilename } from '../../../../lib/fileUtils.js';
 
+// Helper function to format file size
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
 export default {
     prompt: [],
     timeout: 60,
@@ -48,11 +57,21 @@ export default {
         const { content, filename, tags = [], notes = '', contextId, contextKey } = args;
         
         // Validate inputs and return JSON error if invalid
-        if (!content || typeof content !== 'string') {
+        if (content === undefined || content === null) {
             const errorResult = {
                 success: false,
                 filename: filename || 'unknown',
-                error: "content is required and must be a string"
+                error: "content is required and cannot be null or undefined"
+            };
+            resolver.tool = JSON.stringify({ toolUsed: "WriteFile" });
+            return JSON.stringify(errorResult);
+        }
+
+        if (typeof content !== 'string') {
+            const errorResult = {
+                success: false,
+                filename: filename || 'unknown',
+                error: `content must be a string, got ${typeof content}`
             };
             resolver.tool = JSON.stringify({ toolUsed: "WriteFile" });
             return JSON.stringify(errorResult);
@@ -62,7 +81,40 @@ export default {
             const errorResult = {
                 success: false,
                 filename: 'unknown',
-                error: "filename is required and must be a string"
+                error: "filename is required and must be a non-empty string"
+            };
+            resolver.tool = JSON.stringify({ toolUsed: "WriteFile" });
+            return JSON.stringify(errorResult);
+        }
+
+        // Validate filename doesn't contain invalid characters
+        if (filename.trim().length === 0) {
+            const errorResult = {
+                success: false,
+                filename: filename,
+                error: "filename cannot be empty or whitespace only"
+            };
+            resolver.tool = JSON.stringify({ toolUsed: "WriteFile" });
+            return JSON.stringify(errorResult);
+        }
+
+        // Validate tags if provided
+        if (tags !== undefined && !Array.isArray(tags)) {
+            const errorResult = {
+                success: false,
+                filename: filename,
+                error: "tags must be an array if provided"
+            };
+            resolver.tool = JSON.stringify({ toolUsed: "WriteFile" });
+            return JSON.stringify(errorResult);
+        }
+
+        // Validate notes if provided
+        if (notes !== undefined && typeof notes !== 'string') {
+            const errorResult = {
+                success: false,
+                filename: filename,
+                error: "notes must be a string if provided"
             };
             resolver.tool = JSON.stringify({ toolUsed: "WriteFile" });
             return JSON.stringify(errorResult);
@@ -117,6 +169,7 @@ export default {
                 }
             }
 
+            const fileSize = Buffer.byteLength(content, 'utf8');
             const result = {
                 success: true,
                 filename: filename,
@@ -124,8 +177,9 @@ export default {
                 gcs: uploadResult.gcs || null,
                 hash: uploadResult.hash || null,
                 fileId: fileEntry?.id || null,
-                size: Buffer.byteLength(content, 'utf8'),
-                message: `File "${filename}" written and uploaded successfully`
+                size: fileSize,
+                sizeFormatted: formatFileSize(fileSize),
+                message: `File "${filename}" written and uploaded successfully (${formatFileSize(fileSize)})`
             };
 
             resolver.tool = JSON.stringify({ toolUsed: "WriteFile" });

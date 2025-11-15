@@ -1,5 +1,5 @@
 // fileOperations.test.js
-// Integration tests for ReadFile, WriteFile, and ModifyFile tools
+// Integration tests for ReadFile, WriteFile, and EditFile tools
 
 import test from 'ava';
 import serverFactory from '../../../../index.js';
@@ -233,9 +233,9 @@ test('ReadFile: Read with maxLines limit', async t => {
     }
 });
 
-// ========== ModifyFile Tests ==========
+// ========== EditFileByLine Tests ==========
 
-test('ModifyFile: Replace single line', async t => {
+test('EditFileByLine: Replace single line', async t => {
     const contextId = createTestContext();
     
     try {
@@ -256,10 +256,14 @@ test('ModifyFile: Replace single line', async t => {
             return;
         }
         
-        await new Promise(resolve => setTimeout(resolve, 500));
+        t.is(writeParsed.success, true, 'File should be written successfully');
+        t.truthy(writeParsed.url, 'File should have a URL');
+        
+        // Wait for file to be available (increased wait for reliability)
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
         // Modify line 3
-        const modifyResult = await callPathway('sys_tool_modifyfile', {
+        const modifyResult = await callPathway('sys_tool_editfile', {
             contextId,
             file: writeParsed.fileId || 'modifytest.txt',
             startLine: 3,
@@ -290,7 +294,7 @@ test('ModifyFile: Replace single line', async t => {
     }
 });
 
-test('ModifyFile: Replace multiple lines', async t => {
+test('EditFileByLine: Replace multiple lines', async t => {
     const contextId = createTestContext();
     
     try {
@@ -314,7 +318,7 @@ test('ModifyFile: Replace multiple lines', async t => {
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // Replace lines 2-4 with new content
-        const modifyResult = await callPathway('sys_tool_modifyfile', {
+        const modifyResult = await callPathway('sys_tool_editfile', {
             contextId,
             file: writeParsed.fileId || 'multimodify.txt',
             startLine: 2,
@@ -349,7 +353,7 @@ test('ModifyFile: Replace multiple lines', async t => {
     }
 });
 
-test('ModifyFile: Insert content (replace with more lines)', async t => {
+test('EditFileByLine: Insert content (replace with more lines)', async t => {
     const contextId = createTestContext();
     
     try {
@@ -373,7 +377,7 @@ test('ModifyFile: Insert content (replace with more lines)', async t => {
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // Replace line 2 with 3 new lines
-        const modifyResult = await callPathway('sys_tool_modifyfile', {
+        const modifyResult = await callPathway('sys_tool_editfile', {
             contextId,
             file: writeParsed.fileId || 'inserttest.txt',
             startLine: 2,
@@ -410,7 +414,7 @@ test('ModifyFile: Insert content (replace with more lines)', async t => {
     }
 });
 
-test('ModifyFile: Delete content (replace with fewer lines)', async t => {
+test('EditFileByLine: Delete content (replace with fewer lines)', async t => {
     const contextId = createTestContext();
     
     try {
@@ -434,7 +438,7 @@ test('ModifyFile: Delete content (replace with fewer lines)', async t => {
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // Replace lines 2-4 with a single line
-        const modifyResult = await callPathway('sys_tool_modifyfile', {
+        const modifyResult = await callPathway('sys_tool_editfile', {
             contextId,
             file: writeParsed.fileId || 'deletetest.txt',
             startLine: 2,
@@ -469,11 +473,11 @@ test('ModifyFile: Delete content (replace with fewer lines)', async t => {
     }
 });
 
-test('ModifyFile: Error handling - file not found', async t => {
+test('EditFileByLine: Error handling - file not found', async t => {
     const contextId = createTestContext();
     
     try {
-        const result = await callPathway('sys_tool_modifyfile', {
+        const result = await callPathway('sys_tool_editfile', {
             contextId,
             file: 'nonexistent.txt',
             startLine: 1,
@@ -490,7 +494,7 @@ test('ModifyFile: Error handling - file not found', async t => {
     }
 });
 
-test('ModifyFile: Error handling - invalid line range', async t => {
+test('EditFileByLine: Error handling - invalid line range', async t => {
     const contextId = createTestContext();
     
     try {
@@ -513,7 +517,7 @@ test('ModifyFile: Error handling - invalid line range', async t => {
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // Try invalid range (endLine < startLine)
-        const result = await callPathway('sys_tool_modifyfile', {
+        const result = await callPathway('sys_tool_editfile', {
             contextId,
             file: writeParsed.fileId || 'rangetest.txt',
             startLine: 5,
@@ -530,7 +534,7 @@ test('ModifyFile: Error handling - invalid line range', async t => {
     }
 });
 
-test('ModifyFile: Error handling - line out of range', async t => {
+test('EditFileByLine: Error handling - line out of range', async t => {
     const contextId = createTestContext();
     
     try {
@@ -553,7 +557,7 @@ test('ModifyFile: Error handling - line out of range', async t => {
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // Try to modify line 10 (doesn't exist)
-        const result = await callPathway('sys_tool_modifyfile', {
+        const result = await callPathway('sys_tool_editfile', {
             contextId,
             file: writeParsed.fileId || 'rangetest2.txt',
             startLine: 10,
@@ -565,6 +569,210 @@ test('ModifyFile: Error handling - line out of range', async t => {
         const parsed = JSON.parse(result);
         t.is(parsed.success, false);
         t.true(parsed.error?.includes('exceeds file length'));
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+// ========== EditFileBySearchAndReplace Tests ==========
+
+test('EditFileBySearchAndReplace: Replace first occurrence', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Write initial file
+        const initialContent = 'Hello world\nThis is a test\nHello again';
+        const writeResult = await callPathway('sys_tool_writefile', {
+            contextId,
+            content: initialContent,
+            filename: 'searchreplace.txt',
+            userMessage: 'Writing file for search replace test'
+        });
+        
+        const writeParsed = JSON.parse(writeResult);
+        
+        if (!writeParsed.success && writeParsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Replace first occurrence of "Hello"
+        const modifyResult = await callPathway('sys_tool_editfile', {
+            contextId,
+            file: writeParsed.fileId || 'searchreplace.txt',
+            oldString: 'Hello',
+            newString: 'Hi',
+            replaceAll: false,
+            userMessage: 'Replacing first occurrence'
+        });
+        
+        const modifyParsed = JSON.parse(modifyResult);
+        t.is(modifyParsed.success, true);
+        t.is(modifyParsed.mode, 'string-based');
+        t.is(modifyParsed.replaceAll, false);
+        t.is(modifyParsed.occurrencesReplaced, 1);
+        t.is(modifyParsed.totalOccurrences, 2);
+        
+        // Read back to verify
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const readResult = await callPathway('sys_tool_readfile', {
+            contextId,
+            file: modifyParsed.fileId || 'searchreplace.txt',
+            userMessage: 'Reading modified file'
+        });
+        
+        const readParsed = JSON.parse(readResult);
+        t.is(readParsed.success, true);
+        t.is(readParsed.content, 'Hi world\nThis is a test\nHello again');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('EditFileBySearchAndReplace: Replace all occurrences', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Write initial file
+        const initialContent = 'Hello world\nThis is a test\nHello again';
+        const writeResult = await callPathway('sys_tool_writefile', {
+            contextId,
+            content: initialContent,
+            filename: 'searchreplaceall.txt',
+            userMessage: 'Writing file for search replace all test'
+        });
+        
+        const writeParsed = JSON.parse(writeResult);
+        
+        if (!writeParsed.success && writeParsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Replace all occurrences of "Hello"
+        const modifyResult = await callPathway('sys_tool_editfile', {
+            contextId,
+            file: writeParsed.fileId || 'searchreplaceall.txt',
+            oldString: 'Hello',
+            newString: 'Hi',
+            replaceAll: true,
+            userMessage: 'Replacing all occurrences'
+        });
+        
+        const modifyParsed = JSON.parse(modifyResult);
+        t.is(modifyParsed.success, true);
+        t.is(modifyParsed.mode, 'string-based');
+        t.is(modifyParsed.replaceAll, true);
+        t.is(modifyParsed.occurrencesReplaced, 2);
+        
+        // Read back to verify
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const readResult = await callPathway('sys_tool_readfile', {
+            contextId,
+            file: modifyParsed.fileId || 'searchreplaceall.txt',
+            userMessage: 'Reading modified file'
+        });
+        
+        const readParsed = JSON.parse(readResult);
+        t.is(readParsed.success, true);
+        t.is(readParsed.content, 'Hi world\nThis is a test\nHi again');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('EditFileBySearchAndReplace: Replace multiline string', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Write initial file
+        const initialContent = 'Line 1\nLine 2\nLine 3\nLine 2\nLine 4';
+        const writeResult = await callPathway('sys_tool_writefile', {
+            contextId,
+            content: initialContent,
+            filename: 'multiline.txt',
+            userMessage: 'Writing file for multiline replace test'
+        });
+        
+        const writeParsed = JSON.parse(writeResult);
+        
+        if (!writeParsed.success && writeParsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Replace multiline string
+        const modifyResult = await callPathway('sys_tool_editfile', {
+            contextId,
+            file: writeParsed.fileId || 'multiline.txt',
+            oldString: 'Line 2\nLine 3',
+            newString: 'Replaced 2\nReplaced 3',
+            replaceAll: false,
+            userMessage: 'Replacing multiline string'
+        });
+        
+        const modifyParsed = JSON.parse(modifyResult);
+        t.is(modifyParsed.success, true);
+        
+        // Read back to verify
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const readResult = await callPathway('sys_tool_readfile', {
+            contextId,
+            file: modifyParsed.fileId || 'multiline.txt',
+            userMessage: 'Reading modified file'
+        });
+        
+        const readParsed = JSON.parse(readResult);
+        t.is(readParsed.success, true);
+        t.is(readParsed.content, 'Line 1\nReplaced 2\nReplaced 3\nLine 2\nLine 4');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('EditFileBySearchAndReplace: Error handling - string not found', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Write a file
+        const writeResult = await callPathway('sys_tool_writefile', {
+            contextId,
+            content: 'Line 1\nLine 2',
+            filename: 'notfound.txt',
+            userMessage: 'Writing test file'
+        });
+        
+        const writeParsed = JSON.parse(writeResult);
+        
+        if (!writeParsed.success && writeParsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Try to replace a string that doesn't exist
+        const result = await callPathway('sys_tool_editfile', {
+            contextId,
+            file: writeParsed.fileId || 'notfound.txt',
+            oldString: 'This string does not exist',
+            newString: 'replacement',
+            userMessage: 'Trying to replace non-existent string'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, false);
+        t.true(parsed.error?.includes('not found in file') || parsed.error?.includes('oldString not found'));
     } finally {
         await cleanup(contextId);
     }
@@ -611,7 +819,7 @@ test('File Operations: Write, Read, Modify workflow', async t => {
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // 3. Modify the file
-        const modifyResult = await callPathway('sys_tool_modifyfile', {
+        const modifyResult = await callPathway('sys_tool_editfile', {
             contextId,
             file: fileId,
             startLine: 2,
