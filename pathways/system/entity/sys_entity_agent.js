@@ -5,7 +5,8 @@ const MAX_TOOL_CALLS = 50;
 import { callPathway, callTool, say } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
-import { chatArgsHasImageUrl, removeOldImageAndFileContent, getAvailableFiles } from '../../../lib/util.js';
+import { chatArgsHasImageUrl, removeOldImageAndFileContent } from '../../../lib/util.js';
+import { getAvailableFiles } from '../../../lib/fileUtils.js';
 import { Prompt } from '../../../server/prompt.js';
 import { getToolsForEntity, loadEntityConfig } from './tools/shared/sys_entity_tools.js';
 import CortexResponse from '../../../lib/cortexResponse.js';
@@ -329,7 +330,11 @@ export default {
                 memoryLookupRequiredPromise = Promise.race([
                     callPathway('sys_memory_lookup_required', { ...args, chatHistory: chatHistoryLastTurn, stream: false }),
                     timeoutPromise
-                ]);
+                ]).catch(error => {
+                    // Handle timeout or other errors gracefully - return null so the await doesn't throw
+                    logger.warn(`Memory lookup promise rejected: ${error.message}`);
+                    return null;
+                });
             }
         }
         
@@ -388,7 +393,8 @@ export default {
             args.chatHistory = args.chatHistory.slice(-20);
         }
 
-        const availableFiles = getAvailableFiles(args.chatHistory);
+        // Get available files from collection (async, syncs files from chat history)
+        const availableFiles = await getAvailableFiles(args.chatHistory, args.contextId, args.contextKey);
 
         // remove old image and file content
         const visionContentPresent = chatArgsHasImageUrl(args);
@@ -407,7 +413,18 @@ export default {
 
         try {
             if (memoryLookupRequiredPromise) {
-                memoryLookupRequired = JSON.parse(await memoryLookupRequiredPromise)?.memoryRequired;
+                const result = await memoryLookupRequiredPromise;
+                // If result is null (timeout) or empty, default to false
+                if (result && typeof result === 'string') {
+                    try {
+                        memoryLookupRequired = JSON.parse(result)?.memoryRequired || false;
+                    } catch (parseError) {
+                        logger.warn(`Failed to parse memory lookup result: ${parseError.message}`);
+                        memoryLookupRequired = false;
+                    }
+                } else {
+                    memoryLookupRequired = false;
+                }
             } else {
                 memoryLookupRequired = false;
             }

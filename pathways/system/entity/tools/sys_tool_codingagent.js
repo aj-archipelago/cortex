@@ -3,6 +3,7 @@
 
 import { QueueServiceClient } from '@azure/storage-queue';
 import logger from '../../../../lib/logger.js';
+import { resolveFileParameter } from '../../../../lib/fileUtils.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
@@ -58,7 +59,7 @@ export default {
                     },
                     inputFiles: {
                         type: "string",
-                        description: "A list of input files that the coding agent must use to complete the task. Each file should be the fully-qualified URL to the file. Omit this parameter if no input files are needed."
+                        description: "A list of input files (from Available Files section or ListFileCollection or SearchFileCollection) that the coding agent must use to complete the task. Each file should be the hash or filename. Omit this parameter if no input files are needed."
                     },
                     userMessage: {
                         type: "string",
@@ -76,12 +77,45 @@ export default {
     
     executePathway: async ({args, resolver}) => {
         try {
-            const { codingTask, userMessage, inputFiles, codingTaskKeywords } = args;
-            const { contextId } = args;
+            const { codingTask, userMessage, inputFiles, codingTaskKeywords, contextId, contextKey } = args;
 
             let taskSuffix = "";
             if (inputFiles) {
-                taskSuffix = `You must use the following files as input to complete the task: ${inputFiles}.`
+                if (!contextId) {
+                    throw new Error("contextId is required when using the 'inputFiles' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                }
+                
+                // Resolve file parameters to URLs
+                // inputFiles can be a comma-separated, newline-separated, or space-separated list
+                const fileReferences = inputFiles
+                    .split(/[,\n\r]+/)
+                    .map(ref => ref.trim())
+                    .filter(ref => ref.length > 0);
+                
+                const resolvedUrls = [];
+                const failedFiles = [];
+                
+                for (const fileRef of fileReferences) {
+                    // Try to resolve each file reference
+                    const resolvedUrl = await resolveFileParameter(fileRef, contextId, contextKey);
+                    if (resolvedUrl) {
+                        resolvedUrls.push(resolvedUrl);
+                    } else {
+                        failedFiles.push(fileRef);
+                    }
+                }
+                
+                // Fail early if any files couldn't be resolved
+                if (failedFiles.length > 0) {
+                    const fileList = failedFiles.length === 1 
+                        ? `"${failedFiles[0]}"` 
+                        : failedFiles.map(f => `"${f}"`).join(', ');
+                    throw new Error(`File(s) not found: ${fileList}. Use ListFileCollection or SearchFileCollection to find available files.`);
+                }
+                
+                if (resolvedUrls.length > 0) {
+                    taskSuffix = `You must use the following files as input to complete the task: ${resolvedUrls.join(', ')}.`
+                }
             }
 
 

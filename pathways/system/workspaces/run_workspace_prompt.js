@@ -1,5 +1,6 @@
 import { config } from '../../../config.js';
-import { chatArgsHasImageUrl, chatArgsHasType, getAvailableFiles, removeOldImageAndFileContent } from '../../../lib/util.js';
+import { chatArgsHasImageUrl, chatArgsHasType, removeOldImageAndFileContent } from '../../../lib/util.js';
+import { getAvailableFiles } from '../../../lib/fileUtils.js';
 import { loadEntityConfig } from '../../../pathways/system/entity/tools/shared/sys_entity_tools.js';
 import { Prompt } from '../../../server/prompt.js';
 
@@ -48,8 +49,8 @@ export default {
             model
         };
 
-        // Extract available files from chat history
-        const availableFiles = getAvailableFiles(args.chatHistory);
+        // Extract available files from chat history (syncs to collection if contextId available)
+        const availableFiles = await getAvailableFiles(args.chatHistory, args.contextId, args.contextKey);
 
         // Check for both image and file content (CSV files have type 'file', not 'image_url')
         const hasImageContent = chatArgsHasImageUrl(args);

@@ -2,12 +2,8 @@ import ModelPlugin from "./modelPlugin.js";
 import fs from "fs";
 import FormData from "form-data";
 import logger from "../../lib/logger.js";
-import {
-  alignSubtitles,
-  deleteTempPath,
-  downloadFile,
-  getMediaChunks,
-} from "../../lib/util.js";
+import { alignSubtitles } from "../../lib/util.js";
+import { deleteTempPath, downloadFile, getMediaChunks } from "../../lib/fileUtils.js";
 import CortexRequest from "../../lib/cortexRequest.js";
 import { publishRequestProgress } from "../../lib/redisSubscription.js";
 

@@ -48,6 +48,8 @@ const packageJson = JSON.parse(
 const version = packageJson.version;
 
 app.use(cors());
+// Parse JSON bodies for all requests (including DELETE)
+app.use(express.json());
 // Serve static files from the public folder
 app.use("/files", express.static(publicFolder));
 
