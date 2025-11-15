@@ -36,9 +36,8 @@ export default {
         }
 
         // Basic URL format validation
-        let urlObj;
         try {
-            urlObj = new URL(url);
+            new URL(url);
         } catch (e) {
             return JSON.stringify({
                 valid: false,

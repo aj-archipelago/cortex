@@ -2,7 +2,6 @@
 // Tool pathway that manages user file collections (add, search, list files)
 // Uses memory system endpoints (memoryFiles section) for storage
 import logger from '../../../../lib/logger.js';
-import { callPathway } from '../../../../lib/pathwayTools.js';
 import { addFileToCollection, loadFileCollection, saveFileCollection, findFileInCollection, deleteFileByHash, modifyFileCollectionWithLock } from '../../../../lib/fileUtils.js';
 
 export default {
@@ -150,7 +149,6 @@ export default {
         const isAdd = args.fileUrl !== undefined || args.url !== undefined;
         const isSearch = args.query !== undefined;
         const isRemove = args.fileId !== undefined;
-        const isList = !isAdd && !isSearch && !isRemove;
 
         try {
             if (!contextId) {

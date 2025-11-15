@@ -379,7 +379,7 @@ export default {
             return JSON.stringify(result);
 
         } catch (error) {
-            let errorMsg = 'Unknown error';
+            let errorMsg;
             if (error?.message) {
                 errorMsg = error.message;
             } else if (error?.errors && Array.isArray(error.errors)) {

@@ -1,7 +1,6 @@
 // sys_tool_readfile.js
 // Tool pathway that reads text files with line number support
 import logger from '../../../../lib/logger.js';
-import { config } from '../../../../config.js';
 import { axios } from '../../../../lib/requestExecutor.js';
 import { resolveFileParameter } from '../../../../lib/fileUtils.js';
 
@@ -202,7 +201,7 @@ export default {
             return JSON.stringify(result);
 
         } catch (e) {
-            let errorMsg = 'Unknown error occurred while reading file';
+            let errorMsg;
             if (e?.message) {
                 errorMsg = e.message;
             } else if (e?.response) {
@@ -221,6 +220,8 @@ export default {
                 errorMsg = e.errors.map(err => err?.message || String(err)).join('; ');
             } else if (e) {
                 errorMsg = String(e);
+            } else {
+                errorMsg = 'Unknown error occurred while reading file';
             }
 
             logger.error(`Error reading cloud file ${cloudUrl || file || 'unknown'}: ${errorMsg}`);

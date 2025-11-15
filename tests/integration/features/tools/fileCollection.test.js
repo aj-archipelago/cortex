@@ -4,7 +4,6 @@
 import test from 'ava';
 import serverFactory from '../../../../index.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { getvWithDoubleDecryption, setvWithDoubleEncryption } from '../../../../lib/keyValueStorageClient.js';
 import { generateFileMessageContent, resolveFileParameter } from '../../../../lib/fileUtils.js';
 
 let testServer;
