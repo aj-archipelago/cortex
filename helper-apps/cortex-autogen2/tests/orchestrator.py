@@ -12,8 +12,9 @@ import json
 import base64
 import asyncio
 import logging
+import re
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
 # Add parent directory to path to import project modules
@@ -37,7 +38,8 @@ class TestOrchestrator:
         self,
         db_path: Optional[str] = None,
         redis_url: Optional[str] = None,
-        redis_channel: Optional[str] = None
+        redis_channel: Optional[str] = None,
+        logger: Optional[logging.Logger] = None
     ):
         """
         Initialize the test orchestrator.
@@ -46,12 +48,14 @@ class TestOrchestrator:
             db_path: Path to SQLite database (defaults to tests/database/test_results.db)
             redis_url: Redis connection URL (defaults to env var)
             redis_channel: Redis channel name (defaults to env var)
+            logger: Logger instance to use (defaults to module logger)
         """
         self.db = TestRepository(db_path)
         self.evaluator = LLMEvaluator()
+        self.logger = logger or logging.getLogger(__name__)
 
         self.redis_url = redis_url or os.getenv("REDIS_CONNECTION_STRING", "redis://localhost:6379")
-        self.redis_channel = redis_channel or os.getenv("REDIS_CHANNEL", "cortex_progress")
+        self.redis_channel = redis_channel or os.getenv("REDIS_CHANNEL", "requestProgress")
 
         self.azure_queue_conn_str = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
         self.azure_queue_name = os.getenv("AZURE_QUEUE_NAME", "cortex-tasks")
@@ -59,11 +63,131 @@ class TestOrchestrator:
         if not self.azure_queue_conn_str:
             raise ValueError("AZURE_STORAGE_CONNECTION_STRING environment variable must be set")
 
-        logger.info("🎬 Test Orchestrator initialized")
-        logger.info(f"   Redis: {self.redis_url}")
-        logger.info(f"   Queue: {self.azure_queue_name}")
+        # Load test cases and global expectations
+        self.test_cases, self.global_expectations = self.load_test_cases()
 
-    def load_test_cases(self, test_cases_path: Optional[str] = None) -> List[Dict]:
+        # Performance monitoring
+        self.performance_metrics = {
+            'tests_run': 0,
+            'tests_passed': 0,
+            'tests_failed': 0,
+            'tests_skipped': 0,
+            'total_duration': 0,
+            'agent_errors': {},
+            'file_errors': 0,
+            'data_errors': 0,
+            'sequence_errors': 0
+        }
+
+        self.logger.info("🎬 Test Orchestrator initialized")
+        self.logger.info(f"   Redis: {self.redis_url}")
+        self.logger.info(f"   Queue: {self.azure_queue_name}")
+
+    def _track_performance_metric(self, metric: str, value: int = 1):
+        """Track performance metrics during test execution."""
+        if metric in self.performance_metrics:
+            self.performance_metrics[metric] += value
+        elif metric == 'duration':
+            self.performance_metrics['total_duration'] += value
+
+    def _analyze_error_patterns(self, error_message: str):
+        """Analyze error messages to categorize error types."""
+        error_lower = error_message.lower()
+
+        if 'sequence' in error_lower or 'order' in error_lower:
+            self._track_performance_metric('sequence_errors')
+        elif 'file' in error_lower or 'path' in error_lower:
+            self._track_performance_metric('file_errors')
+        elif 'data' in error_lower or 'dataframe' in error_lower:
+            self._track_performance_metric('data_errors')
+        elif any(agent in error_lower for agent in ['aj_sql_agent', 'coder_agent', 'web_search_agent', 'presenter_agent']):
+            agent_name = 'unknown'
+            for agent in ['aj_sql_agent', 'coder_agent', 'web_search_agent', 'presenter_agent']:
+                if agent in error_lower:
+                    agent_name = agent
+                    break
+            if agent_name not in self.performance_metrics['agent_errors']:
+                self.performance_metrics['agent_errors'][agent_name] = 0
+            self.performance_metrics['agent_errors'][agent_name] += 1
+
+    def get_performance_report(self) -> Dict:
+        """Generate a comprehensive performance report."""
+        metrics = self.performance_metrics
+
+        report = {
+            'summary': {
+                'total_tests': metrics['tests_run'],
+                'passed': metrics['tests_passed'],
+                'failed': metrics['tests_failed'],
+                'skipped': metrics['tests_skipped'],
+                'success_rate': (metrics['tests_passed'] / max(metrics['tests_run'], 1)) * 100,
+                'average_duration': metrics['total_duration'] / max(metrics['tests_run'], 1)
+            },
+            'error_breakdown': {
+                'agent_errors': metrics['agent_errors'],
+                'file_errors': metrics['file_errors'],
+                'data_errors': metrics['data_errors'],
+                'sequence_errors': metrics['sequence_errors']
+            },
+            'recommendations': []
+        }
+
+        # Generate recommendations based on error patterns
+        if metrics['sequence_errors'] > 0:
+            report['recommendations'].append("Agent sequence validation needs improvement")
+        if metrics['file_errors'] > 0:
+            report['recommendations'].append("File path handling needs standardization")
+        if metrics['data_errors'] > 0:
+            report['recommendations'].append("Data validation framework needs enhancement")
+        if metrics['agent_errors']:
+            most_problematic_agent = max(metrics['agent_errors'], key=metrics['agent_errors'].get)
+            report['recommendations'].append(f"Focus on improving {most_problematic_agent} reliability")
+
+        return report
+
+    def print_performance_report(self):
+        """Print a formatted performance report to the console."""
+        report = self.get_performance_report()
+
+        print("\n" + "="*80)
+        print("📊 PERFORMANCE REPORT")
+        print("="*80)
+
+        summary = report['summary']
+        print(f"\n📈 SUMMARY:")
+        print(f"   Total Tests: {summary['total_tests']}")
+        print(f"   Passed: {summary['passed']} ({summary['success_rate']:.1f}%)")
+        print(f"   Failed: {summary['failed']}")
+        print(f"   Skipped: {summary['skipped']}")
+        print(f"   Average Duration: {summary['average_duration']:.1f}s")
+        errors = report['error_breakdown']
+        print(f"\n🚨 ERROR BREAKDOWN:")
+        print(f"   Agent Errors: {errors['agent_errors']}")
+        print(f"   File Errors: {errors['file_errors']}")
+        print(f"   Data Errors: {errors['data_errors']}")
+        print(f"   Sequence Errors: {errors['sequence_errors']}")
+
+        if report['recommendations']:
+            print(f"\n💡 RECOMMENDATIONS:")
+            for rec in report['recommendations']:
+                print(f"   • {rec}")
+
+        print("="*80 + "\n")
+
+    def _create_error_result(self, test_case_id: str, error_message: str) -> Dict:
+        """Create a standardized error result for test failures."""
+        return {
+            'test_case_id': test_case_id,
+            'status': 'error',
+            'error_message': error_message,
+            'timestamp': datetime.now().isoformat(),
+            'duration_seconds': 0,
+            'progress_updates': 0,
+            'files_created': 0,
+            'scores': {'overall': 0, 'progress': 0, 'output': 0}
+        }
+
+    def load_test_cases(self, test_cases_path: Optional[str] = None) -> Tuple[List[Dict], List[str]]:
         """
         Load test cases from YAML file.
 
@@ -71,7 +195,7 @@ class TestOrchestrator:
             test_cases_path: Path to test_cases.yaml (defaults to tests/test_cases.yaml)
 
         Returns:
-            List of test case dictionaries
+            Tuple of (test_cases list, global_expectations list)
         """
         if test_cases_path is None:
             test_cases_path = Path(__file__).parent / "test_cases.yaml"
@@ -80,9 +204,12 @@ class TestOrchestrator:
             data = yaml.safe_load(f)
 
         test_cases = data.get('test_cases', [])
-        logger.info(f"📋 Loaded {len(test_cases)} test cases")
+        global_expectations = data.get('global_expectations', [])
+        
+        self.logger.info(f"📋 Loaded {len(test_cases)} test cases")
+        self.logger.info(f"📋 Loaded {len(global_expectations)} global expectations")
 
-        return test_cases
+        return test_cases, global_expectations
 
     async def run_test(self, test_case: Dict) -> Dict:
         """
@@ -99,32 +226,69 @@ class TestOrchestrator:
         timeout = test_case.get('timeout_seconds', 300)
         requires_ajsql = test_case.get('requires_ajsql', False)
 
-        logger.info(f"\n{'='*80}")
-        logger.info(f"🧪 Running Test: {test_case['name']}")
-        logger.info(f"   ID: {test_case_id}")
-        logger.info(f"   Timeout: {timeout}s")
+        # Set runner info for logging
+        self._current_test_case_id = test_case_id
+        self._current_runner_id = getattr(self, '_current_runner_id', 0)  # Will be set by test runner
+
+        self.logger.info(f"\n{'='*80}")
+        self.logger.info(f"🧪 Running Test: {test_case['name']}")
+        self.logger.info(f"   ID: {test_case_id}")
+        self.logger.info(f"   Timeout: {timeout}s")
         if requires_ajsql:
-            logger.info(f"   Requires AJ SQL: Yes")
-        logger.info(f"{'='*80}\n")
+            self.logger.info(f"   Requires AJ SQL: Yes")
+        self.logger.info(f"{'='*80}\n")
+
+        # Comprehensive prerequisite validation
+        self.logger.info("🔍 Running prerequisite validation...")
+
+        # Check API keys and environment variables
+        required_env_vars = ['CORTEX_API_KEY', 'AZURE_STORAGE_CONNECTION_STRING']
+        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+        if missing_vars:
+            self.logger.error(f"❌ MISSING ENVIRONMENT VARIABLES: {missing_vars}")
+            self.logger.error(f"⏭️ SKIPPING test {test_case_id} - required environment variables not set")
+            return self._create_error_result(test_case_id, f"Missing environment variables: {missing_vars}")
+
+        # Check Azure Queue configuration
+        if not self.azure_queue_conn_str:
+            self.logger.error(f"❌ MISSING AZURE QUEUE CONFIGURATION")
+            self.logger.error(f"⏭️ SKIPPING test {test_case_id} - Azure queue not configured")
+            return self._create_error_result(test_case_id, "Azure queue not configured")
+
+        # Check work directory permissions
+        work_dir = os.environ.get('CORTEX_WORK_DIR', '/tmp')
+        if not os.path.exists(work_dir):
+            try:
+                os.makedirs(work_dir, exist_ok=True)
+                self.logger.info(f"✅ Created work directory: {work_dir}")
+            except Exception as e:
+                self.logger.error(f"❌ CANNOT CREATE WORK DIRECTORY: {work_dir} - {e}")
+                self.logger.error(f"⏭️ SKIPPING test {test_case_id} - cannot create work directory")
+                return self._create_error_result(test_case_id, f"Cannot create work directory: {e}")
+
+        # Check write permissions
+        try:
+            test_file = os.path.join(work_dir, f"test_write_{test_case_id}.tmp")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+            self.logger.info(f"✅ Work directory write permissions confirmed: {work_dir}")
+        except Exception as e:
+            self.logger.error(f"❌ NO WRITE PERMISSIONS in work directory: {work_dir} - {e}")
+            self.logger.error(f"⏭️ SKIPPING test {test_case_id} - no write permissions in work directory")
+            return self._create_error_result(test_case_id, f"No write permissions in work directory: {e}")
 
         # Check AJ SQL connectivity if required
         if requires_ajsql:
-            logger.info("🔍 Checking AJ SQL database connectivity...")
+            self.logger.info("🔍 Checking AJ SQL database connectivity...")
             is_accessible, message = check_ajsql_connectivity()
 
             if not is_accessible:
-                logger.warning(f"⚠️ AJ SQL database not accessible: {message}")
-                logger.warning(f"⏭️ SKIPPING test {test_case_id} - requires AJ SQL database access")
+                self.logger.warning(f"⚠️ AJ SQL database not accessible: {message}")
+                self.logger.warning(f"⏭️ SKIPPING test {test_case_id} - requires AJ SQL database access")
+                return self._create_error_result(test_case_id, f"AJ SQL not accessible: {message}")
 
-                return {
-                    'test_case_id': test_case_id,
-                    'status': 'skipped',
-                    'skip_reason': f'AJ SQL database not accessible: {message}',
-                    'message': 'Test skipped due to missing database access (likely IP restriction)'
-                }
-            else:
-                # Note: Success message already logged by check_ajsql_connectivity()
-                pass
+        self.logger.info("✅ All prerequisites validated successfully")
 
         # Generate unique request ID
         request_id = f"test_{test_case_id}_{uuid.uuid4().hex[:8]}"
@@ -136,54 +300,54 @@ class TestOrchestrator:
             request_id=request_id
         )
 
-        logger.info(f"📝 Test run created: ID={test_run_id}, Request={request_id}")
+        self.logger.info(f"📝 Test run created: ID={test_run_id}, Request={request_id}")
 
         # Start collectors
-        progress_collector = ProgressCollector(self.redis_url, self.redis_channel)
-        log_collector = LogCollector()
+        progress_collector = ProgressCollector(self.redis_url, self.redis_channel, self.logger)
+        log_collector = LogCollector("cortex-autogen2-cortex-autogen-function-1")
 
-        # Submit task to Azure Queue
+        # Submit task to Azure Queue first to get the message ID
         try:
             azure_message_id = await self._submit_task(request_id, task_description)
-            logger.info(f"✅ Task submitted to queue (Azure message ID: {azure_message_id})")
+            self.logger.info(f"✅ Task submitted to queue (Azure message ID: {azure_message_id})")
         except Exception as e:
-            logger.error(f"❌ Failed to submit task: {e}")
+            self.logger.error(f"❌ Failed to submit task: {e}")
             self.db.update_test_run_status(test_run_id, 'failed', error_message=str(e))
             return {'test_run_id': test_run_id, 'status': 'failed', 'error': str(e)}
 
-        # Collect data concurrently
+        # Collect data concurrently - start IMMEDIATELY after task submission
         # NOTE: Use Azure Queue message ID, not our custom request_id!
         # The system publishes progress updates with the Azure Queue message ID.
         try:
-            logger.info(f"📡 Starting data collection...")
+            self.logger.info(f"📡 Starting data collection...")
 
-            # Run collectors concurrently - use Azure message ID for progress tracking!
-            progress_task = asyncio.create_task(
-                progress_collector.start_collecting(azure_message_id, timeout=timeout)
-            )
-            log_task = asyncio.create_task(
-                log_collector.start_collecting(azure_message_id, timeout=timeout)
-            )
+            # Start progress collection immediately to catch all updates from the start
+            progress_updates = await progress_collector.start_collecting(azure_message_id, timeout=timeout)
 
-            # Wait for both to complete
-            progress_updates, logs = await asyncio.gather(progress_task, log_task)
+            # Now that progress is complete, collect logs using docker logs command
+            logs = await log_collector.collect_logs_since_task(azure_message_id)
 
-            logger.info(f"✅ Data collection complete")
-            logger.info(f"   Progress updates: {len(progress_updates)}")
-            logger.info(f"   Log entries: {len(logs)}")
+            self.logger.info(f"✅ Data collection complete")
+            self.logger.info(f"   Progress updates: {len(progress_updates)}")
+            self.logger.info(f"   Log entries: {len(logs)}")
 
         except Exception as e:
-            logger.error(f"❌ Data collection error: {e}", exc_info=True)
+            self.logger.error(f"❌ Data collection error: {e}", exc_info=True)
             self.db.update_test_run_status(test_run_id, 'failed', error_message=str(e))
             return {'test_run_id': test_run_id, 'status': 'failed', 'error': str(e)}
 
         # Store progress updates and logs in database
+        # Also log progress updates to the runner logger so they appear in log files
         for update in progress_updates:
+            progress_pct = update.get('progress', 0.0)
+            info = update.get('info', '')
+            self.logger.info(f"📊 Progress: {progress_pct:.0%} - {info}")
+
             self.db.add_progress_update(
                 test_run_id=test_run_id,
                 timestamp=datetime.fromisoformat(update['timestamp']),
-                progress=update.get('progress', 0.0),
-                info=update.get('info', ''),
+                progress=progress_pct,
+                info=info,
                 is_final=update.get('data') is not None
             )
 
@@ -213,16 +377,16 @@ class TestOrchestrator:
                     final_response_text = str(final_result)
 
                 self.db.save_final_response(test_run_id, final_response_text)
-                logger.info(f"💾 Saved final response to database ({len(final_response_text)} chars)")
+                self.logger.info(f"💾 Saved final response to database ({len(final_response_text)} chars)")
 
                 # Log the final response content for visibility during test runs
-                logger.info(f"\n📝 Final Response:")
-                logger.info(f"{final_response_text}")
+                self.logger.info(f"\n📝 Final Response:")
+                self.logger.info(f"{final_response_text}")
             except Exception as e:
-                logger.warning(f"⚠️ Failed to save final response to database: {e}")
+                self.logger.warning(f"⚠️ Failed to save final response to database: {e}")
                 final_response_text = f"Error saving final response: {str(e)}"
 
-        # Update test run status
+        # Update test run status - completed if we received any progress updates (including final message)
         status = 'completed' if len(progress_updates) > 0 else 'timeout'
         self.db.update_test_run_status(test_run_id, status)
 
@@ -230,20 +394,60 @@ class TestOrchestrator:
 
         # Extract files from final result if available
         files_created = []
-        if final_result and isinstance(final_result, dict):
-            deliverables = final_result.get('deliverables', [])
-            for item in deliverables:
-                if isinstance(item, dict):
-                    self.db.add_file(
-                        test_run_id=test_run_id,
-                        file_path=item.get('path', 'unknown'),
-                        file_type=item.get('type', 'unknown'),
+        if final_result:
+            if isinstance(final_result, dict):
+                # Legacy format: dictionary with deliverables
+                deliverables = final_result.get('deliverables', [])
+                for item in deliverables:
+                    if isinstance(item, dict):
+                        self.db.add_file(
+                            test_run_id=test_run_id,
+                            file_path=item.get('path', 'unknown'),
+                            file_type=item.get('type', 'unknown'),
                         sas_url=item.get('sas_url')
                     )
+            elif isinstance(final_result, str):
+                # New format: HTML/Markdown string with SAS URLs - parse to extract files
+                import re
+                # Extract SAS URLs from HTML links/images AND Markdown links/images
+                # Pattern 1: HTML href="...blob.core.windows.net/...?se=..." or src="...blob.core.windows.net/...?se=..."
+                # Pattern 2: Markdown [text](...blob.core.windows.net/...?se=...) or ![alt](...blob.core.windows.net/...?se=...)
+                html_pattern = r'(?:href|src)=["\'](https://[^"\']+\.blob\.core\.windows\.net/[^"\']+\?[^"\']+)["\']'
+                markdown_pattern = r'(?:\[[^\]]*\]|!\[[^\]]*\])\s*\(\s*(https://[^)]+\.blob\.core\.windows\.net/[^)]+\?[^)]+)\s*\)'
+                
+                html_matches = re.findall(html_pattern, final_result)
+                markdown_matches = re.findall(markdown_pattern, final_result)
+                matches = html_matches + markdown_matches
+
+                # Deduplicate URLs to avoid counting the same file multiple times
+                unique_urls = list(set(matches))
+
+                # Extract filenames from URLs or from link text
+                for url in unique_urls:
+                    # Extract filename from URL (blob name before query params)
+                    blob_match = re.search(r'/([^/?]+\.(csv|png|pdf|pptx|xlsx|docx|jpg|jpeg))', url)
+                    if blob_match:
+                        blob_name = blob_match.group(1)
+                        file_ext = blob_match.group(2).lower()
+                        # Map extension to file type
+                        file_type_map = {
+                            'csv': 'csv', 'png': 'image', 'jpg': 'image', 'jpeg': 'image',
+                            'pdf': 'pdf', 'pptx': 'presentation', 'xlsx': 'spreadsheet', 'docx': 'document'
+                        }
+                        file_type = file_type_map.get(file_ext, 'unknown')
+                        
+                        self.db.add_file(
+                            test_run_id=test_run_id,
+                            file_path=blob_name,
+                            file_type=file_type,
+                            sas_url=url
+                        )
+                        self.logger.info(f"📁 Extracted file from final response: {blob_name} ({file_type})")
+        
             files_created = self.db.get_files(test_run_id)
 
         # Calculate metrics
-        logger.info(f"\n📊 Calculating metrics...")
+        self.logger.info(f"\n📊 Calculating metrics...")
         metrics = MetricsCollector.calculate_metrics(
             test_run_data,
             progress_updates,
@@ -254,7 +458,7 @@ class TestOrchestrator:
         self.db.save_metrics(test_run_id, **metrics)
 
         # Run LLM evaluation
-        logger.info(f"\n🤖 Running LLM evaluation...")
+        self.logger.info(f"\n🤖 Running LLM evaluation...")
 
         test_summary = {
             'duration_seconds': test_run_data.get('duration_seconds', 0),
@@ -264,12 +468,18 @@ class TestOrchestrator:
         }
 
         try:
+            # Get test case specific quality criteria
+            test_case_quality_criteria = test_case.get('quality_criteria', [])
+
             progress_eval, output_eval = await self.evaluator.evaluate_test_run(
                 task=task_description,
                 progress_updates=progress_updates,
                 final_result=final_result,
                 files_created=files_created,
-                test_summary=test_summary
+                test_summary=test_summary,
+                test_case_id=test_case_id,
+                global_expectations=self.global_expectations,
+                test_case_quality_criteria=test_case_quality_criteria
             )
 
             # Store evaluation in database
@@ -288,23 +498,44 @@ class TestOrchestrator:
             overall = int((output_eval['score'] * 0.8) + (progress_eval['score'] * 0.2))
 
             # Make evaluation results highly visible during test runs
-            logger.info(f"\n**Overall Score:** {overall}/100 ✅")
-            logger.info(f"**Progress Score:** {progress_eval['score']}/100")
-            logger.info(f"**Output Score:** {output_eval['score']}/100")
-            logger.info(f"**Duration:** {test_run_data.get('duration_seconds', 0):.1f}s")
+            self.logger.info(f"\n**Overall Score:** {overall}/100 ✅")
+            self.logger.info(f"**Progress Score:** {progress_eval['score']}/100")
+            self.logger.info(f"**Output Score:** {output_eval['score']}/100")
+            self.logger.info(f"**Duration:** {test_run_data.get('duration_seconds', 0):.1f}s")
 
-            logger.info(f"\n**Progress Evaluation:**")
-            logger.info(f"{progress_eval['reasoning']}")
+            self.logger.info(f"\n**Progress Evaluation:**")
+            self.logger.info(f"{progress_eval['reasoning']}")
 
-            logger.info(f"\n**Output Evaluation:**")
-            logger.info(f"{output_eval['reasoning']}")
+            self.logger.info(f"\n**Output Evaluation:**")
+            self.logger.info(f"{output_eval['reasoning']}")
 
         except Exception as e:
-            logger.error(f"❌ Evaluation error: {e}", exc_info=True)
+            self.logger.error(f"❌ Evaluation error: {e}", exc_info=True)
             progress_eval = {'score': 0, 'reasoning': f"Evaluation failed: {str(e)}", 'issues': []}
             output_eval = {'score': 0, 'reasoning': f"Evaluation failed: {str(e)}", 'strengths': [], 'weaknesses': []}
 
         # Compile results
+        # Convert logs to messages format for bug validation
+        messages = []
+        self.logger.info(f"🎯 DEBUG: Processing {len(logs)} log entries")
+        for log_entry in logs:
+            agent = log_entry.get('agent')
+            if agent:  # Only include logs with agent information
+                messages.append({
+                    'source': agent,
+                    'content': log_entry.get('message', ''),
+                    'timestamp': log_entry.get('timestamp')
+                })
+                self.logger.info(f"🎯 DEBUG: Found agent log: {agent} - {log_entry.get('message', '')[:50]}...")
+            elif 'aj_sql_agent' in str(log_entry.get('message', '')) or 'Processing task' in str(log_entry.get('message', '')):
+                # Also check for agent mentions in message content
+                messages.append({
+                    'source': 'aj_sql_agent' if 'aj_sql_agent' in str(log_entry.get('message', '')) else 'unknown',
+                    'content': log_entry.get('message', ''),
+                    'timestamp': log_entry.get('timestamp')
+                })
+                self.logger.info(f"🎯 DEBUG: Found agent mention in message: {log_entry.get('message', '')[:100]}...")
+
         results = {
             'test_run_id': test_run_id,
             'test_case_id': test_case_id,
@@ -315,6 +546,7 @@ class TestOrchestrator:
             'logs_count': len(logs),
             'files_created_count': len(files_created),
             'final_response': final_response_text,
+            'messages': messages,  # Add messages for bug validation
             'metrics': metrics,
             'progress_evaluation': progress_eval,
             'output_evaluation': output_eval,
@@ -323,11 +555,139 @@ class TestOrchestrator:
             'overall_score': int((output_eval['score'] * 0.8) + (progress_eval['score'] * 0.2))
         }
 
-        logger.info(f"\n{'='*80}")
-        logger.info(f"✅ Test Complete: {test_case['name']}")
-        logger.info(f"{'='*80}\n")
+        # Extract agent sequence from progress updates and messages for bug validation
+        agent_sequence = []
+        self.logger.info(f"🎯 DEBUG: Checking {len(progress_updates)} progress updates")
+        for update in progress_updates:
+            info = update.get('info', '')
+            self.logger.info(f"🎯 DEBUG: Progress info: {info}")
+            # Look for progress messages that mention agents
+            if ' - ' in info and ('aj_sql_agent' in info or 'coder_agent' in info or 'planner_agent' in info):
+                # Extract agent name from progress message like "📊 Agent message progress: 7% - aj_sql_agent - message"
+                parts = info.split(' - ')
+                if len(parts) >= 2:
+                    agent_name = parts[1].strip()
+                    if agent_name and agent_name not in agent_sequence:
+                        agent_sequence.append(agent_name)
+                        self.logger.info(f"🎯 DEBUG: Found agent in progress: {agent_name}")
+
+        # Also extract from messages (logs) as backup when debug_progress_msgs=False
+        self.logger.info(f"🎯 DEBUG: Checking {len(messages)} messages for agent mentions")
+        for msg in messages:
+            source = msg.get('source', '')
+            content = msg.get('content', '')
+            if source in ['aj_sql_agent', 'coder_agent', 'planner_agent', 'execution_completion_verifier_agent', 'presentation_completion_verifier_agent']:
+                if source not in agent_sequence:
+                    agent_sequence.append(source)
+                    self.logger.info(f"🎯 DEBUG: Found agent in messages: {source}")
+            # Also check content for agent mentions
+            elif 'aj_sql_agent' in content or 'Processing task' in content:
+                if 'aj_sql_agent' not in agent_sequence:
+                    agent_sequence.append('aj_sql_agent')
+                    self.logger.info(f"🎯 DEBUG: Found aj_sql_agent mention in message content")
+
+        results['agent_sequence'] = agent_sequence
+        self.logger.info(f"🎯 DEBUG: Extracted agent_sequence from progress+messages: {agent_sequence}")
+
+        # Run bug-specific validations
+        bug_validations = {
+            "minimal_output": self.validate_minimal_output(results, test_case),
+            "aj_routing": self.validate_aj_routing(results, test_case),
+            "no_hallucination": self.validate_no_hallucination(results),
+            "upload_markers": self.validate_upload_markers(results)
+        }
+
+        # Add to overall results
+        results["bug_validations"] = bug_validations
+        results["bug_validation_passed"] = all(v["passed"] for v in bug_validations.values())
+
+        # CRITICAL: If bug validations fail, set overall score to 0
+        if not results["bug_validation_passed"]:
+            results["overall_score"] = 0
+            results["progress_score"] = 0
+            results["output_score"] = 0
+            self.logger.warning("🚨 BUG VALIDATIONS FAILED - Setting overall score to 0")
+
+        # Log detailed bug validation results
+        for validation_name, validation_result in bug_validations.items():
+            if not validation_result["passed"]:
+                for issue in validation_result["issues"]:
+                    self.logger.warning(f"Bug Validation FAILED - {validation_name}: {issue}")
+
+        # Track performance metrics
+        self._track_performance_metric('tests_run')
+
+        test_status = results.get('status', 'unknown')
+        if test_status == 'completed' and results.get('bug_validation_passed', False):
+            self._track_performance_metric('tests_passed')
+        elif test_status in ['error', 'failed']:
+            self._track_performance_metric('tests_failed')
+            # Analyze error patterns
+            error_msg = results.get('error_message', '')
+            if error_msg:
+                self._analyze_error_patterns(error_msg)
+        elif test_status == 'skipped':
+            self._track_performance_metric('tests_skipped')
+
+        # Track duration
+        duration = results.get('duration_seconds', 0)
+        self._track_performance_metric('duration', duration)
+
+        self.logger.info(f"\n{'='*80}")
+        self.logger.info(f"✅ Test Complete: {test_case['name']}")
+        self.logger.info(f"Bug Validations: {'✅ PASSED' if results['bug_validation_passed'] else '❌ FAILED'}")
+        self.logger.info(f"{'='*80}\n")
 
         return results
+
+    async def run_tests_parallel(self, test_cases: List[Dict]) -> List[Dict]:
+        """
+        Run a batch of test cases in parallel.
+
+        Args:
+            test_cases: List of test case dictionaries
+
+        Returns:
+            List of test results
+        """
+        import asyncio
+
+        async def run_single_test_with_error_handling(test_case: Dict) -> Dict:
+            """Run a single test with error handling."""
+            try:
+                return await self.run_test(test_case)
+            except Exception as e:
+                self.logger.error(f"❌ Test {test_case['id']} failed with exception: {e}")
+                return {
+                    'test_case_id': test_case['id'],
+                    'overall_score': 0,
+                    'progress_score': 0,
+                    'output_score': 0,
+                    'duration': 0,
+                    'error': str(e)
+                }
+
+        # Run tests in parallel
+        tasks = [run_single_test_with_error_handling(tc) for tc in test_cases]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Handle any exceptions that occurred
+        processed_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                self.logger.error(f"❌ Parallel execution failed for test {test_cases[i]['id']}: {result}")
+                processed_results.append({
+                    'test_case_id': test_cases[i]['id'],
+                    'overall_score': 0,
+                    'progress_score': 0,
+                    'output_score': 0,
+                    'duration': 0,
+                    'error': str(result)
+                })
+            else:
+                processed_results.append(result)
+
+        return processed_results
 
     async def run_all_tests(self, test_cases_path: Optional[str] = None) -> List[Dict]:
         """
@@ -339,29 +699,29 @@ class TestOrchestrator:
         Returns:
             List of test results
         """
-        test_cases = self.load_test_cases(test_cases_path)
+        test_cases, _ = self.load_test_cases(test_cases_path)
         results = []
 
-        logger.info(f"\n🚀 Running {len(test_cases)} test cases...\n")
+        self.logger.info(f"\n🚀 Running {len(test_cases)} test cases...\n")
 
         for i, test_case in enumerate(test_cases, 1):
-            logger.info(f"\n{'#'*80}")
+            self.logger.info(f"\n{'#'*80}")
 
             # Show progress summary for completed tests
             if results:
                 completed_count = len(results)
-                passed = sum(1 for r in results if r.get('overall_score', 0) > 80)
+                passed = sum(1 for r in results if r.get('overall_score', 0) > 90)
                 avg_score = sum(r.get('overall_score', 0) for r in results) / completed_count
 
                 # Calculate average progress and output scores
                 avg_progress = sum(r.get('progress_score', 0) for r in results) / completed_count
                 avg_output = sum(r.get('output_score', 0) for r in results) / completed_count
 
-                logger.info(f"# Progress: {completed_count} completed | {passed} passed (>80) | Avg: {avg_score:.1f}/100")
-                logger.info(f"# Scores - Progress: {avg_progress:.1f}/100 | Output: {avg_output:.1f}/100 | Overall: {avg_score:.1f}/100")
+                self.logger.info(f"# Progress: {completed_count} completed | {passed} passed (>80) | Avg: {avg_score:.1f}/100")
+                self.logger.info(f"# Scores - Progress: {avg_progress:.1f}/100 | Output: {avg_output:.1f}/100 | Overall: {avg_score:.1f}/100")
 
-            logger.info(f"# Test {i}/{len(test_cases)}: {test_case['name']}")
-            logger.info(f"{'#'*80}\n")
+            self.logger.info(f"# Test {i}/{len(test_cases)}: {test_case['name']}")
+            self.logger.info(f"{'#'*80}\n")
 
             result = await self.run_test(test_case)
             results.append(result)
@@ -370,7 +730,7 @@ class TestOrchestrator:
         self._print_summary(results)
 
         # Generate and save report
-        logger.info(f"📄 Generating test report...")
+        self.logger.info(f"📄 Generating test report...")
         report = self._generate_test_report(results, test_cases)
 
         # Save report to file with timestamp
@@ -381,8 +741,11 @@ class TestOrchestrator:
         with open(report_path, 'w') as f:
             f.write(report)
 
-        logger.info(f"📄 Test report saved to: {report_path}")
-        logger.info(f"   You can review detailed results and final messages in this file.\n")
+        self.logger.info(f"📄 Test report saved to: {report_path}")
+        self.logger.info(f"   You can review detailed results and final messages in this file.\n")
+
+        # Print performance report
+        self.print_performance_report()
 
         return results
 
@@ -397,8 +760,15 @@ class TestOrchestrator:
         message_data = {
             "request_id": request_id,
             "message_id": str(uuid.uuid4()),
-            "content": task
+            "content": task,
+            "runner_info": {
+                "test_case_id": getattr(self, '_current_test_case_id', 'unknown'),
+                "runner_id": getattr(self, '_current_runner_id', 0)
+            }
         }
+
+        # Debug logging
+        self.logger.info(f"📤 Submitting task with runner_info: {getattr(self, '_current_test_case_id', 'none')} / runner {getattr(self, '_current_runner_id', 'none')}")
 
         message_json = json.dumps(message_data)
         message_b64 = base64.b64encode(message_json.encode('utf-8')).decode('utf-8')
@@ -411,16 +781,16 @@ class TestOrchestrator:
 
     def _print_summary(self, results: List[Dict]):
         """Print summary of all test results."""
-        logger.info(f"\n\n{'='*80}")
-        logger.info(f"📊 TEST SUMMARY")
-        logger.info(f"{'='*80}\n")
+        self.logger.info(f"\n\n{'='*80}")
+        self.logger.info(f"📊 TEST SUMMARY")
+        self.logger.info(f"{'='*80}\n")
 
         total_tests = len(results)
         skipped = sum(1 for r in results if r.get('status') == 'skipped')
         completed_results = [r for r in results if r.get('status') != 'skipped']
         completed_count = len(completed_results)
 
-        passed = sum(1 for r in completed_results if r.get('overall_score', 0) > 80)
+        passed = sum(1 for r in completed_results if r.get('overall_score', 0) > 90)
         failed = completed_count - passed
 
         total_progress_score = sum(r.get('progress_evaluation', {}).get('score', 0) for r in completed_results)
@@ -431,21 +801,21 @@ class TestOrchestrator:
         avg_output = total_output_score / completed_count if completed_count > 0 else 0
         avg_overall = total_overall_score / completed_count if completed_count > 0 else 0
 
-        logger.info(f"Total Tests: {total_tests}")
-        logger.info(f"Completed: {completed_count}")
+        self.logger.info(f"Total Tests: {total_tests}")
+        self.logger.info(f"Completed: {completed_count}")
         if skipped > 0:
-            logger.info(f"Skipped: {skipped} (AJ SQL database not accessible)")
-        logger.info(f"Passed (≥70): {passed}")
-        logger.info(f"Failed (<70): {failed}")
-        logger.info(f"")
+            self.logger.info(f"Skipped: {skipped} (AJ SQL database not accessible)")
+        self.logger.info(f"Passed (≥70): {passed}")
+        self.logger.info(f"Failed (<70): {failed}")
+        self.logger.info(f"")
 
         if completed_count > 0:
-            logger.info(f"Average Scores:")
-            logger.info(f"  Progress: {avg_progress:.1f}/100")
-            logger.info(f"  Output: {avg_output:.1f}/100")
-            logger.info(f"  Overall: {avg_overall:.1f}/100")
+            self.logger.info(f"Average Scores:")
+            self.logger.info(f"  Progress: {avg_progress:.1f}/100")
+            self.logger.info(f"  Output: {avg_output:.1f}/100")
+            self.logger.info(f"  Overall: {avg_overall:.1f}/100")
 
-        logger.info(f"\n{'='*80}\n")
+        self.logger.info(f"\n{'='*80}\n")
 
     def _generate_test_report(self, results: List[Dict], test_cases: List[Dict]) -> str:
         """Generate a comprehensive markdown test report."""
@@ -457,7 +827,7 @@ class TestOrchestrator:
         completed_results = [r for r in results if r.get('status') != 'skipped']
         completed_count = len(completed_results)
 
-        passed = sum(1 for r in completed_results if r.get('overall_score', 0) > 80)
+        passed = sum(1 for r in completed_results if r.get('overall_score', 0) > 90)
         failed = completed_count - passed
 
         total_progress_score = sum(r.get('progress_evaluation', {}).get('score', 0) for r in completed_results)
@@ -574,3 +944,114 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
 
         return report
+
+    def validate_minimal_output(self, test_results: Dict, test_case: Dict) -> Dict:
+        """Validate that minimal requests don't produce unwanted files using generic intent detection."""
+        validation_results = {
+            "passed": True,
+            "issues": []
+        }
+
+        task_text = test_case.get("task", "").lower()
+
+        # Generic minimal intent patterns (not specific keywords)
+        minimal_patterns = [
+            # Direct data delivery requests
+            r'\bjust\s+(give|send|create)\s+(me\s+)?(?:the\s+)?(?:a\s+)?(?:csv|data|list|titles?)\b',
+            r'\bonly\s+(need|want)\s+(the\s+)?(?:csv|data|list|titles?)\b',
+            r'\b(?:give|send)\s+me\s+(?:just\s+)?(?:the\s+)?(?:csv|data|list|titles?)\b',
+
+            # Simplicity signals
+            r'\b(?:keep\s+it\s+)?(?:simple|basic|minimal|straightforward)\b',
+            r'\bno\s+(?:charts?|graphs?|visuals?|analysis)\b',
+
+            # Single deliverable focus
+            r'\bonly\s+(?:the\s+)?(?:csv|data|file|list)\b',
+            r'\bjust\s+(?:the\s+)?(?:csv|data|file|list)\b',
+
+            # Concise answer expectations
+            r'\bhow\s+many\b.*\?',  # "how many articles?"
+            r'\bwhat(?:\'s)?\s+the\s+(?:count|number|total)\b.*\?',  # "what's the count?"
+        ]
+
+        is_minimal_request = any(re.search(pattern, task_text) for pattern in minimal_patterns)
+
+        if is_minimal_request:
+            uploaded_files = test_results.get("uploaded_files", [])
+            # Allow only CSV/data files for minimal requests
+            non_data_files = [f for f in uploaded_files
+                             if not f.get("filename", "").endswith((".csv", ".json", ".txt", ".xml"))]
+
+            if non_data_files:
+                validation_results["passed"] = False
+                validation_results["issues"].append(
+                    f"❌ Minimal request produced non-data files: {[f['filename'] for f in non_data_files]}"
+                )
+
+        return validation_results
+
+    def validate_aj_routing(self, test_results: Dict, test_case: Dict) -> Dict:
+        """Validate that AJ data tasks properly route through aj_sql_agent."""
+        validation_results = {
+            "passed": True,
+            "issues": []
+        }
+
+        if test_case.get("requires_ajsql", False):
+            agent_sequence = test_results.get("agent_sequence", [])
+
+            # Check if aj_sql_agent was called
+            if "aj_sql_agent" not in agent_sequence:
+                validation_results["passed"] = False
+                validation_results["issues"].append("❌ AJ data task did not call aj_sql_agent")
+
+            # Check if aj_sql_agent was called before coder_agent for AJ tasks
+            aj_sql_idx = agent_sequence.index("aj_sql_agent") if "aj_sql_agent" in agent_sequence else -1
+            coder_idx = agent_sequence.index("coder_agent") if "coder_agent" in agent_sequence else -1
+
+            if aj_sql_idx > coder_idx and coder_idx != -1:
+                validation_results["passed"] = False
+                validation_results["issues"].append("❌ coder_agent called before aj_sql_agent for AJ data task")
+
+        return validation_results
+
+    def validate_no_hallucination(self, test_results: Dict) -> Dict:
+        """Validate that presenter_agent doesn't respond without actual files."""
+        validation_results = {
+            "passed": True,
+            "issues": []
+        }
+
+        messages = test_results.get("messages", [])
+        presenter_messages = [msg for msg in messages if msg.get("source") == "presenter_agent"]
+
+        for msg in presenter_messages[:-1]:  # Check all but the last message
+            content = msg.get("content", "")
+            if "📁 Ready for upload:" not in content and not content.strip().startswith("❌"):
+                validation_results["passed"] = False
+                validation_results["issues"].append(f"❌ Premature presenter response without files: {content[:100]}...")
+
+        return validation_results
+
+    def validate_upload_markers(self, test_results: Dict) -> Dict:
+        """Validate that all uploaded files had proper upload markers."""
+        validation_results = {
+            "passed": True,
+            "issues": []
+        }
+
+        uploaded_files = test_results.get("uploaded_files", [])
+        messages = test_results.get("messages", [])
+
+        # Count upload markers in code_executor messages
+        upload_markers = 0
+        for msg in messages:
+            if msg.get("source") == "code_executor":
+                content = msg.get("content", "")
+                upload_markers += content.count("📁 Ready for upload:")
+
+        if upload_markers != len(uploaded_files):
+            validation_results["passed"] = False
+            validation_results["issues"].append(f"❌ Upload marker count ({upload_markers}) doesn't match uploaded files ({len(uploaded_files)})")
+
+        return validation_results

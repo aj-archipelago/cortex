@@ -25,3 +25,5 @@ services:
     #   start_period: 60s
     restart: unless-stopped
     network_mode: host
+    volumes:
+      - ./logs:/tmp/coding/logs

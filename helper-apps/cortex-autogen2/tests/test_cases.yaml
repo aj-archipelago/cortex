@@ -1,10 +1,86 @@
 # Cortex AutoGen2 Test Cases
 # Predefined test tasks for automated quality testing
 
+# Global expectations that apply to ALL test cases
+global_expectations:
+  - "CRITICAL FAIL (SCORE=0): If main requested deliverable is missing, score=0 regardless of other content quality"
+  - "All files must have working SAS URLs and proper download links"
+  - "Response must be FUN, ENGAGING, and PROFESSIONAL - complete user's request with insightful reply"
+  - "MINIMAL BUT DETAILED: Every word adds value, no text dumps or link dumps"
+  - "VISUALS FIRST: Rich visuals (charts, images, previews) integrated naturally with explanations"
+  - "NO TEXT/LINK DUMPS: Never just list files or dump links - integrate everything into engaging narrative"
+  - "EXPLANATIONS WITH VISUALS: Use visuals to explain, not replace explanation - combine both"
+  - "COMPLETE THE CONVERSATION: Reply to user's request as if continuing a conversation, not just delivering files"
+  - "PROFESSIONAL PRESENTATION: Polished, error-free, consistent styling - what an expert would present"
+  - "ENGAGING STORYTELLING: Use data insights, surprising findings, clear narratives to hold attention"
+  - "FUN & DELIGHTFUL: Creative visualizations, interesting patterns, enjoyable experience while maintaining professionalism"
+  - "File previews should appear before download links when available"
+  - "All download links MUST open in new tabs (target='_blank') to prevent users from leaving the site"
+  - "VISUALISTIC: Outputs should be visually rich with charts, images, previews, and visual elements that enhance understanding"
+  - "ENGAGING: Content should be interesting, compelling, and hold user attention - use data insights, surprising findings, and clear narratives"
+  - "PROFESSIONAL: All deliverables must meet professional standards - proper formatting, high-quality visuals, clear structure, polished presentation"
+  - "FUN: While maintaining professionalism, outputs should be enjoyable and delightful - creative visualizations, interesting data patterns, engaging storytelling"
+  - "CLICKABLE PREVIEWS: Preview images MUST be clickable (wrapped in anchor tags linking to main file download URL)"
+  - "CLEAN FILENAMES: All download links MUST use clean, user-friendly filenames - remove timestamps, hashes, and system-generated prefixes (e.g., 'output_20251107T175133Z_4b471ed1.pdf' → 'output.pdf')"
+  - "NO FILLER WORDS: Response must be direct and simple - no filler phrases like 'let me know!', 'if you'd like', 'just let me know', 'feel free to', 'don't hesitate to', or closing pleasantries"
+  - "DIRECT & SIMPLE: Get straight to the point - every word must add value, no unnecessary phrases or pleasantries"
+  - "ALWAYS SHOW PREVIEWS: If preview images exist, they MUST be displayed (not optional)"
+  - "ALWAYS SHOW DATA VISUALS: If data/charts/graphs exist, they MUST be displayed immediately with explanations"
+  - "DATA REQUIRES VISUALS: When there's data (CSV, JSON, statistics, analysis), visuals are ESSENTIAL - raw data is hard for humans to understand, so charts/graphs/visualizations must be created to make data accessible and understandable"
+  - "CRITICAL FAIL (SCORE=0): If there's data and the response only describes what's visible without providing insights, patterns, surprises, or key findings, score=0. Data without insights is useless."
+  - "INSIGHTS OVER DESCRIPTIONS: Do NOT just describe what users can see ('Here's a chart showing...', 'This visualization displays...'). Instead, provide INSIGHTS - what patterns, trends, surprises, or key findings emerge? Extract details that make users go 'wow'."
+  - "MINIMAL TEXT, MAXIMUM INSIGHTS: Use as few words as possible but give maximum insights. Be direct and impactful. Answer 'So what?' - what does this data mean? What should users notice?"
+  - "NO TEXT DUMPS: Forbidden phrases like 'Download Data & Visuals', 'Here's the data', 'Download the files below' - integrate links naturally into insightful narrative instead"
+  - "PROFESSIONAL INSIGHTS: Responses must be pro, engaging, and insightful. Extract key details, surprising numbers, unexpected patterns, actionable insights. Don't repeat what's visible - provide value through insights."
+  - "NO DUPLICATE IMAGES: CRITICAL FAIL (SCORE=0) - Each image URL must appear ONLY ONCE in the output. If the same image URL appears multiple times, score=0. Duplicate images waste space and create poor user experience."
+  - "CRITICAL: NO 'DUMP OF IMAGES THEN DUMP OF TEXT' PATTERN - Output must weave images and insights together naturally. FORBIDDEN: Showing all images first, then all text below. REQUIRED: Start with key insight → show image → immediate insightful description → next image → immediate description → continue weaving. This creates natural, expert-level flow."
+  - "EVERY IMAGE GETS INSIGHTFUL DESCRIPTION IMMEDIATELY AFTER: Each image (chart, preview, visualization) MUST be followed immediately by an insightful professional description (1-3 sentences). FORBIDDEN: Multiple images in a row without descriptions. FORBIDDEN: Saving all descriptions for the end. Each image needs its description right after it."
+  - "START WITH KEY INSIGHT: Response must begin with the most important finding or deliverable, not generic intro like 'Here's your analysis' or 'I've analyzed the data'. Start directly with the key insight (e.g., 'Revenue spiked 40% in Q3, driven entirely by one product line')."
+  - "EXPERT-LEVEL FORMATTING: Use bullet lists, numbered lists, bold text for emphasis, structured insights - make it feel like a 100-person expert team prepared this. Polished, comprehensive, but concise. Not verbose but includes every detail and key point."
+  - "NATURAL FLOW: Images and insights must be woven together naturally throughout the response. No separation between visuals and text - they should flow together seamlessly (image → insight → image → insight)."
+  - "CRITICAL FAIL (SCORE=0): DATA TASKS MUST HAVE VISUALS - For ANY task involving data (comparisons, analysis, trends, statistics, counts, CSV, JSON, database queries, article counts, etc.), charts/graphs/visualizations are MANDATORY. Text-only data analysis FAILS. If task mentions 'compare', 'analysis', 'trends', 'daily', 'counts', 'article counts', 'statistics', or similar data keywords, multiple charts (minimum 3 for comparison tasks) MUST be created and displayed. Data tasks without visuals score 0."
+  - "MULTIPLE VISUALS REQUIRED FOR DATA TASKS: For comparison/analysis tasks (e.g., AJA vs AJE, comparing entities, analyzing trends), create SEVERAL charts showing different perspectives - minimum 3 charts: (1) line chart for time series, (2) bar chart for comparisons, (3) additional chart for another perspective. Single chart is insufficient for data tasks."
+  - "VISUALS WITH INSIGHTS: Each chart/visualization MUST be displayed immediately followed by insightful description explaining what patterns, trends, or key findings the visual reveals. Charts without insights are incomplete."
+  - "CRITICAL: OUTPUT MUST BE PURE MARKDOWN - NO HTML STRUCTURE (no <!DOCTYPE>, <html>, <head>, <body> tags). Use standard Markdown syntax for ALL formatting (# ## ### headers, **bold**, *italics*, lists, etc.). Use HTML <img> tags ONLY for images and HTML <a> tags ONLY for download links. NO CSS styling, NO <style> tags, NO HTML document structure. Theme compatibility is handled by the UI."
+
 test_cases:
-  - id: tc001_pokemon_pptx
+  - id: tc001_random_csv
+    name: "Random Sales Data CSV Generation"
+    description: "Generates random sales data CSV with summary statistics"
+    task: "Generate a CSV with 100 rows of random sales data and a summary CSV with statistics."
+    timeout_seconds: 180
+    requires_ajsql: false
+    expected_deliverables:
+      - type: csv
+        pattern: "*sales*.csv"
+        min_count: 1
+        description: "Main sales data CSV"
+      - type: csv
+        pattern: "*summary*.csv"
+        min_count: 1
+        description: "Summary statistics CSV"
+    min_progress_updates: 3
+    quality_criteria:
+      - "CRITICAL FAIL (SCORE=0): NO CSV FILE DELIVERED - if requested CSV is missing, score=0 regardless of other content"
+      - "Main CSV contains exactly 100 rows of sales data"
+      - "Dates span the last 90 days as specified"
+      - "Realistic product names and prices (no generic 'Product1', 'Product2')"
+      - "Summary statistics calculated correctly from the main data"
+      - "Proper CSV formatting (headers, no missing values)"
+      - "Files uploaded with SAS URLs provided"
+      - "CRITICAL: Summary statistics displayed as markdown table preview (NOT just download link)"
+      - "Summary table shows key metrics like total sales, average order value, etc."
+      - "Response flows naturally with contextual table integration, no generic headers"
+      - "Download links styled properly and integrated contextually"
+    expected_agents:
+      - planner_agent
+      - coder_agent
+      - code_executor
+      - presenter_agent
+
+  - id: tc003_pokemon_pptx
     name: "Most Powerful Gen 1 Pokemon PowerPoint"
-    description: "Creates a PowerPoint about the most powerful Gen 1 Pokemon with their images"
+    description: "Creates a PowerPoint about the most powerful Gen 1 Pokemon with their images and file previews"
     task: "Create a PowerPoint presentation about the Most Powerful Gen 1 Pokemon. Include images of each Pokemon from the same source."
     timeout_seconds: 420
     requires_ajsql: false
@@ -17,12 +93,17 @@ test_cases:
         pattern: "preview_slide_*.png"
         min_count: 2
         description: "Slide preview images"
+      - type: file_preview
+        pattern: "preview_*.pptx.png"
+        min_count: 0
+        description: "PowerPoint file preview thumbnail (generated but not displayed)"
       - type: images
         pattern: "*.png"
         min_count: 10
         description: "Pokemon images used in presentation"
     min_progress_updates: 8
     quality_criteria:
+      - "CRITICAL FAIL (SCORE=0): NO PPTX FILE DELIVERED - if requested PPTX is missing, score=0 regardless of other content"
       - "CRITICAL: Presentation MUST include actual Pokemon character images (NOT just logos or text)"
       - "CRITICAL: Each slide about a Pokemon MUST show THAT SPECIFIC Pokemon's image (e.g., Gengar slide shows Gengar, NOT Pikachu or any other Pokemon)"
       - "CRITICAL: NO REUSING THE SAME IMAGE on multiple slides - each Pokemon needs its own unique character image"
@@ -38,6 +119,10 @@ test_cases:
       - "CRITICAL: Images must NOT cover or overlap text - all text must be readable"
       - "Images positioned properly beside or above text, never covering content"
       - "Each slide shows: Pokemon name, stats/power info, AND that Pokemon's specific character image"
+      - "File preview thumbnail generated (backend) but may not display in response"
+      - "Response includes contextual file preview integration when available, NOT generic 'downloads' headers"
+      - "Download link styled with proper formatting and integrated naturally into response"
+      - "File preview appears before download link when available"
       - "Images properly sized and centered (not too small, easily visible)"
       - "Preview slides generated showing Pokemon images are visible and MATCH the Pokemon names"
       - "Gen 1 Pokemon ONLY (original 151, including evolutions)"
@@ -66,6 +151,8 @@ test_cases:
         description: "Images and charts included in report"
     min_progress_updates: 6
     quality_criteria:
+      - "CRITICAL FAIL (SCORE=0): NO PDF FILE DELIVERED - if requested PDF is missing, score=0 regardless of other content"
+      - "CRITICAL FAIL (SCORE=0): PDF CONTAINS ERROR MESSAGES - if PDF contains 'generation failed', 'contact admin', or similar error messages instead of actual content, score=0"
       - "PDF contains both text content and images"
       - "Charts and graphs are professionally designed"
       - "Real data used, no placeholder or dummy content"
@@ -79,36 +166,114 @@ test_cases:
       - code_executor
       - presenter_agent
 
-  - id: tc003_random_csv
-    name: "Random Sales Data CSV Generation"
-    description: "Generates random sales data CSV with summary statistics"
-    task: "Generate a CSV with 100 rows of random sales data and a summary CSV with statistics."
+  - id: tc004_sports_excel_preview
+    name: "Sports Excel File Generation with Preview"
+    description: "Generates sports statistics Excel file with summary statistics and preview table"
+    task: "Generate an Excel file with 50 rows of sports game statistics and include summary statistics. Show a preview of the summary data."
     timeout_seconds: 180
     requires_ajsql: false
     expected_deliverables:
-      - type: csv
-        pattern: "*sales*.csv"
+      - type: excel
+        pattern: "*sports*.xlsx"
         min_count: 1
-        description: "Main sales data CSV"
-      - type: csv
-        pattern: "*summary*.csv"
+        description: "Main sports data Excel file"
+      - type: excel
+        pattern: "*summary*.xlsx"
         min_count: 1
-        description: "Summary statistics CSV"
+        description: "Summary statistics Excel file"
     min_progress_updates: 3
     quality_criteria:
-      - "Main CSV contains exactly 100 rows of sales data"
-      - "Dates span the last 90 days as specified"
-      - "Realistic product names and prices (no generic 'Product1', 'Product2')"
+      - "CRITICAL FAIL (SCORE=0): NO EXCEL FILE DELIVERED - if requested Excel is missing, score=0 regardless of other content"
+      - "Main Excel contains exactly 50 rows of sports game data"
+      - "Dates span the last 60 days as specified"
+      - "Realistic sports teams and game statistics"
       - "Summary statistics calculated correctly from the main data"
-      - "Proper CSV formatting (headers, no missing values)"
+      - "Proper Excel formatting with headers and data validation"
       - "Files uploaded with SAS URLs provided"
+      - "Summary data previewed as markdown table in output"
     expected_agents:
       - planner_agent
       - coder_agent
       - code_executor
       - presenter_agent
 
-  - id: tc004_aje_aja_comparison
+  - id: tc005_weather_analysis
+    name: "Weather Data Analysis with Full Insights"
+    description: "Generates weather data with comprehensive statistical analysis and visualizations"
+    task: "Generate weather temperature data for 100 cities over 30 days. Provide full statistical analysis including mean, median, standard deviation, correlations, and create insightful charts showing temperature trends and patterns."
+    timeout_seconds: 250
+    requires_ajsql: false
+    expected_deliverables:
+      - type: csv
+        pattern: "*weather*.csv"
+        min_count: 1
+        description: "Weather temperature data CSV"
+      - type: chart
+        pattern: "*.png"
+        min_count: 3
+        description: "Statistical charts and visualizations"
+      - type: excel
+        pattern: "*analysis*.xlsx"
+        min_count: 1
+        description: "Comprehensive analysis with statistics"
+    min_progress_updates: 5
+    quality_criteria:
+      - "CSV contains weather data for 100 cities over 30 days (3000 total records)"
+      - "Realistic city names and temperature ranges by region"
+      - "Comprehensive statistical analysis (mean, median, std dev, quartiles, correlations)"
+      - "Multiple insightful charts: temperature distributions, regional comparisons, time series"
+      - "Statistical insights clearly explained (what the numbers mean)"
+      - "Data visualizations are informative and well-labeled"
+      - "Files uploaded with SAS URLs provided"
+      - "Full analysis presented with key findings and interpretations"
+    expected_agents:
+      - planner_agent
+      - coder_agent
+      - code_executor
+      - presenter_agent
+
+  - id: tc006_currency_analysis
+    name: "Currency Exchange Rate Analysis - Last 10 Years"
+    description: "Fetches real Turkish Lira data and compares with Argentine Peso and US Dollar over 10 years"
+    task: "Get the last 10 years of Turkish Lira (TRY) exchange rate data against USD, and compare it with Argentine Peso (ARS) and US Dollar performance. Analyze volatility, depreciation trends, inflation impacts, and create insightful charts showing comparative currency performance."
+    timeout_seconds: 900
+    requires_ajsql: false
+    expected_deliverables:
+      - type: csv
+        pattern: "*currency*.csv"
+        min_count: 1
+        description: "Raw currency exchange rate data CSV"
+      - type: chart
+        pattern: "*.png"
+        min_count: 4
+        description: "Currency comparison charts and volatility analysis"
+      - type: excel
+        pattern: "*analysis*.xlsx"
+        min_count: 1
+        description: "Comprehensive currency analysis with statistics"
+    min_progress_updates: 6
+    quality_criteria:
+      - "Real exchange rate data for TRY, ARS, and USD spanning 10 years"
+      - "Data sourced from reliable financial APIs or databases"
+      - "Comprehensive analysis including volatility metrics, depreciation rates, inflation correlations"
+      - "CRITICAL: Multiple insightful charts created and included in response (NOT 'available on request')"
+      - "Economic insights explaining currency movements and macroeconomic factors"
+      - "Statistical analysis (correlation, standard deviation, trend analysis)"
+      - "Clear explanations of currency crisis periods and economic impacts"
+      - "Professional visualizations with proper labeling and time periods"
+      - "Files uploaded with SAS URLs provided"
+      - "Full comparative analysis presented with key findings and economic interpretations"
+      - "CRITICAL: Charts displayed with descriptive captions explaining what they show"
+      - "Response flows naturally with contextual chart integration, no generic headers"
+      - "Download links styled properly and integrated contextually into narrative"
+    expected_agents:
+      - planner_agent
+      - coder_agent
+      - web_search_agent
+      - code_executor
+      - presenter_agent
+
+  - id: tc007_aje_aja_comparison
     name: "AJE vs AJA Daily Article Count Comparison"
     description: "Compares daily article counts between AJE and AJA"
     task: "Compare daily article counts for AJE and AJA from the last 30 days. Give me a chart and CSV."
@@ -125,12 +290,15 @@ test_cases:
         description: "Raw data CSV with daily counts"
     min_progress_updates: 5
     quality_criteria:
+      - "CRITICAL DATA ANALYSIS FAILURE (SCORE=0): If response claims AJE has more articles than AJA when data shows AJA > AJE, score=0"
+      - "CRITICAL DATA ANALYSIS FAILURE (SCORE=0): If conclusions are inconsistent (e.g., line chart says AJE higher but bar chart says AJA higher), score=0"
       - "Data queried from UCMS AJE and AJA databases"
       - "Exactly 30 days of data (excluding today)"
       - "Chart clearly shows both AJE and AJA trends"
       - "CSV contains date, aje_count, aja_count columns"
       - "No missing dates in the 30-day period"
       - "Professional chart with legend, labels, and title"
+      - "Response must correctly identify AJA as having higher article counts than AJE based on actual data"
     expected_agents:
       - planner_agent
       - aj_sql_agent
@@ -138,7 +306,7 @@ test_cases:
       - code_executor
       - presenter_agent
 
-  - id: tc005_aje_trump_trend
+  - id: tc008_aje_trump_trend
     name: "AJE Trump Headlines - 6 Month Trend Analysis"
     description: "Analyzes Trump headline trends in AJE"
     task: "Plot Trump headline percentage trends for AJE over the last 6 months by week. Give me a chart and CSV."
@@ -169,7 +337,7 @@ test_cases:
       - code_executor
       - presenter_agent
 
-  - id: tc006_aje_trump_daily
+  - id: tc009_aje_trump_daily
     name: "AJE Trump Headlines - Last Month Daily Chart"
     description: "Daily Trump headline chart for AJE"
     task: "Chart Trump headlines from AJE for the last month by day. Give me the chart and CSV with the headlines."
@@ -205,7 +373,7 @@ test_cases:
       - code_executor
       - presenter_agent
 
-  - id: tc007_aja_aje_wordclouds
+  - id: tc010_aja_aje_wordclouds
     name: "AJA & AJE Last Month Word Clouds"
     description: "Generate word clouds from AJA and AJE headlines"
     task: "Generate word clouds from AJA and AJE headlines for the last month. Give me word frequency CSVs too."
@@ -245,7 +413,7 @@ test_cases:
       - code_executor
       - presenter_agent
 
-  - id: tc008_aje_aja_override_test
+  - id: tc011_aje_aja_override_test
     name: "AJE vs AJA Comparison - Override User Instructions Test"
     description: "Tests NON-NEGOTIABLE OVERRIDE: user explicitly forbids other agents but system must route to aj_sql_agent"
     task: "Compare daily article counts for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) from the last 60 days, do not use any other tools do not use any other agents use only coding agent"

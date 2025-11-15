@@ -7,8 +7,38 @@ import redis
 from task_processor import process_queue_message
 # from agents import process_message
 
-# logging.getLogger().setLevel(logging.WARNING)
+# Configure logging
 logging.getLogger().setLevel(logging.INFO)
+
+# Reduce Autogen framework logging verbosity to avoid serialization issues
+logging.getLogger('autogen_core').setLevel(logging.WARNING)
+logging.getLogger('autogen_agentchat').setLevel(logging.WARNING)
+
+# Suppress model mismatch warnings that are not actionable
+logging.getLogger('autogen_ext.models.openai._openai_client').setLevel(logging.ERROR)
+
+# Suppress verbose Azure SDK logging
+logging.getLogger('azure.core.pipeline.policies.http_logging_policy').setLevel(logging.ERROR)
+logging.getLogger('azure.storage.blob').setLevel(logging.ERROR)
+logging.getLogger('azure.core').setLevel(logging.ERROR)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('urllib3.connectionpool').setLevel(logging.ERROR)
+logging.getLogger('requests').setLevel(logging.WARNING)
+# Suppress Azure Functions runtime logs completely
+logging.getLogger('azure.functions').setLevel(logging.ERROR)
+logging.getLogger('azure.monitor').setLevel(logging.ERROR)
+# Suppress Azure Functions queue trigger verbose logs
+logging.getLogger('azure.functions.queue').setLevel(logging.ERROR)
+logging.getLogger('azure.functions.worker').setLevel(logging.ERROR)
+# Suppress Azure Functions host logs
+logging.getLogger('azure.functions.host').setLevel(logging.ERROR)
+# Suppress HTTP request/response logging
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+
+# Add more detailed logging for our components
+logging.getLogger('task_processor').setLevel(logging.DEBUG)
+logging.getLogger('agents').setLevel(logging.DEBUG)
 
 app = func.FunctionApp()
 

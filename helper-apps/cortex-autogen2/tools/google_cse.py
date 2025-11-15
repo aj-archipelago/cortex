@@ -28,7 +28,9 @@ def _get_env_or_error() -> Dict[str, str]:
 def _build_params(text: Optional[str], parameters: Optional[Dict[str, Any]], env_cx: str) -> Dict[str, Any]:
     parameters = parameters or {}
     # Required
-    q = (parameters.get("q") or text or "")
+    q = (parameters.get("q") or text or "").strip()
+    if not q:
+        raise ValueError("Query text is required (provide 'text' parameter or 'parameters.q')")
     cx = parameters.get("cx") or env_cx
 
     params: Dict[str, Any] = {

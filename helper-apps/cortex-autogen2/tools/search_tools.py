@@ -125,16 +125,28 @@ def _normalize_cse_image_results(payload: Dict[str, Any]) -> List[Dict[str, Any]
         img_url = link or image_obj.get("thumbnailLink") or cse_image.get("src")
         if not img_url:
             continue
+        
+        # Parse width/height - handle both int and string types
+        def parse_dimension(val):
+            if val is None:
+                return None
+            try:
+                return int(val) if isinstance(val, (int, str)) else None
+            except (ValueError, TypeError):
+                return None
+        
+        width = parse_dimension(image_obj.get("width") or cse_image.get("width"))
+        height = parse_dimension(image_obj.get("height") or cse_image.get("height"))
             
         normalized.append({
             "type": "image",
-            "title": it.get("title") or cse_image.get("alt"),
+            "title": it.get("title") or cse_image.get("alt") or "",
             "url": img_url,
             "original_url": link or img_url,
             "thumbnail_url": image_obj.get("thumbnailLink") or img_url,
-            "width": image_obj.get("width") or cse_image.get("width"),
-            "height": image_obj.get("height") or cse_image.get("height"),
-            "host_page_url": image_obj.get("contextLink") or it.get("link"),
+            "width": width,
+            "height": height,
+            "host_page_url": image_obj.get("contextLink") or it.get("link") or "",
         })
     
     # Method 2: Extract from pagemap in web results (fallback)
@@ -161,7 +173,20 @@ def _normalize_cse_image_results(payload: Dict[str, Any]) -> List[Dict[str, Any]
 
 
 def _has_google_cse_env() -> bool:
-    return bool(os.getenv("GOOGLE_CSE_KEY") and os.getenv("GOOGLE_CSE_CX"))
+    """Check if Google CSE is properly configured."""
+    key = os.getenv("GOOGLE_CSE_KEY")
+    cx = os.getenv("GOOGLE_CSE_CX")
+
+    if not key or not cx:
+        logging.debug("[google_cse] Missing GOOGLE_CSE_KEY or GOOGLE_CSE_CX environment variables")
+        return False
+
+    # Additional validation - check if they look like real credentials
+    if key.startswith("your_") or cx.startswith("your_"):
+        logging.debug("[google_cse] Using placeholder credentials - CSE disabled")
+        return False
+
+    return True
 
 
 
@@ -371,7 +396,6 @@ def _make_image_session():
     except Exception:
         return None
 
-
 def _is_downloadable_image(url: str, session=None, timeout: int = 15) -> bool:
     if not url:
         return False
@@ -403,39 +427,110 @@ def _is_downloadable_image(url: str, session=None, timeout: int = 15) -> bool:
 
 async def image_search(query: str, count: int = 25, verify_download: bool = True, required_terms: Optional[List[str]] = None, allowed_domains: Optional[List[str]] = None, strict_entity: bool = False) -> str:
     try:
-        # Simple query variants - avoid over-expanding which dilutes results
+        # Enhanced query variants - prioritize high-quality results with diverse strategies
         def generate_query_variants(q: str) -> List[str]:
             base = q.strip()
-            # Only add ONE quality variant to keep results focused
-            variants = [
-                base,  # Primary: exact query
-                f"{base} hd",  # Secondary: just add quality term
-            ]
-            return variants
+            base_lower = base.lower()
+            
+            # Smart variant generation: Don't add quality terms if they're already present
+            has_quality_term = any(term in base_lower for term in ["high resolution", "hd", "4k", "professional", "official", "quality"])
+            has_art_term = any(term in base_lower for term in ["artwork", "art", "illustration", "photo", "image", "picture"])
+            
+            variants = []
+            
+            # Primary: Add quality term if not present
+            if not has_quality_term:
+                variants.append(f"{base} high resolution")
+                variants.append(f"{base} official")
+            else:
+                variants.append(base)  # Use base if quality term already present
+            
+            # Secondary: Add art/photo context if not present (helps find actual images vs icons)
+            if not has_art_term:
+                variants.append(f"{base} artwork")
+                variants.append(f"{base} photo")
+            else:
+                variants.append(base)
+            
+            # Tertiary: Professional/HD variants
+            variants.append(f"{base} professional")
+            variants.append(f"{base} hd")
+            
+            # Fallback: exact query
+            if base not in variants:
+                variants.append(base)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_variants = []
+            for v in variants:
+                if v not in seen:
+                    seen.add(v)
+                    unique_variants.append(v)
+            
+            return unique_variants[:6]  # Limit to 6 variants
 
         results: List[Dict[str, Any]] = []
-        # Prefer Google CSE when configured; try multiple high-quality variants in parallel
+        # Prefer Google CSE when configured; try multiple high-quality variants with size filters
         if _has_google_cse_env():
             try:
                 logging.info(f"[image_search] Using Google CSE for query: {query}")
-                variants = generate_query_variants(query)[:2]  # cap to 2 calls to stay focused
-                params_base = {
-                    "num": max(1, min(count, 10)),
-                    "searchType": "image",
-                    # No strict size/type constraints; let ranking + verification decide
-                    "safe": "active",
-                }
-                tasks = [
-                    google_cse_search(text=v, parameters=dict(params_base))
-                    for v in variants
+                variants = generate_query_variants(query)[:3]  # Use top 3 variants for better coverage
+                
+                # Create multiple search strategies with different size filters
+                search_strategies = [
+                    # Strategy 1: Large images (best quality)
+                    {
+                        "num": max(1, min(count * 2, 10)),  # Fetch more to have selection headroom
+                        "searchType": "image",
+                        "imgSize": "large",  # Filter for large images
+                        "safe": "active",
+                    },
+                    # Strategy 2: Medium+ images (good quality, more results)
+                    {
+                        "num": max(1, min(count * 2, 10)),
+                        "searchType": "image",
+                        "imgSize": "medium",  # Medium images
+                        "safe": "active",
+                    },
+                    # Strategy 3: No size filter (fallback for rare queries)
+                    {
+                        "num": max(1, min(count, 10)),
+                        "searchType": "image",
+                        "safe": "active",
+                    },
                 ]
-                raws = await asyncio.gather(*tasks)
+                
+                # Combine variants with strategies - use ALL variants and strategies for maximum coverage
+                tasks = []
+                for variant in variants:  # Use all variants for better coverage
+                    for strategy in search_strategies:  # Use all strategies
+                        params = dict(strategy)
+                        tasks.append(google_cse_search(text=variant, parameters=params))
+                
+                raws = await asyncio.gather(*tasks, return_exceptions=True)
                 merged: List[Dict[str, Any]] = []
                 for raw in raws:
+                    if isinstance(raw, Exception):
+                        logging.warning(f"[image_search] Google CSE task raised exception: {raw}")
+                        continue
                     try:
                         data = json.loads(raw) if raw else {}
-                        merged.extend(_normalize_cse_image_results(data))
-                    except Exception:
+                        # Check for error in response
+                        if isinstance(data, dict) and "error" in data:
+                            error_msg = data.get("error", "Unknown error")
+                            logging.error(f"[image_search] Google CSE API error: {error_msg}")
+                            # If it's a credential/config error, log it clearly
+                            if "400" in str(error_msg) or "401" in str(error_msg) or "403" in str(error_msg):
+                                logging.error(f"[image_search] CRITICAL: Google CSE credentials may be invalid or API quota exceeded. Check GOOGLE_CSE_KEY and GOOGLE_CSE_CX environment variables.")
+                            continue
+                        # Only normalize if we have items
+                        if isinstance(data, dict) and "items" in data:
+                            merged.extend(_normalize_cse_image_results(data))
+                        else:
+                            logging.debug(f"[image_search] Google CSE response has no 'items' key: {list(data.keys()) if isinstance(data, dict) else 'not a dict'}")
+                    except Exception as e:
+                        logging.warning(f"[image_search] Failed to process Google CSE response: {e}")
                         continue
                 results = merged
                 logging.info(f"[image_search] Google CSE returned {len(results)} raw results")
@@ -445,7 +540,25 @@ async def image_search(query: str, count: int = 25, verify_download: bool = True
 
 
 
-        # Post-filtering and ranking for relevance and quality
+        # NO FALLBACK: Only use real Google CSE results - no mock/fallback images
+        if not results:
+            # Check if Google CSE is configured but returned errors
+            if _has_google_cse_env():
+                logging.error(f"[image_search] Google CSE is configured but returned no results for query: {query}. This may indicate invalid credentials, API quota exceeded, or no matching images found.")
+                return json.dumps({
+                    "status": "No images found",
+                    "error": "Google CSE returned no results. Please verify GOOGLE_CSE_KEY and GOOGLE_CSE_CX are valid and API quota is available.",
+                    "query": query
+                })
+            else:
+                logging.warning(f"[image_search] Google CSE not configured. Set GOOGLE_CSE_KEY and GOOGLE_CSE_CX environment variables.")
+                return json.dumps({
+                    "status": "No images found",
+                    "error": "Google CSE is not configured. Set GOOGLE_CSE_KEY and GOOGLE_CSE_CX environment variables to enable image search.",
+                    "query": query
+                })
+
+        # Enhanced post-filtering and ranking for relevance and quality
         def score(item: Dict[str, Any]) -> int:
             s = 0
             title = (item.get("title") or "").lower()
@@ -459,49 +572,88 @@ async def image_search(query: str, count: int = 25, verify_download: bool = True
             
             # Primary relevance: query terms in title (highest weight)
             title_overlap = len(q_terms & t_terms)
-            s += 10 * title_overlap  # Increased from 3 to 10
+            s += 15 * title_overlap  # Increased from 10 to 15 for stronger relevance
             
             # Secondary relevance: query terms in URL
             url_overlap = len(q_terms & u_terms)
-            s += 5 * url_overlap
+            s += 8 * url_overlap  # Increased from 5 to 8
             
             # CRITICAL: If NO query terms match title or URL, heavily penalize
             if title_overlap == 0 and url_overlap == 0:
-                s -= 100  # This image is likely completely unrelated
+                s -= 150  # Increased penalty from -100 to -150
             
-            # Quality signals
-            for ext, ext_score in ((".png", 2), (".jpg", 2), (".jpeg", 2), (".webp", 2), (".svg", 0), (".gif", 0)):
+            # Reward trusted/quality domains (prioritize official artwork sources)
+            trusted_domains = ["wikipedia.org", "wikimedia.org", "commons.wikimedia.org", "flickr.com", 
+                              "unsplash.com", "pexels.com", "pixabay.com", "gettyimages.com", "shutterstock.com",
+                              "deviantart.com", "artstation.com", "pinterest.com", "official", "press", "news", "media"]
+            for domain in trusted_domains:
+                if domain in host:
+                    s += 12  # Increased boost for trusted sources
+                    break
+            
+            # Lightly penalize low-quality commercial sources (but don't exclude completely)
+            low_quality_sources = ["ebay.com", "etsy.com", "amazon.com", "alibaba.com", "aliexpress.com"]
+            if any(source in host for source in low_quality_sources):
+                s -= 3  # Light penalty, but still allow these sources
+            
+            # Quality signals - prefer PNG/JPG over SVG/GIF
+            for ext, ext_score in ((".png", 3), (".jpg", 3), (".jpeg", 3), (".webp", 1), (".svg", -2), (".gif", -1)):
                 if url.endswith(ext) or (item.get("original_url") or "").lower().endswith(ext):
                     s += ext_score
                     break
             
-            # Penalize low-quality/irrelevant assets (stronger penalties)
-            negative_tokens = ["sprite", "icon", "thumbnail", "thumb", "small", "mini", "logo", "watermark", "stock", "avatar", "emoji"]
-            s -= 3 * sum(1 for tok in negative_tokens if tok in url)  # Increased penalty
+            # STRONGER penalties for low-quality/irrelevant assets
+            negative_tokens = ["sprite", "icon", "thumbnail", "thumb", "small", "mini", "logo", "watermark", 
+                             "stock", "avatar", "emoji", "low-res", "lowres", "blurry", "pixelated",
+                             "boxshot", "box-shot", "cover-art", "game-cover", "screenshot", "screen-shot",
+                             "clip-art", "clipart", "sticker"]
+            s -= 10 * sum(1 for tok in negative_tokens if tok in url or tok in title)  # Increased from 8 to 10
             
-            # Reward quality descriptors
-            positive_tokens = ["official", "press", "hd", "4k", "wallpaper", "hero", "high-res", "highres"]
-            s += 2 * sum(1 for tok in positive_tokens if tok in title or tok in url)
+            # Lightly prefer artwork over game screenshots/box art (but don't exclude completely)
+            if any(term in query.lower() for term in ["artwork", "art", "illustration", "character"]):
+                if any(tok in url.lower() or tok in title.lower() for tok in ["boxshot", "box-shot", "cover-art", "game-cover", "screenshot"]):
+                    s -= 5  # Light penalty, but still allow these images
             
-            # Reward larger dimensions
+            # STRONGER rewards for quality descriptors
+            positive_tokens = ["official", "press", "hd", "4k", "wallpaper", "hero", "high-res", "highres", 
+                             "high resolution", "professional", "quality", "sharp", "clear", "photography",
+                             "photo", "image", "picture", "artwork", "illustration", "portrait"]
+            s += 6 * sum(1 for tok in positive_tokens if tok in title or tok in url)  # Increased from 4 to 6
+            
+            # Reward larger dimensions (more aggressive scoring)
             try:
                 w = int(item.get("width") or 0)
                 h = int(item.get("height") or 0)
                 area = w * h
-                if area >= 1920 * 1080:     # Full HD or larger
-                    s += 8
+                min_dimension = min(w, h) if w > 0 and h > 0 else 0
+                
+                # Penalize very small images but don't completely filter them out
+                if min_dimension > 0 and min_dimension < 300:
+                    s -= 15  # Penalty for very small images (< 300px)
+                elif min_dimension > 0 and min_dimension < 400:
+                    s -= 5  # Light penalty for small images (300-400px)
+                
+                # Size scoring based on area
+                if area >= 3840 * 2160:     # 4K or larger
+                    s += 20  # Increased from 15
+                elif area >= 1920 * 1080:   # Full HD or larger
+                    s += 15  # Increased from 12
                 elif area >= 1280 * 720:    # HD
-                    s += 5
+                    s += 10  # Increased from 8
                 elif area >= 800 * 600:     # Decent size
-                    s += 2
-                elif area > 0 and area < 400 * 400:  # Too small
-                    s -= 5
+                    s += 5  # Increased from 3
+                elif area > 0 and area < 500 * 500:  # Too small (increased threshold)
+                    s -= 15  # Increased penalty from -10
             except Exception:
                 pass
             
-            # Penalize thumbnails
+            # STRONGER penalty for thumbnails
             if ("thumb" in url or "thumbnail" in url) and not item.get("original_url"):
-                s -= 5
+                s -= 15  # Increased from -5
+            
+            # Penalize very long URLs (often CDN/redirect chains)
+            if len(url) > 200:
+                s -= 3
             
             return s
 
@@ -565,9 +717,14 @@ async def image_search(query: str, count: int = 25, verify_download: bool = True
         deduped.sort(key=score_with_penalty, reverse=True)
         
         # Filter out images with low scores (unrelated or poor quality)
-        # Minimum score threshold: at least some query term overlap is required
-        MIN_RELEVANCE_SCORE = 5  # Ensures at least one query term match + some quality
+        # Lower threshold to allow more variety - only filter out truly irrelevant images
+        MIN_RELEVANCE_SCORE = 5  # Lower threshold to allow more images through
         deduped = [it for it in deduped if score_with_penalty(it) >= MIN_RELEVANCE_SCORE]
+        
+        # Additional quality filter: Remove images with strongly negative scores (heavily penalized)
+        deduped = [it for it in deduped if score_with_penalty(it) > -50]  # Only filter out heavily penalized images
+        
+        # Don't filter by size - let scoring handle it (small images will be ranked lower but still available)
 
         # Optionally verify downloadability and pick top working images
         if verify_download:
@@ -711,8 +868,9 @@ async def collect_task_images(
         filtered.sort(key=lambda x: (x.get("_rank", 0), bool(x.get("host_page_url"))), reverse=True)
 
         # Step 3: download and optionally verify
+        # CRITICAL: work_dir MUST be provided - no fallback allowed for parallel request isolation
         if not work_dir:
-            work_dir = os.getcwd()
+            raise ValueError(f"work_dir is REQUIRED for request isolation. Cannot use fallback - parallel requests must not interfere with each other.")
         os.makedirs(work_dir, exist_ok=True)
 
         from .file_tools import download_image  # local tool
@@ -754,6 +912,14 @@ async def collect_task_images(
                 if not img_url:
                     skipped.append({"reason": "missing_url", "item": it})
                     return None
+
+                # NO MOCK/fallback images - only process real URLs
+                # Skip any local/mock files
+                if it.get("_local_file") or not img_url.startswith(("http://", "https://")):
+                    skipped.append({"reason": "mock_or_local_file", "url": img_url})
+                    return None
+
+                # Always verify images are downloadable
                 if not await is_image_ok_async(img_url, aio_session):
                     skipped.append({"reason": "verify_failed", "url": img_url})
                     return None
@@ -944,8 +1110,9 @@ async def collect_images_by_pattern(
     Returns JSON with downloaded local file paths and any errors.
     """
     try:
+        # CRITICAL: work_dir MUST be provided - no fallback allowed for parallel request isolation
         if not work_dir:
-            work_dir = os.getcwd()
+            raise ValueError(f"work_dir is REQUIRED for request isolation. Cannot use fallback - parallel requests must not interfere with each other.")
         os.makedirs(work_dir, exist_ok=True)
 
         from .file_tools import download_image
@@ -1029,8 +1196,9 @@ async def scrape_image_gallery(
                 clean_urls.append(u)
         clean_urls = clean_urls[:max_images]
 
+        # CRITICAL: work_dir MUST be provided - no fallback allowed for parallel request isolation
         if not work_dir:
-            work_dir = os.getcwd()
+            raise ValueError(f"work_dir is REQUIRED for request isolation. Cannot use fallback - parallel requests must not interfere with each other.")
         os.makedirs(work_dir, exist_ok=True)
 
         from .file_tools import download_image
@@ -1177,7 +1345,7 @@ def _extract_json_path(data: Any, path: str) -> Optional[Any]:
 
 async def fetch_entity_images(
     entities: List[str],
-    entity_type: str = "pokemon",
+    entity_type: str = "",
     count_per_entity: int = 1,
     work_dir: Optional[str] = None,
     force_web_search: bool = False
@@ -1200,8 +1368,9 @@ async def fetch_entity_images(
         JSON with fetched entities, images, and fallback status
     """
     try:
+        # CRITICAL: work_dir MUST be provided - no fallback allowed for parallel request isolation
         if not work_dir:
-            work_dir = os.getcwd()
+            raise ValueError(f"work_dir is REQUIRED for request isolation. Cannot use fallback - parallel requests must not interfere with each other.")
         os.makedirs(work_dir, exist_ok=True)
 
         from .file_tools import download_image
@@ -1340,11 +1509,21 @@ async def fetch_entity_images(
                 try:
                     logging.info(f"[fetch_entity_images] Falling back to web search for {entity_name}")
 
-                    # Use fallback search query if configured, otherwise construct generic query
+                    # Use fallback search query if configured, otherwise construct better query
                     if api_config and api_config.get("fallback_search_query"):
                         search_query = api_config["fallback_search_query"].replace("{entity}", entity_name)
                     else:
-                        search_query = f"{entity_name} {entity_type} official image"
+                        # Create more specific queries that are likely to find relevant images
+                        if entity_type == "pokemon":
+                            search_query = f"{entity_name} pokemon official artwork character sprite"
+                        elif entity_type == "country":
+                            search_query = f"{entity_name} country flag official emblem"
+                        elif entity_type == "character":
+                            search_query = f"{entity_name} character official artwork portrait illustration"
+                        elif entity_type == "movie":
+                            search_query = f"{entity_name} movie poster official artwork"
+                        else:
+                            search_query = f"{entity_name} {entity_type} official image artwork"
 
                     # Use existing collect_task_images function
                     web_result_json = await collect_task_images(

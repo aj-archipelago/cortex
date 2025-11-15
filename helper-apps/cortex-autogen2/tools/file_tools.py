@@ -308,25 +308,32 @@ async def list_files_in_work_dir(work_dir: Optional[str] = None) -> str:
             "other": []
         }
         
-        for item in os.listdir(work_dir):
-            item_path = os.path.join(work_dir, item)
-            if os.path.isfile(item_path):
-                file_info = UniversalFileHandler.detect_file_type(item_path)
-                all_files.append(file_info)
-                
-                # Categorize for display
-                if not file_info["is_deliverable"]:
-                    categories["temporary"].append(file_info)
-                elif file_info["category"] == "document":
-                    categories["documents"].append(file_info)
-                elif file_info["category"] == "image":
-                    categories["images"].append(file_info)
-                elif file_info["category"] == "data":
-                    categories["data"].append(file_info)
-                elif file_info["category"] == "code":
-                    categories["code"].append(file_info)
-                else:
-                    categories["deliverable"].append(file_info)
+        # CRITICAL: Search recursively to find ALL files in subdirectories
+        for root, dirs, files in os.walk(work_dir):
+            # Skip hidden directories and common non-deliverable directories
+            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__', 'node_modules']]
+            
+            for item in files:
+                item_path = os.path.join(root, item)
+                if os.path.isfile(item_path):
+                    file_info = UniversalFileHandler.detect_file_type(item_path)
+                    # Add relative path from work_dir for better readability
+                    file_info["relative_path"] = os.path.relpath(item_path, work_dir)
+                    all_files.append(file_info)
+                    
+                    # Categorize for display
+                    if not file_info["is_deliverable"]:
+                        categories["temporary"].append(file_info)
+                    elif file_info["category"] == "document":
+                        categories["documents"].append(file_info)
+                    elif file_info["category"] == "image":
+                        categories["images"].append(file_info)
+                    elif file_info["category"] == "data":
+                        categories["data"].append(file_info)
+                    elif file_info["category"] == "code":
+                        categories["code"].append(file_info)
+                    else:
+                        categories["deliverable"].append(file_info)
         
         if not all_files:
             return f"📁 No files found in working directory: {work_dir}"
@@ -348,25 +355,41 @@ async def list_files_in_work_dir(work_dir: Optional[str] = None) -> str:
             if categories["documents"]:
                 result += f"📄 **Documents** ({len(categories['documents'])}):\n"
                 for file_info in categories["documents"]:
-                    result += f"  ✅ {file_info['filename']} ({file_info['size']} bytes) - {file_info['description']}\n"
+                    # Use absolute path stored in file_info
+                    abs_path = file_info.get('absolute_path', os.path.join(work_dir, file_info.get('relative_path', file_info['filename'])))
+                    file_path = file_info.get('relative_path', file_info['filename'])
+                    result += f"  ✅ {file_path} ({file_info['size']} bytes) - {file_info['description']}\n"
+                    result += f"     Path: {abs_path}\n"
                 result += "\n"
             
             if categories["images"]:
                 result += f"🖼️ **Images** ({len(categories['images'])}):\n"
                 for file_info in categories["images"]:
-                    result += f"  ✅ {file_info['filename']} ({file_info['size']} bytes) - {file_info['description']}\n"
+                    # Use absolute path stored in file_info
+                    abs_path = file_info.get('absolute_path', os.path.join(work_dir, file_info.get('relative_path', file_info['filename'])))
+                    file_path = file_info.get('relative_path', file_info['filename'])
+                    result += f"  ✅ {file_path} ({file_info['size']} bytes) - {file_info['description']}\n"
+                    result += f"     Path: {abs_path}\n"
                 result += "\n"
             
             if categories["data"]:
                 result += f"📊 **Data Files** ({len(categories['data'])}):\n"
                 for file_info in categories["data"]:
-                    result += f"  ✅ {file_info['filename']} ({file_info['size']} bytes) - {file_info['description']}\n"
+                    # Use absolute path stored in file_info
+                    abs_path = file_info.get('absolute_path', os.path.join(work_dir, file_info.get('relative_path', file_info['filename'])))
+                    file_path = file_info.get('relative_path', file_info['filename'])
+                    result += f"  ✅ {file_path} ({file_info['size']} bytes) - {file_info['description']}\n"
+                    result += f"     Path: {abs_path}\n"
                 result += "\n"
             
             if categories["deliverable"]:
                 result += f"📦 **Other Deliverables** ({len(categories['deliverable'])}):\n"
                 for file_info in categories["deliverable"]:
-                    result += f"  ✅ {file_info['filename']} ({file_info['size']} bytes) - {file_info['description']}\n"
+                    # Use absolute path stored in file_info
+                    abs_path = file_info.get('absolute_path', os.path.join(work_dir, file_info.get('relative_path', file_info['filename'])))
+                    file_path = file_info.get('relative_path', file_info['filename'])
+                    result += f"  ✅ {file_path} ({file_info['size']} bytes) - {file_info['description']}\n"
+                    result += f"     Path: {abs_path}\n"
                 result += "\n"
         
         if categories["temporary"]:
@@ -380,12 +403,20 @@ async def list_files_in_work_dir(work_dir: Optional[str] = None) -> str:
             for file_info in categories["code"]:
                 result += f"  📝 {file_info['filename']} ({file_info['size']} bytes) - {file_info['description']}\n"
         
-        # Add recommendations
+        # Add recommendations with absolute paths list
         if deliverable_count > 0:
             result += f"\n🚀 **NEXT ACTIONS**:\n"
             result += f"1. Read and analyze deliverable files\n"
             result += f"2. Upload all deliverables to Azure\n"
-            result += f"3. Provide download links to user\n"
+            result += f"3. Provide download links to user\n\n"
+            result += "📋 **ABSOLUTE PATHS FOR UPLOAD** (copy these paths for batch_upload_for_uploader):\n"
+            all_deliverable_paths = []
+            for category_name in ["documents", "images", "data", "deliverable"]:
+                for file_info in categories[category_name]:
+                    abs_path = file_info.get('absolute_path', os.path.join(work_dir, file_info.get('relative_path', file_info['filename'])))
+                    all_deliverable_paths.append(abs_path)
+            for path in all_deliverable_paths:
+                result += f"  - {path}\n"
         else:
             result += f"\n⚠️ **WARNING**: No deliverable files found!\n"
             result += f"Check if the task was completed successfully.\n"
@@ -546,36 +577,41 @@ def get_file_tools(executor_work_dir: Optional[str] = None) -> List[FunctionTool
     tools = []
     
     # Create partial functions with work_dir bound
-    def _to_text_part(value: str) -> Dict[str, Any]:
-        # Always return OpenAI-typed content
-        return {"type": "text", "text": value if isinstance(value, str) else str(value)}
-
-    def bound_list_files_typed() -> Dict[str, Any]:
-        return _to_text_part(asyncio.run(list_files_in_work_dir(executor_work_dir)))
+    # Functions return strings - FunctionTool will handle formatting
+    def bound_list_files_typed() -> str:
+        return asyncio.run(list_files_in_work_dir(executor_work_dir))
     
-    def bound_read_file_typed(filename: str, max_length: int = 5000) -> Dict[str, Any]:
-        return _to_text_part(asyncio.run(read_file_from_work_dir(filename, executor_work_dir, max_length)))
+    def bound_read_file_typed(filename: str, max_length: int = 5000) -> str:
+        return asyncio.run(read_file_from_work_dir(filename, executor_work_dir, max_length))
     
-    def bound_get_file_info_typed(filename: str) -> Dict[str, Any]:
-        return _to_text_part(asyncio.run(get_file_info(filename, executor_work_dir)))
+    def bound_get_file_info_typed(filename: str) -> str:
+        return asyncio.run(get_file_info(filename, executor_work_dir))
     
-    # Add tools
-    tools.append(FunctionTool(
+    def bound_create_file_typed(filename: str, content: str) -> str:
+        return asyncio.run(create_file(filename, content, executor_work_dir))
+    
+    # Import create_safe_function_tool locally to avoid circular import
+    from agents import create_safe_function_tool
+    
+    # Add tools using create_safe_function_tool to ensure proper JSON wrapping
+    tools.append(create_safe_function_tool(
         bound_list_files_typed,
-        name="list_files_in_work_dir",
         description="Intelligently discover and categorize all files in the working directory with comprehensive metadata"
     ))
     
-    tools.append(FunctionTool(
+    tools.append(create_safe_function_tool(
         bound_read_file_typed,
-        name="read_file_from_work_dir", 
         description="Intelligently read and analyze any file type with automatic content detection and preview generation"
     ))
     
-    tools.append(FunctionTool(
+    tools.append(create_safe_function_tool(
         bound_get_file_info_typed,
-        name="get_file_info",
         description="Get comprehensive metadata and analysis for any file type including permissions and recommendations"
+    ))
+    
+    tools.append(create_safe_function_tool(
+        bound_create_file_typed,
+        description="Create a new file with the given content in the working directory. Use this to save JSON data files, CSV files, or any text-based files."
     ))
 
     # Add a convenience uploader for the newest deliverables
@@ -609,12 +645,11 @@ def get_file_tools(executor_work_dir: Optional[str] = None) -> List[FunctionTool
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def bound_upload_recent_deliverables_typed(max_age_minutes: int = 15, max_files: int = 5) -> Dict[str, Any]:
-        return _to_text_part(asyncio.run(_upload_recent_deliverables(max_age_minutes, max_files)))
+    def bound_upload_recent_deliverables_typed(max_age_minutes: int = 15, max_files: int = 5) -> str:
+        return asyncio.run(_upload_recent_deliverables(max_age_minutes, max_files))
 
-    tools.append(FunctionTool(
+    tools.append(create_safe_function_tool(
         bound_upload_recent_deliverables_typed,
-        name="upload_recent_deliverables",
         description="Upload the newest deliverables from the working directory (scans last N minutes) and return their URLs"
     ))
 
@@ -657,14 +692,513 @@ def get_file_tools(executor_work_dir: Optional[str] = None) -> List[FunctionTool
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def bound_list_recent_deliverables_typed(max_age_minutes: int = 15, max_files: int = 10, min_size_bytes: int = 1024) -> Dict[str, Any]:
-        return _to_text_part(asyncio.run(_list_recent_deliverables(max_age_minutes, max_files, min_size_bytes)))
+    def bound_list_recent_deliverables_typed(max_age_minutes: int = 15, max_files: int = 10, min_size_bytes: int = 1024) -> str:
+        return asyncio.run(_list_recent_deliverables(max_age_minutes, max_files, min_size_bytes))
 
-    tools.append(FunctionTool(
+    tools.append(create_safe_function_tool(
         bound_list_recent_deliverables_typed,
-        name="list_recent_deliverables",
         description="List likely deliverables (by type, size, recency) without uploading; returns suggestions for human-like selection"
     ))
     
     logger.info(f"✅ Universal file tools created for work_dir: {executor_work_dir}")
-    return tools 
+    return tools
+
+
+# =============================================================================
+# FILE PREVIEW GENERATION FUNCTIONS
+# =============================================================================
+
+def generate_file_preview(file_path: str, work_dir: str) -> Optional[str]:
+    """
+    Generate a preview image/thumbnail for supported file types.
+
+    Args:
+        file_path: Path to the file to preview
+        work_dir: Working directory for saving preview images
+
+    Returns:
+        Path to generated preview image, or None if preview cannot be generated
+    """
+    logger.info(f"🎨 generate_file_preview called for {file_path}")
+    if not os.path.exists(file_path):
+        logger.warning(f"🎨 File does not exist: {file_path}")
+        return None
+
+    filename = os.path.basename(file_path)
+    extension = os.path.splitext(filename)[1].lower()
+    logger.info(f"🎨 Processing {filename} with extension {extension}")
+
+    try:
+        if extension == '.pdf':
+            logger.info(f"🎨 Generating PDF preview for {filename}")
+            return _generate_pdf_preview(file_path, work_dir)
+        elif extension == '.pptx':
+            logger.info(f"🎨 Generating PPTX preview for {filename}")
+            return _generate_pptx_preview(file_path, work_dir)
+        elif extension in ['.docx', '.xlsx']:
+            logger.info(f"🎨 Generating Office preview for {filename}")
+            return _generate_office_preview(file_path, work_dir)
+        else:
+            logger.info(f"🎨 No preview support for extension {extension}")
+            return None
+    except Exception as e:
+        logger.warning(f"Failed to generate preview for {filename}: {e}")
+        return None
+
+
+def _generate_pdf_preview(file_path: str, work_dir: str) -> Optional[str]:
+    """Generate ONE comprehensive preview image for PDF files - combines multiple pages."""
+    try:
+        from pdf2image import convert_from_path
+        from PIL import Image
+        import tempfile
+
+        # Get PDF info to determine number of pages
+        from pypdf import PdfReader
+        reader = PdfReader(file_path)
+        total_pages = len(reader.pages)
+
+        # Convert up to first 4 pages (or all pages if fewer than 4)
+        max_pages = min(4, total_pages)
+        images = convert_from_path(file_path, first_page=1, last_page=max_pages, dpi=100)
+        if not images:
+            return None
+
+        if len(images) == 1:
+            # Single page PDF - just use the first page
+            preview_image = images[0]
+        else:
+            # Multi-page PDF - create a contact sheet combining pages
+            # Calculate grid layout (2x2 for up to 4 pages)
+            cols = 2
+            rows = (len(images) + 1) // 2  # Ceiling division
+
+            # Thumbnail size for each page
+            thumb_width = 300
+            thumb_height = 400
+
+            # Create combined image
+            combined_width = cols * thumb_width
+            combined_height = rows * thumb_height
+            combined_image = Image.new('RGB', (combined_width, combined_height), color='white')
+
+            # Add each page as a thumbnail
+            for i, page_img in enumerate(images):
+                # Resize page to thumbnail
+                page_img.thumbnail((thumb_width, thumb_height), Image.Resampling.LANCZOS)
+
+                # Calculate position in grid
+                x = (i % cols) * thumb_width
+                y = (i // cols) * thumb_height
+
+                # Center the thumbnail in its cell
+                cell_center_x = x + thumb_width // 2
+                cell_center_y = y + thumb_height // 2
+                img_center_x = page_img.width // 2
+                img_center_y = page_img.height // 2
+
+                paste_x = cell_center_x - img_center_x
+                paste_y = cell_center_y - img_center_y
+
+                combined_image.paste(page_img, (paste_x, paste_y))
+
+                # Add page number label
+                from PIL import ImageDraw, ImageFont
+                try:
+                    draw = ImageDraw.Draw(combined_image)
+                    # Try to use a small font
+                    try:
+                        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
+                    except:
+                        font = ImageFont.load_default()
+
+                    # Add page number in bottom-right of each thumbnail
+                    label = f"Page {i+1}"
+                    bbox = draw.textbbox((paste_x, paste_y + thumb_height - 25), label, font=font)
+                    draw.rectangle(bbox, fill="white")
+                    draw.text((paste_x + 5, paste_y + thumb_height - 25), label, fill="black", font=font)
+                except Exception as e:
+                    logger.debug(f"Could not add page labels to PDF preview: {e}")
+
+            preview_image = combined_image
+
+        # Save the comprehensive preview image
+        filename = os.path.basename(file_path)
+        preview_filename = f"preview_{os.path.splitext(filename)[0]}.png"
+        preview_path = os.path.join(work_dir, preview_filename)
+
+        preview_image.save(preview_path, 'PNG')
+        logger.info(f"🎨 Generated comprehensive PDF preview with {len(images)} pages: {preview_path}")
+        return preview_path
+
+    except ImportError as e:
+        logger.warning(f"Missing dependencies for PDF preview generation: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"PDF preview generation failed: {e}")
+        return None
+
+
+def _generate_pptx_preview(file_path: str, work_dir: str) -> Optional[str]:
+    """Generate preview image for PowerPoint files by rendering actual slides."""
+    try:
+        from pptx import Presentation
+        from PIL import Image, ImageDraw, ImageFont
+
+        # Load the presentation
+        prs = Presentation(file_path)
+        if len(prs.slides) == 0:
+            logger.warning("PowerPoint file has no slides")
+            return None
+
+        # Get filename early for use throughout function
+        filename = os.path.basename(file_path)
+        
+        # Render first slide (title slide) as preview
+        slide = prs.slides[0]
+        
+        # Get slide dimensions
+        slide_width = prs.slide_width
+        slide_height = prs.slide_height
+        
+        # Convert EMU to pixels (assuming 96 DPI)
+        width_px = int(slide_width / 914400 * 96)
+        height_px = int(slide_height / 914400 * 96)
+        
+        # Create PIL image with white background
+        img = Image.new('RGB', (width_px, height_px), color='white')
+        draw = ImageDraw.Draw(img)
+        
+        # Try to render text from shapes
+        try:
+            # Default font
+            try:
+                font_large = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 48)
+                font_medium = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 32)
+                font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
+            except:
+                font_large = ImageFont.load_default()
+                font_medium = ImageFont.load_default()
+                font_small = ImageFont.load_default()
+            
+            y_pos = 100
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    text = shape.text.strip()
+                    # Determine font size based on shape type
+                    if hasattr(shape, "is_placeholder") and shape.is_placeholder:
+                        if shape.placeholder_format.idx == 0:  # Title placeholder
+                            font = font_large
+                        else:
+                            font = font_medium
+                    else:
+                        font = font_medium
+                    
+                    # Wrap text if too long
+                    max_width = width_px - 200
+                    words = text.split()
+                    lines = []
+                    current_line = []
+                    for word in words:
+                        test_line = ' '.join(current_line + [word])
+                        bbox = draw.textbbox((0, 0), test_line, font=font)
+                        if bbox[2] - bbox[0] <= max_width:
+                            current_line.append(word)
+                        else:
+                            if current_line:
+                                lines.append(' '.join(current_line))
+                            current_line = [word]
+                    if current_line:
+                        lines.append(' '.join(current_line))
+                    
+                    # Draw text lines
+                    for line in lines[:5]:  # Limit to 5 lines
+                        if y_pos + 60 > height_px - 100:
+                            break
+                        draw.text((100, y_pos), line, fill='black', font=font)
+                        y_pos += 60
+                    
+                    if y_pos > height_px - 100:
+                        break
+            
+            # If no text found, add filename
+            if y_pos == 100:
+                draw.text((100, height_px // 2), filename, fill='black', font=font_large)
+        except Exception as e:
+            logger.warning(f"Error rendering slide text: {e}")
+            # Fallback: just show filename
+            try:
+                font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 48)
+            except:
+                font = ImageFont.load_default()
+            draw.text((100, height_px // 2), filename, fill='black', font=font)
+
+        # Save preview image
+        preview_filename = f"preview_{os.path.splitext(filename)[0]}.png"
+        preview_path = os.path.join(work_dir, preview_filename)
+        
+        img.save(preview_path, 'PNG', dpi=(150, 150))
+        logger.info(f"✅ Generated PPTX preview: {preview_path}")
+        return preview_path
+
+    except ImportError:
+        logger.warning("python-pptx or PIL not available for PPTX preview generation")
+        return None
+    except Exception as e:
+        logger.warning(f"PowerPoint preview generation failed: {e}")
+        return None
+
+
+def _generate_office_preview(file_path: str, work_dir: str) -> Optional[str]:
+    """Generate preview image for Word/Excel files."""
+    try:
+        import matplotlib.pyplot as plt
+        import pandas as pd
+        from matplotlib.patches import Rectangle
+
+        filename = os.path.basename(file_path)
+        extension = os.path.splitext(filename)[1].lower()
+
+        if extension == '.xlsx':
+            # For Excel files, try to read and display actual content
+            try:
+                # Read the first sheet
+                df = pd.read_excel(file_path, nrows=20)  # Limit to first 20 rows for preview
+                
+                # Create figure with appropriate size
+                fig, ax = plt.subplots(figsize=(12, min(8, max(4, len(df) * 0.3 + 2))))
+                ax.set_facecolor('#ffffff')
+                ax.axis('off')
+                
+                # Create table
+                if len(df) > 0:
+                    # Prepare data for table (limit columns for readability)
+                    display_df = df.head(15)  # Show first 15 rows
+                    if len(display_df.columns) > 8:
+                        display_df = display_df.iloc[:, :8]  # Limit to 8 columns
+                    
+                    # Create table
+                    table = ax.table(
+                        cellText=display_df.values.tolist(),
+                        colLabels=[str(col)[:20] for col in display_df.columns],  # Truncate long column names
+                        cellLoc='left',
+                        loc='center',
+                        bbox=[0, 0, 1, 1]
+                    )
+                    
+                    # Style the table
+                    table.auto_set_font_size(False)
+                    table.set_fontsize(8)
+                    table.scale(1, 1.5)
+                    
+                    # Style header row
+                    for i in range(len(display_df.columns)):
+                        cell = table[(0, i)]
+                        cell.set_facecolor('#2563eb')
+                        cell.set_text_props(weight='bold', color='white')
+                    
+                    # Style data rows (alternating colors)
+                    for i in range(1, len(display_df) + 1):
+                        for j in range(len(display_df.columns)):
+                            cell = table[(i, j)]
+                            if i % 2 == 0:
+                                cell.set_facecolor('#f3f4f6')
+                            else:
+                                cell.set_facecolor('#ffffff')
+                            cell.set_text_props(color='#000000')
+                    
+                    # Add title
+                    ax.text(0.5, 0.98, f"Excel Workbook: {filename}", 
+                           ha='center', va='top', fontsize=12, fontweight='bold',
+                           transform=ax.transAxes)
+                    
+                    if len(df) > 15:
+                        ax.text(0.5, 0.02, f"Showing first 15 of {len(df)} rows", 
+                               ha='center', va='bottom', fontsize=8, style='italic',
+                               transform=ax.transAxes)
+                else:
+                    # Empty Excel file
+                    ax.text(0.5, 0.5, f"Excel Workbook: {filename}\n(Empty file)", 
+                           ha='center', va='center', fontsize=12)
+                
+            except Exception as e:
+                logger.warning(f"Failed to read Excel content for preview: {e}, using fallback")
+                # Fallback to simple preview
+                ax.text(0.5, 0.7, f"Excel Workbook", ha='center', va='center',
+                        fontsize=16, fontweight='bold')
+                ax.text(0.5, 0.5, f"{filename}", ha='center', va='center',
+                        fontsize=12)
+                ax.text(0.5, 0.3, "Click download link below to view", ha='center', va='center',
+                        fontsize=10, style='italic')
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+        elif extension == '.docx':
+            # Word documents - keep simple preview for now
+            ax.text(0.5, 0.7, f"Word Document", ha='center', va='center',
+                    fontsize=16, fontweight='bold')
+            ax.text(0.5, 0.5, f"{filename}", ha='center', va='center',
+                    fontsize=12)
+            ax.text(0.5, 0.3, "Click download link below to view", ha='center', va='center',
+                    fontsize=10, style='italic')
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis('off')
+
+        # Save preview image
+        preview_filename = f"preview_{os.path.splitext(filename)[0]}.png"
+        preview_path = os.path.join(work_dir, preview_filename)
+
+        plt.savefig(preview_path, dpi=150, bbox_inches='tight', facecolor='#ffffff')
+        plt.close()
+
+        return preview_path
+
+    except Exception as e:
+        logger.warning(f"Office document preview generation failed: {e}")
+        return None
+
+
+def extract_pdf_text(file_path: str) -> str:
+    """Extract text content from PDF files to validate content quality. Returns JSON with extracted text and validation."""
+    try:
+        import json
+        import os
+
+        if not os.path.exists(file_path):
+            return json.dumps({"error": f"File not found: {file_path}", "is_valid": False})
+
+        filename = os.path.basename(file_path)
+
+        # Extract text using pypdf
+        from pypdf import PdfReader
+
+        reader = PdfReader(file_path)
+        extracted_text = ""
+
+        # Extract text from first few pages (limit to avoid huge content)
+        max_pages = min(5, len(reader.pages))
+        for page_num in range(max_pages):
+            page = reader.pages[page_num]
+            text = page.extract_text()
+            if text.strip():
+                extracted_text += f"\n--- Page {page_num + 1} ---\n{text.strip()}"
+
+        # Validate content
+        is_valid = True
+        validation_errors = []
+
+        if not extracted_text.strip():
+            is_valid = False
+            validation_errors.append("PDF contains no extractable text content")
+
+        # Check for error messages
+        error_indicators = [
+            "generation failed",
+            "contact admin",
+            "error",
+            "failed",
+            "unable to",
+            "cannot",
+            "report generation failed"
+        ]
+
+        lower_text = extracted_text.lower()
+        for indicator in error_indicators:
+            if indicator in lower_text:
+                is_valid = False
+                validation_errors.append(f"PDF contains error message: '{indicator}'")
+
+        # Check for minimum content length
+        if len(extracted_text.strip()) < 100:
+            is_valid = False
+            validation_errors.append("PDF content too short (less than 100 characters)")
+
+        return json.dumps({
+            "filename": filename,
+            "extracted_text": extracted_text[:2000],  # Limit for LLM context
+            "total_pages": len(reader.pages),
+            "is_valid": is_valid,
+            "validation_errors": validation_errors,
+            "content_length": len(extracted_text)
+        })
+
+    except Exception as e:
+        logger.error(f"PDF text extraction failed for {file_path}: {e}")
+        return json.dumps({
+            "error": str(e),
+            "is_valid": False,
+            "validation_errors": ["PDF text extraction failed"]
+        })
+
+
+def extract_pdf_text(file_path: str) -> str:
+    """Extract text content from PDF files to validate content quality. Returns JSON with extracted text and validation."""
+    try:
+        import json
+        import os
+
+        if not os.path.exists(file_path):
+            return json.dumps({"error": f"File not found: {file_path}", "is_valid": False})
+
+        filename = os.path.basename(file_path)
+
+        # Extract text using pypdf
+        from pypdf import PdfReader
+
+        reader = PdfReader(file_path)
+        extracted_text = ""
+
+        # Extract text from first few pages (limit to avoid huge content)
+        max_pages = min(5, len(reader.pages))
+        for page_num in range(max_pages):
+            page = reader.pages[page_num]
+            text = page.extract_text()
+            if text.strip():
+                extracted_text += f"\n--- Page {page_num + 1} ---\n{text.strip()}"
+
+        # Validate content
+        is_valid = True
+        validation_errors = []
+
+        if not extracted_text.strip():
+            is_valid = False
+            validation_errors.append("PDF contains no extractable text content")
+
+        # Check for error messages
+        error_indicators = [
+            "generation failed",
+            "contact admin",
+            "error",
+            "failed",
+            "unable to",
+            "cannot",
+            "report generation failed"
+        ]
+
+        lower_text = extracted_text.lower()
+        for indicator in error_indicators:
+            if indicator in lower_text:
+                is_valid = False
+                validation_errors.append(f"PDF contains error message: '{indicator}'")
+
+        # Check for minimum content length
+        if len(extracted_text.strip()) < 100:
+            is_valid = False
+            validation_errors.append("PDF content too short (less than 100 characters)")
+
+        return json.dumps({
+            "filename": filename,
+            "extracted_text": extracted_text[:2000],  # Limit for LLM context
+            "total_pages": len(reader.pages),
+            "is_valid": is_valid,
+            "validation_errors": validation_errors,
+            "content_length": len(extracted_text)
+        })
+
+    except Exception as e:
+        logger.error(f"PDF text extraction failed for {file_path}: {e}")
+        return json.dumps({
+            "error": str(e),
+            "is_valid": False,
+            "validation_errors": ["PDF text extraction failed"]
+        })

@@ -95,15 +95,15 @@ class RedisPublisher:
         # Heartbeat + transient caching
         self._heartbeat_task: Optional[asyncio.Task] = None
         try:
-            # Clamp to at most 1.0s to ensure the UI gets updates every second
-            interval = float(os.getenv("PROGRESS_HEARTBEAT_INTERVAL", "1.0"))
-            if interval > 1.0:
-                interval = 1.0
+            # Use 5-second interval for heartbeats (less frequent)
+            interval = float(os.getenv("PROGRESS_HEARTBEAT_INTERVAL", "5.0"))
+            if interval > 5.0:
+                interval = 5.0
             if interval <= 0:
-                interval = 1.0
+                interval = 5.0
             self._interval_seconds = interval
         except Exception:
-            self._interval_seconds = 1.0
+            self._interval_seconds = 2.0
         # We cache only summarized progress strings (emoji sentence) with progress float
         self._transient_latest: Dict[str, Dict[str, Any]] = {}
         self._transient_all: Dict[str, List[Dict[str, Any]]] = {}
@@ -144,23 +144,37 @@ class RedisPublisher:
             
         return self.publish_request_progress(message_data)
 
-    async def set_transient_update(self, request_id: str, progress: float, info: str) -> None:
+    async def set_transient_update(self, request_id: str, progress: float, info: str, data: str = None) -> None:
         """Cache the latest summarized transient progress (short sentence with emoji).
-        Heartbeat will re-publish this every second until final. No raw chat content here."""
+        Heartbeat will re-publish this every second until final. No raw chat content here.
+        CRITICAL: Also immediately publish the update to ensure it's received even if heartbeat fails."""
         try:
             async with self._lock:
                 # Skip if already finalized
                 if self._finalized.get(request_id):
                     return
-                self._transient_latest[request_id] = {"progress": progress, "info": info, "ts": time.time()}
+                self._transient_latest[request_id] = {"progress": progress, "info": info, "data": data, "ts": time.time()}
                 lst = self._transient_all.get(request_id)
                 if lst is None:
                     lst = []
                     self._transient_all[request_id] = lst
-                lst.append({"progress": progress, "info": info, "ts": time.time()})
+                lst.append({"progress": progress, "info": info, "data": data, "ts": time.time()})
                 # Avoid unbounded growth
                 if len(lst) > 200:
                     del lst[: len(lst) - 200]
+
+            # CRITICAL FIX: Immediately publish the update (not just cache it)
+            # This ensures progress updates are received even if heartbeat fails or isn't running
+            try:
+                message_data = {
+                    "requestId": request_id,
+                    "progress": float(progress),
+                    "info": str(info),
+                    "data": data
+                }
+                self.publish_request_progress(message_data)
+            except Exception as pub_err:
+                logger.debug(f"Immediate publish error for {request_id}: {pub_err}")
         except Exception as e:
             logger.warning(f"set_transient_update error for {request_id}: {e}")
 
@@ -235,18 +249,12 @@ class RedisPublisher:
     async def close(self):
         """Close Redis connection gracefully"""
         global redis_client
-        # Stop heartbeat
-        if self._heartbeat_task is not None:
-            try:
-                self._heartbeat_task.cancel()
-                try:
-                    await self._heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-            except Exception as e:
-                logger.debug(f"Error cancelling heartbeat task: {e}")
-            finally:
-                self._heartbeat_task = None
+        # CRITICAL: Do NOT cancel heartbeat task here - it should run continuously
+        # for all tasks. The heartbeat is a long-lived background task that should
+        # only be cancelled when the entire process shuts down, not per-task.
+        # This ensures progress updates are sent every second as a heartbeat.
+        # The heartbeat will automatically skip finalized requests, so it's safe
+        # to keep it running even after tasks complete.
         if redis_client:
             try:
                 # Don't actually close the connection in non-continuous mode
