@@ -28,6 +28,21 @@ const createTestContext = () => {
     return contextId;
 };
 
+// Helper to extract files array from stored format (handles both old array format and new {version, files} format)
+const extractFilesFromStored = (stored) => {
+    if (!stored) return [];
+    const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored;
+    // Handle new format: { version, files }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.files) {
+        return Array.isArray(parsed.files) ? parsed.files : [];
+    }
+    // Handle old format: just an array
+    if (Array.isArray(parsed)) {
+        return parsed;
+    }
+    return [];
+};
+
 // Helper to clean up test data
 const cleanup = async (contextId, contextKey = null) => {
     try {
@@ -73,7 +88,7 @@ test('WriteFile: Write and upload text file', async t => {
             contextId,
             section: 'memoryFiles'
         });
-        const collection = JSON.parse(saved);
+        const collection = extractFilesFromStored(saved);
         t.is(collection.length, 1);
         t.is(collection[0].filename, filename);
         t.is(collection[0].url, parsed.url);
@@ -121,7 +136,7 @@ test('WriteFile: Write JSON file with tags and notes', async t => {
             contextId,
             section: 'memoryFiles'
         });
-        const collection = JSON.parse(saved);
+        const collection = extractFilesFromStored(saved);
         t.is(collection.length, 1);
         t.is(collection[0].filename, filename);
         t.deepEqual(collection[0].tags, tags);
@@ -237,7 +252,7 @@ test('WriteFile: Different file types and MIME types', async t => {
             contextId,
             section: 'memoryFiles'
         });
-        const collection = JSON.parse(saved);
+        const collection = extractFilesFromStored(saved);
         t.is(collection.length, successCount);
     } finally {
         await cleanup(contextId);
@@ -324,7 +339,7 @@ test('WriteFile: Duplicate content (same hash)', async t => {
             contextId,
             section: 'memoryFiles'
         });
-        const collection = JSON.parse(saved);
+        const collection = extractFilesFromStored(saved);
         t.is(collection.length, 2);
         t.true(collection.some(f => f.filename === filename1));
         t.true(collection.some(f => f.filename === filename2));

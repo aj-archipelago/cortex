@@ -3,7 +3,7 @@
 // Uses memory system endpoints (memoryFiles section) for storage
 import logger from '../../../../lib/logger.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { addFileToCollection, loadFileCollection, saveFileCollection, findFileInCollection, deleteFileByHash } from '../../../../lib/fileUtils.js';
+import { addFileToCollection, loadFileCollection, saveFileCollection, findFileInCollection, deleteFileByHash, modifyFileCollectionWithLock } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -156,8 +156,6 @@ export default {
             if (!contextId) {
                 throw new Error("contextId is required for file collection operations");
             }
-            // Load existing collection using utility function
-            let collection = await loadFileCollection(contextId, contextKey, true);
 
             if (isAdd) {
                 // Add file to collection
@@ -201,15 +199,51 @@ export default {
                 }
 
                 const queryLower = query.toLowerCase();
+                
+                // Use optimistic locking to update lastAccessed
+                await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
+                    // Find matching files and update their lastAccessed
+                    const fileIds = new Set();
+                    collection.forEach(file => {
+                        // Search in filename, tags, and notes
+                        const filenameMatch = file.filename.toLowerCase().includes(queryLower);
+                        const notesMatch = file.notes && file.notes.toLowerCase().includes(queryLower);
+                        const tagMatch = file.tags.some(tag => tag.toLowerCase().includes(queryLower));
+                        
+                        const matchesQuery = filenameMatch || notesMatch || tagMatch;
+                        
+                        // Filter by tags if provided
+                        const matchesTags = filterTags.length === 0 || 
+                            filterTags.every(filterTag => 
+                                file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
+                            );
+                        
+                        if (matchesQuery && matchesTags) {
+                            fileIds.add(file.id);
+                        }
+                    });
+                    
+                    // Update lastAccessed for found files
+                    collection.forEach(file => {
+                        if (fileIds.has(file.id)) {
+                            file.lastAccessed = new Date().toISOString();
+                        }
+                    });
+                    
+                    return collection;
+                });
+                
+                // Reload collection to get results (after update)
+                const collection = await loadFileCollection(contextId, contextKey, false);
+                
+                // Filter and sort results (for display only, not modifying)
                 let results = collection.filter(file => {
-                    // Search in filename, tags, and notes
                     const filenameMatch = file.filename.toLowerCase().includes(queryLower);
                     const notesMatch = file.notes && file.notes.toLowerCase().includes(queryLower);
                     const tagMatch = file.tags.some(tag => tag.toLowerCase().includes(queryLower));
                     
                     const matchesQuery = filenameMatch || notesMatch || tagMatch;
                     
-                    // Filter by tags if provided
                     const matchesTags = filterTags.length === 0 || 
                         filterTags.every(filterTag => 
                             file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
@@ -229,14 +263,6 @@ export default {
 
                 // Limit results
                 results = results.slice(0, limit);
-
-                // Update lastAccessed for found files
-                results.forEach(file => {
-                    file.lastAccessed = new Date().toISOString();
-                });
-
-                // Save updated collection using utility function
-                await saveFileCollection(contextId, contextKey, collection);
 
                 resolver.tool = JSON.stringify({ toolUsed: "SearchFileCollection" });
                 return JSON.stringify({
@@ -265,72 +291,59 @@ export default {
                 let removedFiles = [];
                 let deletedFromCloud = 0;
                 let deletionErrors = [];
+                let filesToRemove = [];
 
+                // First, identify files to remove (before locking)
                 if (fileId === '*') {
-                    // Remove all files - delete each from cloud storage first
-                    removedCount = collection.length;
-                    removedFiles = collection.map(f => ({
+                    // Load collection to get all files
+                    const collection = await loadFileCollection(contextId, contextKey, false);
+                    filesToRemove = collection.map(f => ({
                         id: f.id,
                         filename: f.filename,
                         hash: f.hash || null
                     }));
-                    
-                    // Delete all files from cloud storage
-                    for (const file of collection) {
-                        if (file.hash) {
-                            try {
-                                logger.info(`Deleting file from cloud storage: ${file.filename} (hash: ${file.hash})`);
-                                const deleted = await deleteFileByHash(file.hash, resolver);
-                                if (deleted) {
-                                    deletedFromCloud++;
-                                }
-                            } catch (error) {
-                                const errorMsg = error?.message || String(error);
-                                logger.warn(`Failed to delete file ${file.filename} (hash: ${file.hash}) from cloud storage: ${errorMsg}`);
-                                deletionErrors.push({ filename: file.filename, error: errorMsg });
-                            }
-                        }
-                    }
-                    
-                    collection = [];
                 } else {
-                    // Remove specific file by ID, filename, URL, or hash using shared matching logic
+                    // Load collection and find specific file
+                    const collection = await loadFileCollection(contextId, contextKey, false);
                     const foundFile = findFileInCollection(fileId, collection);
                     
                     if (!foundFile) {
                         throw new Error(`File with ID, filename, URL, or hash "${fileId}" not found in collection`);
                     }
                     
-                    // Delete from cloud storage if hash exists
-                    if (foundFile.hash) {
-                        try {
-                            logger.info(`Deleting file from cloud storage: ${foundFile.filename} (hash: ${foundFile.hash})`);
-                            const deleted = await deleteFileByHash(foundFile.hash, resolver);
-                            if (deleted) {
-                                deletedFromCloud = 1;
-                            }
-                        } catch (error) {
-                            const errorMsg = error?.message || String(error);
-                            logger.warn(`Failed to delete file ${foundFile.filename} (hash: ${foundFile.hash}) from cloud storage: ${errorMsg}`);
-                            deletionErrors.push({ filename: foundFile.filename, error: errorMsg });
-                        }
-                    } else {
-                        logger.info(`No hash found for file ${foundFile.filename}, skipping cloud storage deletion`);
-                    }
-                    
-                    removedFiles.push({
+                    filesToRemove = [{
                         id: foundFile.id,
                         filename: foundFile.filename,
                         hash: foundFile.hash || null
-                    });
-                    
-                    // Remove the matched file from collection
-                    collection = collection.filter(file => file.id !== foundFile.id);
-                    removedCount = 1;
+                    }];
                 }
 
-                // Save updated collection using utility function
-                await saveFileCollection(contextId, contextKey, collection);
+                // Delete files from cloud storage (outside lock - idempotent operation)
+                for (const fileInfo of filesToRemove) {
+                    if (fileInfo.hash) {
+                        try {
+                            logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash})`);
+                            const deleted = await deleteFileByHash(fileInfo.hash, resolver);
+                            if (deleted) {
+                                deletedFromCloud++;
+                            }
+                        } catch (error) {
+                            const errorMsg = error?.message || String(error);
+                            logger.warn(`Failed to delete file ${fileInfo.filename} (hash: ${fileInfo.hash}) from cloud storage: ${errorMsg}`);
+                            deletionErrors.push({ filename: fileInfo.filename, error: errorMsg });
+                        }
+                    }
+                }
+
+                // Use optimistic locking to remove files from collection
+                const fileIdsToRemove = new Set(filesToRemove.map(f => f.id));
+                const finalCollection = await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
+                    // Remove files by ID
+                    return collection.filter(file => !fileIdsToRemove.has(file.id));
+                });
+
+                removedCount = filesToRemove.length;
+                removedFiles = filesToRemove;
 
                 // Build result message
                 let message;
@@ -356,16 +369,17 @@ export default {
                     success: true,
                     removedCount: removedCount,
                     deletedFromCloud: deletedFromCloud,
-                    remainingFiles: collection.length,
+                    remainingFiles: finalCollection.length,
                     message: message,
                     removedFiles: removedFiles,
                     deletionErrors: deletionErrors.length > 0 ? deletionErrors : undefined
                 });
 
             } else {
-                // List collection
+                // List collection (read-only, no locking needed)
                 const { tags: filterTags = [], sortBy = 'date', limit = 50 } = args;
                 
+                const collection = await loadFileCollection(contextId, contextKey, true);
                 let results = collection;
 
                 // Filter by tags if provided

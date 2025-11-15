@@ -124,7 +124,7 @@ test('formatFilesForTemplate should format files correctly', t => {
     ];
     
     const result = formatFilesForTemplate(collection);
-    t.true(result.includes('Hash | Filename | Date Added | Notes'));
+    t.true(result.includes('Hash | Filename | URL | Date Added | Notes'));
     t.true(result.includes('def456 | doc.pdf |'));
     t.true(result.includes('abc123 | image.jpg |'));
     t.true(result.includes('Test image'));
@@ -150,7 +150,7 @@ test('formatFilesForTemplate should handle files without optional fields', t => 
     ];
     
     const result = formatFilesForTemplate(collection);
-    t.true(result.includes('Hash | Filename | Date Added | Notes'));
+    t.true(result.includes('Hash | Filename | URL | Date Added | Notes'));
     t.true(result.includes(' | image.jpg |'));
     t.false(result.includes('Azure URL'));
     t.false(result.includes('GCS URL'));

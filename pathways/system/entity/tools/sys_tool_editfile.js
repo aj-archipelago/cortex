@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, modifyFileCollectionWithLock } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -189,6 +189,7 @@ export default {
             }
 
             // Find the file in the collection to get metadata (for updating later)
+            // We'll load it again inside the lock, but need to verify it exists first
             const collection = await loadFileCollection(contextId, contextKey, true);
             const foundFile = findFileInCollection(file, collection);
 
@@ -200,6 +201,9 @@ export default {
                 resolver.tool = JSON.stringify({ toolUsed: toolName });
                 return JSON.stringify(errorResult);
             }
+            
+            // Store the file ID for updating inside the lock
+            const fileIdToUpdate = foundFile.id;
 
             // Download the current file content
             logger.info(`Downloading file for modification: ${fileUrl}`);
@@ -326,18 +330,27 @@ export default {
                 throw new Error('Failed to upload modified file to cloud storage');
             }
 
-            // Update the file collection entry with new URL and hash
-            foundFile.url = uploadResult.url;
-            if (uploadResult.gcs) {
-                foundFile.gcs = uploadResult.gcs;
-            }
-            if (uploadResult.hash) {
-                foundFile.hash = uploadResult.hash;
-            }
-            foundFile.lastAccessed = new Date().toISOString();
-
-            // Save the updated collection
-            await saveFileCollection(contextId, contextKey, collection);
+            // Update the file collection entry with new URL and hash using optimistic locking
+            const updatedCollection = await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
+                const fileToUpdate = collection.find(f => f.id === fileIdToUpdate);
+                if (!fileToUpdate) {
+                    throw new Error(`File with ID "${fileIdToUpdate}" not found in collection during update`);
+                }
+                
+                fileToUpdate.url = uploadResult.url;
+                if (uploadResult.gcs) {
+                    fileToUpdate.gcs = uploadResult.gcs;
+                }
+                if (uploadResult.hash) {
+                    fileToUpdate.hash = uploadResult.hash;
+                }
+                fileToUpdate.lastAccessed = new Date().toISOString();
+                
+                return collection;
+            });
+            
+            // Get the updated file info for the result
+            const updatedFile = updatedCollection.find(f => f.id === fileIdToUpdate);
 
             // Build result message
             let message;
@@ -354,7 +367,7 @@ export default {
             const result = {
                 success: true,
                 filename: filename,
-                fileId: foundFile.id,
+                fileId: updatedFile.id,
                 url: uploadResult.url,
                 gcs: uploadResult.gcs || null,
                 hash: uploadResult.hash || null,

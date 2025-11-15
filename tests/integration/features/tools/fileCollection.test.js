@@ -29,6 +29,21 @@ const createTestContext = () => {
     return contextId;
 };
 
+// Helper to extract files array from stored format (handles both old array format and new {version, files} format)
+const extractFilesFromStored = (stored) => {
+    if (!stored) return [];
+    const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored;
+    // Handle new format: { version, files }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.files) {
+        return Array.isArray(parsed.files) ? parsed.files : [];
+    }
+    // Handle old format: just an array
+    if (Array.isArray(parsed)) {
+        return parsed;
+    }
+    return [];
+};
+
 // Helper to clean up test data
 const cleanup = async (contextId, contextKey = null) => {
     try {
@@ -64,7 +79,7 @@ test('File collection: Add file to collection', async t => {
             contextId,
             section: 'memoryFiles'
         });
-        const collection = JSON.parse(saved);
+        const collection = extractFilesFromStored(saved);
         t.is(collection.length, 1);
         t.is(collection[0].filename, 'test.jpg');
         t.is(collection[0].url, 'https://example.com/test.jpg');
@@ -497,7 +512,7 @@ test('generateFileMessageContent should find file by ID', async t => {
             contextId,
             section: 'memoryFiles'
         });
-        const collection = JSON.parse(saved);
+        const collection = extractFilesFromStored(saved);
         const fileId = collection[0].id;
         
         // Normalize by ID
@@ -586,7 +601,7 @@ test('generateFileMessageContent should detect image type', async t => {
             contextId,
             section: 'memoryFiles'
         });
-        const collection = JSON.parse(saved);
+        const collection = extractFilesFromStored(saved);
         const fileId = collection[0].id;
         
         const result = await generateFileMessageContent(fileId, contextId);
