@@ -1,7 +1,7 @@
 // sys_tool_writefile.js
 // Entity tool that writes content to a file and uploads it to cloud storage
 import logger from '../../../../lib/logger.js';
-import { uploadFileToCloud, addFileToCollection, getMimeTypeFromFilename } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, addFileToCollection, getMimeTypeFromFilename, isTextMimeType } from '../../../../lib/fileUtils.js';
 
 // Helper function to format file size
 function formatFileSize(bytes) {
@@ -129,9 +129,7 @@ export default {
             let mimeType = getMimeTypeFromFilename(filename, 'text/plain');
             
             // Add charset=utf-8 for text-based MIME types to ensure proper encoding
-            if (mimeType.startsWith('text/') || mimeType === 'application/json' || 
-                mimeType === 'application/javascript' || mimeType === 'application/typescript' ||
-                mimeType === 'application/xml') {
+            if (isTextMimeType(mimeType)) {
                 mimeType = `${mimeType}; charset=utf-8`;
             }
 

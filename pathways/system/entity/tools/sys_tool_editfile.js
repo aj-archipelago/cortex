@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, modifyFileCollectionWithLock } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, modifyFileCollectionWithLock, isTextMimeType } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -297,9 +297,7 @@ export default {
             let mimeType = getMimeTypeFromFilename(filename, 'text/plain');
             
             // Add charset=utf-8 for text-based MIME types
-            if (mimeType.startsWith('text/') || mimeType === 'application/json' || 
-                mimeType === 'application/javascript' || mimeType === 'application/typescript' ||
-                mimeType === 'application/xml') {
+            if (isTextMimeType(mimeType)) {
                 mimeType = `${mimeType}; charset=utf-8`;
             }
 

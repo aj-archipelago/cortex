@@ -239,12 +239,10 @@ test('generateFileMessageContent should return null for invalid input', async t 
     t.is(await generateFileMessageContent(123, 'context-1'), null);
 });
 
-test('generateFileMessageContent should return basic object when no contextId', async t => {
+test('generateFileMessageContent should return null when no contextId', async t => {
     const result = await generateFileMessageContent('https://example.com/file.pdf', null);
     
-    t.truthy(result);
-    t.is(result.type, 'file');
-    t.is(result.url, 'https://example.com/file.pdf');
+    t.is(result, null);
 });
 
 test('generateFileMessageContent should return null for file not in collection', async t => {
