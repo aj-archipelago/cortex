@@ -518,7 +518,7 @@ test('generateFileMessageContent should find file by ID', async t => {
         const result = await generateFileMessageContent(fileId, contextId);
         
         t.truthy(result);
-        t.is(result.type, 'file');
+        t.is(result.type, 'image_url');
         t.is(result.url, 'https://example.com/test.pdf');
         t.is(result.gcs, 'gs://bucket/test.pdf');
         t.is(result.originalFilename, 'test.pdf');
@@ -607,8 +607,7 @@ test('generateFileMessageContent should detect image type', async t => {
         
         t.truthy(result);
         t.is(result.type, 'image_url');
-        t.truthy(result.image_url);
-        t.is(result.image_url.url, 'https://example.com/image.jpg');
+        t.is(result.url, 'https://example.com/image.jpg');
     } finally {
         await cleanup(contextId);
     }

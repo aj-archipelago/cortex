@@ -2,7 +2,32 @@
 // Tool pathway that reads text files with line number support
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { resolveFileParameter } from '../../../../lib/fileUtils.js';
+import { resolveFileParameter, getMimeTypeFromFilename, isTextMimeType } from '../../../../lib/fileUtils.js';
+
+/**
+ * Check if a file is a text file type that can be read
+ * @param {string} url - File URL or path
+ * @returns {boolean} - Returns true if it's a text file, false otherwise
+ */
+function isTextFile(url) {
+    if (!url || typeof url !== 'string') {
+        return false;
+    }
+
+    // Extract filename from URL (remove query string and fragment)
+    const urlPath = url.split('?')[0].split('#')[0];
+    
+    // Use existing MIME utility to get MIME type
+    const mimeType = getMimeTypeFromFilename(urlPath);
+    
+    if (!mimeType || mimeType === 'application/octet-stream') {
+        // Unknown MIME type, reject to be safe
+        return false;
+    }
+
+    // Use shared utility function for consistency with other tools
+    return isTextMimeType(mimeType);
+}
 
 export default {
     prompt: [],
@@ -11,8 +36,8 @@ export default {
         type: "function",
         icon: "📖",
         function: {
-            name: "ReadFile",
-            description: "Read text content from a file. Can read the entire file or specific line ranges. Use this to access and analyze text files from your file collection. Supports text files, markdown files, html, csv, and other document formats that can be converted to text, but not images, videos, or audio files or pdfs.",
+            name: "ReadTextFile",
+            description: "Read text content from a file. Can read the entire file or specific line ranges. Use this to access and analyze text files from your file collection. Supports text files, markdown files, html, csv, and other document formats that can be converted to text.  DOES NOT support binary files, images, videos, or audio files or pdfs.",
             parameters: {
                 type: "object",
                 properties: {
@@ -77,6 +102,19 @@ export default {
                 return JSON.stringify(errorResult);
             }
 
+            // Check if file is a text type before attempting to read
+            if (!isTextFile(cloudUrl)) {
+                const mimeType = getMimeTypeFromFilename(cloudUrl.split('?')[0].split('#')[0]);
+                const detectedType = mimeType || 'unknown type';
+                
+                const errorResult = {
+                    success: false,
+                    error: `This tool only supports text files. The file appears to be a non-text file (MIME type: ${detectedType}). For images, PDFs, videos, or other non-text files, please use the AnalyzeImage, AnalyzePDF, or AnalyzeVideo tools instead.`
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
+
             if (startLine !== undefined) {
                 if (typeof startLine !== 'number' || !Number.isInteger(startLine) || startLine < 1) {
                 const errorResult = {
@@ -128,6 +166,17 @@ export default {
 
             if (response.status !== 200 || !response.data) {
                 throw new Error(`Failed to download file content: ${response.status}`);
+            }
+
+            // Secondary check: verify content-type header if available
+            const contentType = response.headers['content-type'] || response.headers['Content-Type'];
+            if (contentType && !isTextMimeType(contentType)) {
+                const errorResult = {
+                    success: false,
+                    error: `This tool only supports text files. The file appears to be a non-text file (Content-Type: ${contentType}). For images, PDFs, videos, or other non-text files, please use the AnalyzeImage, AnalyzePDF, or AnalyzeVideo tools instead.`
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
             }
 
             // Explicitly decode as UTF-8 to prevent mojibake (encoding corruption)
