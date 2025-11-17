@@ -2,7 +2,7 @@
 // Agentic extension of the entity system that uses OpenAI's tool calling API
 const MAX_TOOL_CALLS = 50;
 
-import { callPathway, callTool, say } from '../../../lib/pathwayTools.js';
+import { callPathway, callTool, say, sendToolStart, sendToolFinish } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
 import { chatArgsHasImageUrl, removeOldImageAndFileContent } from '../../../lib/util.js';
@@ -114,10 +114,18 @@ export default {
                         const toolDefinition = entityTools[toolFunction]?.definition;
                         const toolIcon = toolDefinition?.icon || '🛠️';
                         
-                        // Report status to the user
-                        const toolUserMessage = toolArgs.userMessage || `Executing tool: ${toolCall.function.name} - ${JSON.stringify(toolArgs)}`;
-                        const messageWithIcon = toolIcon ? `${toolIcon}&nbsp;&nbsp;${toolUserMessage}` : toolUserMessage;
-                        await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `${messageWithIcon}\n\n`, 1000, false);
+                        // Get the user message for the tool
+                        const toolUserMessage = toolArgs.userMessage || `Executing tool: ${toolCall.function.name}`;
+                        
+                        // Send tool start message
+                        const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+                        const toolCallId = toolCall.id;
+                        try {
+                            await sendToolStart(requestId, toolCallId, toolIcon, toolUserMessage);
+                        } catch (startError) {
+                            logger.error(`Error sending tool start message: ${startError.message}`);
+                            // Continue execution even if start message fails
+                        }
 
                         const toolResult = await callTool(toolFunction, {
                             ...args,
@@ -171,6 +179,15 @@ export default {
                             });
                         }
 
+                        // Send tool finish message (success)
+                        const hasError = toolResult?.error !== undefined;
+                        try {
+                            await sendToolFinish(requestId, toolCallId, !hasError, hasError ? toolResult.error : null);
+                        } catch (finishError) {
+                            logger.error(`Error sending tool finish message: ${finishError.message}`);
+                            // Continue execution even if finish message fails
+                        }
+
                         return { 
                             success: true, 
                             result: toolResult,
@@ -181,6 +198,17 @@ export default {
                         };
                     } catch (error) {
                         logger.error(`Error executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
+                        
+                        // Send tool finish message (error)
+                        // Get requestId and toolCallId if not already defined (in case error occurred before they were set)
+                        const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+                        const toolCallId = toolCall.id;
+                        try {
+                            await sendToolFinish(requestId, toolCallId, false, error.message);
+                        } catch (finishError) {
+                            logger.error(`Error sending tool finish message: ${finishError.message}`);
+                            // Continue execution even if finish message fails
+                        }
                         
                         // Create error message history
                         const errorMessages = JSON.parse(JSON.stringify(preToolCallMessages));

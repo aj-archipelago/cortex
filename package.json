@@ -33,7 +33,7 @@
   "type": "module",
   "homepage": "https://github.com/aj-archipelago/cortex#readme",
   "dependencies": {
-    "@aj-archipelago/merval": "^1.0.6",
+    "@aj-archipelago/merval": "^1.0.7",
     "@aj-archipelago/subvibe": "^1.0.12",
     "@apollo/server": "^4.7.3",
     "@apollo/server-plugin-response-cache": "^4.1.2",
