@@ -138,6 +138,11 @@ export default {
             if (resolvedInputImages.length > 2) {
                 params.input_image_3 = resolvedInputImages[2];
             }
+
+            // Set default aspectRatio for qwen-image-edit-plus model
+            if (model === "replicate-qwen-image-edit-plus") {
+                params.aspectRatio = "match_input_image";
+            }
             
             // Call appropriate pathway based on model
             const pathwayName = model.includes('seedream') ? 'image_seedream4' : 'image_qwen';

@@ -7,7 +7,7 @@ export default {
     negativePrompt: "",
     width: 1024,
     height: 1024,
-    aspectRatio: "match_input_image", // Options: "1:1", "16:9", "9:16", "4:3", "3:4", "match_input_image" (use "match_input_image" for qwen-image-edit-plus)
+    aspectRatio: "16:9", // Options: "1:1", "16:9", "9:16", "4:3", "3:4", "match_input_image" (use "match_input_image" for qwen-image-edit-plus)
     numberResults: 1,
     output_format: "webp",
     output_quality: 80, // Use 95 for qwen-image-edit-plus
