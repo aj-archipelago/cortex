@@ -14,6 +14,7 @@ import {
   generateBlobName,
   sanitizeFilename,
 } from "../../utils/filenameUtils.js";
+import { isTextMimeType as isTextMimeTypeUtil } from "../../utils/mimeUtils.js";
 
 export class AzureStorageProvider extends StorageProvider {
   constructor(connectionString, containerName) {
@@ -216,7 +217,6 @@ export class AzureStorageProvider extends StorageProvider {
     
     await blockBlobClient.uploadStream(stream, undefined, undefined, options);
     
-    
     const sasToken = this.generateSASToken(containerClient, blobName);
     
     const url = `${blockBlobClient.url}?${sasToken}`;
@@ -231,18 +231,9 @@ export class AzureStorageProvider extends StorageProvider {
     return url;
   }
 
-  // Helper method to check if a MIME type is text-based
+  // Use shared utility for MIME type checking
   isTextMimeType(mimeType) {
-    if (!mimeType) return false;
-    const baseType = mimeType.split(';')[0].trim().toLowerCase();
-    return baseType.startsWith('text/') || 
-           baseType === 'application/json' ||
-           baseType === 'application/javascript' ||
-           baseType === 'application/xml' ||
-           baseType === 'application/xhtml+xml' ||
-           baseType === 'application/x-sh' ||
-           baseType === 'application/x-shellscript' ||
-           baseType.startsWith('application/x-') && baseType.includes('script');
+    return isTextMimeTypeUtil(mimeType);
   }
 
   async deleteFiles(requestId) {

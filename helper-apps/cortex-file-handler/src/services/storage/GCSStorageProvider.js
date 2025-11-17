@@ -6,6 +6,7 @@ import {
   generateBlobName,
   sanitizeFilename,
 } from "../../utils/filenameUtils.js";
+import { isTextMimeType as isTextMimeTypeUtil } from "../../utils/mimeUtils.js";
 import axios from "axios";
 
 import { StorageProvider } from "./StorageProvider.js";
@@ -103,18 +104,9 @@ export class GCSStorageProvider extends StorageProvider {
     return `gs://${this.bucketName}/${blobName}`;
   }
 
-  // Helper method to check if a MIME type is text-based
+  // Use shared utility for MIME type checking
   isTextMimeType(mimeType) {
-    if (!mimeType) return false;
-    const baseType = mimeType.split(';')[0].trim().toLowerCase();
-    return baseType.startsWith('text/') || 
-           baseType === 'application/json' ||
-           baseType === 'application/javascript' ||
-           baseType === 'application/xml' ||
-           baseType === 'application/xhtml+xml' ||
-           baseType === 'application/x-sh' ||
-           baseType === 'application/x-shellscript' ||
-           baseType.startsWith('application/x-') && baseType.includes('script');
+    return isTextMimeTypeUtil(mimeType);
   }
 
   async deleteFiles(requestId) {
