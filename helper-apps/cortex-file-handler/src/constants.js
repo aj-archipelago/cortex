@@ -135,7 +135,7 @@ export const AZURITE_ACCOUNT_NAME = "devstoreaccount1";
 
 // Parse comma-separated container names from environment variable
 export const parseContainerNames = () => {
-  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
   return containerStr.split(',').map(name => name.trim());
 };
 

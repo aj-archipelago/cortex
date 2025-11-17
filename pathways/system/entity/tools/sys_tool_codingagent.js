@@ -49,7 +49,7 @@ export default {
         icon: "🤖",
         function: {
             name: "CodeExecution",
-            description: "This tool allows you to asynchronously engage an agent to write and execute code to perform a task on your behalf. Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks - examples include data analysis, file manipulation, or other tasks that require code execution. With this tool you can read and write files and also access internal databases and query them directly. This will start a background task and return - you will not receive the response immediately.",
+            description: "This tool allows you to asynchronously engage an agent to write and execute code in a sandbox to perform a task on your behalf. Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks - examples include data analysis, file manipulation, or other tasks that require code execution. With this tool you can read and write files and also access internal databases and query them directly. This will start a background task and return - you will not receive the response immediately.",
             parameters: {
                 type: "object",
                 properties: {
@@ -58,7 +58,10 @@ export default {
                         description: "Detailed task description for the coding agent. Include all necessary information as this is the only message the coding agent receives. Let the agent decide how to solve it without making assumptions about its capabilities. IMPORTANT: The coding agent does not share your context, so you must provide it with all the information in this message."
                     },
                     inputFiles: {
-                        type: "string",
+                        type: "array",
+                        items: {
+                            type: "string"
+                        },
                         description: "A list of input files (from Available Files section or ListFileCollection or SearchFileCollection) that the coding agent must use to complete the task. Each file should be the hash or filename. Omit this parameter if no input files are needed."
                     },
                     userMessage: {
@@ -86,11 +89,10 @@ export default {
                 }
                 
                 // Resolve file parameters to URLs
-                // inputFiles can be a comma-separated, newline-separated, or space-separated list
-                const fileReferences = inputFiles
-                    .split(/[,\n\r]+/)
-                    .map(ref => ref.trim())
-                    .filter(ref => ref.length > 0);
+                // inputFiles is an array of strings (file hashes or filenames)
+                const fileReferences = Array.isArray(inputFiles) 
+                    ? inputFiles.map(ref => String(ref).trim()).filter(ref => ref.length > 0)
+                    : [];
                 
                 const resolvedUrls = [];
                 const failedFiles = [];
@@ -135,7 +137,12 @@ export default {
                 toolCallbackMessage: userMessage
             });
 
-            return userMessage || "I've started working on your coding task. I'll let you know when it's complete.";
+            // Return explicit message that task has started but is not complete yet
+            const statusMessage = userMessage 
+                ? `${userMessage}\n\n⚠️ **Task Status**: This coding task has been started and is now running in the background. The task is in progress and not yet complete. You will be notified when the task finishes.`
+                : "⚠️ **Task Status**: I've started your coding task and it is now running in the background. The task is in progress and not yet complete. I will notify you when the task finishes and the results are available.";
+            
+            return statusMessage;
         } catch (error) {
             logger.error(`Error in coding agent tool: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
             throw error;
