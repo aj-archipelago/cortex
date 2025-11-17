@@ -17,5 +17,10 @@
     "queues": {
       "maxPollingInterval": "00:00:01"
     }
+  },
+  "concurrency": {
+    "dynamicConcurrencyEnabled": true,
+    "snapshotPersistenceEnabled": true,
+    "maxConcurrentRequestsPerInstance": 10
   }
 }

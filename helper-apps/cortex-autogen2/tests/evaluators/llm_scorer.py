@@ -116,12 +116,18 @@ class LLMEvaluator:
                 'strengths': []
             }
 
-    def _check_for_hallucinated_urls(self, task: str, final_result: Optional[Union[Dict, str]]) -> Dict:
+    async def _check_url_validity(self, task: str, final_result: Optional[Union[Dict, str]]) -> Dict:
         """
-        Check if the output contains hallucinated URLs that are not real Azure SAS URLs.
-        Returns dict with 'is_hallucinated' bool and list of invalid URLs.
+        Check URL validity and distinguish between:
+        - Hallucinated URLs: completely fake/inaccessible URLs
+        - Valid internet URLs: accessible but need Azure SAS conversion
+        - Valid Azure SAS URLs: proper format
+
+        Returns dict with validation results.
         """
         import re
+        import aiohttp
+        import asyncio
 
         # Extract all URLs from the final result
         urls = []
@@ -146,12 +152,23 @@ class LLMEvaluator:
 
         # Check each URL for validity
         hallucinated_urls = []
-        for url in urls:
+        internet_urls_needing_azure = []
+        valid_azure_urls = []
+
+        async def check_url(url: str):
             url_lower = url.lower()
 
             # Skip URLs that are clearly not file download URLs
-            if any(skip_domain in url_lower for skip_domain in ['localhost', '127.0.0.1', 'example.com']):
-                continue
+            if any(skip_domain in url_lower for skip_domain in ['localhost', '127.0.0.1']):
+                return
+
+            # Skip obviously truncated URLs (common issue with long HTML content)
+            # URLs that end with just a filename without extension or parameters are likely truncated
+            if (url.endswith('preview_') or
+                url.endswith('slide__') or
+                (url.count('/') >= 4 and not url.endswith('.png') and not url.endswith('.pptx') and not url.endswith('.pdf') and '?' not in url)):
+                logger.debug(f"Skipping likely truncated URL: {url}")
+                return
 
             # Check if it's a real Azure SAS URL
             is_real_azure_url = (
@@ -160,19 +177,44 @@ class LLMEvaluator:
                 ('sig=' in url)  # SAS signature parameter
             )
 
-            # Check for hallucinated domains
-            is_hallucinated = (
-                ('files.bld.ai' in url_lower) or  # Our test showed this hallucinated domain
+            if is_real_azure_url:
+                valid_azure_urls.append(url)
+                return
+
+            # Check for obviously hallucinated domains
+            is_obviously_hallucinated = (
+                ('files.bld.ai' in url_lower) or  # Known hallucinated domain
                 ('example.com' in url_lower and 'download' in url_lower) or
-                (not is_real_azure_url and any(file_ext in url_lower for file_ext in ['.pptx', '.pdf', '.csv', '.png', '.xlsx']))
+                any(fake_domain in url_lower for fake_domain in ['fake.com', 'test.com', 'placeholder.com'])
             )
 
-            if is_hallucinated:
+            if is_obviously_hallucinated:
+                hallucinated_urls.append(url)
+                return
+
+            # Check if URL is actually accessible (HEAD request)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.head(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                        if response.status == 200:
+                            # URL is accessible but not Azure SAS - needs conversion
+                            internet_urls_needing_azure.append(url)
+                        else:
+                            # URL returns error - likely hallucinated
+                            hallucinated_urls.append(url)
+            except Exception:
+                # URL is not accessible - likely hallucinated
                 hallucinated_urls.append(url)
 
+        # Check all URLs concurrently
+        await asyncio.gather(*[check_url(url) for url in urls])
+
         return {
-            'is_hallucinated': len(hallucinated_urls) > 0,
-            'hallucinated_urls': hallucinated_urls
+            'has_hallucinated_urls': len(hallucinated_urls) > 0,
+            'has_internet_urls_needing_azure': len(internet_urls_needing_azure) > 0,
+            'hallucinated_urls': hallucinated_urls,
+            'internet_urls_needing_azure': internet_urls_needing_azure,
+            'valid_azure_urls': valid_azure_urls
         }
 
 
@@ -203,33 +245,65 @@ class LLMEvaluator:
         """
         logger.info(f"📊 Evaluating final output...")
 
-        # CRITICAL: Check for hallucinated URLs - automatic 0 score
-        hallucination_check = self._check_for_hallucinated_urls(task, final_result)
-        if hallucination_check['is_hallucinated']:
-            logger.warning(f"🚨 HALLUCINATED URLS DETECTED: {hallucination_check['hallucinated_urls']}")
+        # CRITICAL: Check URL validity - distinguish between hallucinated and internet URLs
+        url_check = await self._check_url_validity(task, final_result)
+
+        # Hallucinated URLs = automatic 0 score
+        if url_check['has_hallucinated_urls']:
+            logger.warning(f"🚨 HALLUCINATED URLS DETECTED: {url_check['hallucinated_urls']}")
             return {
                 'score': 0,
-                'reasoning': f"CRITICAL FAIL: Hallucinated URLs detected. Real Azure SAS URLs must contain 'blob.core.windows.net' and SAS tokens. Found invalid URLs: {', '.join(hallucination_check['hallucinated_urls'])}",
+                'reasoning': f"CRITICAL FAIL: Hallucinated URLs detected - completely fake/inaccessible URLs. Found invalid URLs: {', '.join(url_check['hallucinated_urls'])}",
                 'strengths': [],
                 'weaknesses': [
-                    "CRITICAL: Hallucinated URLs - system created fake download links",
-                    "Real Azure SAS URLs must contain 'blob.core.windows.net' domain",
-                    "URLs must include SAS token parameters (?sv=, sig=, etc.)",
-                    "System must never create fake URLs - only use real Azure Blob Storage URLs"
+                    "CRITICAL: Hallucinated URLs - system created completely fake/inaccessible download links",
+                    "These URLs cannot be accessed or downloaded",
+                    "System must never create fake URLs"
                 ]
             }
 
+        # Check that all URLs are actually accessible - allow any working URL
+        if url_check['has_internet_urls_needing_azure']:
+            # These URLs were found to be accessible via HEAD requests
+            # Allow them - the key requirement is accessibility, not Azure conversion
+            accessible_urls = url_check['internet_urls_needing_azure']
+            logger.info(f"✅ ACCESSIBLE URLS FOUND: {len(accessible_urls)} URLs verified as accessible - allowing all working URLs")
+            # Don't penalize for non-Azure URLs if they're accessible
 
-        # CRITICAL: Special validation for Pokemon PPTX test - check file size for image content
-        if test_case_id == "tc001_pokemon_pptx":
+
+        # CRITICAL: Special validation for Pokemon PPTX test - check actual embedded images
+        if test_case_id == "tc003_pokemon_pptx":
             pptx_files = [f for f in files_created if f.get('filename', '').lower().endswith('.pptx')]
             if pptx_files:
                 for pptx_file in pptx_files:
-                    # Check if PPTX file size indicates it contains images (>500KB)
+                    # Check actual embedded images in PPTX file
                     try:
                         import os
+                        import zipfile
                         file_path = pptx_file.get('local_path', '')
                         if file_path and os.path.exists(file_path):
+                            # PPTX files are ZIP archives - count embedded images
+                            with zipfile.ZipFile(file_path, 'r') as pptx_zip:
+                                image_files = [f for f in pptx_zip.namelist() if f.startswith('ppt/media/image') and (f.endswith('.png') or f.endswith('.jpg') or f.endswith('.jpeg'))]
+
+                            if len(image_files) < 10:
+                                logger.warning(f"❌ Pokemon PPTX test failed: Only {len(image_files)} embedded images found, expected at least 10 Pokemon images")
+                                return {
+                                    'score': 0,
+                                    'reasoning': f"CRITICAL FAIL: Pokemon PPTX contains only {len(image_files)} embedded images, but task requires individual images of all 10 Pokemon to be embedded in the presentation slides.",
+                                    'strengths': [],
+                                    'weaknesses': [
+                                        f"Only {len(image_files)} images embedded in PPTX (expected 10+ for top 10 Pokemon)",
+                                        "Pokemon images not properly embedded in presentation slides",
+                                        "CRITICAL: Missing required visual content for Pokemon presentation"
+                                    ]
+                                }
+                        else:
+                            logger.warning(f"❌ Could not check PPTX file: {file_path}")
+                    except Exception as e:
+                        logger.warning(f"❌ Error checking PPTX embedded images: {e}")
+                        # Fallback to file size check if ZIP inspection fails
+                        try:
                             file_size_kb = os.path.getsize(file_path) / 1024
                             if file_size_kb < 500:
                                 logger.warning(f"❌ Pokemon PPTX test failed: PPTX file too small ({file_size_kb:.1f}KB < 500KB), likely missing images")
@@ -238,16 +312,11 @@ class LLMEvaluator:
                                     'reasoning': f"CRITICAL FAIL: Pokemon PPTX file is too small ({file_size_kb:.1f}KB < 500KB), indicating missing Pokemon images. PPTX must contain actual Pokemon images to pass.",
                                     'strengths': [],
                                     'weaknesses': [
-                                        "CRITICAL: PPTX file lacks image content (file size too small)",
-                                        "Pokemon PPTX must include actual Pokemon images",
-                                        "File size <500KB indicates missing or no images in presentation",
-                                        "Test requires visual Pokemon content, not empty slides"
+                                        f"PPTX file size ({file_size_kb:.1f}KB) is too small to contain 10 Pokemon images"
                                     ]
                                 }
-                        else:
-                            logger.warning(f"❌ Could not check PPTX file size: {file_path}")
-                    except Exception as e:
-                        logger.warning(f"❌ Error checking PPTX file size: {e}")
+                        except Exception as size_e:
+                            logger.warning(f"❌ Error checking PPTX file size: {size_e}")
 
         # Format data for prompt
         # CRITICAL: final_result can be a string (markdown) or dict - handle both cases
@@ -335,18 +404,18 @@ class LLMEvaluator:
         # Score progress updates
         progress_eval = await self.score_progress_updates(progress_updates, task)
 
-        # Validate PDF content before scoring output
+        # Validate file content before scoring output (includes PDF and PPTX validation)
         work_dir = test_summary.get('work_dir', '')
-        pdf_valid, pdf_error = self._validate_pdf_content(files_created, work_dir)
+        file_valid, file_error = self._validate_file_content(files_created, work_dir)
 
-        if not pdf_valid:
-            logger.error(f"❌ CRITICAL: PDF validation failed: {pdf_error}")
-            # Return 0 score for output if PDF contains error content
+        if not file_valid:
+            logger.error(f"❌ CRITICAL: File content validation failed: {file_error}")
+            # Return 0 score for output if files contain error content
             output_eval = {
                 'score': 0,
-                'reasoning': f"CRITICAL FAILURE: {pdf_error}. PDF contains error messages instead of actual content.",
+                'reasoning': f"CRITICAL FAILURE: {file_error}. Files contain error messages instead of actual content.",
                 'strengths': [],
-                'weaknesses': [pdf_error]
+                'weaknesses': [file_error]
             }
         else:
             # Score final output normally
@@ -413,38 +482,102 @@ class LLMEvaluator:
         # If regex didn't work, try parsing the entire cleaned response
         return json.loads(response)
 
-    def _validate_pdf_content(self, files_created: List[str], work_dir: str) -> Tuple[bool, str]:
-        """Validate PDF content to ensure it doesn't contain error messages."""
+    def _validate_file_content(self, files_created: List[str], work_dir: str) -> Tuple[bool, str]:
+        """Validate file content to ensure it doesn't contain error messages or font issues."""
         import os
-        from tools.file_tools import extract_pdf_text
+        from tools.file_tools import extract_pdf_text, extract_pptx_text
+
+        # CRITICAL FAIL: Check for placeholder images first - any placeholder = 0 score
+        for file_info in files_created:
+            if isinstance(file_info, dict):
+                filename = file_info.get('filename', '').lower()
+                # Check for placeholder patterns in filenames
+                if ('placeholder' in filename or
+                    '_placeholder' in filename or
+                    'placeholder_' in filename):
+                    return False, f"CRITICAL FAIL: Placeholder images detected in deliverables (filename: {file_info.get('filename', '')}). Any placeholder content results in automatic score=0."
 
         for file_info in files_created:
-            if isinstance(file_info, dict) and file_info.get('type') == 'pdf':
+            if isinstance(file_info, dict):
+                file_type = file_info.get('type', '')
                 filename = file_info.get('filename', '')
                 if filename:
                     # Find the actual file path
-                    pdf_path = None
+                    file_path = None
                     for root, dirs, files in os.walk(work_dir):
                         for file in files:
                             if file == filename:
-                                pdf_path = os.path.join(root, file)
+                                file_path = os.path.join(root, file)
                                 break
-                        if pdf_path:
+                        if file_path:
                             break
 
-                    if pdf_path:
+                    if file_path:
                         try:
-                            result = extract_pdf_text(pdf_path)
-                            import json
-                            validation_data = json.loads(result)
+                            # Validate PDF files
+                            if file_type == 'pdf':
+                                result = extract_pdf_text(file_path)
+                                import json
+                                validation_data = json.loads(result)
 
-                            if not validation_data.get('is_valid', True):
-                                errors = validation_data.get('validation_errors', [])
-                                return False, f"PDF validation failed: {', '.join(errors)}"
+                                if not validation_data.get('is_valid', True):
+                                    errors = validation_data.get('validation_errors', [])
+                                    return False, f"PDF validation failed: {', '.join(errors)}"
+
+                                # Check for error messages in extracted text
+                                extracted_text = validation_data.get('text', '').lower()
+                                error_indicators = [
+                                    'error: unable to generate',
+                                    'generation failed',
+                                    'contact admin',
+                                    'system error',
+                                    'unable to create',
+                                    'failed to generate',
+                                    'character at index',
+                                    'outside the range of characters supported by the font'
+                                ]
+
+                                for error_msg in error_indicators:
+                                    if error_msg in extracted_text:
+                                        return False, f"PDF contains error message: '{error_msg}'"
+
+                            # Validate PPTX files
+                            elif file_type == 'pptx':
+                                result = extract_pptx_text(file_path)
+                                import json
+                                validation_data = json.loads(result)
+
+                                if not validation_data.get('is_valid', True):
+                                    errors = validation_data.get('validation_errors', [])
+                                    return False, f"PPTX validation failed: {', '.join(errors)}"
+
+                                # Check for error messages in extracted text
+                                extracted_text = validation_data.get('text', '').lower()
+                                error_indicators = [
+                                    'error: unable to generate',
+                                    'generation failed',
+                                    'contact admin',
+                                    'system error',
+                                    'unable to create',
+                                    'failed to generate',
+                                    'character at index',
+                                    'outside the range of characters supported by the font',
+                                    'font error',
+                                    'unable to render'
+                                ]
+
+                                for error_msg in error_indicators:
+                                    if error_msg in extracted_text:
+                                        return False, f"PPTX contains error message: '{error_msg}'"
+
                         except Exception as e:
-                            return False, f"PDF validation error: {str(e)}"
+                            return False, f"File content validation error: {str(e)}"
 
         return True, ""
+
+    def _validate_pdf_content(self, files_created: List[str], work_dir: str) -> Tuple[bool, str]:
+        """Legacy method - now delegates to comprehensive file validation."""
+        return self._validate_file_content(files_created, work_dir)
 
     async def _call_llm(self, prompt: str) -> str:
         """

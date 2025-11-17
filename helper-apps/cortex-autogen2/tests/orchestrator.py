@@ -211,6 +211,16 @@ class TestOrchestrator:
 
         return test_cases, global_expectations
 
+    def run_test_sync(self, test_case: Dict) -> Dict:
+        """Synchronous wrapper for run_test to run in thread pool."""
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self.run_test(test_case))
+        finally:
+            loop.close()
+
     async def run_test(self, test_case: Dict) -> Dict:
         """
         Run a single test case end-to-end.
@@ -236,7 +246,6 @@ class TestOrchestrator:
         self.logger.info(f"   Timeout: {timeout}s")
         if requires_ajsql:
             self.logger.info(f"   Requires AJ SQL: Yes")
-        self.logger.info(f"{'='*80}\n")
 
         # Comprehensive prerequisite validation
         self.logger.info("🔍 Running prerequisite validation...")
@@ -293,8 +302,10 @@ class TestOrchestrator:
         # Generate unique request ID
         request_id = f"test_{test_case_id}_{uuid.uuid4().hex[:8]}"
 
-        # Create test run record in database
-        test_run_id = self.db.create_test_run(
+        # Create test run record in database (run in thread to avoid blocking)
+        import asyncio
+        test_run_id = await asyncio.to_thread(
+            self.db.create_test_run,
             test_case_id=test_case_id,
             task_description=task_description,
             request_id=request_id
@@ -321,8 +332,12 @@ class TestOrchestrator:
         try:
             self.logger.info(f"📡 Starting data collection...")
 
+            # For parallel execution, use appropriate timeout
+            parallel_timeout = min(timeout, 600)  # Allow up to 10 minutes for parallel execution
+            self.logger.info(f"⏱️ Using parallel timeout: {parallel_timeout}s")
+
             # Start progress collection immediately to catch all updates from the start
-            progress_updates = await progress_collector.start_collecting(azure_message_id, timeout=timeout)
+            progress_updates = await progress_collector.start_collecting(azure_message_id, timeout=parallel_timeout)
 
             # Now that progress is complete, collect logs using docker logs command
             logs = await log_collector.collect_logs_since_task(azure_message_id)
@@ -337,12 +352,9 @@ class TestOrchestrator:
             return {'test_run_id': test_run_id, 'status': 'failed', 'error': str(e)}
 
         # Store progress updates and logs in database
-        # Also log progress updates to the runner logger so they appear in log files
         for update in progress_updates:
             progress_pct = update.get('progress', 0.0)
             info = update.get('info', '')
-            self.logger.info(f"📊 Progress: {progress_pct:.0%} - {info}")
-
             self.db.add_progress_update(
                 test_run_id=test_run_id,
                 timestamp=datetime.fromisoformat(update['timestamp']),
@@ -494,20 +506,24 @@ class TestOrchestrator:
                 output_weaknesses=output_eval.get('weaknesses', [])
             )
 
-            # Weighted: 80% output quality, 20% progress reporting (output matters most!)
-            overall = int((output_eval['score'] * 0.8) + (progress_eval['score'] * 0.2))
-
-            # Make evaluation results highly visible during test runs
-            self.logger.info(f"\n**Overall Score:** {overall}/100 ✅")
-            self.logger.info(f"**Progress Score:** {progress_eval['score']}/100")
-            self.logger.info(f"**Output Score:** {output_eval['score']}/100")
-            self.logger.info(f"**Duration:** {test_run_data.get('duration_seconds', 0):.1f}s")
 
             self.logger.info(f"\n**Progress Evaluation:**")
             self.logger.info(f"{progress_eval['reasoning']}")
 
             self.logger.info(f"\n**Output Evaluation:**")
             self.logger.info(f"{output_eval['reasoning']}")
+
+
+            # Weighted: 80% output quality, 20% progress reporting (output matters most!)
+            overall = int((output_eval['score'] * 0.8) + (progress_eval['score'] * 0.2))
+            # Make evaluation results highly visible during test runs
+            self.logger.info(f"**Duration:** {test_run_data.get('duration_seconds', 0):.1f}s")
+            self.logger.info(f"**Progress Score:** {progress_eval['score']}/100")
+            self.logger.info(f"**Output Score:** {output_eval['score']}/100")
+
+
+
+            self.logger.info(f"**Overall Score:** {overall}/100 🏁.")
 
         except Exception as e:
             self.logger.error(f"❌ Evaluation error: {e}", exc_info=True)
@@ -517,7 +533,6 @@ class TestOrchestrator:
         # Compile results
         # Convert logs to messages format for bug validation
         messages = []
-        self.logger.info(f"🎯 DEBUG: Processing {len(logs)} log entries")
         for log_entry in logs:
             agent = log_entry.get('agent')
             if agent:  # Only include logs with agent information
@@ -526,7 +541,6 @@ class TestOrchestrator:
                     'content': log_entry.get('message', ''),
                     'timestamp': log_entry.get('timestamp')
                 })
-                self.logger.info(f"🎯 DEBUG: Found agent log: {agent} - {log_entry.get('message', '')[:50]}...")
             elif 'aj_sql_agent' in str(log_entry.get('message', '')) or 'Processing task' in str(log_entry.get('message', '')):
                 # Also check for agent mentions in message content
                 messages.append({
@@ -534,7 +548,6 @@ class TestOrchestrator:
                     'content': log_entry.get('message', ''),
                     'timestamp': log_entry.get('timestamp')
                 })
-                self.logger.info(f"🎯 DEBUG: Found agent mention in message: {log_entry.get('message', '')[:100]}...")
 
         results = {
             'test_run_id': test_run_id,
@@ -557,10 +570,8 @@ class TestOrchestrator:
 
         # Extract agent sequence from progress updates and messages for bug validation
         agent_sequence = []
-        self.logger.info(f"🎯 DEBUG: Checking {len(progress_updates)} progress updates")
         for update in progress_updates:
             info = update.get('info', '')
-            self.logger.info(f"🎯 DEBUG: Progress info: {info}")
             # Look for progress messages that mention agents
             if ' - ' in info and ('aj_sql_agent' in info or 'coder_agent' in info or 'planner_agent' in info):
                 # Extract agent name from progress message like "📊 Agent message progress: 7% - aj_sql_agent - message"
@@ -569,25 +580,20 @@ class TestOrchestrator:
                     agent_name = parts[1].strip()
                     if agent_name and agent_name not in agent_sequence:
                         agent_sequence.append(agent_name)
-                        self.logger.info(f"🎯 DEBUG: Found agent in progress: {agent_name}")
 
         # Also extract from messages (logs) as backup when debug_progress_msgs=False
-        self.logger.info(f"🎯 DEBUG: Checking {len(messages)} messages for agent mentions")
         for msg in messages:
             source = msg.get('source', '')
             content = msg.get('content', '')
             if source in ['aj_sql_agent', 'coder_agent', 'planner_agent', 'execution_completion_verifier_agent', 'presentation_completion_verifier_agent']:
                 if source not in agent_sequence:
                     agent_sequence.append(source)
-                    self.logger.info(f"🎯 DEBUG: Found agent in messages: {source}")
             # Also check content for agent mentions
             elif 'aj_sql_agent' in content or 'Processing task' in content:
                 if 'aj_sql_agent' not in agent_sequence:
                     agent_sequence.append('aj_sql_agent')
-                    self.logger.info(f"🎯 DEBUG: Found aj_sql_agent mention in message content")
 
         results['agent_sequence'] = agent_sequence
-        self.logger.info(f"🎯 DEBUG: Extracted agent_sequence from progress+messages: {agent_sequence}")
 
         # Run bug-specific validations
         bug_validations = {
@@ -895,10 +901,10 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
             report += f"""### Test {i}: {test_name}
 
-**Overall Score:** {score}/100 {'✅' if score >= 70 else '❌'}
+**Duration:** {duration:.1f}s
 **Progress Score:** {progress_score}/100
 **Output Score:** {output_score}/100
-**Duration:** {duration:.1f}s
+**Overall Score:** {score}/100 {'✅' if score >= 70 else '❌'}
 
 **Progress Evaluation:**
 {result.get('progress_evaluation', {}).get('reasoning', 'N/A')}

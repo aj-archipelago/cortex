@@ -79,7 +79,12 @@ class ProgressCollector:
                         data = json.loads(message['data'])
 
                         # Only collect updates for our request
-                        if data.get('requestId') == request_id or data.get('request_id') == request_id:
+                        msg_request_id = data.get('requestId') or data.get('request_id')
+                        progress_val = data.get('progress', 0)
+                        has_data = 'data' in data and data['data'] is not None
+
+                        # Strict filtering: only process messages for our exact request ID
+                        if msg_request_id and msg_request_id == request_id:
                             message_count += 1
 
                             update = {

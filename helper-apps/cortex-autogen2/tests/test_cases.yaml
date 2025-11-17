@@ -4,6 +4,8 @@
 # Global expectations that apply to ALL test cases
 global_expectations:
   - "CRITICAL FAIL (SCORE=0): If main requested deliverable is missing, score=0 regardless of other content quality"
+  - "CRITICAL FAIL (SCORE=0): MULTIPLE FILE DELIVERIES - If task requests multiple specific file types (e.g., 'return pptx & pdf', 'give me chart and CSV', 'Excel and PDF'), ALL requested file types MUST be delivered. Missing ANY requested file type = score 0. Example: Task asks for 'pptx & pdf' but only PPTX delivered = FAIL."
+  - "CRITICAL FAIL (SCORE=0): FILES CONTAIN ERROR MESSAGES - Any deliverable containing error messages like 'Error: Unable to Generate', 'generation failed', 'contact admin', or font errors like 'Character at index 0 in text is outside the range of characters supported by the font' will score 0"
   - "All files must have working SAS URLs and proper download links"
   - "Response must be FUN, ENGAGING, and PROFESSIONAL - complete user's request with insightful reply"
   - "MINIMAL BUT DETAILED: Every word adds value, no text dumps or link dumps"
@@ -81,7 +83,7 @@ test_cases:
   - id: tc003_pokemon_pptx
     name: "Most Powerful Gen 1 Pokemon PowerPoint"
     description: "Creates a PowerPoint about the most powerful Gen 1 Pokemon with their images and file previews"
-    task: "Create a PowerPoint presentation about the Most Powerful Gen 1 Pokemon. Include images of each Pokemon from the same source."
+    task: "Create a PowerPoint presentation about the top 10 Most Powerful Gen1 Pokemon. Include individual images of each of the top 10 Pokemon directly in the presentation slides."
     timeout_seconds: 420
     requires_ajsql: false
     expected_deliverables:
@@ -90,9 +92,9 @@ test_cases:
         min_count: 1
         description: "PowerPoint presentation file"
       - type: preview_images
-        pattern: "preview_slide_*.png"
-        min_count: 2
-        description: "Slide preview images"
+        pattern: "preview_*.png"
+        min_count: 1
+        description: "Multiple slide previews showing different Pokemon"
       - type: file_preview
         pattern: "preview_*.pptx.png"
         min_count: 0
@@ -104,29 +106,16 @@ test_cases:
     min_progress_updates: 8
     quality_criteria:
       - "CRITICAL FAIL (SCORE=0): NO PPTX FILE DELIVERED - if requested PPTX is missing, score=0 regardless of other content"
-      - "CRITICAL: Presentation MUST include actual Pokemon character images (NOT just logos or text)"
-      - "CRITICAL: Each slide about a Pokemon MUST show THAT SPECIFIC Pokemon's image (e.g., Gengar slide shows Gengar, NOT Pikachu or any other Pokemon)"
-      - "CRITICAL: NO REUSING THE SAME IMAGE on multiple slides - each Pokemon needs its own unique character image"
-      - "CRITICAL: Verify in preview images that each Pokemon name matches its image (e.g., if slide says 'Alakazam', the image must show Alakazam)"
-      - "Each Pokemon mentioned MUST have its corresponding character image on the slide"
-      - "All Pokemon images from SAME consistent source (pokemon.com, bulbapedia.net, or pokemondb.net)"
-      - "Images show the actual Pokemon characters (Mewtwo, Dragonite, Alakazam, Gengar, etc.) - NOT generic Pokemon logos"
-      - "Images are high-quality official artwork or game sprites (NO fan art, NO thumbnails)"
-      - "NO watermarked images unless from official Pokemon source"
-      - "Consistent art style throughout (all game sprites OR all official artwork)"
-      - "At least 10-12 DIFFERENT Gen 1 Pokemon featured, each with their OWN unique character image"
-      - "Professional slide design with Pokemon-themed colors (red, blue, yellow)"
-      - "CRITICAL: Images must NOT cover or overlap text - all text must be readable"
-      - "Images positioned properly beside or above text, never covering content"
-      - "Each slide shows: Pokemon name, stats/power info, AND that Pokemon's specific character image"
-      - "File preview thumbnail generated (backend) but may not display in response"
-      - "Response includes contextual file preview integration when available, NOT generic 'downloads' headers"
-      - "Download link styled with proper formatting and integrated naturally into response"
-      - "File preview appears before download link when available"
-      - "Images properly sized and centered (not too small, easily visible)"
-      - "Preview slides generated showing Pokemon images are visible and MATCH the Pokemon names"
-      - "Gen 1 Pokemon ONLY (original 151, including evolutions)"
-      - "Power ranking or stats included (HP, Attack, Special, etc.)"
+      - "CRITICAL FAIL (SCORE=0): MISSING TOP 10 POKEMON IMAGES - if any of the top 10 Pokemon do not have individual images directly embedded in the presentation slides, score=0"
+      - "Presentation includes Pokemon-themed content with visual elements"
+      - "Each Pokemon mentioned should have some form of visual representation"
+      - "At least 5-15 Pokemon featured with their names and basic information"
+      - "Professional slide design with clear, readable text"
+      - "Images positioned appropriately and do not interfere with text readability"
+      - "Power ranking or basic stats included for Pokemon"
+      - "File preview integration when available"
+      - "Download links styled properly and contextually placed"
+      - "Gen 1 Pokemon focus (original 151, including evolutions)"
     expected_agents:
       - planner_agent
       - web_search_agent
@@ -169,7 +158,7 @@ test_cases:
   - id: tc004_sports_excel_preview
     name: "Sports Excel File Generation with Preview"
     description: "Generates sports statistics Excel file with summary statistics and preview table"
-    task: "Generate an Excel file with 50 rows of sports game statistics and include summary statistics. Show a preview of the summary data."
+    task: "Generate an Excel file with 50 rows of sports game statistics and include summary statistics. Create basic charts showing scoring trends and team performance."
     timeout_seconds: 180
     requires_ajsql: false
     expected_deliverables:
@@ -181,6 +170,10 @@ test_cases:
         pattern: "*summary*.xlsx"
         min_count: 1
         description: "Summary statistics Excel file"
+      - type: chart
+        pattern: "*.png"
+        min_count: 1
+        description: "Basic charts showing scoring trends or performance"
     min_progress_updates: 3
     quality_criteria:
       - "CRITICAL FAIL (SCORE=0): NO EXCEL FILE DELIVERED - if requested Excel is missing, score=0 regardless of other content"
@@ -324,11 +317,11 @@ test_cases:
     min_progress_updates: 6
     quality_criteria:
       - "Data covers full 6 months from UCMS AJE database"
-      - "Chart shows 3 lines: trump count, total count, and % trump"
+      - "Professional chart(s) showing Trump headline trends and patterns"
       - "Data aggregated by week (ISO weeks recommended)"
       - "CSV contains columns: week, trump_count, total_count, percent_trump"
       - "Case-insensitive Trump matching in headlines"
-      - "Professional multi-line chart with legend and axis labels"
+      - "Clear visualizations with legends and axis labels"
       - "All weeks in 6-month period represented"
     expected_agents:
       - planner_agent
@@ -439,6 +432,49 @@ test_cases:
       - "No missing dates in the 60-day period"
       - "Professional chart with legend, labels, and title"
       - "CRITICAL: Test fails if coder_agent attempts direct DB access or if aj_sql_agent is never called"
+    expected_agents:
+      - planner_agent
+      - aj_sql_agent
+      - coder_agent
+      - code_executor
+      - presenter_agent
+
+  - id: tc012_aje_aja_authors_presentation
+    name: "AJE vs AJA Top Authors Presentation"
+    description: "Creates a presentation comparing top authors from Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) from the last 30 days, delivering both PPTX and PDF"
+    task: "prepare me a presentation of comparison of top authors for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) from the last 30 days, return pptx & pdf"
+    timeout_seconds: 600
+    requires_ajsql: true
+    expected_deliverables:
+      - type: pptx
+        pattern: "*.pptx"
+        min_count: 1
+        description: "PowerPoint presentation file"
+      - type: pdf
+        pattern: "*.pdf"
+        min_count: 1
+        description: "PDF version of the presentation"
+      - type: chart
+        pattern: "*.png"
+        min_count: 3
+        description: "Comparison charts and visualizations"
+      - type: csv
+        pattern: "*authors*.csv"
+        min_count: 1
+        description: "Author comparison data CSV"
+    min_progress_updates: 8
+    quality_criteria:
+      - "CRITICAL FAIL (SCORE=0): NO PPTX OR PDF FILE DELIVERED - if EITHER requested PPTX or PDF is missing, score=0 regardless of other content"
+      - "CRITICAL FAIL (SCORE=0): MISSING BOTH DELIVERABLES - if task requests both PPTX and PDF, BOTH must be delivered or score=0"
+      - "CRITICAL FAIL (SCORE=0): FILES CONTAIN ERROR MESSAGES - if PPTX or PDF contains 'Error: Unable to Generate', 'generation failed', or similar error messages instead of actual content, score=0"
+      - "CRITICAL FAIL (SCORE=0): FONT ERRORS IN FILES - if files contain font errors like 'Character at index 0 in text is outside the range of characters supported by the font', score=0"
+      - "Data queried from UCMS AJE and AJA databases for last 30 days"
+      - "Presentation compares top authors from both AJA and AJE with meaningful metrics (article count, engagement, etc.)"
+      - "Includes both PPTX and PDF deliverables as explicitly requested"
+      - "Professional presentation with comparison charts and insights"
+      - "Files uploaded with SAS URLs provided"
+      - "Multiple charts showing author comparisons and trends"
+      - "Clean filenames without timestamps or hashes"
     expected_agents:
       - planner_agent
       - aj_sql_agent

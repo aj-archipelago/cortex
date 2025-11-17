@@ -46,7 +46,7 @@ def get_runner_logger(runner_id: int, test_id: str):
 
     # Only add handlers if not already added
     if not logger.handlers:
-        # Console handler
+        # Console handler with immediate flushing
         console_handler = UnbufferedStreamHandler(sys.stdout)
         console_handler.setFormatter(logging.Formatter(
             '%(asctime)s - %(levelname)s - %(message)s',
@@ -54,7 +54,7 @@ def get_runner_logger(runner_id: int, test_id: str):
         ))
         logger.addHandler(console_handler)
 
-        # File handler with timestamp
+        # File handler with timestamp and immediate flushing
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         log_file = f"logs/{timestamp}_runner_{runner_id}_{test_id}.log"
         log_dir = Path(log_file).parent
@@ -69,6 +69,15 @@ def get_runner_logger(runner_id: int, test_id: str):
         logger.setLevel(logging.INFO)
         # Prevent propagation to root logger to avoid duplicate logs
         logger.propagate = False
+
+        # Override log methods to flush immediately
+        original_log = logger._log
+        def flushing_log(level, msg, args, exc_info=None, extra=None, stack_info=False):
+            original_log(level, msg, args, exc_info, exc_info, extra, stack_info)
+            for handler in logger.handlers:
+                if hasattr(handler, 'flush'):
+                    handler.flush()
+        logger._log = flushing_log
 
     return logger
 
@@ -102,11 +111,6 @@ def print_test_result(result: dict):
         print(f"\n📝 Final Response Data Field ({len(final_response)} chars):")
         print(final_response)
 
-    print(f"\n📊 Scores:")
-    print(f"  Progress: {result.get('progress_evaluation', {}).get('score', 0)}/100")
-    print(f"  Output: {result.get('output_evaluation', {}).get('score', 0)}/100")
-    print(f"  Overall: {result.get('overall_score', 0)}/100")
-
     # Show evaluation reasoning
     progress_eval = result.get('progress_evaluation', {})
     if progress_eval.get('reasoning'):
@@ -128,6 +132,11 @@ def print_test_result(result: dict):
         print(f"\n⚠️  Weaknesses:")
         for weakness in output_eval['weaknesses']:
             print(f"  • {weakness}")
+
+    print(f"\n📊 Scores:")
+    print(f"  Progress: {result.get('progress_evaluation', {}).get('score', 0)}/100")
+    print(f"  Output: {result.get('output_evaluation', {}).get('score', 0)}/100")
+    print(f"  Overall: {result.get('overall_score', 0)}/100")
 
     print(f"{'─' * 80}\n")
 
@@ -231,17 +240,16 @@ async def run_all_tests_parallel(max_concurrent: int = 2):
         # Get separate logger for this runner
         runner_logger = get_runner_logger(runner_id, test_case['id'])
 
-        # Set runner logger globally for TaskProcessor to pick up
-        set_current_runner_logger(runner_logger)
-
         # Write a marker to the log file to show this runner started
         runner_logger.info(f"🚀 Runner {runner_id} started test: {test_case['id']}")
+        print(f"DEBUG: Runner {runner_id} starting test {test_case['id']}")
 
         try:
-            # Create orchestrator with runner logger
+            # Run each test in its own thread to avoid blocking the event loop
+            import asyncio
             runner_orchestrator = TestOrchestrator(logger=runner_logger)
             runner_orchestrator._current_runner_id = runner_id  # Set runner ID for logging
-            result = await runner_orchestrator.run_test(test_case)
+            result = await asyncio.to_thread(runner_orchestrator.run_test_sync, test_case)
             runner_logger.info(f"✅ Runner {runner_id} completed test: {test_case['id']}")
             return result
         except Exception as e:
@@ -255,18 +263,8 @@ async def run_all_tests_parallel(max_concurrent: int = 2):
                 'error': str(e)
             }
 
-    # Start initial batch
-    logger.info(f"🚀 Starting initial batch: max_concurrent={max_concurrent}, total_tests={len(test_cases)}")
-    while len(running_tasks) < max_concurrent and pending_tests:
-        test_case = pending_tests.pop(0)
-        runner_id = next_runner_id
-        next_runner_id += 1
-        task = asyncio.create_task(run_single_test_with_completion(test_case, runner_id))
-        running_tasks[test_case['id']] = task
-        runner_ids[test_case['id']] = runner_id
-        logger.info(f"▶️  Started test: {test_case['id']} (running: {len(running_tasks)}, pending: {len(pending_tests)}, runner: {runner_id})")
-
-    # Process completed tasks and start new ones
+    # Process completed tasks and start new ones to maintain max_concurrent parallel execution
+    logger.info(f"🚀 Starting parallel execution: max_concurrent={max_concurrent}, total_tests={len(test_cases)}")
     while running_tasks or pending_tests:
         if running_tasks:
             # Wait for any task to complete
@@ -292,50 +290,31 @@ async def run_all_tests_parallel(max_concurrent: int = 2):
                         print_test_result(result)
                         logger.info(f"✅ Completed test: {completed_test_id} ({completed_count}/{len(test_cases)})")
 
-                        # Check if this test failed - if so, stop immediately
+                        # Check if this test failed - log but continue with all tests
                         if (result.get('overall_score', 0) < 90 or
                             result.get('progress_score', 0) < 90 or
                             result.get('output_score', 0) < 90):
-                            logger.error(f"❌ Test {completed_test_id} failed with scores below 90. Stopping all remaining tests immediately.")
-                            print(f"\n🚨 TEST FAILURE DETECTED: {completed_test_id} failed. Stopping execution for investigation.\n")
-
-                            # Cancel all remaining running and pending tasks
-                            for tid, t in running_tasks.items():
-                                if not t.done():
-                                    t.cancel()
-                            running_tasks.clear()
-
-                            # Clear pending tests to exit the loop
-                            pending_tests.clear()
-                            break
+                            logger.warning(f"❌ Test {completed_test_id} failed with score < 90. Continuing with remaining tests.")
+                            # Continue execution instead of stopping
 
                     except Exception as e:
-                        logger.error(f"❌ Task completion failed for {completed_test_id}: {e}")
-                        print(f"\n🚨 TEST EXECUTION ERROR: {completed_test_id} crashed. Stopping for investigation.\n")
-                        # Cancel all remaining tasks on execution error
-                        for tid, t in running_tasks.items():
-                            if not t.done():
-                                t.cancel()
-                        running_tasks.clear()
-                        pending_tests.clear()
-                        break
+                        logger.error(f"❌ Task {completed_test_id} failed with exception: {e}")
+                        # Continue with other tasks
 
-                    # Remove from running tasks
-                    del running_tasks[completed_test_id]
+                    finally:
+                        # Remove completed task
+                        del running_tasks[completed_test_id]
 
-        # Start new tasks if we have capacity
+        # Start new tests to maintain max_concurrent parallel execution
         while len(running_tasks) < max_concurrent and pending_tests:
             test_case = pending_tests.pop(0)
             runner_id = next_runner_id
             next_runner_id += 1
+            logger.info(f"🔄 Starting test: {test_case['id']} with runner {runner_id}")
             task = asyncio.create_task(run_single_test_with_completion(test_case, runner_id))
             running_tasks[test_case['id']] = task
             runner_ids[test_case['id']] = runner_id
-            logger.info(f"▶️  Started test: {test_case['id']} (running: {len(running_tasks)}, runner: {runner_id})")
-
-        # Small delay to prevent tight looping
-        if running_tasks:
-            await asyncio.sleep(0.1)
+            logger.info(f"✅ Started test: {test_case['id']} (running: {len(running_tasks)}, pending: {len(pending_tests)}, runner: {runner_id})")
 
     # Print final summary
     print("\n" + "=" * 80)

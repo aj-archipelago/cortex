@@ -48,8 +48,9 @@ class ProgressMessageGenerator:
     def __init__(self, model_client=None):
         self.used_emojis = set()  # Track recently used emojis to encourage variety
         self.model_client = model_client  # Optional model client to use
+        self.used_emojis_by_request = {}  # Track emojis per request ID
 
-    async def generate_progress_message(self, base_message: str, context: str = "", task_info: str = "", recent_messages: Optional[List[str]] = None) -> str:
+    async def generate_progress_message(self, base_message: str, context: str = "", task_info: str = "", recent_messages: Optional[List[str]] = None, request_id: str = None) -> str:
         """Generate dynamic progress messages using LLM with emoji selection."""
         logger.debug(f"🤖 Generating progress for: '{base_message}', context: '{context}'")
 
@@ -76,10 +77,15 @@ class ProgressMessageGenerator:
                 recent_context = "\n".join(unique_recent)
                 context_info = f"\nRECENT ACTIVITY:\n{recent_context}"
 
-        # Build list of recently used emojis to avoid - last 7 emojis
+        # Build list of recently used emojis to avoid - last 3 emojis per request
         avoid_emojis = ""
-        if self.used_emojis:
-            recent_emojis = list(self.used_emojis)[-7:]  # Last 7 used emojis
+        if request_id:
+            request_emojis = self.used_emojis_by_request.get(request_id, [])
+            if request_emojis:
+                recent_emojis = request_emojis[-3:]  # Last 3 used emojis for this request
+                avoid_emojis = f"\n\nFORBIDDEN EMOJIS (do NOT use these recently used ones for this task): {', '.join(recent_emojis)}"
+        elif self.used_emojis:
+            recent_emojis = list(self.used_emojis)[-7:]  # Fallback to global tracking
             avoid_emojis = f"\n\nFORBIDDEN EMOJIS (do NOT use these recently used ones): {', '.join(recent_emojis)}"
 
         prompt = f"""Convert this progress message into a concise, engaging update for the user.
@@ -150,12 +156,23 @@ Return ONLY the progress message (5-7 words):"""
                 if self._is_valid_progress_message(dynamic_msg, word_count):
                     # Track used emoji for variety
                     emoji = dynamic_msg[0] if dynamic_msg else ""
+
+                    # Track globally
                     self.used_emojis.add(emoji)
                     if len(self.used_emojis) > 15:  # Reset after 15 different emojis to keep memory fresh
                         # Keep the last 3 emojis to avoid immediate repetition
                         last_three = list(self.used_emojis)[-3:]
                         self.used_emojis.clear()
                         self.used_emojis.update(last_three)
+
+                    # Track per request (keep last 3 used emojis)
+                    if request_id:
+                        if request_id not in self.used_emojis_by_request:
+                            self.used_emojis_by_request[request_id] = []
+                        self.used_emojis_by_request[request_id].append(emoji)
+                        # Keep only last 3 emojis per request
+                        if len(self.used_emojis_by_request[request_id]) > 3:
+                            self.used_emojis_by_request[request_id] = self.used_emojis_by_request[request_id][-3:]
 
                     logger.debug(f"🤖 Dynamic progress SUCCESS: '{base_message}' -> '{dynamic_msg}' ({word_count} words)")
                     return dynamic_msg
@@ -253,6 +270,10 @@ def extract_progress_info(content: str, source: str) -> str:
         content = str(content)
 
     content = content.strip()
+
+    # Remove emojis to prevent double emojis in progress messages
+    # This regex matches most emoji patterns including compound emojis
+    content = re.sub(r'[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002500-\U00002BEF\U00002702-\U000027B0\U00002702-\U000027B0\U000024C2-\U0001F251\U0001f926-\U0001f937\U00010000-\U0010ffff\U000024C2-\U0001F251\U0001f926-\U0001f937\U00010000-\U0010ffff\U000024C2-\U0001F251\U0001f926-\U0001f937\U0001F1F2-\U0001F1F4\U0001F1F8-\U0001F1FA\U0001F1F0-\U0001F1F7\U0001F1E6-\U0001F1FF\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002500-\U00002BEF\U00002702-\U000027B0\U00002702-\U000027B0\U000024C2-\U0001F251\U0001f926-\U0001f937\U00010000-\U0010ffff]+', '', content)
 
     # Remove common prefixes and technical artifacts
     content = re.sub(r'^.*?assistant[:\s]*', '', content, flags=re.IGNORECASE)

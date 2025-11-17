@@ -1202,3 +1202,84 @@ def extract_pdf_text(file_path: str) -> str:
             "is_valid": False,
             "validation_errors": ["PDF text extraction failed"]
         })
+
+def extract_pptx_text(file_path: str) -> str:
+    """Extract text content from PowerPoint files to validate content quality. Returns JSON with extracted text and validation."""
+    try:
+        from pptx import Presentation
+        import json
+        
+        presentation = Presentation(file_path)
+        extracted_text = ""
+        slide_count = 0
+        total_shapes = 0
+        
+        for slide_num, slide in enumerate(presentation.slides):
+            slide_count += 1
+            slide_text = ""
+            shapes_with_text = 0
+            
+            for shape in slide.shapes:
+                total_shapes += 1
+                if hasattr(shape, "text") and shape.text.strip():
+                    shapes_with_text += 1
+                    slide_text += shape.text.strip() + " "
+            
+            if slide_text.strip():
+                extracted_text += f"\n--- Slide {slide_num + 1} ---\n{slide_text.strip()}"
+        
+        # Validation logic
+        validation_errors = []
+        
+        # Check if presentation has content
+        if slide_count == 0:
+            validation_errors.append("PPTX contains no slides")
+        elif not extracted_text.strip():
+            validation_errors.append("PPTX contains no extractable text content")
+        
+        # Check for error messages in content
+        lower_text = extracted_text.lower()
+        error_indicators = [
+            'error: unable to generate',
+            'generation failed', 
+            'contact admin',
+            'system error',
+            'unable to create',
+            'failed to generate',
+            'character at index',
+            'outside the range of characters supported by the font',
+            'font error',
+            'unable to render',
+            'presentation creation failed'
+        ]
+        
+        for error_msg in error_indicators:
+            if error_msg in lower_text:
+                validation_errors.append(f"Contains error message: '{error_msg}'")
+        
+        # Check minimum content length
+        if len(extracted_text.strip()) < 50:
+            validation_errors.append("PPTX content is too short (less than 50 characters)")
+        
+        return json.dumps({
+            "is_valid": len(validation_errors) == 0,
+            "validation_errors": validation_errors,
+            "text": extracted_text,
+            "slide_count": slide_count,
+            "total_shapes": total_shapes,
+            "content_length": len(extracted_text)
+        })
+        
+    except ImportError:
+        return json.dumps({
+            "error": "python-pptx library not available",
+            "is_valid": False,
+            "validation_errors": ["Missing python-pptx library for PPTX text extraction"]
+        })
+    except Exception as e:
+        logger.error(f"PPTX text extraction failed for {file_path}: {e}")
+        return json.dumps({
+            "error": str(e),
+            "is_valid": False,
+            "validation_errors": ["PPTX text extraction failed"]
+        })

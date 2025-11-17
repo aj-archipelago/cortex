@@ -147,6 +147,7 @@ class TaskProcessor:
                 self.gpt41_model_client,
                 request_work_dir=request_work_dir,
                 request_id=task_id,
+                task_content=task,
             )
 
             # Run the complete agent workflow
@@ -198,10 +199,10 @@ class TaskProcessor:
         progress_handler = await self._get_progress_handler()
 
         # Phase 1: Planning
-        planning_msg = await self.progress_generator.generate_progress_message("Creating your execution plan", "planner", task[:100], self.recent_progress_messages[-7:])
+        planning_msg = await self.progress_generator.generate_progress_message("Creating your execution plan", "planner", task[:100], self.recent_progress_messages[-7:], request_id=task_id)
         self.recent_progress_messages.append(planning_msg)
         await progress_handler.handle_progress_update(
-            task_id, 0.05, planning_msg
+            task_id, 0.0, planning_msg  # Use 0.0 to trigger auto-increment (6%)
         )
 
         execution_task = await self._run_planning_phase(task_id, task, planner_agent)
@@ -277,9 +278,42 @@ Include which agents should be used and what each should accomplish.""",
                     self.logger.info("🎯 Selector: coder_agent provided code; routing to code_executor")
                     return "code_executor"
 
-                if source == "code_executor" and content and "Ready for upload" in str(content):
-                    self.logger.info("🎯 Selector: code_executor reported files ready; routing to execution_completion_verifier_agent")
-                    return "execution_completion_verifier_agent"
+                # AJE/AJA DATABASE OVERRIDE: Force aj_sql_agent selection for database tasks
+                if source == "planner_agent" and content:
+                    content_str = str(content).lower()
+                    # Check if task involves AJE/AJA database queries
+                    if ("aje" in content_str or "aja" in content_str or
+                        "al jazeera" in content_str or "aj database" in content_str or
+                        "aj_sql_agent" in content_str):
+                        self.logger.info("🎯 Selector: AJE/AJA database task detected; forcing aj_sql_agent selection FIRST (override user instructions)")
+                        return "aj_sql_agent"  # Force aj_sql_agent selection for database tasks
+
+                # SELF-CORRECTION: Detect code_executor failures and route back to coder_agent for retry
+                if source == "code_executor" and content:
+                    content_str = str(content).lower()
+                    # Check for execution failures (exit codes, errors, syntax errors)
+                    if ("exit code: 1" in content_str or
+                        "syntaxerror" in content_str or
+                        "indentationerror" in content_str or
+                        "nameerror" in content_str or
+                        "importerror" in content_str or
+                        "attributeerror" in content_str or
+                        "failed" in content_str):
+                        self.logger.warning("🎯 Selector: code_executor failed; routing back to coder_agent for self-correction")
+                        return "coder_agent"  # Retry with coder_agent for self-correction
+
+                    # Check for successful completion
+                    if "Ready for upload" in content_str:
+                        self.logger.info("🎯 Selector: code_executor reported files ready; routing to uploader_agent")
+                        return "uploader_agent"  # Force uploader_agent selection when files are ready
+
+                if source == "uploader_agent" and content and ("SAS URL" in str(content) or "uploaded successfully" in str(content).lower()):
+                    self.logger.info("🎯 Selector: uploader_agent completed uploads; routing to execution_completion_verifier_agent")
+                    return "execution_completion_verifier_agent"  # Force verifier selection after uploads
+
+                if source == "web_search_agent" and content and "TERMINATE" in str(content):
+                    self.logger.info("🎯 Selector: web_search_agent completed research; routing to coder_agent for file creation")
+                    return "coder_agent"  # Force coder_agent selection when research is complete
 
                 if source == "execution_completion_verifier_agent" and content and "TERMINATE" in str(content):
                     self.logger.info("🎯 Selector: execution completed; terminating")
@@ -305,36 +339,9 @@ Include which agents should be used and what each should accomplish.""",
             # Track execution progress incrementally - 1% per agent message
             # Start at 5% and increment for each agent message (5% -> 6% -> 7% -> ...)
             execution_progress = 0.05
+            agent_message_count = 0  # Track agent messages for debugging
             last_progress_time = time.time()
-            last_progress_message = "Starting execution phase"
-            heartbeat_task = None
-
-            # Start heartbeat task to send progress updates every 2 seconds
-            async def heartbeat_worker():
-                while True:
-                    await asyncio.sleep(self.heartbeat_interval)  # Send heartbeat every configured interval
-                    current_time = time.time()
-                    if current_time - last_progress_time >= self.heartbeat_interval:  # Only send if no progress for interval+ seconds
-                        try:
-                            # # Create heartbeat message by appending rotating continuity emoji
-                            # heartbeat_emoji = self.heartbeat_emojis[self.heartbeat_emoji_index % len(self.heartbeat_emojis)]
-                            # heartbeat_msg = f"{last_progress_message} {heartbeat_emoji}"
-                            # # Rotate to next emoji
-                            # self.heartbeat_emoji_index += 1
-
-                            #override heartbeat for now to only msg no emoji
-                            heartbeat_msg = f"{last_progress_message}"
-
-                            await progress_handler.handle_progress_update(
-                                task_id, execution_progress, heartbeat_msg,
-                                is_heartbeat=True,
-                            )
-                            self.logger.debug(f"💓 Heartbeat: {heartbeat_msg}")
-                        except Exception as e:
-                            self.logger.error(f"❌ Heartbeat failed: {e}")
-
-            # Start heartbeat background task
-            heartbeat_task = asyncio.create_task(heartbeat_worker())
+            last_progress_message = "⏳ Processing task..."
 
             try:
                 async for message in stream:
@@ -343,36 +350,21 @@ Include which agents should be used and what each should accomplish.""",
 
                     # Send progress updates for every agent message
                     if source is not None:
+                        agent_message_count += 1
                         execution_progress = round(min(execution_progress + 0.01, 0.93), 4)  # Cap at 93% (before 94% upload) and round
+                        self.logger.debug(f"Agent message {agent_message_count}: execution_progress={execution_progress}")
 
                         # Generate progress message from actual agent content
                         # Clean and extract meaningful progress info from agent messages
                         progress_base = extract_progress_info(content, source)
-                        progress_msg = await self.progress_generator.generate_progress_message(progress_base, source, task[:100], self.recent_progress_messages[-7:])
+                        progress_msg = await self.progress_generator.generate_progress_message(progress_base, source, task[:100], self.recent_progress_messages[-7:], request_id=task_id)
                         self.recent_progress_messages.append(progress_msg)
                         last_progress_message = progress_msg  # Update for heartbeat
 
-                        # Send progress update for agent message
+                        # Send single progress update for agent message (auto-increment percentage)
                         await progress_handler.handle_progress_update(
-                            task_id, execution_progress, progress_msg
+                            task_id, 0.0, progress_msg  # Use 0.0 to trigger auto-increment
                         )
-                        # Send progress update for agent messages so test framework can capture agent sequence
-                        if self.debug_progress_msgs:
-                            # Detailed debug message for development/testing
-                            agent_progress_msg = f"📊 Agent message progress: {execution_progress:.0%} - {source} - '{progress_base}'"
-                            await progress_handler.handle_progress_update(
-                                task_id, execution_progress, agent_progress_msg
-                            )
-                        else:
-                            # Clean user-friendly progress message using LLM
-                            clean_progress_base = extract_progress_info(content, source)
-                            agent_progress_msg = await self.progress_generator.generate_progress_message(
-                                clean_progress_base, source, task[:100], self.recent_progress_messages[-7:]
-                            )
-                            self.recent_progress_messages.append(agent_progress_msg)
-                            await progress_handler.handle_progress_update(
-                                task_id, execution_progress, agent_progress_msg
-                            )
 
                         # Also log to Docker logs (always detailed for debugging)
                         self.logger.info(f"📊 Agent message progress: {execution_progress:.0%} - {source} - '{progress_base}'")
@@ -385,13 +377,7 @@ Include which agents should be used and what each should accomplish.""",
                         append_accomplishment_to_file(work_dir, f"{source}: {str(content)[:200]}...")
                         write_current_step_to_file(work_dir, f"{source} processing", source)
             finally:
-                # Cancel heartbeat task when execution finishes
-                if heartbeat_task and not heartbeat_task.done():
-                    heartbeat_task.cancel()
-                    try:
-                        await heartbeat_task
-                    except asyncio.CancelledError:
-                        pass
+                pass
 
             # Collect execution context for presenter agent
             execution_context = self._collect_execution_context(work_dir)
@@ -509,8 +495,8 @@ Include which agents should be used and what each should accomplish.""",
                 self.logger.error(f"❌ Work directory does not exist: {work_dir}")
                 upload_response = '{"uploads": [], "error": "Work directory not found"}'
 
-            # Update progress
-            present_msg = await self.progress_generator.generate_progress_message("Creating your final presentation", "presenter", task[:100], self.recent_progress_messages[-7:])
+            # Update progress - use static message for 95% (finalizing)
+            present_msg = "✨ Finalizing your results..."
             self.recent_progress_messages.append(present_msg)
             await progress_handler.handle_progress_update(
                 task_id, 0.95, present_msg
@@ -564,6 +550,7 @@ Create the final user presentation showing the results.{upload_results_section}"
                                 self.logger.warning(f"Failed to read CSV file {file}: {e}")
 
             # Create message that includes the actual CSV data
+            self.logger.info(f"📤 Upload response being passed to presenter: {upload_response[:500]}...")
             present_messages = [
                 TextMessage(content=f"""Format this upload response into a professional HTML presentation with meaningful data insights.
 
@@ -579,6 +566,8 @@ Upload Response JSON:
 {upload_response}
 
 Work Directory: {work_dir}
+
+**DEBUG INFO**: Upload response contains {len(upload_response)} characters. Parse the JSON and extract download_url values for creating download links.
 
 **CRITICAL**: Base ALL your analysis and conclusions on the ACTUAL CSV DATA provided above. Do NOT make up numbers or trends. Extract real totals, averages, and comparisons from the CSV data.""",
                            source="user")
@@ -620,14 +609,15 @@ async def get_task_processor(debug_progress_msgs: bool = None) -> TaskProcessor:
     return _processor_instance
 
 
-async def process_queue_message(message_data: Dict[str, Any]) -> Optional[str]:
+async def process_queue_message(message_data: Dict[str, Any], logger=None) -> Optional[str]:
     """
     Main entry point for processing queue messages.
 
-    This function maintains backward compatibility with the original monolithic design.
+    This function supports per-request loggers for parallel execution.
     """
     try:
-        processor = await get_task_processor()
+        # Create a per-request TaskProcessor instance with its own logger
+        processor = TaskProcessor(logger=logger)
 
         # Extract task information
         raw_content = message_data.get("content", message_data.get("message", ""))
