@@ -73,14 +73,23 @@ export class GCSStorageProvider extends StorageProvider {
     };
   }
 
-  async uploadStream(context, encodedFilename, stream) {
+  async uploadStream(context, encodedFilename, stream, providedContentType = null) {
     const bucket = this.storage.bucket(this.bucketName);
     const blobName = sanitizeFilename(encodedFilename);
+
+    let contentType = providedContentType || this.getContentType(encodedFilename) || "application/octet-stream";
+    
+    // For text MIME types, ensure charset=utf-8 is included if not already present
+    if (this.isTextMimeType(contentType)) {
+      if (!contentType.includes('charset=')) {
+        contentType = `${contentType}; charset=utf-8`;
+      }
+    }
 
     const file = bucket.file(blobName);
     const writeStream = file.createWriteStream({
       metadata: {
-        contentType: this.getContentType(encodedFilename) || "application/octet-stream",
+        contentType: contentType,
       },
       resumable: false,
     });
@@ -92,6 +101,20 @@ export class GCSStorageProvider extends StorageProvider {
     });
 
     return `gs://${this.bucketName}/${blobName}`;
+  }
+
+  // Helper method to check if a MIME type is text-based
+  isTextMimeType(mimeType) {
+    if (!mimeType) return false;
+    const baseType = mimeType.split(';')[0].trim().toLowerCase();
+    return baseType.startsWith('text/') || 
+           baseType === 'application/json' ||
+           baseType === 'application/javascript' ||
+           baseType === 'application/xml' ||
+           baseType === 'application/xhtml+xml' ||
+           baseType === 'application/x-sh' ||
+           baseType === 'application/x-shellscript' ||
+           baseType.startsWith('application/x-') && baseType.includes('script');
   }
 
   async deleteFiles(requestId) {

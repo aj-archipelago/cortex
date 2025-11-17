@@ -359,6 +359,8 @@ function uploadBlob(
             const fileExtension = path.extname(filename);
             const shortId = generateShortId();
             const uploadName = `${shortId}${fileExtension}`;
+            // Extract content-type from busboy info (preserves charset if provided)
+            const contentType = info.mimeType || null;
             const azureStream = !saveToLocal ? new PassThrough() : null;
             const gcsStream = gcs ? new PassThrough() : null;
             let diskWriteStream, tempDir, tempFilePath;
@@ -439,6 +441,7 @@ function uploadBlob(
                 uploadName,
                 azureStream,
                 capturedContainerName,
+                contentType,
               ).catch(async (err) => {
                 cloudUploadError = err;
                 // Fallback: try from disk if available
@@ -448,7 +451,7 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToAzureStorage(context, uploadName, diskStream, capturedContainerName);
+                  return saveToAzureStorage(context, uploadName, diskStream, capturedContainerName, contentType);
                 }
                 throw err;
               });
@@ -459,6 +462,7 @@ function uploadBlob(
                 context,
                 uploadName,
                 gcsStream,
+                contentType,
               ).catch(async (err) => {
                 cloudUploadError = err;
                 if (diskWritePromise) {
@@ -467,7 +471,7 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToGoogleStorage(context, uploadName, diskStream);
+                  return saveToGoogleStorage(context, uploadName, diskStream, contentType);
                 }
                 throw err;
               });
@@ -686,14 +690,14 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
 }
 
 // Helper function to handle Azure blob storage
-async function saveToAzureStorage(context, encodedFilename, file, containerName = null) {
+async function saveToAzureStorage(context, encodedFilename, file, containerName = null, contentType = null) {
   const storageFactory = StorageFactory.getInstance();
   const provider = await storageFactory.getAzureProvider(containerName);
-  return await provider.uploadStream(context, encodedFilename, file);
+  return await provider.uploadStream(context, encodedFilename, file, contentType);
 }
 
 // Wrapper that checks if GCS is configured
-async function saveToGoogleStorage(context, encodedFilename, file) {
+async function saveToGoogleStorage(context, encodedFilename, file, contentType = null) {
   if (!gcs) {
     throw new Error("Google Cloud Storage is not initialized");
   }
@@ -702,7 +706,7 @@ async function saveToGoogleStorage(context, encodedFilename, file) {
   if (!gcsProvider) {
     throw new Error("GCS provider not available");
   }
-  return await gcsProvider.uploadStream(context, encodedFilename, file);
+  return await gcsProvider.uploadStream(context, encodedFilename, file, contentType);
 }
 
 async function uploadFile(

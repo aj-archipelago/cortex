@@ -124,6 +124,21 @@ export class AzureStorageProvider extends StorageProvider {
       throw new Error(`Invalid blob name generated: blobName="${blobName}", requestId="${requestId}", filename="${filename}"`);
     }
 
+    // Determine content-type from filename
+    const sourceFilename = filename || filePath;
+    let contentType = mime.lookup(sourceFilename);
+    
+    // For text MIME types, ensure charset=utf-8 is included if not already present
+    if (contentType && this.isTextMimeType(contentType)) {
+      if (!contentType.includes('charset=')) {
+        contentType = `${contentType}; charset=utf-8`;
+      }
+    }
+
+    // Set ContentEncoding to utf-8 for text files to help browsers interpret encoding correctly
+    // Azure preserves ContentEncoding header even though it strips charset from ContentType
+    const contentEncoding = (contentType && this.isTextMimeType(contentType)) ? 'utf-8' : undefined;
+
     // Create a read stream for the file
     const fileStream = fs.createReadStream(filePath);
 
@@ -131,6 +146,8 @@ export class AzureStorageProvider extends StorageProvider {
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
     const uploadOptions = {
       blobHTTPHeaders: {
+        ...(contentType ? { blobContentType: contentType } : {}),
+        ...(contentEncoding ? { blobContentEncoding: contentEncoding } : {}),
         blobCacheControl: 'public, max-age=2592000, immutable',
       },
     };
@@ -157,9 +174,16 @@ export class AzureStorageProvider extends StorageProvider {
     };
   }
 
-  async uploadStream(context, encodedFilename, stream) {
+  async uploadStream(context, encodedFilename, stream, providedContentType = null) {
     const { containerClient } = await this.getBlobClient();
-    const contentType = mime.lookup(encodedFilename);
+    let contentType = providedContentType || mime.lookup(encodedFilename);
+
+    // For text MIME types, ensure charset=utf-8 is included if not already present
+    if (contentType && this.isTextMimeType(contentType)) {
+      if (!contentType.includes('charset=')) {
+        contentType = `${contentType}; charset=utf-8`;
+      }
+    }
 
     // Normalize the blob name: sanitizeFilename decodes, cleans, then we encode for Azure
     let blobName = sanitizeFilename(encodedFilename);
@@ -170,9 +194,14 @@ export class AzureStorageProvider extends StorageProvider {
       throw new Error(`Invalid blob name generated from encodedFilename: "${encodedFilename}"`);
     }
 
+    // Set ContentEncoding to utf-8 for text files to help browsers interpret encoding correctly
+    // Azure preserves ContentEncoding header even though it strips charset from ContentType
+    const contentEncoding = (contentType && this.isTextMimeType(contentType)) ? 'utf-8' : undefined;
+    
     const options = {
       blobHTTPHeaders: {
         ...(contentType ? { blobContentType: contentType } : {}),
+        ...(contentEncoding ? { blobContentEncoding: contentEncoding } : {}),
         blobCacheControl: 'public, max-age=2592000, immutable',
       },
       maxConcurrency: 50,
@@ -180,9 +209,14 @@ export class AzureStorageProvider extends StorageProvider {
     };
 
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-    if (context.log) context.log(`Uploading to Azure... ${blobName}`);
+    if (context.log) {
+      context.log(`Uploading to Azure... ${blobName}`);
+      context.log(`Setting content-type: ${contentType}`);
+    }
     
     await blockBlobClient.uploadStream(stream, undefined, undefined, options);
+    
+    
     const sasToken = this.generateSASToken(containerClient, blobName);
     
     const url = `${blockBlobClient.url}?${sasToken}`;
@@ -195,6 +229,20 @@ export class AzureStorageProvider extends StorageProvider {
     }
     
     return url;
+  }
+
+  // Helper method to check if a MIME type is text-based
+  isTextMimeType(mimeType) {
+    if (!mimeType) return false;
+    const baseType = mimeType.split(';')[0].trim().toLowerCase();
+    return baseType.startsWith('text/') || 
+           baseType === 'application/json' ||
+           baseType === 'application/javascript' ||
+           baseType === 'application/xml' ||
+           baseType === 'application/xhtml+xml' ||
+           baseType === 'application/x-sh' ||
+           baseType === 'application/x-shellscript' ||
+           baseType.startsWith('application/x-') && baseType.includes('script');
   }
 
   async deleteFiles(requestId) {
