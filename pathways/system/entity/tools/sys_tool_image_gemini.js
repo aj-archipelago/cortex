@@ -53,21 +53,16 @@ export default {
         icon: "🔄",
         function: {
             name: "ModifyImage",
-            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated. It takes up to two input images as a reference and outputs a new image based on the instructions.",
+            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated. It takes up to three input images as a reference and outputs a new image based on the instructions.",
             parameters: {
                 type: "object",
                 properties: {
-                    inputImage: {
-                        type: "string",
-                        description: "An image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification."
-                    },
-                    inputImage2: {
-                        type: "string",
-                        description: "A second image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification if there is one."
-                    },
-                    inputImage3: {
-                        type: "string",
-                        description: "A third image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification if there is one."
+                    inputImages: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        },
+                        description: "An array of images from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as references for the image modification. You can provide up to 3 images. Each image should be the hash or filename."
                     },
                     detailedInstructions: {
                         type: "string",
@@ -89,7 +84,7 @@ export default {
                         description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["inputImage", "detailedInstructions", "userMessage"]
+                required: ["inputImages", "detailedInstructions", "userMessage"]
             }
         }
     }],
@@ -102,43 +97,25 @@ export default {
             
             // Resolve input images to URLs using the common utility
             // For Gemini, prefer GCS URLs over Azure URLs
-            // Fail early if any provided image parameter cannot be resolved
-            if (args.inputImage) {
+            // Fail early if any provided image cannot be resolved
+            const resolvedInputImages = [];
+            if (args.inputImages && Array.isArray(args.inputImages)) {
                 if (!args.contextId) {
-                    throw new Error("contextId is required when using the 'inputImage' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                    throw new Error("contextId is required when using the 'inputImages' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
                 }
-                const resolved = await resolveFileParameter(args.inputImage, args.contextId, args.contextKey, { preferGcs: true });
-                if (!resolved) {
-                    throw new Error(`File not found: "${args.inputImage}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                
+                // Limit to 3 images maximum
+                const imagesToProcess = args.inputImages.slice(0, 3);
+                
+                for (let i = 0; i < imagesToProcess.length; i++) {
+                    const imageRef = imagesToProcess[i];
+                    const resolved = await resolveFileParameter(imageRef, args.contextId, args.contextKey, { preferGcs: true });
+                    if (!resolved) {
+                        throw new Error(`File not found: "${imageRef}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                    }
+                    resolvedInputImages.push(resolved);
                 }
-                args.inputImage = resolved;
             }
-            
-            if (args.inputImage2) {
-                if (!args.contextId) {
-                    throw new Error("contextId is required when using the 'inputImage2' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
-                }
-                const resolved = await resolveFileParameter(args.inputImage2, args.contextId, args.contextKey, { preferGcs: true });
-                if (!resolved) {
-                    throw new Error(`File not found: "${args.inputImage2}". Use ListFileCollection or SearchFileCollection to find available files.`);
-                }
-                args.inputImage2 = resolved;
-            }
-            
-            if (args.inputImage3) {
-                if (!args.contextId) {
-                    throw new Error("contextId is required when using the 'inputImage3' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
-                }
-                const resolved = await resolveFileParameter(args.inputImage3, args.contextId, args.contextKey, { preferGcs: true });
-                if (!resolved) {
-                    throw new Error(`File not found: "${args.inputImage3}". Use ListFileCollection or SearchFileCollection to find available files.`);
-                }
-                args.inputImage3 = resolved;
-            }
-            
-            const resolvedInputImage = args.inputImage;
-            const resolvedInputImage2 = args.inputImage2;
-            const resolvedInputImage3 = args.inputImage3;
             
             // Call the image generation pathway
             let result = await callPathway('image_gemini_25', {
@@ -146,9 +123,9 @@ export default {
                 text: prompt,
                 model, 
                 stream: false,
-                input_image: resolvedInputImage,
-                input_image_2: resolvedInputImage2,
-                input_image_3: resolvedInputImage3,
+                input_image: resolvedInputImages.length > 0 ? resolvedInputImages[0] : undefined,
+                input_image_2: resolvedInputImages.length > 1 ? resolvedInputImages[1] : undefined,
+                input_image_3: resolvedInputImages.length > 2 ? resolvedInputImages[2] : undefined,
                 optimizePrompt: true,
             }, pathwayResolver);
 
@@ -186,8 +163,8 @@ export default {
                                         const uniqueId = imageHash ? imageHash.substring(0, 8) : `${Date.now()}-${uploadedImages.length}`;
                                         
                                         // Determine filename prefix based on whether this is a modification or generation
-                                        // If inputImage exists, it's a modification; otherwise it's a generation
-                                        const isModification = args.inputImage || args.inputImage2 || args.inputImage3;
+                                        // If inputImages exists, it's a modification; otherwise it's a generation
+                                        const isModification = args.inputImages && Array.isArray(args.inputImages) && args.inputImages.length > 0;
                                         const defaultPrefix = isModification ? 'modified-image' : 'generated-image';
                                         const filenamePrefix = args.filenamePrefix || defaultPrefix;
                                         

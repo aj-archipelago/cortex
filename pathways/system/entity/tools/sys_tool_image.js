@@ -54,17 +54,12 @@ export default {
             parameters: {
                 type: "object",
                 properties: {
-                    inputImage: {
-                        type: "string",
-                        description: "An image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification."
-                    },
-                    inputImage2: {
-                        type: "string",
-                        description: "A second image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification if there is one."
-                    },
-                    inputImage3: {
-                        type: "string",
-                        description: "A third image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as a reference for the image modification if there is one."
+                    inputImages: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        },
+                        description: "An array of images from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as references for the image modification. You can provide up to 3 images. Each image should be the hash or filename."
                     },
                     detailedInstructions: {
                         type: "string",
@@ -86,7 +81,7 @@ export default {
                         description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["inputImage", "detailedInstructions", "userMessage"]
+                required: ["inputImages", "detailedInstructions", "userMessage"]
             }
         }
     }],
@@ -98,51 +93,33 @@ export default {
             let model = "replicate-seedream-4";
             let prompt = args.detailedInstructions || "";
 
-            // If we have an input image, use the flux-kontext-max model
-            if (args.inputImage || args.inputImage2 || args.inputImage3) {
+            // If we have input images, use the flux-kontext-max model
+            if (args.inputImages && Array.isArray(args.inputImages) && args.inputImages.length > 0) {
                 model = "replicate-qwen-image-edit-plus";
             }
 
             pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
             
             // Resolve all input images to URLs using the common utility
-            // Fail early if any provided image parameter cannot be resolved
-            if (args.inputImage) {
+            // Fail early if any provided image cannot be resolved
+            const resolvedInputImages = [];
+            if (args.inputImages && Array.isArray(args.inputImages)) {
                 if (!args.contextId) {
-                    throw new Error("contextId is required when using the 'inputImage' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                    throw new Error("contextId is required when using the 'inputImages' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
                 }
-                const resolved = await resolveFileParameter(args.inputImage, args.contextId, args.contextKey);
-                if (!resolved) {
-                    throw new Error(`File not found: "${args.inputImage}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                
+                // Limit to 3 images maximum
+                const imagesToProcess = args.inputImages.slice(0, 3);
+                
+                for (let i = 0; i < imagesToProcess.length; i++) {
+                    const imageRef = imagesToProcess[i];
+                    const resolved = await resolveFileParameter(imageRef, args.contextId, args.contextKey);
+                    if (!resolved) {
+                        throw new Error(`File not found: "${imageRef}". Use ListFileCollection or SearchFileCollection to find available files.`);
+                    }
+                    resolvedInputImages.push(resolved);
                 }
-                args.inputImage = resolved;
             }
-            
-            if (args.inputImage2) {
-                if (!args.contextId) {
-                    throw new Error("contextId is required when using the 'inputImage2' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
-                }
-                const resolved = await resolveFileParameter(args.inputImage2, args.contextId, args.contextKey);
-                if (!resolved) {
-                    throw new Error(`File not found: "${args.inputImage2}". Use ListFileCollection or SearchFileCollection to find available files.`);
-                }
-                args.inputImage2 = resolved;
-            }
-            
-            if (args.inputImage3) {
-                if (!args.contextId) {
-                    throw new Error("contextId is required when using the 'inputImage3' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
-                }
-                const resolved = await resolveFileParameter(args.inputImage3, args.contextId, args.contextKey);
-                if (!resolved) {
-                    throw new Error(`File not found: "${args.inputImage3}". Use ListFileCollection or SearchFileCollection to find available files.`);
-                }
-                args.inputImage3 = resolved;
-            }
-            
-            const resolvedInputImage = args.inputImage;
-            const resolvedInputImage2 = args.inputImage2;
-            const resolvedInputImage3 = args.inputImage3;
             
             // Build parameters object, only including image parameters if they have non-empty values
             const params = {
@@ -152,14 +129,14 @@ export default {
                 stream: false,
             };
             
-            if (resolvedInputImage) {
-                params.input_image = resolvedInputImage;
+            if (resolvedInputImages.length > 0) {
+                params.input_image = resolvedInputImages[0];
             }
-            if (resolvedInputImage2) {
-                params.input_image_2 = resolvedInputImage2;
+            if (resolvedInputImages.length > 1) {
+                params.input_image_2 = resolvedInputImages[1];
             }
-            if (resolvedInputImage3) {
-                params.input_image_3 = resolvedInputImage3;
+            if (resolvedInputImages.length > 2) {
+                params.input_image_3 = resolvedInputImages[2];
             }
             
             // Call appropriate pathway based on model
@@ -209,7 +186,7 @@ export default {
                                         const uniqueId = uploadedHash ? uploadedHash.substring(0, 8) : `${Date.now()}-${uploadedImages.length}`;
                                         
                                         // Determine filename prefix based on whether this is a modification or generation
-                                        const isModification = args.inputImage || args.inputImage2 || args.inputImage3;
+                                        const isModification = args.inputImages && Array.isArray(args.inputImages) && args.inputImages.length > 0;
                                         const defaultPrefix = isModification ? 'modified-image' : 'generated-image';
                                         const filenamePrefix = args.filenamePrefix || defaultPrefix;
                                         

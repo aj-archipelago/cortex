@@ -206,15 +206,16 @@ export class StorageService {
     // Delete from primary storage
     if (hashResult.url) {
       try {
-        // Log the URL being deleted for debugging
-        console.log(`Deleting file from primary storage - hash: ${hash}, url: ${hashResult.url}`);
+        // Log the URL being deleted for debugging (redact SAS token for security)
+        const { redactSasToken } = await import('../../utils/logSecurity.js');
+        console.log(`Deleting file from primary storage - hash: ${hash}, url: ${redactSasToken(hashResult.url)}`);
         const primaryResult = await this.deleteFile(hashResult.url);
         if (primaryResult) {
           console.log(`Successfully deleted from primary storage - hash: ${hash}, result: ${primaryResult}`);
           results.push({ provider: 'primary', result: primaryResult });
         } else {
           // deleteFile returned null, which means the URL was invalid
-          console.warn(`Invalid or empty URL for hash ${hash}: ${hashResult.url}`);
+          console.warn(`Invalid or empty URL for hash ${hash}: ${redactSasToken(hashResult.url)}`);
           results.push({ provider: 'primary', error: 'Invalid URL (container-only or empty blob name)' });
         }
       } catch (error) {

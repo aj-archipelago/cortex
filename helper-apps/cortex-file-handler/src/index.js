@@ -736,8 +736,12 @@ async function CortexFileHandler(context, req) {
           offset: chunkOffset,
           gcs: chunkResult.gcs,
         });
+        // Redact SAS tokens for secure logging
+        const { redactSasToken } = await import('./utils/logSecurity.js');
+        const redactedUrl = redactSasToken(chunkResult.url);
+        const redactedGcs = chunkResult.gcs ? redactSasToken(chunkResult.gcs) : '';
         console.log(
-          `Saved chunk as: ${chunkResult.url}${chunkResult.gcs ? ` and ${chunkResult.gcs}` : ""}`,
+          `Saved chunk as: ${redactedUrl}${redactedGcs ? ` and ${redactedGcs}` : ""}`,
         );
         await sendProgress();
       }

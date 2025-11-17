@@ -525,3 +525,105 @@ test.serial(
     }
   },
 );
+
+// UTF-8 Encoding Test
+test.serial("should preserve UTF-8 characters including emdash in uploaded files", async (t) => {
+  // Create content with emdash and other UTF-8 characters
+  const fileContent = `# Sesame AI (Maya) — Financial Overview
+
+This document contains various UTF-8 characters:
+• Em dash: —
+• En dash: –
+• Ellipsis: …
+• Quotes: "smart quotes" and 'smart apostrophes'
+• Accented: café, résumé, naïve
+• Symbols: ©, ®, ™
+• Currency: €, £, ¥
+• Math: π, ∑, ∞
+• Emoji: 🚀, ✅, ❌
+
+The emdash should be preserved correctly when the file is downloaded.`;
+
+  const filePath = await createTestFile(fileContent, "md");
+  const requestId = uuidv4();
+  let response;
+
+  try {
+    // Upload file with explicit content-type including charset
+    const form = new FormData();
+    form.append("file", fs.createReadStream(filePath), {
+      filename: "test-utf8.md",
+      contentType: "text/markdown; charset=utf-8",
+    });
+    form.append("requestId", requestId);
+
+    response = await axios.post(baseUrl, form, {
+      headers: {
+        ...form.getHeaders(),
+        "Content-Type": "multipart/form-data",
+      },
+      validateStatus: (status) => true,
+      timeout: 30000,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
+
+    t.is(response.status, 200, "Upload should succeed");
+    t.truthy(response.data.url, "Response should include a URL");
+
+    // Download the file and verify encoding is preserved
+    const downloadResponse = await axios.get(response.data.url, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+    });
+
+    t.is(downloadResponse.status, 200, "Download should succeed");
+
+    // Verify content-type header includes charset
+    const contentType = downloadResponse.headers["content-type"] || 
+                       downloadResponse.headers["Content-Type"];
+    t.truthy(contentType, "Content-Type header should be present");
+    t.true(
+      contentType.includes("charset=utf-8") || contentType.includes("charset=UTF-8"),
+      "Content-Type should include charset=utf-8"
+    );
+
+    // Decode the downloaded content as UTF-8
+    const downloadedContent = Buffer.from(downloadResponse.data).toString("utf8");
+
+    // Verify the emdash is preserved (not corrupted)
+    // Check that the emdash character (U+2014) is present and not corrupted
+    t.true(
+      downloadedContent.includes("—"),
+      "Emdash should be preserved in downloaded content"
+    );
+    
+    // Verify the emdash bytes are correct (not the common corruption pattern)
+    // The corruption "â€"" occurs when UTF-8 bytes E2 80 94 are interpreted as ISO-8859-1
+    // We check that the actual emdash character exists, not the corruption
+    const emdashBytes = Buffer.from("—", "utf8");
+    const downloadedBytes = Buffer.from(downloadedContent, "utf8");
+    t.true(
+      downloadedBytes.includes(emdashBytes),
+      "Emdash bytes should be preserved correctly"
+    );
+
+    // Verify the entire content matches
+    t.is(
+      downloadedContent,
+      fileContent,
+      "Downloaded content should exactly match original content"
+    );
+
+    // Verify other UTF-8 characters are also preserved
+    t.true(downloadedContent.includes("–"), "En dash should be preserved");
+    t.true(downloadedContent.includes("…"), "Ellipsis should be preserved");
+    t.true(downloadedContent.includes("©"), "Copyright symbol should be preserved");
+    t.true(downloadedContent.includes("🚀"), "Emoji should be preserved");
+  } finally {
+    fs.unlinkSync(filePath);
+    if (response?.data?.url) {
+      await cleanupHashAndFile(null, response.data.url, baseUrl);
+    }
+  }
+});
