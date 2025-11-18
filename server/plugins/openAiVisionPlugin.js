@@ -25,7 +25,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
     async tryParseMessages(messages) {
         // Whitelist of content types we accept from parsed JSON strings
         // Only these types will be used if a JSON string parses to an object
-        const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url'];
+        const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url', 'tool_use', 'tool_result'];
         
         // Helper to check if an object is a valid whitelisted content type
         const isValidContentObject = (obj) => {
@@ -83,7 +83,12 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                                     return { type: 'image_url', image_url: { url } };
                                 }
                             }
-                            
+
+                            // Handle these for Claude because it uses this parser
+                            if (contentType === 'tool_use' || contentType === 'tool_result') {
+                                return itemToProcess;
+                            }
+
                             // If we got here, we failed to process something - likely the image - so we'll return it as a text object.
                             const textContent = typeof itemToProcess === 'string' 
                                 ? itemToProcess 
