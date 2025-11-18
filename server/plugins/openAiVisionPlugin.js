@@ -23,6 +23,20 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
     }
     
     async tryParseMessages(messages) {
+        // Whitelist of content types we accept from parsed JSON strings
+        // Only these types will be used if a JSON string parses to an object
+        const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url'];
+        
+        // Helper to check if an object is a valid whitelisted content type
+        const isValidContentObject = (obj) => {
+            return (
+                typeof obj === 'object' && 
+                obj !== null && 
+                typeof obj.type === 'string' &&
+                WHITELISTED_CONTENT_TYPES.includes(obj.type)
+            );
+        };
+        
         return await Promise.all(messages.map(async message => {
             try {
                 // Handle tool-related message types
@@ -36,24 +50,45 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                     return {
                         ...message,
                         content: await Promise.all(message.content.map(async item => {
+                            // A content array item can be a plain string, a JSON string, or a valid content object
+                            let itemToProcess, contentType;
+
+                            // First try to parse it as a JSON string
                             const parsedItem = safeJsonParse(item);
-
-                            if (typeof parsedItem === 'string') {
-                                return { type: 'text', text: parsedItem };
+                            
+                            // Check if parsed item is a known content object
+                            if (isValidContentObject(parsedItem)) {
+                                itemToProcess = parsedItem;
+                                contentType = parsedItem.type;
+                            } 
+                            // It's not, so check if original item is already a known content object
+                            else if (isValidContentObject(item)) {
+                                itemToProcess = item;
+                                contentType = item.type;
+                            } 
+                            // It's not, so return it as a text object. This covers all unknown objects and strings.
+                            else {
+                                const textContent = typeof item === 'string' ? item : JSON.stringify(item);
+                                return { type: 'text', text: textContent };
                             }
-
-                            if (typeof parsedItem === 'object' && parsedItem !== null) {
-                                // Handle both 'image' and 'image_url' types
-                                if (parsedItem.type === 'image' || parsedItem.type === 'image_url') {
-                                    const url = parsedItem.url || parsedItem.image_url?.url;
-                                    if (url && await this.validateImageUrl(url)) {
-                                        return { type: 'image_url', image_url: { url } };
-                                    }
-                                    return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
+                            
+                            // Process whitelisted content types (we know contentType is known and valid at this point)
+                            if (contentType === 'text') {
+                                return { type: 'text', text: itemToProcess.text || '' };
+                            }
+                            
+                            if (contentType === 'image' || contentType === 'image_url') {
+                                const url = itemToProcess.url || itemToProcess.image_url?.url;
+                                if (url && await this.validateImageUrl(url)) {
+                                    return { type: 'image_url', image_url: { url } };
                                 }
                             }
                             
-                            return parsedItem;
+                            // If we got here, we failed to process something - likely the image - so we'll return it as a text object.
+                            const textContent = typeof itemToProcess === 'string' 
+                                ? itemToProcess 
+                                : JSON.stringify(itemToProcess);
+                            return { type: 'text', text: textContent };
                         }))
                     };
                 }
