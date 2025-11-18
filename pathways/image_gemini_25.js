@@ -72,7 +72,7 @@ export default {
         optimizePrompt: false, // Enable prompt optimization using Google's best practices
     },
     max_tokens: 32000,
-    model: 'gemini-25-flash-image',
+    model: 'gemini-flash-25-image',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,

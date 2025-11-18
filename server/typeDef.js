@@ -122,7 +122,7 @@ const getGraphQlType = (value) => {
 
 const getMessageTypeDefs = () => {
   const messageType = `input Message { role: String, content: String, name: String }`;
-  const multiMessageType = `input MultiMessage { role: String, content: [String], name: String }`;
+  const multiMessageType = `input MultiMessage { role: String, content: [String], name: String, tool_calls: [String], tool_call_id: String }`;
   
   return `${messageType}\n\n${multiMessageType}`;
 };

@@ -145,8 +145,11 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
             return value.map(msg => ({
                 ...msg,
                 content: Array.isArray(msg.content) ? 
-                    msg.content.map(item => JSON.stringify(item)) : 
-                    msg.content
+                    msg.content.map(item => typeof item === 'string' ? item : JSON.stringify(item)) : 
+                    msg.content,
+                tool_calls: Array.isArray(msg.tool_calls) ? 
+                    msg.tool_calls.map(tc => typeof tc === 'string' ? tc : JSON.stringify(tc)) : 
+                    msg.tool_calls
             }));
         } else if (type === '[String]' && Array.isArray(value)) {
             return value;
