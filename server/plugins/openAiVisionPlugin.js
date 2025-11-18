@@ -39,16 +39,44 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         
         return await Promise.all(messages.map(async message => {
             try {
+                // Parse tool_calls from string array to object array if present
+                const parsedMessage = { ...message };
+                if (message.tool_calls && Array.isArray(message.tool_calls)) {
+                    parsedMessage.tool_calls = message.tool_calls.map(tc => {
+                        if (typeof tc === 'string') {
+                            try {
+                                return JSON.parse(tc);
+                            } catch (e) {
+                                logger.warn(`Failed to parse tool_call: ${tc}`);
+                                return tc;
+                            }
+                        }
+                        return tc;
+                    });
+                }
+                
                 // Handle tool-related message types
-                if (message.role === "tool" || (message.role === "assistant" && message.tool_calls)) {
-                    return {
-                        ...message
-                    };
+                // For tool messages, OpenAI requires content to be a string, not an array
+                if (message.role === "tool") {
+                    // Convert content array to string if needed
+                    if (Array.isArray(message.content)) {
+                        parsedMessage.content = message.content
+                            .map(item => typeof item === 'string' ? item : 
+                                (typeof item === 'object' && item?.text) ? item.text : 
+                                JSON.stringify(item))
+                            .join('\n');
+                    }
+                    return parsedMessage;
+                }
+                
+                // For assistant messages with tool_calls, return as-is (content can be null or string)
+                if (message.role === "assistant" && parsedMessage.tool_calls) {
+                    return parsedMessage;
                 }
 
                 if (Array.isArray(message.content)) {
                     return {
-                        ...message,
+                        ...parsedMessage,
                         content: await Promise.all(message.content.map(async item => {
                             // A content array item can be a plain string, a JSON string, or a valid content object
                             let itemToProcess, contentType;
