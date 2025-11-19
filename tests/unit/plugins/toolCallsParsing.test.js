@@ -1,6 +1,6 @@
 // toolCallsParsing.test.js
 // Tests for tool_calls parsing from strings to objects in plugins
-// and tool message content array to string conversion
+// and tool message content array to text content parts array conversion
 
 import test from 'ava';
 import OpenAIVisionPlugin from '../../../server/plugins/openAiVisionPlugin.js';
@@ -78,13 +78,13 @@ test('OpenAIVisionPlugin - handles tool_calls that are already objects', async (
     t.is(result[0].tool_calls[0].id, 'call_123');
 });
 
-test('OpenAIVisionPlugin - converts tool message content array to string', async (t) => {
+test('OpenAIVisionPlugin - converts tool message content array to text content parts array', async (t) => {
     const plugin = new OpenAIVisionPlugin(mockPathway, mockModel);
     
     const messages = [
         {
             role: 'tool',
-            content: ['Result 1', 'Result 2'], // Array as would come from REST
+            content: ['Result 1', 'Result 2'], // Array of strings as would come from REST
             tool_call_id: 'call_123'
         }
     ];
@@ -93,11 +93,15 @@ test('OpenAIVisionPlugin - converts tool message content array to string', async
     
     t.is(result.length, 1);
     t.is(result[0].role, 'tool');
-    t.is(typeof result[0].content, 'string'); // Should be converted to string
-    t.is(result[0].content, 'Result 1\nResult 2');
+    t.true(Array.isArray(result[0].content)); // Should be converted to array of text content parts
+    t.is(result[0].content.length, 2);
+    t.is(result[0].content[0].type, 'text');
+    t.is(result[0].content[0].text, 'Result 1');
+    t.is(result[0].content[1].type, 'text');
+    t.is(result[0].content[1].text, 'Result 2');
 });
 
-test('OpenAIVisionPlugin - handles tool message with content object array', async (t) => {
+test('OpenAIVisionPlugin - preserves tool message with content text parts array', async (t) => {
     const plugin = new OpenAIVisionPlugin(mockPathway, mockModel);
     
     const messages = [
@@ -114,8 +118,30 @@ test('OpenAIVisionPlugin - handles tool message with content object array', asyn
     const result = await plugin.tryParseMessages(messages);
     
     t.is(result.length, 1);
-    t.is(typeof result[0].content, 'string');
-    t.is(result[0].content, 'Result 1\nResult 2');
+    t.true(Array.isArray(result[0].content)); // Should preserve array format
+    t.is(result[0].content.length, 2);
+    t.is(result[0].content[0].type, 'text');
+    t.is(result[0].content[0].text, 'Result 1');
+    t.is(result[0].content[1].type, 'text');
+    t.is(result[0].content[1].text, 'Result 2');
+});
+
+test('OpenAIVisionPlugin - preserves tool message with string content', async (t) => {
+    const plugin = new OpenAIVisionPlugin(mockPathway, mockModel);
+    
+    const messages = [
+        {
+            role: 'tool',
+            content: 'Simple text result',
+            tool_call_id: 'call_123'
+        }
+    ];
+    
+    const result = await plugin.tryParseMessages(messages);
+    
+    t.is(result.length, 1);
+    t.is(typeof result[0].content, 'string'); // Should preserve string format
+    t.is(result[0].content, 'Simple text result');
 });
 
 test('GrokVisionPlugin - parses tool_calls from string array to object array', async (t) => {
@@ -146,7 +172,7 @@ test('GrokVisionPlugin - parses tool_calls from string array to object array', a
     t.is(result[0].tool_calls[0].id, 'call_456');
 });
 
-test('GrokVisionPlugin - converts tool message content array to string', async (t) => {
+test('GrokVisionPlugin - converts tool message content array to text content parts array', async (t) => {
     const plugin = new GrokVisionPlugin(mockPathway, { ...mockModel, type: 'GROK-VISION' });
     
     const messages = [
@@ -160,8 +186,12 @@ test('GrokVisionPlugin - converts tool message content array to string', async (
     const result = await plugin.tryParseMessages(messages);
     
     t.is(result.length, 1);
-    t.is(typeof result[0].content, 'string');
-    t.is(result[0].content, 'Grok result 1\nGrok result 2');
+    t.true(Array.isArray(result[0].content)); // Should be converted to array of text content parts
+    t.is(result[0].content.length, 2);
+    t.is(result[0].content[0].type, 'text');
+    t.is(result[0].content[0].text, 'Grok result 1');
+    t.is(result[0].content[1].type, 'text');
+    t.is(result[0].content[1].text, 'Grok result 2');
 });
 
 test('Gemini15ChatPlugin - converts tool message content array to string', async (t) => {

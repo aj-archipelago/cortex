@@ -91,7 +91,7 @@ export default {
             icon: "📋",
             function: {
                 name: "ListFileCollection",
-                description: "List all files in your collection, optionally filtered by tags or sorted by date. Useful for getting an overview of your stored files.",
+                description: "List all files in your collection, optionally filtered by tags or sorted by date. Useful for getting an overview of your stored files or when you don't know the exact file you're looking for.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -123,7 +123,7 @@ export default {
             icon: "🗑️",
             function: {
                 name: "RemoveFileFromCollection",
-                description: "Remove one or more files from your collection and delete them from cloud storage. Use a file ID to remove a specific file, or use '*' to remove all files. The file will be deleted from cloud storage (if a hash is available) and removed from your collection.",
+                description: "Remove a file from your collection and delete it from cloud storage.",
                 parameters: {
                     type: "object",
                     properties: {

@@ -258,113 +258,50 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
 
     // Override tryParseMessages to preserve X.AI vision detail field
     async tryParseMessages(messages) {
-        // Whitelist of content types we accept from parsed JSON strings
-        // Only these types will be used if a JSON string parses to an object
-        const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url', 'tool_use', 'tool_result'];
+        // First, extract detail fields from original messages before parsing
+        // We need to preserve these because the parent's tryParseMessages doesn't handle them
+        const detailMap = new Map();
+        messages.forEach((message, index) => {
+            if (Array.isArray(message.content)) {
+                message.content.forEach((item, itemIndex) => {
+                    const parsedItem = safeJsonParse(item);
+                    const detail = parsedItem?.image_url?.detail || parsedItem?.detail || 
+                                  (typeof item === 'object' && item !== null ? (item.image_url?.detail || item.detail) : null);
+                    if (detail) {
+                        detailMap.set(`${index}-${itemIndex}`, detail);
+                    }
+                });
+            }
+        });
         
-        // Helper to check if an object is a valid whitelisted content type
-        const isValidContentObject = (obj) => {
-            return (
-                typeof obj === 'object' && 
-                obj !== null && 
-                typeof obj.type === 'string' &&
-                WHITELISTED_CONTENT_TYPES.includes(obj.type)
-            );
-        };
+        // Call parent's tryParseMessages to handle all the standard parsing
+        const parsedMessages = await super.tryParseMessages(messages);
         
-        return await Promise.all(messages.map(async message => {
-            try {
-                // Parse tool_calls from string array to object array if present
-                const parsedMessage = { ...message };
-                if (message.tool_calls && Array.isArray(message.tool_calls)) {
-                    parsedMessage.tool_calls = message.tool_calls.map(tc => {
-                        if (typeof tc === 'string') {
-                            try {
-                                return JSON.parse(tc);
-                            } catch (e) {
-                                logger.warn(`Failed to parse tool_call: ${tc}`);
-                                return tc;
+        // Now restore the detail fields to image_url objects
+        return parsedMessages.map((parsedMessage, index) => {
+            if (Array.isArray(parsedMessage.content)) {
+                return {
+                    ...parsedMessage,
+                    content: parsedMessage.content.map((item, itemIndex) => {
+                        // If this is an image_url item, check if we have a detail field to restore
+                        if (item.type === 'image_url' && item.image_url) {
+                            const detail = detailMap.get(`${index}-${itemIndex}`);
+                            if (detail) {
+                                return {
+                                    ...item,
+                                    image_url: {
+                                        ...item.image_url,
+                                        detail: detail
+                                    }
+                                };
                             }
                         }
-                        return tc;
-                    });
-                }
-                
-                // Handle tool-related message types
-                // For tool messages, Grok (like OpenAI) requires content to be a string, not an array
-                if (message.role === "tool") {
-                    // Convert content array to string if needed
-                    if (Array.isArray(message.content)) {
-                        parsedMessage.content = message.content
-                            .map(item => typeof item === 'string' ? item : 
-                                (typeof item === 'object' && item?.text) ? item.text : 
-                                JSON.stringify(item))
-                            .join('\n');
-                    }
-                    return parsedMessage;
-                }
-                
-                // For assistant messages with tool_calls, return as-is (content can be null or string)
-                if (message.role === "assistant" && parsedMessage.tool_calls) {
-                    return parsedMessage;
-                }
-
-                if (Array.isArray(message.content)) {
-                    return {
-                        ...parsedMessage,
-                        content: await Promise.all(message.content.map(async item => {
-                            // A content array item can be a plain string, a JSON string, or a valid content object
-                            let itemToProcess, contentType;
-
-                            // First try to parse it as a JSON string
-                            const parsedItem = safeJsonParse(item);
-                            
-                            // Check if parsed item is a known content object
-                            if (isValidContentObject(parsedItem)) {
-                                itemToProcess = parsedItem;
-                                contentType = parsedItem.type;
-                            } 
-                            // It's not, so check if original item is already a known content object
-                            else if (isValidContentObject(item)) {
-                                itemToProcess = item;
-                                contentType = item.type;
-                            } 
-                            // It's not, so return it as a text object. This covers all unknown objects and strings.
-                            else {
-                                const textContent = typeof item === 'string' ? item : JSON.stringify(item);
-                                return { type: 'text', text: textContent };
-                            }
-                            
-                            // Process whitelisted content types (we know contentType is known and valid at this point)
-                            if (contentType === 'text') {
-                                return { type: 'text', text: itemToProcess.text || '' };
-                            }
-                            
-                            if (contentType === 'image' || contentType === 'image_url') {
-                                const url = itemToProcess.url || itemToProcess.image_url?.url;
-                                const detail = itemToProcess.image_url?.detail || itemToProcess.detail;
-                                if (url && await this.validateImageUrl(url)) {
-                                    const imageUrl = { url };
-                                    if (detail) {
-                                        imageUrl.detail = detail;
-                                    }
-                                    return { type: 'image_url', image_url: imageUrl };
-                                }
-                            }
-                            
-                            // If we got here, we failed to process something - likely the image - so we'll return it as a text object.
-                            const textContent = typeof itemToProcess === 'string' 
-                                ? itemToProcess 
-                                : JSON.stringify(itemToProcess);
-                            return { type: 'text', text: textContent };
-                        }))
-                    };
-                }
-            } catch (e) {
-                return message;
+                        return item;
+                    })
+                };
             }
-            return message;
-        }));
+            return parsedMessage;
+        });
     }
 
     // Override parseResponse to handle Grok-specific response fields

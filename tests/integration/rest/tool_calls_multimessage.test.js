@@ -89,8 +89,8 @@ test('POST /chat/completions - tool_calls strings are preserved in REST endpoint
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - tool message with content array is converted to string', async (t) => {
-  // Test that tool messages with content arrays get converted to strings
+test('POST /chat/completions - tool message with content array is converted to text content parts array', async (t) => {
+  // Test that tool messages with content arrays get converted to arrays of text content parts
   // This should happen in the plugin's tryParseMessages method
   
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -115,7 +115,7 @@ test('POST /chat/completions - tool message with content array is converted to s
         },
         {
           role: 'tool',
-          content: ['Result line 1', 'Result line 2'], // Array that should be converted to string
+          content: ['Result line 1', 'Result line 2'], // Array that should be converted to text content parts array
           tool_call_id: 'call_789'
         }
       ],
@@ -137,7 +137,7 @@ test('POST /chat/completions - tool message with content array is converted to s
   });
 
   t.is(response.statusCode, 200);
-  // The request should succeed - tool message content array should be converted to string by plugin
+  // The request should succeed - tool message content array should be converted to text content parts array by plugin
   t.truthy(response.body);
 });
 
