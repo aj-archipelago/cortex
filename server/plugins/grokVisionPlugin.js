@@ -311,7 +311,7 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
 
                 if (Array.isArray(message.content)) {
                     return {
-                        ...message,
+                        ...parsedMessage,
                         content: await Promise.all(message.content.map(async item => {
                             // A content array item can be a plain string, a JSON string, or a valid content object
                             let itemToProcess, contentType;
