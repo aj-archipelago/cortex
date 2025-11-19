@@ -6,7 +6,9 @@ import {
     extractFilesFromChatHistory,
     formatFilesForTemplate,
     extractFilenameFromUrl,
-    combineFilenameWithUrlExtension
+    combineFilenameWithUrlExtension,
+    ensureFilenameExtension,
+    determineMimeTypeFromUrl
 } from '../../../lib/fileUtils.js';
 
 // Test extractFilesFromChatHistory
