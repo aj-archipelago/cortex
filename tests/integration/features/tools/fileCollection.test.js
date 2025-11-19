@@ -224,8 +224,7 @@ test('File collection: Remove single file', async t => {
         t.is(parsed.remainingFiles, 1);
         t.is(parsed.removedFiles.length, 1);
         t.is(parsed.removedFiles[0].filename, 'file1.jpg');
-        // Note: deletedFromCloud may be 0 if file has no hash or deletion fails (which is OK)
-        t.true(typeof parsed.deletedFromCloud === 'number');
+        t.true(parsed.message.includes('Cloud storage cleanup started in background'));
         
         // Verify it was removed
         const listResult = await callPathway('sys_tool_file_collection', {
@@ -273,7 +272,7 @@ test('File collection: Remove multiple files', async t => {
         t.is(parsed.removedCount, 2);
         t.is(parsed.remainingFiles, 0);
         t.is(parsed.removedFiles.length, 2);
-        t.true(parsed.message.includes('2 file(s) removed'));
+        t.true(parsed.message.includes('Cloud storage cleanup started in background'));
         
         // Verify collection is empty
         const listResult = await callPathway('sys_tool_file_collection', {

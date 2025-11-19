@@ -336,29 +336,27 @@ export default {
                      throw new Error(`No files found matching: ${notFoundFiles.join(', ')}`);
                 }
 
-                // Delete files from cloud storage (outside lock - idempotent operation)
-                for (const fileInfo of filesToRemove) {
-                    if (fileInfo.hash) {
-                        try {
-                            logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash})`);
-                            const deleted = await deleteFileByHash(fileInfo.hash, resolver);
-                            if (deleted) {
-                                deletedFromCloud++;
-                            }
-                        } catch (error) {
-                            const errorMsg = error?.message || String(error);
-                            logger.warn(`Failed to delete file ${fileInfo.filename} (hash: ${fileInfo.hash}) from cloud storage: ${errorMsg}`);
-                            deletionErrors.push({ filename: fileInfo.filename, error: errorMsg });
-                        }
-                    }
-                }
-
-                // Use optimistic locking to remove files from collection
+                // Use optimistic locking to remove files from collection FIRST
                 const fileIdsToRemove = new Set(filesToRemove.map(f => f.id));
                 const finalCollection = await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
                     // Remove files by ID
                     return collection.filter(file => !fileIdsToRemove.has(file.id));
                 });
+
+                // Delete files from cloud storage ASYNC (fire and forget, but log errors)
+                // We do this after updating collection so user gets fast response and files are "gone" from UI immediately
+                (async () => {
+                    for (const fileInfo of filesToRemove) {
+                        if (fileInfo.hash) {
+                            try {
+                                logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash})`);
+                                await deleteFileByHash(fileInfo.hash, resolver);
+                            } catch (error) {
+                                logger.warn(`Failed to delete file ${fileInfo.filename} (hash: ${fileInfo.hash}) from cloud storage: ${error?.message || String(error)}`);
+                            }
+                        }
+                    }
+                })().catch(err => logger.error(`Async cloud deletion error: ${err}`));
 
                 removedCount = filesToRemove.length;
                 removedFiles = filesToRemove;
@@ -366,28 +364,20 @@ export default {
                 // Build result message
                 let message = `${removedCount} file(s) removed from collection`;
                 
-                if (deletedFromCloud > 0) {
-                    message += ` (${deletedFromCloud} deleted from cloud storage)`;
-                }
-                
                 if (notFoundFiles.length > 0) {
                     message += `. Could not find: ${notFoundFiles.join(', ')}`;
                 }
                 
-                if (deletionErrors.length > 0) {
-                    message += `. ${deletionErrors.length} deletion error(s) occurred`;
-                }
+                message += " (Cloud storage cleanup started in background)";
 
                 resolver.tool = JSON.stringify({ toolUsed: "RemoveFileFromCollection" });
                 return JSON.stringify({
                     success: true,
                     removedCount: removedCount,
-                    deletedFromCloud: deletedFromCloud,
                     remainingFiles: finalCollection.length,
                     message: message,
                     removedFiles: removedFiles,
-                    notFoundFiles: notFoundFiles.length > 0 ? notFoundFiles : undefined,
-                    deletionErrors: deletionErrors.length > 0 ? deletionErrors : undefined
+                    notFoundFiles: notFoundFiles.length > 0 ? notFoundFiles : undefined
                 });
 
             } else {
