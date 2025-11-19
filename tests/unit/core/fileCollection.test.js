@@ -4,7 +4,9 @@
 import test from 'ava';
 import { 
     extractFilesFromChatHistory,
-    formatFilesForTemplate
+    formatFilesForTemplate,
+    extractFilenameFromUrl,
+    combineFilenameWithUrlExtension
 } from '../../../lib/fileUtils.js';
 
 // Test extractFilesFromChatHistory
@@ -255,5 +257,77 @@ test('extractFilesFromChatHistory should extract filename from various fields', 
             t.is(files[0].filename, testCase.expected, `Test case ${index} failed`);
         }
     });
+});
+
+// Test extractFilenameFromUrl
+test('extractFilenameFromUrl should return null when no URL provided', t => {
+    t.is(extractFilenameFromUrl(null), null);
+    t.is(extractFilenameFromUrl(null, null), null);
+    t.is(extractFilenameFromUrl(undefined), null);
+    t.is(extractFilenameFromUrl(''), null);
+});
+
+test('extractFilenameFromUrl should extract filename from Azure URL', t => {
+    t.is(extractFilenameFromUrl('https://example.com/file.pdf'), 'file.pdf');
+    t.is(extractFilenameFromUrl('https://storage.blob.core.windows.net/container/file.docx'), 'file.docx');
+});
+
+test('extractFilenameFromUrl should prefer GCS URL over Azure URL', t => {
+    const azureUrl = 'https://example.com/file1.pdf';
+    const gcsUrl = 'gs://bucket/file2.pdf';
+    t.is(extractFilenameFromUrl(azureUrl, gcsUrl), 'file2.pdf');
+});
+
+test('extractFilenameFromUrl should remove query parameters', t => {
+    t.is(extractFilenameFromUrl('https://example.com/file.pdf?token=abc123'), 'file.pdf');
+    t.is(extractFilenameFromUrl('https://example.com/file.pdf?token=abc&sig=xyz'), 'file.pdf');
+});
+
+test('extractFilenameFromUrl should handle URLs without extension', t => {
+    t.is(extractFilenameFromUrl('https://example.com/filename'), 'filename');
+    t.is(extractFilenameFromUrl('https://example.com/path/to/file'), 'file');
+});
+
+// Test combineFilenameWithUrlExtension
+test('combineFilenameWithUrlExtension should return null when no URL and no original filename', t => {
+    t.is(combineFilenameWithUrlExtension(null, null), null);
+    t.is(combineFilenameWithUrlExtension(null, null, null), null);
+    t.is(combineFilenameWithUrlExtension('', null), null);
+});
+
+test('combineFilenameWithUrlExtension should return original filename when no URL', t => {
+    t.is(combineFilenameWithUrlExtension('document.pdf', null), 'document.pdf');
+    t.is(combineFilenameWithUrlExtension('document.pdf', null, null), 'document.pdf');
+});
+
+test('combineFilenameWithUrlExtension should handle empty string original filename', t => {
+    // Empty string should be treated as missing, so should return URL filename
+    const result = combineFilenameWithUrlExtension('', 'https://example.com/file.pdf');
+    t.is(result, 'file.pdf');
+});
+
+test('combineFilenameWithUrlExtension should preserve original base name with URL extension', t => {
+    t.is(combineFilenameWithUrlExtension('document.docx', 'https://example.com/file.pdf'), 'document.pdf');
+    t.is(combineFilenameWithUrlExtension('myfile.txt', 'https://example.com/file.md'), 'myfile.md');
+});
+
+test('combineFilenameWithUrlExtension should use URL filename when no original filename', t => {
+    t.is(combineFilenameWithUrlExtension(null, 'https://example.com/file.pdf'), 'file.pdf');
+    t.is(combineFilenameWithUrlExtension(null, 'https://example.com/file.pdf', 'gs://bucket/file.docx'), 'file.docx');
+});
+
+test('combineFilenameWithUrlExtension should prefer GCS URL extension', t => {
+    const result = combineFilenameWithUrlExtension('document.docx', 'https://example.com/file.pdf', 'gs://bucket/file.md');
+    t.is(result, 'document.md');
+});
+
+test('combineFilenameWithUrlExtension should handle files without extension', t => {
+    t.is(combineFilenameWithUrlExtension('document', 'https://example.com/file.pdf'), 'document.pdf');
+    t.is(combineFilenameWithUrlExtension('document.docx', 'https://example.com/file'), 'document');
+});
+
+test('combineFilenameWithUrlExtension should handle URL without extension', t => {
+    t.is(combineFilenameWithUrlExtension('document.docx', 'https://example.com/file'), 'document');
+    t.is(combineFilenameWithUrlExtension('document', 'https://example.com/file'), 'document');
 });
 

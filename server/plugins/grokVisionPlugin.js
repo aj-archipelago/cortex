@@ -260,7 +260,7 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
     async tryParseMessages(messages) {
         // Whitelist of content types we accept from parsed JSON strings
         // Only these types will be used if a JSON string parses to an object
-        const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url'];
+        const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url', 'tool_use', 'tool_result'];
         
         // Helper to check if an object is a valid whitelisted content type
         const isValidContentObject = (obj) => {
