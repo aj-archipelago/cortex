@@ -6,7 +6,6 @@ import {
     extractFilesFromChatHistory,
     formatFilesForTemplate,
     extractFilenameFromUrl,
-    combineFilenameWithUrlExtension,
     ensureFilenameExtension,
     determineMimeTypeFromUrl
 } from '../../../lib/fileUtils.js';
@@ -290,46 +289,48 @@ test('extractFilenameFromUrl should handle URLs without extension', t => {
     t.is(extractFilenameFromUrl('https://example.com/path/to/file'), 'file');
 });
 
-// Test combineFilenameWithUrlExtension
-test('combineFilenameWithUrlExtension should return null when no URL and no original filename', t => {
-    t.is(combineFilenameWithUrlExtension(null, null), null);
-    t.is(combineFilenameWithUrlExtension(null, null, null), null);
-    t.is(combineFilenameWithUrlExtension('', null), null);
+// Test ensureFilenameExtension and determineMimeTypeFromUrl (replacing deprecated combineFilenameWithUrlExtension)
+test('ensureFilenameExtension should return null when no MIME type', t => {
+    t.is(ensureFilenameExtension(null, null), null);
+    t.is(ensureFilenameExtension('file.pdf', null), 'file.pdf');
+    t.is(ensureFilenameExtension('file.pdf', 'application/octet-stream'), 'file.pdf');
 });
 
-test('combineFilenameWithUrlExtension should return original filename when no URL', t => {
-    t.is(combineFilenameWithUrlExtension('document.pdf', null), 'document.pdf');
-    t.is(combineFilenameWithUrlExtension('document.pdf', null, null), 'document.pdf');
+test('ensureFilenameExtension should return original filename when no MIME type', t => {
+    t.is(ensureFilenameExtension('document.pdf', null), 'document.pdf');
+    t.is(ensureFilenameExtension('document.pdf', 'application/octet-stream'), 'document.pdf');
 });
 
-test('combineFilenameWithUrlExtension should handle empty string original filename', t => {
-    // Empty string should be treated as missing, so should return URL filename
-    const result = combineFilenameWithUrlExtension('', 'https://example.com/file.pdf');
-    t.is(result, 'file.pdf');
+test('ensureFilenameExtension should handle empty string filename', t => {
+    // Empty string should return null (no filename to work with)
+    t.is(ensureFilenameExtension('', 'text/plain'), null);
 });
 
-test('combineFilenameWithUrlExtension should preserve original base name with URL extension', t => {
-    t.is(combineFilenameWithUrlExtension('document.docx', 'https://example.com/file.pdf'), 'document.pdf');
-    t.is(combineFilenameWithUrlExtension('myfile.txt', 'https://example.com/file.md'), 'myfile.md');
+test('ensureFilenameExtension should preserve base name with correct extension from MIME type', t => {
+    t.is(ensureFilenameExtension('document.docx', 'application/pdf'), 'document.pdf');
+    t.is(ensureFilenameExtension('myfile.txt', 'text/markdown'), 'myfile.md');
+    t.is(ensureFilenameExtension('image.jpg', 'image/jpeg'), 'image.jpg'); // Already correct
 });
 
-test('combineFilenameWithUrlExtension should use URL filename when no original filename', t => {
-    t.is(combineFilenameWithUrlExtension(null, 'https://example.com/file.pdf'), 'file.pdf');
-    t.is(combineFilenameWithUrlExtension(null, 'https://example.com/file.pdf', 'gs://bucket/file.docx'), 'file.docx');
+test('ensureFilenameExtension should use MIME type extension when no filename', t => {
+    t.is(ensureFilenameExtension(null, 'application/pdf'), null); // Returns null, doesn't generate filename
 });
 
-test('combineFilenameWithUrlExtension should prefer GCS URL extension', t => {
-    const result = combineFilenameWithUrlExtension('document.docx', 'https://example.com/file.pdf', 'gs://bucket/file.md');
-    t.is(result, 'document.md');
+test('determineMimeTypeFromUrl should prefer GCS URL', t => {
+    const mimeType1 = determineMimeTypeFromUrl('https://example.com/file.pdf', 'gs://bucket/file.md');
+    t.is(mimeType1, 'text/markdown');
+    
+    const mimeType2 = determineMimeTypeFromUrl('https://example.com/file.pdf', null);
+    t.is(mimeType2, 'application/pdf');
 });
 
-test('combineFilenameWithUrlExtension should handle files without extension', t => {
-    t.is(combineFilenameWithUrlExtension('document', 'https://example.com/file.pdf'), 'document.pdf');
-    t.is(combineFilenameWithUrlExtension('document.docx', 'https://example.com/file'), 'document');
+test('ensureFilenameExtension should handle files without extension', t => {
+    t.is(ensureFilenameExtension('document', 'application/pdf'), 'document.pdf');
+    t.is(ensureFilenameExtension('document.docx', 'application/octet-stream'), 'document.docx'); // No change for binary
 });
 
-test('combineFilenameWithUrlExtension should handle URL without extension', t => {
-    t.is(combineFilenameWithUrlExtension('document.docx', 'https://example.com/file'), 'document');
-    t.is(combineFilenameWithUrlExtension('document', 'https://example.com/file'), 'document');
+test('ensureFilenameExtension should normalize extensions (jpeg->jpg, markdown->md)', t => {
+    t.is(ensureFilenameExtension('image.jpeg', 'image/jpeg'), 'image.jpg');
+    t.is(ensureFilenameExtension('doc.markdown', 'text/markdown'), 'doc.md');
 });
 
