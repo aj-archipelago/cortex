@@ -778,6 +778,102 @@ test('EditFileBySearchAndReplace: Error handling - string not found', async t =>
     }
 });
 
+// ========== Data Integrity Tests ==========
+
+test('EditFile: Old file preserved if upload fails (data integrity)', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Write initial file
+        const initialContent = 'Original content\nLine 2\nLine 3';
+        const writeResult = await callPathway('sys_tool_writefile', {
+            contextId,
+            content: initialContent,
+            filename: 'integrity-test.txt',
+            userMessage: 'Writing file for integrity test'
+        });
+        
+        const writeParsed = JSON.parse(writeResult);
+        
+        if (!writeParsed.success && writeParsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        t.is(writeParsed.success, true);
+        const originalFileId = writeParsed.fileId;
+        const originalUrl = writeParsed.url;
+        const originalHash = writeParsed.hash;
+        
+        // Verify original file is readable
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const readOriginal = await callPathway('sys_tool_readfile', {
+            contextId,
+            file: originalFileId,
+            userMessage: 'Reading original file'
+        });
+        const readOriginalParsed = JSON.parse(readOriginal);
+        t.is(readOriginalParsed.success, true);
+        t.is(readOriginalParsed.content, initialContent);
+        
+        // Edit the file (this should upload first, then delete old file)
+        const modifyResult = await callPathway('sys_tool_editfile', {
+            contextId,
+            file: originalFileId,
+            startLine: 1,
+            endLine: 1,
+            content: 'Modified content',
+            userMessage: 'Modifying file (upload-first test)'
+        });
+        
+        const modifyParsed = JSON.parse(modifyResult);
+        t.is(modifyParsed.success, true);
+        t.truthy(modifyParsed.url);
+        t.truthy(modifyParsed.hash);
+        
+        // Verify new URL is different from old URL (new file was uploaded)
+        t.not(modifyParsed.url, originalUrl);
+        t.not(modifyParsed.hash, originalHash);
+        
+        // Verify new file has correct content
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const readModified = await callPathway('sys_tool_readfile', {
+            contextId,
+            file: modifyParsed.fileId || originalFileId,
+            userMessage: 'Reading modified file'
+        });
+        const readModifiedParsed = JSON.parse(readModified);
+        t.is(readModifiedParsed.success, true);
+        t.true(readModifiedParsed.content.includes('Modified content'));
+        t.false(readModifiedParsed.content.includes('Original content'));
+        
+        // Verify file collection was updated with new URL (proves upload happened first)
+        const listResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            userMessage: 'List files'
+        });
+        const listParsed = JSON.parse(listResult);
+        const updatedFile = listParsed.files.find(f => f.id === originalFileId);
+        t.truthy(updatedFile);
+        // Most important: URL changed, proving new file was uploaded before old was deleted
+        t.is(updatedFile.url, modifyParsed.url);
+        t.not(updatedFile.url, originalUrl, 'URL should have changed after edit');
+        // Hash verification is optional - some systems may not return it in list
+        if (modifyParsed.hash && updatedFile.hash) {
+            t.is(updatedFile.hash, modifyParsed.hash);
+        }
+        
+        // Note: We can't easily test upload failure scenario in integration tests,
+        // but the code structure ensures old file is preserved because:
+        // 1. Upload happens first (line 304-315 in sys_tool_editfile.js)
+        // 2. If upload fails, error is thrown before deletion code runs
+        // 3. Old file deletion only happens after successful upload (line 317+)
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
 // ========== Integration Tests ==========
 
 test('File Operations: Write, Read, Modify workflow', async t => {

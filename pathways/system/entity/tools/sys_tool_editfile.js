@@ -301,21 +301,7 @@ export default {
                 mimeType = `${mimeType}; charset=utf-8`;
             }
 
-            // Delete the old file version before uploading the new one
-            const oldHash = foundFile.hash;
-            if (oldHash) {
-                logger.info(`Deleting old file version with hash ${oldHash} before uploading new version`);
-                const deleted = await deleteFileByHash(oldHash, resolver);
-                if (deleted) {
-                    logger.info(`Successfully deleted old file version`);
-                } else {
-                    logger.info(`Old file version not found or already deleted (hash: ${oldHash})`);
-                }
-            } else {
-                logger.info(`No hash found for old file, skipping deletion`);
-            }
-
-            // Upload the modified file
+            // Upload the modified file FIRST (safer: prevent data loss if upload fails)
             const fileBuffer = Buffer.from(modifiedContent, 'utf8');
             const uploadResult = await uploadFileToCloud(
                 fileBuffer,
@@ -326,6 +312,23 @@ export default {
 
             if (!uploadResult || !uploadResult.url) {
                 throw new Error('Failed to upload modified file to cloud storage');
+            }
+
+            // Now it is safe to delete the old file version
+            const oldHash = foundFile.hash;
+            if (oldHash) {
+                // Fire-and-forget async deletion for better performance, but log errors
+                // We don't want to fail the whole operation if cleanup fails, since we have the new file
+                (async () => {
+                    try {
+                        logger.info(`Deleting old file version with hash ${oldHash} (background task)`);
+                        await deleteFileByHash(oldHash, resolver);
+                    } catch (cleanupError) {
+                        logger.warn(`Failed to cleanup old file version (hash: ${oldHash}): ${cleanupError.message}`);
+                    }
+                })().catch(err => logger.error(`Async cleanup error: ${err}`));
+            } else {
+                logger.info(`No hash found for old file, skipping deletion`);
             }
 
             // Update the file collection entry with new URL and hash using optimistic locking
