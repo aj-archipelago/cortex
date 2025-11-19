@@ -92,7 +92,7 @@ export default {
         const pathwayResolver = resolver;
 
         try {   
-            let model = "gemini-25-flash-image";
+            let model = "gemini-flash-25-image";
             let prompt = args.detailedInstructions || "";
             
             // Resolve input images to URLs using the common utility

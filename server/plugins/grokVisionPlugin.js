@@ -258,50 +258,50 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
 
     // Override tryParseMessages to preserve X.AI vision detail field
     async tryParseMessages(messages) {
-        return await Promise.all(messages.map(async message => {
-            try {
-                // Handle tool-related message types
-                if (message.role === "tool" || (message.role === "assistant" && message.tool_calls)) {
-                    return {
-                        ...message
-                    };
-                }
-
-                if (Array.isArray(message.content)) {
-                    return {
-                        ...message,
-                        content: await Promise.all(message.content.map(async item => {
-                            const parsedItem = safeJsonParse(item);
-
-                            if (typeof parsedItem === 'string') {
-                                return { type: 'text', text: parsedItem };
-                            }
-
-                            if (typeof parsedItem === 'object' && parsedItem !== null) {
-                                // Handle both 'image' and 'image_url' types
-                                if (parsedItem.type === 'image' || parsedItem.type === 'image_url') {
-                                    const url = parsedItem.url || parsedItem.image_url?.url;
-                                    const detail = parsedItem.image_url?.detail || parsedItem.detail;
-                                    if (url && await this.validateImageUrl(url)) {
-                                        const imageUrl = { url };
-                                        if (detail) {
-                                            imageUrl.detail = detail;
-                                        }
-                                        return { type: 'image_url', image_url: imageUrl };
-                                    }
-                                    return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
-                                }
-                            }
-                            
-                            return parsedItem;
-                        }))
-                    };
-                }
-            } catch (e) {
-                return message;
+        // First, extract detail fields from original messages before parsing
+        // We need to preserve these because the parent's tryParseMessages doesn't handle them
+        const detailMap = new Map();
+        messages.forEach((message, index) => {
+            if (Array.isArray(message.content)) {
+                message.content.forEach((item, itemIndex) => {
+                    const parsedItem = safeJsonParse(item);
+                    const detail = parsedItem?.image_url?.detail || parsedItem?.detail || 
+                                  (typeof item === 'object' && item !== null ? (item.image_url?.detail || item.detail) : null);
+                    if (detail) {
+                        detailMap.set(`${index}-${itemIndex}`, detail);
+                    }
+                });
             }
-            return message;
-        }));
+        });
+        
+        // Call parent's tryParseMessages to handle all the standard parsing
+        const parsedMessages = await super.tryParseMessages(messages);
+        
+        // Now restore the detail fields to image_url objects
+        return parsedMessages.map((parsedMessage, index) => {
+            if (Array.isArray(parsedMessage.content)) {
+                return {
+                    ...parsedMessage,
+                    content: parsedMessage.content.map((item, itemIndex) => {
+                        // If this is an image_url item, check if we have a detail field to restore
+                        if (item.type === 'image_url' && item.image_url) {
+                            const detail = detailMap.get(`${index}-${itemIndex}`);
+                            if (detail) {
+                                return {
+                                    ...item,
+                                    image_url: {
+                                        ...item.image_url,
+                                        detail: detail
+                                    }
+                                };
+                            }
+                        }
+                        return item;
+                    })
+                };
+            }
+            return parsedMessage;
+        });
     }
 
     // Override parseResponse to handle Grok-specific response fields

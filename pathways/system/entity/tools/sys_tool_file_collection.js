@@ -91,7 +91,7 @@ export default {
             icon: "📋",
             function: {
                 name: "ListFileCollection",
-                description: "List all files in your collection, optionally filtered by tags or sorted by date. Useful for getting an overview of your stored files.",
+                description: "List all files in your collection, optionally filtered by tags or sorted by date. Useful for getting an overview of your stored files or when you don't know the exact file you're looking for.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -123,7 +123,7 @@ export default {
             icon: "🗑️",
             function: {
                 name: "RemoveFileFromCollection",
-                description: "Remove one or more files from your collection and delete them from cloud storage. Use a file ID to remove a specific file, or use '*' to remove all files. The file will be deleted from cloud storage (if a hash is available) and removed from your collection.",
+                description: "Remove a file from your collection and delete it from cloud storage.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -196,6 +196,8 @@ export default {
                     throw new Error("query is required and must be a string");
                 }
 
+                // Ensure filterTags is always an array
+                const safeFilterTags = Array.isArray(filterTags) ? filterTags : [];
                 const queryLower = query.toLowerCase();
                 
                 // Use optimistic locking to update lastAccessed
@@ -203,18 +205,21 @@ export default {
                     // Find matching files and update their lastAccessed
                     const fileIds = new Set();
                     collection.forEach(file => {
+                        // Skip files without filename
+                        if (!file.filename) return;
+                        
                         // Search in filename, tags, and notes
                         const filenameMatch = file.filename.toLowerCase().includes(queryLower);
                         const notesMatch = file.notes && file.notes.toLowerCase().includes(queryLower);
-                        const tagMatch = file.tags.some(tag => tag.toLowerCase().includes(queryLower));
+                        const tagMatch = Array.isArray(file.tags) && file.tags.some(tag => tag.toLowerCase().includes(queryLower));
                         
                         const matchesQuery = filenameMatch || notesMatch || tagMatch;
                         
                         // Filter by tags if provided
-                        const matchesTags = filterTags.length === 0 || 
-                            filterTags.every(filterTag => 
+                        const matchesTags = safeFilterTags.length === 0 || 
+                            (Array.isArray(file.tags) && safeFilterTags.every(filterTag => 
                                 file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
-                            );
+                            ));
                         
                         if (matchesQuery && matchesTags) {
                             fileIds.add(file.id);
@@ -236,24 +241,27 @@ export default {
                 
                 // Filter and sort results (for display only, not modifying)
                 let results = collection.filter(file => {
+                    // Skip files without filename
+                    if (!file.filename) return false;
+                    
                     const filenameMatch = file.filename.toLowerCase().includes(queryLower);
                     const notesMatch = file.notes && file.notes.toLowerCase().includes(queryLower);
-                    const tagMatch = file.tags.some(tag => tag.toLowerCase().includes(queryLower));
+                    const tagMatch = Array.isArray(file.tags) && file.tags.some(tag => tag.toLowerCase().includes(queryLower));
                     
                     const matchesQuery = filenameMatch || notesMatch || tagMatch;
                     
-                    const matchesTags = filterTags.length === 0 || 
-                        filterTags.every(filterTag => 
+                    const matchesTags = safeFilterTags.length === 0 || 
+                        (Array.isArray(file.tags) && safeFilterTags.every(filterTag => 
                             file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
-                        );
+                        ));
                     
                     return matchesQuery && matchesTags;
                 });
 
                 // Sort by relevance (filename matches first, then by date)
                 results.sort((a, b) => {
-                    const aFilenameMatch = a.filename.toLowerCase().includes(queryLower);
-                    const bFilenameMatch = b.filename.toLowerCase().includes(queryLower);
+                    const aFilenameMatch = a.filename && a.filename.toLowerCase().includes(queryLower);
+                    const bFilenameMatch = b.filename && b.filename.toLowerCase().includes(queryLower);
                     if (aFilenameMatch && !bFilenameMatch) return -1;
                     if (!aFilenameMatch && bFilenameMatch) return 1;
                     return new Date(b.addedDate) - new Date(a.addedDate);
@@ -383,7 +391,7 @@ export default {
                 // Filter by tags if provided
                 if (filterTags.length > 0) {
                     results = results.filter(file =>
-                        filterTags.every(filterTag =>
+                        Array.isArray(file.tags) && filterTags.every(filterTag =>
                             file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
                         )
                     );

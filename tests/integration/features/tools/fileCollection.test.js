@@ -791,7 +791,7 @@ test('resolveFileParameter: Return null when fileParam is empty', async t => {
     }
 });
 
-test('resolveFileParameter: Fuzzy filename matching', async t => {
+test('resolveFileParameter: Contains match on filename', async t => {
     const contextId = createTestContext();
     
     try {
@@ -804,9 +804,34 @@ test('resolveFileParameter: Fuzzy filename matching', async t => {
             userMessage: 'Adding test file'
         });
         
-        // Resolve by partial filename (fuzzy match)
+        // Resolve by partial filename (contains match)
         const resolved = await resolveFileParameter('document.pdf', contextId);
         t.is(resolved, 'https://example.com/my-document.pdf');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('resolveFileParameter: Contains match requires minimum 4 characters', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a file with a specific filename
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test.pdf',
+            gcs: 'gs://bucket/test.pdf',
+            filename: 'test.pdf',
+            userMessage: 'Adding test file'
+        });
+        
+        // Try to resolve with a 3-character parameter (should fail - too short)
+        const resolvedShort = await resolveFileParameter('pdf', contextId);
+        t.is(resolvedShort, null, 'Should not match with parameter shorter than 4 characters');
+        
+        // Try to resolve with a 4-character parameter (should succeed)
+        const resolvedLong = await resolveFileParameter('test', contextId);
+        t.is(resolvedLong, 'https://example.com/test.pdf', 'Should match with parameter 4+ characters');
     } finally {
         await cleanup(contextId);
     }

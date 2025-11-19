@@ -4,7 +4,10 @@
 import test from 'ava';
 import { 
     extractFilesFromChatHistory,
-    formatFilesForTemplate
+    formatFilesForTemplate,
+    extractFilenameFromUrl,
+    ensureFilenameExtension,
+    determineMimeTypeFromUrl
 } from '../../../lib/fileUtils.js';
 
 // Test extractFilesFromChatHistory
@@ -124,11 +127,15 @@ test('formatFilesForTemplate should format files correctly', t => {
     ];
     
     const result = formatFilesForTemplate(collection);
-    t.true(result.includes('Hash | Filename | URL | Date Added | Notes'));
-    t.true(result.includes('def456 | doc.pdf |'));
-    t.true(result.includes('abc123 | image.jpg |'));
-    t.true(result.includes('Test image'));
-    // Should be sorted by lastAccessed (most recent first)
+    // Should not include header or notes
+    t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
+    t.false(result.includes('Test image'));
+    // Should include hash, filename, url, date, and tags
+    t.true(result.includes('def456 | doc.pdf | https://example.com/doc.pdf'));
+    t.true(result.includes('abc123 | image.jpg | https://example.com/image.jpg'));
+    t.true(result.includes('photo')); // tags should be included
+    t.true(result.includes('Jan')); // date should be included
+    // Should be sorted by lastAccessed (most recently accessed first)
     const docIndex = result.indexOf('def456');
     const imageIndex = result.indexOf('abc123');
     t.true(docIndex < imageIndex, 'More recently accessed file should appear first');
@@ -150,11 +157,15 @@ test('formatFilesForTemplate should handle files without optional fields', t => 
     ];
     
     const result = formatFilesForTemplate(collection);
-    t.true(result.includes('Hash | Filename | URL | Date Added | Notes'));
-    t.true(result.includes(' | image.jpg |'));
+    // Should not include header
+    t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
+    // Should include filename, url, and date even without hash or tags
+    t.true(result.includes('image.jpg'));
+    t.true(result.includes('https://example.com/image.jpg'));
+    // Date should be included (may be 2023 or 2024 due to timezone conversion)
+    t.true(result.includes('2023') || result.includes('2024'));
     t.false(result.includes('Azure URL'));
     t.false(result.includes('GCS URL'));
-    t.false(result.includes('Tags'));
 });
 
 test('formatFilesForTemplate should limit to 10 files and show note', t => {
@@ -162,24 +173,24 @@ test('formatFilesForTemplate should limit to 10 files and show note', t => {
         id: `file-${i}`,
         filename: `file${i}.txt`,
         hash: `hash${i}`,
+        url: `https://example.com/file${i}.txt`,
         addedDate: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
         lastAccessed: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`
     }));
     
     const result = formatFilesForTemplate(collection);
-    // Should only show 10 files - count file lines (excluding header, separator, and note)
+    // Should only show 10 files - count file lines (excluding the note line)
     const lines = result.split('\n');
-    // Find the separator line index
-    const separatorIndex = lines.findIndex(line => line.startsWith('-'));
-    // Count file lines (between separator and note, or end of result)
-    const fileLines = lines.slice(separatorIndex + 1).filter(line => 
-        line.includes('|') && !line.startsWith('Note:')
+    // Count file lines (lines with | that are not the note line)
+    const fileLines = lines.filter(line => 
+        line.includes('|') && !line.includes('more file(s) available')
     );
     const fileCount = fileLines.length;
     t.is(fileCount, 10);
-    // Should include note about more files
-    t.true(result.includes('Note: Showing the last 10 most recently used files'));
-    t.true(result.includes('5 more file(s) are available'));
+    // Should include compact note about more files
+    t.true(result.includes('more file(s) available'));
+    t.true(result.includes('5 more file(s) available'));
+    t.true(result.includes('ListFileCollection or SearchFileCollection'));
 });
 
 test('extractFilesFromChatHistory should handle mixed content types', t => {
@@ -255,5 +266,79 @@ test('extractFilesFromChatHistory should extract filename from various fields', 
             t.is(files[0].filename, testCase.expected, `Test case ${index} failed`);
         }
     });
+});
+
+// Test extractFilenameFromUrl
+test('extractFilenameFromUrl should return null when no URL provided', t => {
+    t.is(extractFilenameFromUrl(null), null);
+    t.is(extractFilenameFromUrl(null, null), null);
+    t.is(extractFilenameFromUrl(undefined), null);
+    t.is(extractFilenameFromUrl(''), null);
+});
+
+test('extractFilenameFromUrl should extract filename from Azure URL', t => {
+    t.is(extractFilenameFromUrl('https://example.com/file.pdf'), 'file.pdf');
+    t.is(extractFilenameFromUrl('https://storage.blob.core.windows.net/container/file.docx'), 'file.docx');
+});
+
+test('extractFilenameFromUrl should prefer GCS URL over Azure URL', t => {
+    const azureUrl = 'https://example.com/file1.pdf';
+    const gcsUrl = 'gs://bucket/file2.pdf';
+    t.is(extractFilenameFromUrl(azureUrl, gcsUrl), 'file2.pdf');
+});
+
+test('extractFilenameFromUrl should remove query parameters', t => {
+    t.is(extractFilenameFromUrl('https://example.com/file.pdf?token=abc123'), 'file.pdf');
+    t.is(extractFilenameFromUrl('https://example.com/file.pdf?token=abc&sig=xyz'), 'file.pdf');
+});
+
+test('extractFilenameFromUrl should handle URLs without extension', t => {
+    t.is(extractFilenameFromUrl('https://example.com/filename'), 'filename');
+    t.is(extractFilenameFromUrl('https://example.com/path/to/file'), 'file');
+});
+
+// Test ensureFilenameExtension and determineMimeTypeFromUrl (replacing deprecated combineFilenameWithUrlExtension)
+test('ensureFilenameExtension should return null when no MIME type', t => {
+    t.is(ensureFilenameExtension(null, null), null);
+    t.is(ensureFilenameExtension('file.pdf', null), 'file.pdf');
+    t.is(ensureFilenameExtension('file.pdf', 'application/octet-stream'), 'file.pdf');
+});
+
+test('ensureFilenameExtension should return original filename when no MIME type', t => {
+    t.is(ensureFilenameExtension('document.pdf', null), 'document.pdf');
+    t.is(ensureFilenameExtension('document.pdf', 'application/octet-stream'), 'document.pdf');
+});
+
+test('ensureFilenameExtension should handle empty string filename', t => {
+    // Empty string should return null (no filename to work with)
+    t.is(ensureFilenameExtension('', 'text/plain'), null);
+});
+
+test('ensureFilenameExtension should preserve base name with correct extension from MIME type', t => {
+    t.is(ensureFilenameExtension('document.docx', 'application/pdf'), 'document.pdf');
+    t.is(ensureFilenameExtension('myfile.txt', 'text/markdown'), 'myfile.md');
+    t.is(ensureFilenameExtension('image.jpg', 'image/jpeg'), 'image.jpg'); // Already correct
+});
+
+test('ensureFilenameExtension should use MIME type extension when no filename', t => {
+    t.is(ensureFilenameExtension(null, 'application/pdf'), null); // Returns null, doesn't generate filename
+});
+
+test('determineMimeTypeFromUrl should prefer GCS URL', t => {
+    const mimeType1 = determineMimeTypeFromUrl('https://example.com/file.pdf', 'gs://bucket/file.md');
+    t.is(mimeType1, 'text/markdown');
+    
+    const mimeType2 = determineMimeTypeFromUrl('https://example.com/file.pdf', null);
+    t.is(mimeType2, 'application/pdf');
+});
+
+test('ensureFilenameExtension should handle files without extension', t => {
+    t.is(ensureFilenameExtension('document', 'application/pdf'), 'document.pdf');
+    t.is(ensureFilenameExtension('document.docx', 'application/octet-stream'), 'document.docx'); // No change for binary
+});
+
+test('ensureFilenameExtension should normalize extensions (jpeg->jpg, markdown->md)', t => {
+    t.is(ensureFilenameExtension('image.jpeg', 'image/jpeg'), 'image.jpg');
+    t.is(ensureFilenameExtension('doc.markdown', 'text/markdown'), 'doc.md');
 });
 
