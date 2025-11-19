@@ -123,20 +123,21 @@ export default {
             icon: "🗑️",
             function: {
                 name: "RemoveFileFromCollection",
-                description: "Remove a file from your collection and delete it from cloud storage.",
+                description: "Remove one or more files from your collection and delete them from cloud storage.",
                 parameters: {
                     type: "object",
                     properties: {
-                        fileId: {
-                            type: "string",
-                            description: "The file to remove (from ListFileCollection or SearchFileCollection): can be the hash, the filename, the URL, or the GCS URL, or '*' to remove all files."
+                        fileIds: {
+                            type: "array",
+                            items: { type: "string" },
+                            description: "Array of files to remove (from ListFileCollection or SearchFileCollection): each item can be the hash, the filename, the URL, or the GCS URL."
                         },
                         userMessage: {
                             type: "string",
                             description: "A user-friendly message that describes what you're doing with this tool"
                         }
                     },
-                    required: ["fileId", "userMessage"]
+                    required: ["fileIds", "userMessage"]
                 }
             }
         }
@@ -148,7 +149,7 @@ export default {
         // Determine which function was called based on which parameters are present
         const isAdd = args.fileUrl !== undefined || args.url !== undefined;
         const isSearch = args.query !== undefined;
-        const isRemove = args.fileId !== undefined;
+        const isRemove = args.fileIds !== undefined || args.fileId !== undefined;
 
         try {
             if (!contextId) {
@@ -287,41 +288,52 @@ export default {
 
             } else if (isRemove) {
                 // Remove file(s) from collection and delete from cloud storage
-                const { fileId } = args;
+                const { fileIds, fileId } = args;
                 
-                if (!fileId || typeof fileId !== 'string') {
-                    throw new Error("fileId is required and must be a string");
+                // Normalize input to array
+                let targetFiles = [];
+                if (Array.isArray(fileIds)) {
+                    targetFiles = fileIds;
+                } else if (fileId) {
+                    targetFiles = [fileId];
+                }
+
+                if (!targetFiles || targetFiles.length === 0) {
+                    throw new Error("fileIds array is required and must not be empty");
                 }
 
                 let removedCount = 0;
                 let removedFiles = [];
                 let deletedFromCloud = 0;
                 let deletionErrors = [];
+                let notFoundFiles = [];
                 let filesToRemove = [];
 
-                // First, identify files to remove (before locking)
-                if (fileId === '*') {
-                    // Load collection to get all files
-                    const collection = await loadFileCollection(contextId, contextKey, false);
-                    filesToRemove = collection.map(f => ({
-                        id: f.id,
-                        filename: f.filename,
-                        hash: f.hash || null
-                    }));
-                } else {
-                    // Load collection and find specific file
-                    const collection = await loadFileCollection(contextId, contextKey, false);
-                    const foundFile = findFileInCollection(fileId, collection);
+                // Load collection once to find all files
+                const collection = await loadFileCollection(contextId, contextKey, false);
+                
+                // Resolve all files
+                for (const target of targetFiles) {
+                    if (target === '*') continue; // Skip wildcard if passed
                     
-                    if (!foundFile) {
-                        throw new Error(`File with ID, filename, URL, or hash "${fileId}" not found in collection`);
+                    const foundFile = findFileInCollection(target, collection);
+                    
+                    if (foundFile) {
+                        // Avoid duplicates
+                        if (!filesToRemove.some(f => f.id === foundFile.id)) {
+                            filesToRemove.push({
+                                id: foundFile.id,
+                                filename: foundFile.filename,
+                                hash: foundFile.hash || null
+                            });
+                        }
+                    } else {
+                        notFoundFiles.push(target);
                     }
-                    
-                    filesToRemove = [{
-                        id: foundFile.id,
-                        filename: foundFile.filename,
-                        hash: foundFile.hash || null
-                    }];
+                }
+
+                if (filesToRemove.length === 0 && notFoundFiles.length > 0) {
+                     throw new Error(`No files found matching: ${notFoundFiles.join(', ')}`);
                 }
 
                 // Delete files from cloud storage (outside lock - idempotent operation)
@@ -352,22 +364,18 @@ export default {
                 removedFiles = filesToRemove;
 
                 // Build result message
-                let message;
-                if (fileId === '*') {
-                    message = `All ${removedCount} file(s) removed from collection`;
-                    if (deletedFromCloud > 0) {
-                        message += ` (${deletedFromCloud} deleted from cloud storage)`;
-                    }
-                    if (deletionErrors.length > 0) {
-                        message += `. ${deletionErrors.length} deletion error(s) occurred`;
-                    }
-                } else {
-                    message = `File "${removedFiles[0]?.filename || fileId}" removed from collection`;
-                    if (deletedFromCloud > 0) {
-                        message += ` and deleted from cloud storage`;
-                    } else if (removedFiles[0]?.hash) {
-                        message += ` (cloud storage deletion failed or file not found)`;
-                    }
+                let message = `${removedCount} file(s) removed from collection`;
+                
+                if (deletedFromCloud > 0) {
+                    message += ` (${deletedFromCloud} deleted from cloud storage)`;
+                }
+                
+                if (notFoundFiles.length > 0) {
+                    message += `. Could not find: ${notFoundFiles.join(', ')}`;
+                }
+                
+                if (deletionErrors.length > 0) {
+                    message += `. ${deletionErrors.length} deletion error(s) occurred`;
                 }
 
                 resolver.tool = JSON.stringify({ toolUsed: "RemoveFileFromCollection" });
@@ -378,6 +386,7 @@ export default {
                     remainingFiles: finalCollection.length,
                     message: message,
                     removedFiles: removedFiles,
+                    notFoundFiles: notFoundFiles.length > 0 ? notFoundFiles : undefined,
                     deletionErrors: deletionErrors.length > 0 ? deletionErrors : undefined
                 });
 

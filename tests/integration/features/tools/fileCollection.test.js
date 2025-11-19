@@ -214,7 +214,7 @@ test('File collection: Remove single file', async t => {
         // Remove file1
         const result = await callPathway('sys_tool_file_collection', {
             contextId,
-            fileId: file1Id,
+            fileIds: [file1Id],
             userMessage: 'Remove file 1'
         });
         
@@ -240,7 +240,54 @@ test('File collection: Remove single file', async t => {
     }
 });
 
-test('File collection: Remove all files', async t => {
+test('File collection: Remove multiple files', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add files
+        const addResult1 = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/file1.jpg',
+            filename: 'file1.jpg',
+            userMessage: 'Add file 1'
+        });
+        const file1Id = JSON.parse(addResult1).fileId;
+
+        const addResult2 = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/file2.pdf',
+            filename: 'file2.pdf',
+            userMessage: 'Add file 2'
+        });
+        const file2Id = JSON.parse(addResult2).fileId;
+        
+        // Remove multiple files
+        const result = await callPathway('sys_tool_file_collection', {
+            contextId,
+            fileIds: [file1Id, file2Id],
+            userMessage: 'Remove files 1 and 2'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, true);
+        t.is(parsed.removedCount, 2);
+        t.is(parsed.remainingFiles, 0);
+        t.is(parsed.removedFiles.length, 2);
+        t.true(parsed.message.includes('2 file(s) removed'));
+        
+        // Verify collection is empty
+        const listResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            userMessage: 'List files'
+        });
+        const listParsed = JSON.parse(listResult);
+        t.is(listParsed.totalFiles, 0);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: Wildcard removal should be ignored', async t => {
     const contextId = createTestContext();
     
     try {
@@ -252,36 +299,25 @@ test('File collection: Remove all files', async t => {
             userMessage: 'Add file 1'
         });
         
-        await callPathway('sys_tool_file_collection', {
-            contextId,
-            url: 'https://example.com/file2.pdf',
-            filename: 'file2.pdf',
-            userMessage: 'Add file 2'
-        });
-        
-        // Remove all
+        // Try to remove with wildcard - should be safe no-op
         const result = await callPathway('sys_tool_file_collection', {
-            contextId,
-            fileId: '*',
-            userMessage: 'Remove all files'
+             contextId,
+             fileId: '*',
+             userMessage: 'Attempt wildcard removal'
         });
-        
+
         const parsed = JSON.parse(result);
         t.is(parsed.success, true);
-        t.is(parsed.removedCount, 2);
-        t.is(parsed.remainingFiles, 0);
-        t.is(parsed.removedFiles.length, 2);
-        t.true(parsed.message.includes('All 2 file(s)'));
-        // Note: deletedFromCloud may be 0 if files have no hash or deletion fails (which is OK)
-        t.true(typeof parsed.deletedFromCloud === 'number');
+        t.is(parsed.removedCount, 0);
+        t.is(parsed.remainingFiles, 1); // File should still be there
         
-        // Verify collection is empty
+        // Verify collection is NOT empty
         const listResult = await callPathway('sys_tool_file_collection', {
             contextId,
             userMessage: 'List files'
         });
         const listParsed = JSON.parse(listResult);
-        t.is(listParsed.totalFiles, 0);
+        t.is(listParsed.totalFiles, 1);
     } finally {
         await cleanup(contextId);
     }
@@ -305,13 +341,13 @@ test('File collection: Error handling - remove non-existent file', async t => {
     try {
         const result = await callPathway('sys_tool_file_collection', {
             contextId,
-            fileId: 'non-existent-id',
+            fileIds: ['non-existent-id'],
             userMessage: 'Remove file'
         });
         
         const parsed = JSON.parse(result);
         t.is(parsed.success, false);
-        t.true(parsed.error.includes('not found in collection'));
+        t.true(parsed.error.includes('No files found matching'));
     } finally {
         await cleanup(contextId);
     }
