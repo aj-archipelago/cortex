@@ -127,11 +127,15 @@ test('formatFilesForTemplate should format files correctly', t => {
     ];
     
     const result = formatFilesForTemplate(collection);
-    t.true(result.includes('Hash | Filename | URL | Date Added | Notes'));
-    t.true(result.includes('def456 | doc.pdf |'));
-    t.true(result.includes('abc123 | image.jpg |'));
-    t.true(result.includes('Test image'));
-    // Should be sorted by lastAccessed (most recent first)
+    // Should not include header or notes
+    t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
+    t.false(result.includes('Test image'));
+    // Should include hash, filename, url, date, and tags
+    t.true(result.includes('def456 | doc.pdf | https://example.com/doc.pdf'));
+    t.true(result.includes('abc123 | image.jpg | https://example.com/image.jpg'));
+    t.true(result.includes('photo')); // tags should be included
+    t.true(result.includes('Jan')); // date should be included
+    // Should be sorted by lastAccessed (most recently accessed first)
     const docIndex = result.indexOf('def456');
     const imageIndex = result.indexOf('abc123');
     t.true(docIndex < imageIndex, 'More recently accessed file should appear first');
@@ -153,11 +157,15 @@ test('formatFilesForTemplate should handle files without optional fields', t => 
     ];
     
     const result = formatFilesForTemplate(collection);
-    t.true(result.includes('Hash | Filename | URL | Date Added | Notes'));
-    t.true(result.includes(' | image.jpg |'));
+    // Should not include header
+    t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
+    // Should include filename, url, and date even without hash or tags
+    t.true(result.includes('image.jpg'));
+    t.true(result.includes('https://example.com/image.jpg'));
+    // Date should be included (may be 2023 or 2024 due to timezone conversion)
+    t.true(result.includes('2023') || result.includes('2024'));
     t.false(result.includes('Azure URL'));
     t.false(result.includes('GCS URL'));
-    t.false(result.includes('Tags'));
 });
 
 test('formatFilesForTemplate should limit to 10 files and show note', t => {
@@ -165,24 +173,24 @@ test('formatFilesForTemplate should limit to 10 files and show note', t => {
         id: `file-${i}`,
         filename: `file${i}.txt`,
         hash: `hash${i}`,
+        url: `https://example.com/file${i}.txt`,
         addedDate: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
         lastAccessed: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`
     }));
     
     const result = formatFilesForTemplate(collection);
-    // Should only show 10 files - count file lines (excluding header, separator, and note)
+    // Should only show 10 files - count file lines (excluding the note line)
     const lines = result.split('\n');
-    // Find the separator line index
-    const separatorIndex = lines.findIndex(line => line.startsWith('-'));
-    // Count file lines (between separator and note, or end of result)
-    const fileLines = lines.slice(separatorIndex + 1).filter(line => 
-        line.includes('|') && !line.startsWith('Note:')
+    // Count file lines (lines with | that are not the note line)
+    const fileLines = lines.filter(line => 
+        line.includes('|') && !line.includes('more file(s) available')
     );
     const fileCount = fileLines.length;
     t.is(fileCount, 10);
-    // Should include note about more files
-    t.true(result.includes('Note: Showing the last 10 most recently used files'));
-    t.true(result.includes('5 more file(s) are available'));
+    // Should include compact note about more files
+    t.true(result.includes('more file(s) available'));
+    t.true(result.includes('5 more file(s) available'));
+    t.true(result.includes('ListFileCollection or SearchFileCollection'));
 });
 
 test('extractFilesFromChatHistory should handle mixed content types', t => {

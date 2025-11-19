@@ -55,7 +55,8 @@ export default {
         codeRequestId: ``,
         skipCallbackMessage: false,
         entityId: ``,
-        researchMode: false, 
+        researchMode: false,
+        userInfo: '',
         model: 'oai-gpt41',
         contextKey: ``
     },
