@@ -451,9 +451,15 @@ class ModelPlugin {
         });
      
         // Clean up any null messages if they exist
+        // Preserve null for assistant messages with tool_calls (per OpenAI spec)
         expandedMessages.forEach((message) => {
             if (typeof message === 'object' && message.content === null) {
-                message.content = '';
+                // Assistant messages with tool_calls can have null content per OpenAI spec
+                if (message.role === 'assistant' && message.tool_calls) {
+                    // Keep null as-is
+                } else {
+                    message.content = '';
+                }
             }
         });
 
