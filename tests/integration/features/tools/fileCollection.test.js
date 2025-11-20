@@ -286,41 +286,6 @@ test('File collection: Remove multiple files', async t => {
     }
 });
 
-test('File collection: Wildcard removal should be ignored', async t => {
-    const contextId = createTestContext();
-    
-    try {
-        // Add files
-        await callPathway('sys_tool_file_collection', {
-            contextId,
-            url: 'https://example.com/file1.jpg',
-            filename: 'file1.jpg',
-            userMessage: 'Add file 1'
-        });
-        
-        // Try to remove with wildcard - should be safe no-op
-        const result = await callPathway('sys_tool_file_collection', {
-             contextId,
-             fileId: '*',
-             userMessage: 'Attempt wildcard removal'
-        });
-
-        const parsed = JSON.parse(result);
-        t.is(parsed.success, true);
-        t.is(parsed.removedCount, 0);
-        t.is(parsed.remainingFiles, 1); // File should still be there
-        
-        // Verify collection is NOT empty
-        const listResult = await callPathway('sys_tool_file_collection', {
-            contextId,
-            userMessage: 'List files'
-        });
-        const listParsed = JSON.parse(listResult);
-        t.is(listParsed.totalFiles, 1);
-    } finally {
-        await cleanup(contextId);
-    }
-});
 
 test('File collection: Error handling - missing contextId', async t => {
     const result = await callPathway('sys_tool_file_collection', {

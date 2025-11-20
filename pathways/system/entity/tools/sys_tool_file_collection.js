@@ -304,8 +304,6 @@ export default {
 
                 let removedCount = 0;
                 let removedFiles = [];
-                let deletedFromCloud = 0;
-                let deletionErrors = [];
                 let notFoundFiles = [];
                 let filesToRemove = [];
 
@@ -333,27 +331,38 @@ export default {
                 }
 
                 if (filesToRemove.length === 0 && notFoundFiles.length > 0) {
-                     throw new Error(`No files found matching: ${notFoundFiles.join(', ')}`);
+                    throw new Error(`No files found matching: ${notFoundFiles.join(', ')}`);
                 }
 
                 // Use optimistic locking to remove files from collection FIRST
+                // Capture hashes INSIDE the lock to avoid race conditions with concurrent edits
                 const fileIdsToRemove = new Set(filesToRemove.map(f => f.id));
+                const hashesToDelete = [];
                 const finalCollection = await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
+                    // Capture hashes of files that will be removed (at current lock time)
+                    collection.forEach(file => {
+                        if (fileIdsToRemove.has(file.id) && file.hash) {
+                            hashesToDelete.push({
+                                hash: file.hash,
+                                filename: file.filename || 'unknown'
+                            });
+                        }
+                    });
+                    
                     // Remove files by ID
                     return collection.filter(file => !fileIdsToRemove.has(file.id));
                 });
 
                 // Delete files from cloud storage ASYNC (fire and forget, but log errors)
                 // We do this after updating collection so user gets fast response and files are "gone" from UI immediately
+                // Use hashes captured inside the lock to ensure we delete the correct files
                 (async () => {
-                    for (const fileInfo of filesToRemove) {
-                        if (fileInfo.hash) {
-                            try {
-                                logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash})`);
-                                await deleteFileByHash(fileInfo.hash, resolver);
-                            } catch (error) {
-                                logger.warn(`Failed to delete file ${fileInfo.filename} (hash: ${fileInfo.hash}) from cloud storage: ${error?.message || String(error)}`);
-                            }
+                    for (const fileInfo of hashesToDelete) {
+                        try {
+                            logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash})`);
+                            await deleteFileByHash(fileInfo.hash, resolver);
+                        } catch (error) {
+                            logger.warn(`Failed to delete file ${fileInfo.filename} (hash: ${fileInfo.hash}) from cloud storage: ${error?.message || String(error)}`);
                         }
                     }
                 })().catch(err => logger.error(`Async cloud deletion error: ${err}`));
