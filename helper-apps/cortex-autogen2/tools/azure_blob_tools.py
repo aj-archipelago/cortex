@@ -12,7 +12,7 @@ import hashlib
 import re
 import unicodedata
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Union
 from urllib.parse import urlparse, parse_qs, quote
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions, ContentSettings
 from azure.core.exceptions import AzureError, ServiceResponseError
@@ -283,69 +283,99 @@ def upload_file_to_azure_blob(file_path: str, blob_name: str = None) -> str:
                 logger.error(f"❌ Upload failed after {max_attempts} attempts for {file_path}: {e}", exc_info=True)
                 return json.dumps({"error": str(e)})
 
-def upload_files_to_azure_blob(file_paths: List[str], work_dir: str = None) -> str:
+def upload_files(file_paths: Union[str, List[str]], work_dir: str = None) -> dict:
     """
-    Upload multiple files to Azure Blob Storage in batch.
-    Returns a JSON string with list of upload results.
-    
+    Unified file upload function - handles single files or multiple files.
+
     Args:
-        file_paths: List of file paths to upload (can be relative or absolute)
+        file_paths: Single file path (str) or list of file paths to upload
         work_dir: Optional working directory for resolving relative paths
-        
+
     Returns:
-        JSON string with list of upload results, each containing blob_name and download_url
+        Dict with upload results containing local filenames and download URLs
     """
-    import json
+    # Handle single file case - convert to list
+    if isinstance(file_paths, str):
+        file_paths = [file_paths]
+
+    if not file_paths:
+        return {"success": False, "error": "No file paths provided", "uploads": [], "failed": []}
+
     results = []
-    
+    failed = []
+
     for file_path in file_paths:
         try:
             # Resolve relative paths using work_dir if provided
             resolved_path = file_path
             if work_dir and not os.path.isabs(file_path):
-                # First try direct join with work_dir
+                # Try different path resolution strategies
                 candidate_path = os.path.join(work_dir, file_path)
                 if os.path.exists(candidate_path):
                     resolved_path = candidate_path
                 else:
-                    # If not found, try just the filename in work_dir
+                    # Try just the filename in work_dir
                     filename = os.path.basename(file_path)
                     candidate_path = os.path.join(work_dir, filename)
                     if os.path.exists(candidate_path):
                         resolved_path = candidate_path
                     else:
-                        # Last resort: search work_dir for any file with this name
+                        # Search work_dir for the file
                         if os.path.exists(work_dir):
                             for root, dirs, files in os.walk(work_dir):
                                 if filename in files:
                                     resolved_path = os.path.join(root, filename)
                                     break
-            
-            # Validate file exists before upload
+
+            # Validate file exists and is readable
             if not os.path.exists(resolved_path):
-                logger.error(f"❌ File not found: {file_path} (resolved: {resolved_path})")
-                results.append({"error": f"File not found: {file_path}", "file_path": file_path})
+                error_msg = f"File not found: {file_path}"
+                logger.error(f"❌ {error_msg}")
+                failed.append({"file": file_path, "error": error_msg})
                 continue
-            
+
+            if not os.access(resolved_path, os.R_OK):
+                error_msg = f"File not readable: {file_path}"
+                logger.error(f"❌ {error_msg}")
+                failed.append({"file": file_path, "error": error_msg})
+                continue
+
+            # Upload file
             uploader = AzureBlobUploader()
             result = uploader.upload_file(resolved_path)
-            results.append(result)
-            logger.info(f"✅ Successfully uploaded {resolved_path}")
+
+            if result and "download_url" in result:
+                results.append({
+                    "local_filename": os.path.basename(resolved_path),
+                    "local_path": resolved_path,
+                    "blob_name": result.get("blob_name", os.path.basename(resolved_path)),
+                    "download_url": result["download_url"]
+                })
+                logger.info(f"✅ Uploaded {os.path.basename(resolved_path)}")
+            else:
+                error_msg = f"Upload failed: {result.get('error', 'Unknown error')}"
+                logger.error(f"❌ {error_msg}")
+                failed.append({"file": file_path, "error": error_msg})
+
         except Exception as e:
-            logger.warning(f"Upload failed for {file_path}: {str(e)[:100]}...")
-            results.append({"error": str(e), "file_path": file_path})
+            error_msg = f"Upload error: {str(e)[:100]}"
+            logger.error(f"❌ {error_msg}")
+            failed.append({"file": file_path, "error": error_msg})
 
-    # Count successful vs failed uploads
-    successful_uploads = len([r for r in results if 'error' not in r])
-    failed_uploads = len([r for r in results if 'error' in r])
+    # Summary logging
+    success_count = len(results)
+    fail_count = len(failed)
 
-    # Single summary log for batch upload
-    if successful_uploads > 0:
-        logger.info(f"📦 Batch upload: {successful_uploads}/{len(file_paths)} files uploaded successfully")
-    if failed_uploads > 0:
-        logger.warning(f"⚠️ Batch upload: {failed_uploads} files failed to upload")
+    if success_count > 0:
+        logger.info(f"📦 Upload complete: {success_count} succeeded, {fail_count} failed")
 
-    return json.dumps({"uploads": results})
+    return {
+        "success": success_count > 0,
+        "uploads": results,
+        "failed": failed,
+        "total_uploaded": success_count,
+        "total_failed": fail_count
+    }
 
 # This function is no longer needed as the class handles text uploads if necessary,
 # and direct calls should go through the singleton.

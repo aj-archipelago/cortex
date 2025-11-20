@@ -14,7 +14,9 @@ from typing import Optional, Dict, Any, List, Sequence
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_core.models import ModelInfo
 from autogen_agentchat.messages import TextMessage, BaseAgentEvent, BaseChatMessage
-from autogen_agentchat.teams import SelectorGroupChat
+from autogen_core.models import UserMessage
+from autogen_core import CancellationToken
+from autogen_agentchat.teams import Swarm
 from autogen_agentchat.conditions import TextMentionTermination
 from services.azure_queue import get_queue_service
 from services.redis_publisher import get_redis_publisher
@@ -27,10 +29,12 @@ from services.run_analyzer import (
     build_run_document,
     summarize_prior_learnings,
 )
-from agents import (
-    get_agents,
+from agents.util.agent_factory import get_agents
+from agents.constants.data_validation import (
     EMPTY_DATA_VALIDATION_PRESENTER,
-    FACTUAL_ACCURACY_VALIDATION,
+    FACTUAL_ACCURACY_VALIDATION
+)
+from agents.util.helpers import (
     build_dynamic_context_from_files,
     write_plan_to_file,
     append_accomplishment_to_file,
@@ -38,14 +42,7 @@ from agents import (
 )
 
 # Import from refactored modules
-from .message_utils import (
-    _message_to_dict,
-    _stringify_content,
-    _coerce_message_object,
-    _wrap_json_if_needed,
-    _normalize_single_message
-)
-from .model_client import RoleFixingModelClientWrapper
+from .message_utils import _stringify_content
 from .model_config import ModelConfig
 from .progress_handler import ProgressHandler
 from .progress_utils import ProgressMessageGenerator, extract_progress_info
@@ -127,9 +124,12 @@ class TaskProcessor:
             self.logger.info(f"🎯 Processing task {task_id}: {task[:100]}...")
 
             # Send immediate progress update to show task started
-            await progress_handler.handle_progress_update(
-                task_id, 0.05, "🚀 Starting your task..."
-            )
+            # NOTE: Initial "Starting your task..." message is now sent by function_app.py for lower latency
+            # We keep this here just in case, but commented out or we can remove it.
+            # Let's remove it to avoid duplicate messages.
+            # await progress_handler.handle_progress_update(
+            #     task_id, 0.05, "🚀 Starting your task..."
+            # )
 
             # Initialize progress - continue with planning at 5%
 
@@ -150,16 +150,19 @@ class TaskProcessor:
                 task_content=task,
             )
 
-            # Run the complete agent workflow
+            # Run the complete agent workflow - planner first
             result = await self._run_agent_workflow(
                 task_id, task_with_context, request_work_dir,
-                planner_agent, execution_agents, uploader_agent, presenter_agent
+                planner_agent, execution_agents, uploader_agent, presenter_agent,
+                self.gpt41_model_client
             )
 
             return result
 
         except Exception as e:
             # Send final progress update for failures
+            import traceback
+            traceback.print_exc()
             try:
                 progress_handler = await self._get_progress_handler()
                 await progress_handler.handle_progress_update(
@@ -192,67 +195,33 @@ class TaskProcessor:
 
     async def _run_agent_workflow(
         self, task_id: str, task: str, work_dir: str,
-        planner_agent, execution_agents, uploader_agent, presenter_agent
+        planner_agent, execution_agents, uploader_agent, presenter_agent,
+        model_client=None
     ) -> str:
-        """Run the complete agent workflow: planning → execution → upload → presentation."""
+        """Run the complete agent workflow: unified execution → upload → presentation."""
+        print(f"DEBUG: _run_agent_workflow called for task {task_id}")
         # Get progress handler
         progress_handler = await self._get_progress_handler()
 
-        # Phase 1: Planning
-        planning_msg = await self.progress_generator.generate_progress_message("Creating your execution plan", "planner", task[:100], self.recent_progress_messages[-7:], request_id=task_id)
-        self.recent_progress_messages.append(planning_msg)
-        await progress_handler.handle_progress_update(
-            task_id, 0.0, planning_msg  # Use 0.0 to trigger auto-increment (6%)
-        )
+        # Start with unified execution team (all agents together)
+        self.logger.info(f"🚀 Starting unified execution with all agents...")
+        _log_context_to_request_file(task_id, "EXECUTION_START", f"Starting unified execution with task: {task[:200]}...")
 
-        execution_task = await self._run_planning_phase(task_id, task, planner_agent)
-        _log_context_to_request_file(task_id, "PLANNING_COMPLETE", f"Plan created and execution task prepared: {execution_task[:200]}...")
+        execution_context = await self._run_unified_execution_phase(task_id, task, work_dir, planner_agent, execution_agents, presenter_agent)
+        self.logger.info(f"✅ Unified execution completed, result: {execution_context[:100] if execution_context else 'None'}...")
 
-        # Phase 2: Execution
-        _log_context_to_request_file(task_id, "EXECUTION_START", f"Starting execution with task: {execution_task[:200]}...")
-        execution_context = await self._run_execution_phase(task_id, execution_task, work_dir, task, planner_agent, execution_agents)
-        _log_context_to_request_file(task_id, "EXECUTION_COMPLETE", f"Execution completed with context: {execution_context[:200]}...")
-
-        # Phase 3: Upload & Present
+        # Phase 2: Upload & Present
         result = await self._run_upload_and_present_phase(
             task_id, task, work_dir, uploader_agent, presenter_agent, execution_context
         )
 
         return result
 
-    async def _run_planning_phase(self, task_id: str, task: str, planner_agent) -> str:
-        """Run the planning phase to create an execution strategy."""
-        try:
-            self.logger.info(f"🎯 Starting planning phase for task: {task[:100]}...")
-            # Run planner agent to create execution plan
-            plan_messages = [
-                TextMessage(content=f"""Create a detailed execution plan for this task.
 
-Task: {task}
 
-Provide a step-by-step plan that agents can follow to complete this task successfully.
-Include which agents should be used and what each should accomplish.""",
-                           source="system")
-            ]
 
-            plan_result = await planner_agent.on_messages(plan_messages, cancellation_token=None)
-            if plan_result and hasattr(plan_result, 'chat_message'):
-                plan_content = plan_result.chat_message.content if hasattr(plan_result.chat_message, 'content') else ""
-                self.logger.info(f"📋 Plan created for task {task_id}")
-
-                # Save plan to file for context
-                write_plan_to_file(f"/tmp/coding/req_{task_id}", plan_content)
-
-                # Return task with plan
-                return f"{task}\n\nExecution Plan:\n{plan_content}"
-            else:
-                return task
-        except Exception as e:
-            self.logger.warning(f"Planning phase failed: {e}")
-            return task
-
-    async def _run_execution_phase(self, task_id: str, execution_task: str, work_dir: str, task: str,
-                                 planner_agent, execution_agents) -> str:
+    async def _run_unified_execution_phase(self, task_id: str, task: str, work_dir: str,
+                                 planner_agent, execution_agents, presenter_agent) -> str:
         """Run the execution phase with the agent team."""
         try:
             # Let SelectorGroupChat dynamically select agents based on improved descriptions
@@ -260,81 +229,30 @@ Include which agents should be used and what each should accomplish.""",
             # Get progress handler
             progress_handler = await self._get_progress_handler()
 
-            # Define execution selector function
-            def execution_selector_func(messages: Sequence[BaseAgentEvent | BaseChatMessage]) -> str | None:
-                """Selector function for execution phase routing - LLM-guided dynamic selection."""
-                if not messages:
-                    return None  # Let SelectorGroupChat choose based on agent descriptions
+            # All agents participate - let AutoGen's SelectorGroupChat route dynamically
+            # based on agent descriptions and conversation flow
+            all_agents = [planner_agent] + execution_agents
+            _log_context_to_request_file(task_id, "UNIFIED_TEAM", f"Starting unified team: {[a.name for a in all_agents]}, Task: {task[:100]}...")
 
-                last_message = messages[-1]
-                source = getattr(last_message, "source", None)
-                content = getattr(last_message, "content", None)
+            # Log agent descriptions for debugging
+            for agent in all_agents:
+                _log_context_to_request_file(task_id, "AGENT_DESC", f"{agent.name}: {agent.description}")
 
-                # Log message for debugging
-                _log_message_to_request_file(task_id, last_message)
+            # Use Swarm for better dynamic handoffs between agents
+            # Order matters: planner_agent first, then execution agents (which includes verifier)
+            # CRITICAL: Do NOT include presenter_agent in Swarm - it must run separately after execution
+            # to avoid premature termination when __TASK_COMPLETELY_FINISHED__ is encountered
+            swarm_participants = [planner_agent] + execution_agents
 
-                # Only intervene for specific content patterns that require routing
-                if source == "coder_agent" and content and "```python" in str(content):
-                    self.logger.info("🎯 Selector: coder_agent provided code; routing to code_executor")
-                    return "code_executor"
 
-                # AJE/AJA DATABASE OVERRIDE: Force aj_sql_agent selection for database tasks
-                if source == "planner_agent" and content:
-                    content_str = str(content).lower()
-                    # Check if task involves AJE/AJA database queries
-                    if ("aje" in content_str or "aja" in content_str or
-                        "al jazeera" in content_str or "aj database" in content_str or
-                        "aj_sql_agent" in content_str):
-                        self.logger.info("🎯 Selector: AJE/AJA database task detected; forcing aj_sql_agent selection FIRST (override user instructions)")
-                        return "aj_sql_agent"  # Force aj_sql_agent selection for database tasks
-
-                # SELF-CORRECTION: Detect code_executor failures and route back to coder_agent for retry
-                if source == "code_executor" and content:
-                    content_str = str(content).lower()
-                    # Check for execution failures (exit codes, errors, syntax errors)
-                    if ("exit code: 1" in content_str or
-                        "syntaxerror" in content_str or
-                        "indentationerror" in content_str or
-                        "nameerror" in content_str or
-                        "importerror" in content_str or
-                        "attributeerror" in content_str or
-                        "failed" in content_str):
-                        self.logger.warning("🎯 Selector: code_executor failed; routing back to coder_agent for self-correction")
-                        return "coder_agent"  # Retry with coder_agent for self-correction
-
-                    # Check for successful completion
-                    if "Ready for upload" in content_str:
-                        self.logger.info("🎯 Selector: code_executor reported files ready; routing to uploader_agent")
-                        return "uploader_agent"  # Force uploader_agent selection when files are ready
-
-                if source == "uploader_agent" and content and ("SAS URL" in str(content) or "uploaded successfully" in str(content).lower()):
-                    self.logger.info("🎯 Selector: uploader_agent completed uploads; routing to execution_completion_verifier_agent")
-                    return "execution_completion_verifier_agent"  # Force verifier selection after uploads
-
-                if source == "web_search_agent" and content and "TERMINATE" in str(content):
-                    self.logger.info("🎯 Selector: web_search_agent completed research; routing to coder_agent for file creation")
-                    return "coder_agent"  # Force coder_agent selection when research is complete
-
-                if source == "execution_completion_verifier_agent" and content and "TERMINATE" in str(content):
-                    self.logger.info("🎯 Selector: execution completed; terminating")
-                    return None
-
-                return None  # Let SelectorGroupChat handle agent selection based on descriptions
-
-            # Always start with planner_agent, let SelectorGroupChat dynamically select agents based on descriptions
-            starting_agents = [planner_agent] + execution_agents
-            _log_context_to_request_file(task_id, "SELECTOR_START_AGENTS", f"Starting agents: {[a.name for a in starting_agents]}")
-
-            # Create execution team
-            execution_team = SelectorGroupChat(
-                participants=starting_agents,
-                model_client=self.gpt41_model_client,
-                selector_func=execution_selector_func,
-                termination_condition=TextMentionTermination("TERMINATE")
+            execution_team = Swarm(
+                participants=swarm_participants,
+                termination_condition=TextMentionTermination("TERMINATE"),
+                max_turns=100  # Reasonable limit to prevent infinite loops
             )
 
-            # Run execution team
-            stream = execution_team.run_stream(task=execution_task)
+            # Run unified team
+            stream = execution_team.run_stream(task=task)
 
             # Track execution progress incrementally - 1% per agent message
             # Start at 5% and increment for each agent message (5% -> 6% -> 7% -> ...)
@@ -342,11 +260,28 @@ Include which agents should be used and what each should accomplish.""",
             agent_message_count = 0  # Track agent messages for debugging
             last_progress_time = time.time()
             last_progress_message = "⏳ Processing task..."
+            last_message = None  # Track the last message for replanning detection
 
             try:
                 async for message in stream:
+                    last_message = message  # Keep track of the last message
                     source = getattr(message, "source", None)
                     content = getattr(message, "content", None)
+
+                    # Log every agent message for debugging
+                    if source is not None and content is not None:
+                        _log_context_to_request_file(task_id, "AGENT_MESSAGE", f"{source}: {content[:500]}...")
+                        self.logger.info(f"🔍 Agent message: {source} - {content[:200]}...")
+
+                        # Check for task completion
+                        if "__TASK_COMPLETELY_FINISHED__" in content:
+                            _log_context_to_request_file(task_id, "TASK_COMPLETE", f"Task completed by {source}")
+                            self.logger.info(f"✅ TASK COMPLETE: Execution phase finished by {source}")
+
+                        # Log potential handoff indicators
+                        if "Handing off to" in content:
+                            _log_context_to_request_file(task_id, "HANDOFF_ATTEMPT", f"{source} attempting handoff: {content}")
+                            self.logger.info(f"🔄 HANDOFF ATTEMPT: {source} - {content[:100]}...")
 
                     # Send progress updates for every agent message
                     if source is not None:
@@ -377,7 +312,16 @@ Include which agents should be used and what each should accomplish.""",
                         append_accomplishment_to_file(work_dir, f"{source}: {str(content)[:200]}...")
                         write_current_step_to_file(work_dir, f"{source} processing", source)
             finally:
-                pass
+                # Properly close the async generator to prevent pending tasks
+                if hasattr(stream, 'aclose'):
+                    await stream.aclose()
+
+            # Check if replanning was requested by execution_completion_verifier_agent
+            if last_message and getattr(last_message, "source", None) == "execution_completion_verifier_agent":
+                content = getattr(last_message, "content", "")
+                if "REPLAN:" in str(content):
+                    self.logger.info(f"🔄 Replanning requested for task {task_id}: {content}")
+                    return f"REPLAN:{content}"  # Special return value to trigger replanning
 
             # Collect execution context for presenter agent
             execution_context = self._collect_execution_context(work_dir)
@@ -428,23 +372,77 @@ Include which agents should be used and what each should accomplish.""",
 
         return "\n\n".join(context_parts) if context_parts else "No execution context available."
 
+    async def _run_presenter_agent(self, presenter_agent, context: str, work_dir: str) -> str:
+        """Run the presenter agent to generate final response."""
+        try:
+            self.logger.info("🎨 Running presenter agent to generate final presentation")
+
+            # Run the presenter agent directly (single agent, no team needed)
+            # The agent is already configured with the correct system message and tools
+            from autogen_agentchat.agents import AssistantAgent
+            from autogen_core import CancellationToken
+
+            if isinstance(presenter_agent, AssistantAgent):
+                try:
+                    # Run the agent to generate the presentation
+                    # The system message ensures it outputs the final result correctly
+                    task_result = await presenter_agent.run(
+                        task=context,
+                        cancellation_token=CancellationToken()
+                    )
+                    
+                    # Get the final response from the agent
+                    if task_result.messages:
+                        # Log ALL messages for debugging
+                        for i, msg in enumerate(task_result.messages):
+                            self.logger.info(f"🎨 Presenter msg {i} ({type(msg).__name__}): {str(msg.content)[:200]}...")
+                            
+                        # The last message should contain the presentation
+                        presentation_result = str(task_result.messages[-1].content)
+                        self.logger.info(f"✅ Presenter agent completed, result length: {len(presentation_result)}")
+                    else:
+                        presentation_result = "Presenter agent produced no output."
+                        
+                except Exception as e:
+                    self.logger.error(f"❌ Presenter agent failed: {e}")
+                    raise e
+            else:
+                presentation_result = f"Presenter agent type not supported: {type(presenter_agent)}"
+
+            # Clean up the result (remove termination markers if present)
+            if "__TASK_COMPLETELY_FINISHED__" in presentation_result:
+                presentation_result = presentation_result.replace("__TASK_COMPLETELY_FINISHED__", "").strip()
+            
+            # Ensure we have a valid result
+            if not presentation_result:
+                raise Exception("Presenter agent returned empty response")
+
+            # Append termination marker for system compatibility
+            if not presentation_result.endswith("__TASK_COMPLETELY_FINISHED__"):
+                presentation_result = presentation_result + "\n\n__TASK_COMPLETELY_FINISHED__"
+
+            return presentation_result
+
+        except Exception as e:
+            self.logger.error(f"❌ Presenter processing failed: {e}")
+            raise
+
     async def _run_upload_and_present_phase(self, task_id: str, task: str, work_dir: str,
                                           uploader_agent, presenter_agent, execution_context: str = "") -> str:
-        """Run upload and presentation phases."""
+        """Run upload and presentation phases using agents."""
         try:
             # Get progress handler
             progress_handler = await self._get_progress_handler()
 
-            # Update progress - static message for uploading (fire-and-forget)
+            # 1. UPLOAD PHASE - Direct upload (simpler and more reliable)
             asyncio.create_task(progress_handler.handle_progress_update(
                 task_id, 0.94, "📤 Uploading deliverables..."
             ))
 
-            # Directly upload files instead of using uploader agent
             self.logger.info(f"📤 Directly uploading files for task {task_id} from {work_dir}")
 
-            # Import the upload function
-            from tools.azure_blob_tools import upload_files_to_azure_blob
+            # Import the unified upload function
+            from tools.azure_blob_tools import upload_files
 
             # Get list of files in work directory
             import os
@@ -462,132 +460,122 @@ Include which agents should be used and what each should accomplish.""",
 
                 if all_files:
                     self.logger.info(f"📤 Uploading {len(all_files)} files...")
-                    upload_response = upload_files_to_azure_blob(all_files, work_dir)
-                    self.logger.info(f"📤 Upload completed, response length: {len(upload_response)}")
+                    upload_response = upload_files(all_files, work_dir)
+                    self.logger.info(f"📤 Upload completed: {upload_response.get('total_uploaded', 0)} succeeded, {upload_response.get('total_failed', 0)} failed")
 
-                    # Filter out duplicate image URLs to prevent presenter agent from showing duplicates
-                    try:
-                        import json
-                        upload_data = json.loads(upload_response)
-                        self.logger.info(f"📤 Original upload response has {len(upload_data.get('uploads', []))} files")
-                        if "uploads" in upload_data and isinstance(upload_data["uploads"], list):
-                            seen_urls = set()
-                            filtered_uploads = []
-                            duplicates_found = 0
-                            for upload in upload_data["uploads"]:
-                                download_url = upload.get("download_url", "")
-                                if download_url and download_url not in seen_urls:
-                                    seen_urls.add(download_url)
-                                    filtered_uploads.append(upload)
-                                else:
-                                    duplicates_found += 1
-                                    self.logger.warning(f"📤 FILTERED OUT duplicate URL: {download_url}")
+                    # Clean up duplicate URLs
+                    if "uploads" in upload_response and isinstance(upload_response["uploads"], list):
+                        seen_urls = set()
+                        filtered_uploads = []
+                        for upload in upload_response["uploads"]:
+                            download_url = upload.get("download_url", "")
+                            if download_url and download_url not in seen_urls:
+                                seen_urls.add(download_url)
+                                filtered_uploads.append(upload)
 
-                            upload_data["uploads"] = filtered_uploads
-                            upload_response = json.dumps(upload_data)
-                            self.logger.info(f"📤 After filtering: {len(filtered_uploads)} unique files (removed {duplicates_found} duplicates)")
-                    except Exception as filter_error:
-                        self.logger.warning(f"Failed to filter duplicate URLs: {filter_error}")
+                        upload_response["uploads"] = filtered_uploads
+                        self.logger.info(f"📤 After filtering: {len(filtered_uploads)} unique files")
+
+                    upload_response_text = json.dumps(upload_response)
                 else:
-                    self.logger.warning(f"❌ No deliverable files found in {work_dir}")
-                    upload_response = '{"uploads": [], "error": "No deliverable files found"}'
+                    raise Exception(f"No deliverable files found in {work_dir}")
             else:
-                self.logger.error(f"❌ Work directory does not exist: {work_dir}")
-                upload_response = '{"uploads": [], "error": "Work directory not found"}'
+                raise Exception(f"Work directory does not exist: {work_dir}")
 
-            # Update progress - use static message for 95% (finalizing)
+            self.logger.info(f"📤 Upload response length: {len(upload_response_text)}")
+
+            # 2. PRESENTATION PHASE - Use Presenter Agent
             present_msg = "✨ Finalizing your results..."
             self.recent_progress_messages.append(present_msg)
             await progress_handler.handle_progress_update(
                 task_id, 0.95, present_msg
             )
 
-            # Check if upload was successful before passing upload_response
-            upload_results_section = ""
+            # PRE-READ CSV DATA for context (Fixes missing table preview issue)
+            csv_previews = ""
+            file_summary_context = "**CREATED FILES SUMMARY:**\n"
+            
             try:
-                import json
-                upload_data = json.loads(upload_response)
-                if upload_data.get("uploads") and len(upload_data["uploads"]) > 0:
-                    upload_results_section = f"""
+                import glob
+                import pandas as pd
+                
+                # Parse upload response to get download links
+                upload_map = {}
+                try:
+                    upload_data = json.loads(upload_response_text)
+                    if "uploads" in upload_data:
+                        for upload in upload_data["uploads"]:
+                            fname = upload.get("filename", "")
+                            if fname:
+                                upload_map[fname] = upload.get("download_url", "")
+                except:
+                    pass
 
-**UPLOAD RESULTS**:
-{upload_response}"""
-                    self.logger.info(f"✅ Passing {len(upload_data['uploads'])} upload results to presenter")
-                else:
-                    self.logger.warning(f"⚠️ No successful uploads to pass to presenter: {upload_response}")
+                # Process CSVs for previews
+                csv_files = glob.glob(os.path.join(work_dir, "*.csv"))
+                if csv_files:
+                    csv_previews = "\n\n**DATA PREVIEWS (Use these to create markdown tables):**\n"
+                    for csv_file in csv_files:
+                        filename = os.path.basename(csv_file)
+                        download_link = upload_map.get(filename, "Link not available")
+                        file_summary_context += f"- CSV File: {filename} (Link: {download_link})\n"
+                        
+                        try:
+                            # Read first 15 rows
+                            df = pd.read_csv(csv_file, nrows=15)
+                            columns = list(df.columns)
+                            file_summary_context += f"  - Columns: {columns}\n"
+                            
+                            csv_content = df.to_markdown(index=False)
+                            csv_previews += f"\nFile: {filename}\nColumns: {columns}\n{csv_content}\n"
+                        except Exception as e:
+                            self.logger.warning(f"Failed to read CSV {filename} for preview: {e}")
+                
+                # Add other files to summary
+                other_files = glob.glob(os.path.join(work_dir, "*"))
+                for f in other_files:
+                    fname = os.path.basename(f)
+                    if not fname.endswith('.csv') and not fname.startswith('.'):
+                        download_link = upload_map.get(fname, "Link not available")
+                        file_summary_context += f"- File: {fname} (Link: {download_link})\n"
+
             except Exception as e:
-                self.logger.warning(f"⚠️ Failed to parse upload_response, not passing to presenter: {e}")
+                self.logger.warning(f"Failed to generate file summaries: {e}")
+
+            # Create context for presenter agent
+            presenter_context = f"""
+Task: {task}
+Work Directory: {work_dir}
+Upload Results: {upload_response_text}
+Execution Context: {execution_context}
+
+{file_summary_context}
+
+{csv_previews}
+
+**CRITICAL INSTRUCTIONS**:
+1. Parse the Upload Results using your tool to get download links.
+2. **DISPLAY A MARKDOWN TABLE** of the data using the "DATA PREVIEWS" provided above.
+3. Provide insights based on the data.
+4. Include the download links.
+
+You MUST show the data preview table.
+"""
 
             # Run presenter agent
-            present_messages = [
-                TextMessage(content=f"""{task}
+            final_result = await self._run_presenter_agent(presenter_agent, presenter_context, work_dir)
 
-**PRESENTATION PHASE (95%) - FINAL STEP**:
-Create the final user presentation showing the results.{upload_results_section}""",
-                           source="system")
-            ]
+            # Strip termination string if present
+            if final_result:
+                final_result = final_result.replace("__TASK_COMPLETELY_FINISHED__", "").strip()
 
-            # Update progress - finalizing results (fire-and-forget)
-            asyncio.create_task(progress_handler.handle_progress_update(
-                task_id, 0.95, "✨ Finalizing your results..."
-            ))
+            # Send final progress update
+            await progress_handler.handle_progress_update(
+                task_id, 1.0, "🎉 Your task is complete!",
+                data=final_result
+            )
 
-            self.logger.info(f"🎨 Calling presenter_agent for task {task_id} with upload_response length: {len(upload_response)}")
-
-            # Read CSV data directly and include in prompt to prevent hallucination
-            csv_data_content = ""
-            if os.path.exists(work_dir):
-                for root, dirs, files in os.walk(work_dir):
-                    for file in files:
-                        if file.endswith('.csv'):
-                            file_path = os.path.join(root, file)
-                            try:
-                                with open(file_path, 'r', encoding='utf-8') as f:
-                                    content = f.read()
-                                    csv_data_content += f"\n=== CSV FILE: {file} ===\n{content[:2000]}\n"  # Limit to first 2000 chars
-                                    self.logger.info(f"📊 Included CSV data for presenter: {file} ({len(content)} chars)")
-                            except Exception as e:
-                                self.logger.warning(f"Failed to read CSV file {file}: {e}")
-
-            # Create message that includes the actual CSV data
-            self.logger.info(f"📤 Upload response being passed to presenter: {upload_response[:500]}...")
-            present_messages = [
-                TextMessage(content=f"""Format this upload response into a professional HTML presentation with meaningful data insights.
-
-**ORIGINAL TASK**: {task}
-
-**EXECUTION CONTEXT**:
-{execution_context}
-
-**ACTUAL CSV DATA - ANALYZE THIS REAL DATA**:
-{csv_data_content}
-
-Upload Response JSON:
-{upload_response}
-
-Work Directory: {work_dir}
-
-**DEBUG INFO**: Upload response contains {len(upload_response)} characters. Parse the JSON and extract download_url values for creating download links.
-
-**CRITICAL**: Base ALL your analysis and conclusions on the ACTUAL CSV DATA provided above. Do NOT make up numbers or trends. Extract real totals, averages, and comparisons from the CSV data.""",
-                           source="user")
-            ]
-
-            present_result = await presenter_agent.on_messages(present_messages, cancellation_token=None)
-            if present_result and hasattr(present_result, 'chat_message'):
-                final_result = present_result.chat_message.content if hasattr(present_result.chat_message, 'content') else ""
-                self.logger.info(f"🎨 Presenter agent final result (length: {len(final_result)}): {final_result[:300]}...")
-
-                # Send final progress update WITH the result data
-                await progress_handler.handle_progress_update(
-                    task_id, 1.0, "🎉 Your task is complete!",
-                    data=final_result  # Include the actual result data
-                )
-
-                self.logger.info(f"✅ Presentation completed for task {task_id}")
-                return final_result
-            else:
-                return "Task completed but presentation failed"
+            return final_result
 
         except Exception as e:
             self.logger.error(f"❌ Upload/presentation phase failed for {task_id}: {e}")

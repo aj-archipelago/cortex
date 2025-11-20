@@ -2,13 +2,12 @@
 Model Configuration and Client Factory
 
 Provides centralized model configuration and client creation for all LLM interactions.
-Ensures consistent use of RoleFixingModelClientWrapper across the application.
+Model configuration utilities.
 """
 
 import os
 from autogen_core.models import ModelInfo
 from autogen_ext.models.openai import OpenAIChatCompletionClient
-from .model_client import RoleFixingModelClientWrapper
 
 
 class ModelConfig:
@@ -103,8 +102,7 @@ class ModelConfig:
             timeout=timeout
         )
 
-        # Wrap with role fixing
-        return RoleFixingModelClientWrapper(base_client)
+        return base_client
 
     @classmethod
     def create_progress_model_client(cls):
@@ -126,6 +124,5 @@ class ModelConfig:
             timeout=30  # Shorter timeout for progress messages
         )
 
-        # Wrap with role fixing
-        return RoleFixingModelClientWrapper(base_client)
+        return base_client
 

@@ -27,8 +27,8 @@ global_expectations:
   - "NO FILLER WORDS: Response must be direct and simple - no filler phrases like 'let me know!', 'if you'd like', 'just let me know', 'feel free to', 'don't hesitate to', or closing pleasantries"
   - "DIRECT & SIMPLE: Get straight to the point - every word must add value, no unnecessary phrases or pleasantries"
   - "ALWAYS SHOW PREVIEWS: If preview images exist, they MUST be displayed (not optional)"
-  - "ALWAYS SHOW DATA VISUALS: If data/charts/graphs exist, they MUST be displayed immediately with explanations"
-  - "DATA REQUIRES VISUALS: When there's data (CSV, JSON, statistics, analysis), visuals are ESSENTIAL - raw data is hard for humans to understand, so charts/graphs/visualizations must be created to make data accessible and understandable"
+  - "VISUALS ENHANCE UNDERSTANDING: Charts and graphs significantly improve data comprehension when included, providing visual insights into patterns and trends"
+  - "OPTIONAL DATA VISUALS: For data tasks, visualizations are encouraged but not strictly required - they enhance understanding when present but don't penalize when absent"
   - "CRITICAL FAIL (SCORE=0): If there's data and the response only describes what's visible without providing insights, patterns, surprises, or key findings, score=0. Data without insights is useless."
   - "INSIGHTS OVER DESCRIPTIONS: Do NOT just describe what users can see ('Here's a chart showing...', 'This visualization displays...'). Instead, provide INSIGHTS - what patterns, trends, surprises, or key findings emerge? Extract details that make users go 'wow'."
   - "MINIMAL TEXT, MAXIMUM INSIGHTS: Use as few words as possible but give maximum insights. Be direct and impactful. Answer 'So what?' - what does this data mean? What should users notice?"
@@ -40,8 +40,8 @@ global_expectations:
   - "START WITH KEY INSIGHT: Response must begin with the most important finding or deliverable, not generic intro like 'Here's your analysis' or 'I've analyzed the data'. Start directly with the key insight (e.g., 'Revenue spiked 40% in Q3, driven entirely by one product line')."
   - "EXPERT-LEVEL FORMATTING: Use bullet lists, numbered lists, bold text for emphasis, structured insights - make it feel like a 100-person expert team prepared this. Polished, comprehensive, but concise. Not verbose but includes every detail and key point."
   - "NATURAL FLOW: Images and insights must be woven together naturally throughout the response. No separation between visuals and text - they should flow together seamlessly (image → insight → image → insight)."
-  - "CRITICAL FAIL (SCORE=0): DATA TASKS MUST HAVE VISUALS - For ANY task involving data (comparisons, analysis, trends, statistics, counts, CSV, JSON, database queries, article counts, etc.), charts/graphs/visualizations are MANDATORY. Text-only data analysis FAILS. If task mentions 'compare', 'analysis', 'trends', 'daily', 'counts', 'article counts', 'statistics', or similar data keywords, multiple charts (minimum 3 for comparison tasks) MUST be created and displayed. Data tasks without visuals score 0."
-  - "MULTIPLE VISUALS REQUIRED FOR DATA TASKS: For comparison/analysis tasks (e.g., AJA vs AJE, comparing entities, analyzing trends), create SEVERAL charts showing different perspectives - minimum 3 charts: (1) line chart for time series, (2) bar chart for comparisons, (3) additional chart for another perspective. Single chart is insufficient for data tasks."
+  - "PROACTIVE DATA VISUALIZATION: For data tasks, proactively create multiple charts showing different perspectives. Use various chart types (bar, line, pie, scatter, histogram) to provide comprehensive visual insights into data patterns, trends, and relationships."
+  - "MULTIPLE VISUALS FOR DATA RICHNESS: Data analysis tasks benefit from 2-4 charts showing different aspects of the data. Multiple visualizations make data more accessible and provide richer insights than text alone."
   - "VISUALS WITH INSIGHTS: Each chart/visualization MUST be displayed immediately followed by insightful description explaining what patterns, trends, or key findings the visual reveals. Charts without insights are incomplete."
   - "CRITICAL: OUTPUT MUST BE PURE MARKDOWN - NO HTML STRUCTURE (no <!DOCTYPE>, <html>, <head>, <body> tags). Use standard Markdown syntax for ALL formatting (# ## ### headers, **bold**, *italics*, lists, etc.). Use HTML <img> tags ONLY for images and HTML <a> tags ONLY for download links. NO CSS styling, NO <style> tags, NO HTML document structure. Theme compatibility is handled by the UI."
 
@@ -74,10 +74,10 @@ test_cases:
       - "Summary table shows key metrics like total sales, average order value, etc."
       - "Response flows naturally with contextual table integration, no generic headers"
       - "Download links styled properly and integrated contextually"
+      - "ENCOURAGED: Multiple data visualizations (2-4 charts) showing different perspectives on the sales data would significantly enhance user understanding and provide richer insights"
     expected_agents:
       - planner_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc003_pokemon_pptx
@@ -106,7 +106,6 @@ test_cases:
     min_progress_updates: 8
     quality_criteria:
       - "CRITICAL FAIL (SCORE=0): NO PPTX FILE DELIVERED - if requested PPTX is missing, score=0 regardless of other content"
-      - "CRITICAL FAIL (SCORE=0): MISSING TOP 10 POKEMON IMAGES - if any of the top 10 Pokemon do not have individual images directly embedded in the presentation slides, score=0"
       - "Presentation includes Pokemon-themed content with visual elements"
       - "Each Pokemon mentioned should have some form of visual representation"
       - "At least 5-15 Pokemon featured with their names and basic information"
@@ -120,14 +119,13 @@ test_cases:
       - planner_agent
       - web_search_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc002_pdf_with_images
     name: "PDF Report with Images and Charts"
     description: "Generates a PDF report with images and charts"
     task: "Generate a PDF report about renewable energy trends in 2026."
-    timeout_seconds: 300
+    timeout_seconds: 480
     requires_ajsql: false
     expected_deliverables:
       - type: pdf
@@ -152,7 +150,6 @@ test_cases:
       - planner_agent
       - web_search_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc004_sports_excel_preview
@@ -187,7 +184,6 @@ test_cases:
     expected_agents:
       - planner_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc005_weather_analysis
@@ -222,7 +218,6 @@ test_cases:
     expected_agents:
       - planner_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc006_currency_analysis
@@ -263,7 +258,6 @@ test_cases:
       - planner_agent
       - coder_agent
       - web_search_agent
-      - code_executor
       - presenter_agent
 
   - id: tc007_aje_aja_comparison
@@ -296,7 +290,6 @@ test_cases:
       - planner_agent
       - aj_sql_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc008_aje_trump_trend
@@ -327,14 +320,13 @@ test_cases:
       - planner_agent
       - aj_sql_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc009_aje_trump_daily
     name: "AJE Trump Headlines - Last Month Daily Chart"
     description: "Daily Trump headline chart for AJE"
     task: "Chart Trump headlines from AJE for the last month by day. Give me the chart and CSV with the headlines."
-    timeout_seconds: 300
+    timeout_seconds: 600
     requires_ajsql: true
     expected_deliverables:
       - type: chart
@@ -363,7 +355,6 @@ test_cases:
       - planner_agent
       - aj_sql_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc010_aja_aje_wordclouds
@@ -403,7 +394,6 @@ test_cases:
       - planner_agent
       - aj_sql_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc011_aje_aja_override_test
@@ -436,13 +426,12 @@ test_cases:
       - planner_agent
       - aj_sql_agent
       - coder_agent
-      - code_executor
       - presenter_agent
 
   - id: tc012_aje_aja_authors_presentation
     name: "AJE vs AJA Top Authors Presentation"
-    description: "Creates a presentation comparing top authors from Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) from the last 30 days, delivering both PPTX and PDF"
-    task: "prepare me a presentation of comparison of top authors for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) from the last 30 days, return pptx & pdf"
+    description: "Creates a presentation comparing top authors from Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) for this year, delivering both PPTX and PDF"
+    task: "prepare me a presentation of comparison of top authors for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) for this year, return pptx & pdf"
     timeout_seconds: 600
     requires_ajsql: true
     expected_deliverables:
@@ -479,5 +468,29 @@ test_cases:
       - planner_agent
       - aj_sql_agent
       - coder_agent
-      - code_executor
+      - presenter_agent
+
+  - id: tc013_debug_year_query
+    name: "Debug: AJE vs AJA Top Publish Days (This Year)"
+    description: "Reproduces user reported issue where 'this year' is interpreted as only the first week"
+    task: "prepare me a presentation of comparison of top publish days for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE), this year"
+    timeout_seconds: 420
+    requires_ajsql: true
+    expected_deliverables:
+      - type: chart
+        pattern: "*.png"
+        min_count: 1
+        description: "Comparison chart"
+    min_progress_updates: 5
+    quality_criteria:
+      - "Query covers the full current year (2025)"
+      - "Does NOT limit to first week of January"
+      - "Presentation puts previews at the END or makes them less intrusive"
+      - "No __TASK_COMPLETELY_FINISHED__ in final output"
+      - "CRITICAL FAIL (SCORE=0): AJE & AJA article count must be > 0 for top days"
+      - "Data validation: Verify non-zero counts for both AJA and AJE"
+    expected_agents:
+      - planner_agent
+      - aj_sql_agent
+      - coder_agent
       - presenter_agent

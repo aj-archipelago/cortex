@@ -68,6 +68,18 @@ def queue_trigger(msg: func.QueueMessage):
         
         logging.info(f"🔍 QUEUE_TRIGGER: Content: {message_data['content'][:100]}...")
         
+        # Send immediate progress update to Redis to minimize latency
+        # This ensures the user sees "Starting your task..." instantly
+        try:
+            redis_client.publish(channel, json.dumps({
+                "requestId": msg.id,
+                "progress": 0.05,
+                "info": "🚀 Starting your task..."
+            }))
+            logging.info(f"🚀 QUEUE_TRIGGER: Sent immediate progress for {msg.id}")
+        except Exception as e:
+            logging.warning(f"⚠️ QUEUE_TRIGGER: Failed to send immediate progress: {e}")
+        
         # Process the message synchronously with per-request logger
         import asyncio
         loop = asyncio.new_event_loop()
@@ -84,6 +96,12 @@ def queue_trigger(msg: func.QueueMessage):
             else:
                 logging.warning(f"⚠️ QUEUE_TRIGGER: Message {msg.id} returned no result")
         finally:
+            # Cancel all pending tasks before closing loop to prevent "Task was destroyed but it is pending!" errors
+            pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            for task in pending_tasks:
+                task.cancel()
+            if pending_tasks:
+                loop.run_until_complete(asyncio.gather(*pending_tasks, return_exceptions=True))
             loop.close()
             
     except Exception as e:
