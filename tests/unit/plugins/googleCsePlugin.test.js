@@ -109,3 +109,41 @@ test('parseResponse returns JSON string', t => {
   const res = plugin.parseResponse(data);
   t.is(res, JSON.stringify(data));
 });
+
+test('getRequestParameters throws error when query is empty', t => {
+  const { plugin } = t.context;
+  
+  // Test with empty string for both q and text
+  t.throws(() => {
+    plugin.getRequestParameters('', {}, {});
+  }, { message: 'Google Custom Search requires a non-empty query parameter (q or text)' });
+  
+  // Test with empty q parameter and no text
+  t.throws(() => {
+    plugin.getRequestParameters(undefined, { q: '' }, {});
+  }, { message: 'Google Custom Search requires a non-empty query parameter (q or text)' });
+  
+  // Test with whitespace-only query
+  t.throws(() => {
+    plugin.getRequestParameters('   ', {}, {});
+  }, { message: 'Google Custom Search requires a non-empty query parameter (q or text)' });
+  
+  // Test with whitespace-only q parameter
+  t.throws(() => {
+    plugin.getRequestParameters(undefined, { q: '  \t\n  ' }, {});
+  }, { message: 'Google Custom Search requires a non-empty query parameter (q or text)' });
+});
+
+test('getRequestParameters throws error when query is undefined', t => {
+  const { plugin } = t.context;
+  
+  // Test with undefined for both q and text
+  t.throws(() => {
+    plugin.getRequestParameters(undefined, {}, {});
+  }, { message: 'Google Custom Search requires a non-empty query parameter (q or text)' });
+  
+  // Test with undefined q and no text
+  t.throws(() => {
+    plugin.getRequestParameters(undefined, { q: undefined }, {});
+  }, { message: 'Google Custom Search requires a non-empty query parameter (q or text)' });
+});
