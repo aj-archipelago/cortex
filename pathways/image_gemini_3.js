@@ -7,15 +7,25 @@ export default {
     executePathway: async ({args, runAllPrompts, resolver}) => {
         let finalPrompt = args.text || '';
         
-        const { optimizePrompt, input_image, input_image_2, input_image_3 } = { ...resolver.pathway.inputParameters, ...args };
+        // Extract all input image parameters (up to 14 images)
+        const inputImages = [];
+        for (let i = 1; i <= 14; i++) {
+            const imageParam = i === 1 ? 'input_image' : `input_image_${i}`;
+            const imageValue = resolver.pathway.inputParameters[imageParam] || args[imageParam];
+            if (imageValue) {
+                inputImages.push(imageValue);
+            }
+        }
+
+        const { optimizePrompt } = { ...resolver.pathway.inputParameters, ...args };
 
         // Check if prompt optimization is enabled
-        if (optimizePrompt && optimizePrompt !== false && finalPrompt) {
+        if (optimizePrompt && finalPrompt) {
             try {
                 // Call the prompt optimizer pathway
                 const optimizerResult = await callPathway('image_prompt_optimizer_gemini_25', {
                     userPrompt: finalPrompt,
-                    hasInputImages: !!input_image || !!input_image_2 || !!input_image_3
+                    hasInputImages: inputImages.length > 0
                 }, resolver);
                 
                 if (optimizerResult) {
@@ -29,25 +39,13 @@ export default {
         // Build the user content with text and images
         const userContent = [{"type": "text", "text": finalPrompt}];
         
-        // Add input images if provided
-        if (input_image) {
+        // Add all input images if provided
+        inputImages.forEach(imageUrl => {
             userContent.push({
                 "type": "image_url",
-                "image_url": {"url": input_image}
+                "image_url": {"url": imageUrl}
             });
-        }
-        if (input_image_2) {
-            userContent.push({
-                "type": "image_url", 
-                "image_url": {"url": input_image_2}
-            });
-        }
-        if (input_image_3) {
-            userContent.push({
-                "type": "image_url",
-                "image_url": {"url": input_image_3}
-            });
-        }
+        });
 
         const userMessage = {"role": "user", "content": userContent};
 
@@ -67,12 +65,25 @@ export default {
         input_image: "", // URL to first input image
         input_image_2: "", // URL to second input image  
         input_image_3: "", // URL to third input image
+        input_image_4: "", // URL to fourth input image
+        input_image_5: "", // URL to fifth input image
+        input_image_6: "", // URL to sixth input image
+        input_image_7: "", // URL to seventh input image
+        input_image_8: "", // URL to eighth input image
+        input_image_9: "", // URL to ninth input image
+        input_image_10: "", // URL to tenth input image
+        input_image_11: "", // URL to eleventh input image
+        input_image_12: "", // URL to twelfth input image
+        input_image_13: "", // URL to thirteenth input image
+        input_image_14: "", // URL to fourteenth input image
         contextId: ``,
         response_modalities: ["TEXT", "IMAGE"],
         optimizePrompt: false, // Enable prompt optimization using Google's best practices
+        aspectRatio: "", // Image aspect ratio (e.g., "16:9", "1:1", "9:16", "4:3", "3:4")
+        image_size: "", // Image size (e.g., "2K", "4K")
     },
-    max_tokens: 32000,
-    model: 'gemini-flash-25-image',
+    max_tokens: 64576,
+    model: 'gemini-pro-3-image',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,
@@ -83,3 +94,4 @@ export default {
         {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH'}
     ],
 }
+
