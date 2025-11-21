@@ -20,7 +20,7 @@ export default {
         const { optimizePrompt } = { ...resolver.pathway.inputParameters, ...args };
 
         // Check if prompt optimization is enabled
-        if (optimizePrompt && optimizePrompt !== false && finalPrompt) {
+        if (optimizePrompt && finalPrompt) {
             try {
                 // Call the prompt optimizer pathway
                 const optimizerResult = await callPathway('image_prompt_optimizer_gemini_25', {

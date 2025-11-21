@@ -1,11 +1,6 @@
 import Gemini25ImagePlugin from './gemini25ImagePlugin.js';
-import logger from '../../lib/logger.js';
 
 class Gemini3ImagePlugin extends Gemini25ImagePlugin {
-
-    constructor(pathway, model) {
-        super(pathway, model);
-    }
 
     // Override getRequestParameters to add Gemini 3 specific image_config support
     getRequestParameters(text, parameters, prompt, cortexRequest) {
