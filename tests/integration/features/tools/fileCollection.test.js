@@ -214,7 +214,7 @@ test('File collection: Remove single file', async t => {
         // Remove file1
         const result = await callPathway('sys_tool_file_collection', {
             contextId,
-            fileId: file1Id,
+            fileIds: [file1Id],
             userMessage: 'Remove file 1'
         });
         
@@ -224,8 +224,7 @@ test('File collection: Remove single file', async t => {
         t.is(parsed.remainingFiles, 1);
         t.is(parsed.removedFiles.length, 1);
         t.is(parsed.removedFiles[0].filename, 'file1.jpg');
-        // Note: deletedFromCloud may be 0 if file has no hash or deletion fails (which is OK)
-        t.true(typeof parsed.deletedFromCloud === 'number');
+        t.true(parsed.message.includes('Cloud storage cleanup started in background'));
         
         // Verify it was removed
         const listResult = await callPathway('sys_tool_file_collection', {
@@ -240,30 +239,32 @@ test('File collection: Remove single file', async t => {
     }
 });
 
-test('File collection: Remove all files', async t => {
+test('File collection: Remove multiple files', async t => {
     const contextId = createTestContext();
     
     try {
         // Add files
-        await callPathway('sys_tool_file_collection', {
+        const addResult1 = await callPathway('sys_tool_file_collection', {
             contextId,
             url: 'https://example.com/file1.jpg',
             filename: 'file1.jpg',
             userMessage: 'Add file 1'
         });
-        
-        await callPathway('sys_tool_file_collection', {
+        const file1Id = JSON.parse(addResult1).fileId;
+
+        const addResult2 = await callPathway('sys_tool_file_collection', {
             contextId,
             url: 'https://example.com/file2.pdf',
             filename: 'file2.pdf',
             userMessage: 'Add file 2'
         });
+        const file2Id = JSON.parse(addResult2).fileId;
         
-        // Remove all
+        // Remove multiple files
         const result = await callPathway('sys_tool_file_collection', {
             contextId,
-            fileId: '*',
-            userMessage: 'Remove all files'
+            fileIds: [file1Id, file2Id],
+            userMessage: 'Remove files 1 and 2'
         });
         
         const parsed = JSON.parse(result);
@@ -271,9 +272,7 @@ test('File collection: Remove all files', async t => {
         t.is(parsed.removedCount, 2);
         t.is(parsed.remainingFiles, 0);
         t.is(parsed.removedFiles.length, 2);
-        t.true(parsed.message.includes('All 2 file(s)'));
-        // Note: deletedFromCloud may be 0 if files have no hash or deletion fails (which is OK)
-        t.true(typeof parsed.deletedFromCloud === 'number');
+        t.true(parsed.message.includes('Cloud storage cleanup started in background'));
         
         // Verify collection is empty
         const listResult = await callPathway('sys_tool_file_collection', {
@@ -286,6 +285,7 @@ test('File collection: Remove all files', async t => {
         await cleanup(contextId);
     }
 });
+
 
 test('File collection: Error handling - missing contextId', async t => {
     const result = await callPathway('sys_tool_file_collection', {
@@ -305,13 +305,13 @@ test('File collection: Error handling - remove non-existent file', async t => {
     try {
         const result = await callPathway('sys_tool_file_collection', {
             contextId,
-            fileId: 'non-existent-id',
+            fileIds: ['non-existent-id'],
             userMessage: 'Remove file'
         });
         
         const parsed = JSON.parse(result);
         t.is(parsed.success, false);
-        t.true(parsed.error.includes('not found in collection'));
+        t.true(parsed.error.includes('No files found matching'));
     } finally {
         await cleanup(contextId);
     }

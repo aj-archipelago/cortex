@@ -301,21 +301,7 @@ export default {
                 mimeType = `${mimeType}; charset=utf-8`;
             }
 
-            // Delete the old file version before uploading the new one
-            const oldHash = foundFile.hash;
-            if (oldHash) {
-                logger.info(`Deleting old file version with hash ${oldHash} before uploading new version`);
-                const deleted = await deleteFileByHash(oldHash, resolver);
-                if (deleted) {
-                    logger.info(`Successfully deleted old file version`);
-                } else {
-                    logger.info(`Old file version not found or already deleted (hash: ${oldHash})`);
-                }
-            } else {
-                logger.info(`No hash found for old file, skipping deletion`);
-            }
-
-            // Upload the modified file
+            // Upload the modified file FIRST (safer: prevent data loss if upload fails)
             const fileBuffer = Buffer.from(modifiedContent, 'utf8');
             const uploadResult = await uploadFileToCloud(
                 fileBuffer,
@@ -329,11 +315,16 @@ export default {
             }
 
             // Update the file collection entry with new URL and hash using optimistic locking
+            // Capture the old hash INSIDE the lock to avoid race conditions with concurrent edits
+            let oldHashToDelete = null;
             const updatedCollection = await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
                 const fileToUpdate = collection.find(f => f.id === fileIdToUpdate);
                 if (!fileToUpdate) {
                     throw new Error(`File with ID "${fileIdToUpdate}" not found in collection during update`);
                 }
+                
+                // Capture the old hash BEFORE updating (this is the current hash at lock time)
+                oldHashToDelete = fileToUpdate.hash || null;
                 
                 fileToUpdate.url = uploadResult.url;
                 if (uploadResult.gcs) {
@@ -346,6 +337,23 @@ export default {
                 
                 return collection;
             });
+
+            // Now it is safe to delete the old file version (after lock succeeds)
+            // This ensures we're deleting the correct hash even if concurrent edits occurred
+            if (oldHashToDelete) {
+                // Fire-and-forget async deletion for better performance, but log errors
+                // We don't want to fail the whole operation if cleanup fails, since we have the new file
+                (async () => {
+                    try {
+                        logger.info(`Deleting old file version with hash ${oldHashToDelete} (background task)`);
+                        await deleteFileByHash(oldHashToDelete, resolver);
+                    } catch (cleanupError) {
+                        logger.warn(`Failed to cleanup old file version (hash: ${oldHashToDelete}): ${cleanupError.message}`);
+                    }
+                })().catch(err => logger.error(`Async cleanup error: ${err}`));
+            } else {
+                logger.info(`No hash found for old file, skipping deletion`);
+            }
             
             // Get the updated file info for the result
             const updatedFile = updatedCollection.find(f => f.id === fileIdToUpdate);
