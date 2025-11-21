@@ -49,6 +49,18 @@ function isTextContentArray(content) {
   );
 }
 
+// Helper to check that response doesn't contain error messages
+function assertNoErrors(t, response) {
+  const messageContent = response.body?.choices?.[0]?.message?.content;
+  if (messageContent && typeof messageContent === 'string') {
+    t.falsy(messageContent.includes('Execution failed'), 'Response should not contain "Execution failed"');
+    t.falsy(messageContent.includes('tool_calls') && messageContent.includes('must be followed'), 
+      'Response should not contain tool_calls validation errors');
+    t.falsy(messageContent.includes('HTTP error:'), 'Response should not contain HTTP errors');
+    t.falsy(messageContent.includes('Invalid JSON'), 'Response should not contain JSON parsing errors');
+  }
+}
+
 test('POST /chat/completions - user message with string content', async (t) => {
   // Spec: User message content can be a string
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -68,6 +80,7 @@ test('POST /chat/completions - user message with string content', async (t) => {
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - user message with array of text content parts', async (t) => {
@@ -92,6 +105,7 @@ test('POST /chat/completions - user message with array of text content parts', a
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - user message with array containing strings (should be converted)', async (t) => {
@@ -113,6 +127,7 @@ test('POST /chat/completions - user message with array containing strings (shoul
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - system message with string content', async (t) => {
@@ -134,6 +149,7 @@ test('POST /chat/completions - system message with string content', async (t) =>
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - system message with array of text content parts', async (t) => {
@@ -157,6 +173,7 @@ test('POST /chat/completions - system message with array of text content parts',
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - system message with array containing strings (should be converted)', async (t) => {
@@ -178,6 +195,7 @@ test('POST /chat/completions - system message with array containing strings (sho
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - assistant message with string content', async (t) => {
@@ -203,6 +221,7 @@ test('POST /chat/completions - assistant message with string content', async (t)
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - assistant message with array of text content parts', async (t) => {
@@ -231,6 +250,7 @@ test('POST /chat/completions - assistant message with array of text content part
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - assistant message with null content and tool_calls', async (t) => {
@@ -270,6 +290,7 @@ test('POST /chat/completions - assistant message with null content and tool_call
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
   // The request should succeed, meaning null content was preserved and accepted by OpenAI API
 });
 
@@ -294,6 +315,11 @@ test('POST /chat/completions - assistant message with empty string content and t
               arguments: '{"location": "San Francisco"}'
             }
           }]
+        },
+        {
+          role: 'tool',
+          content: 'Sunny, 72°F',
+          tool_call_id: 'call_123'
         }
       ],
       stream: false
@@ -304,6 +330,7 @@ test('POST /chat/completions - assistant message with empty string content and t
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - assistant message with array containing strings and tool_calls (should be converted)', async (t) => {
@@ -327,6 +354,11 @@ test('POST /chat/completions - assistant message with array containing strings a
               arguments: '{"location": "San Francisco"}'
             }
           }]
+        },
+        {
+          role: 'tool',
+          content: 'Tool result',
+          tool_call_id: 'call_123'
         }
       ],
       stream: false
@@ -337,6 +369,7 @@ test('POST /chat/completions - assistant message with array containing strings a
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - tool message with string content', async (t) => {
@@ -371,6 +404,7 @@ test('POST /chat/completions - tool message with string content', async (t) => {
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - tool message with array of text content parts', async (t) => {
@@ -408,6 +442,7 @@ test('POST /chat/completions - tool message with array of text content parts', a
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - tool message with array containing strings (should be converted)', async (t) => {
@@ -442,6 +477,7 @@ test('POST /chat/completions - tool message with array containing strings (shoul
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - tool message with empty string content', async (t) => {
@@ -476,6 +512,7 @@ test('POST /chat/completions - tool message with empty string content', async (t
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - tool message with null content (should be converted to empty string)', async (t) => {
@@ -510,6 +547,7 @@ test('POST /chat/completions - tool message with null content (should be convert
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - complex conversation with all content variations', async (t) => {
@@ -568,6 +606,7 @@ test('POST /chat/completions - complex conversation with all content variations'
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - user message with image content part', async (t) => {
@@ -649,6 +688,11 @@ test('POST /chat/completions - assistant message with empty array content and to
               arguments: '{}'
             }
           }]
+        },
+        {
+          role: 'tool',
+          content: 'Tool result',
+          tool_call_id: 'call_123'
         }
       ],
       stream: false
@@ -659,6 +703,7 @@ test('POST /chat/completions - assistant message with empty array content and to
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
 test('POST /chat/completions - messages with name fields and various content types', async (t) => {
@@ -691,5 +736,6 @@ test('POST /chat/completions - messages with name fields and various content typ
 
   t.is(response.statusCode, 200);
   t.truthy(response.body);
+  assertNoErrors(t, response);
 });
 
