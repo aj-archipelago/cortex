@@ -277,7 +277,7 @@ var config = convict({
                 },
                 "requestsPerSecond": 50,
                 "maxTokenLength": 1000000,
-                "maxReturnTokens": 8192,
+                "maxReturnTokens": 32768,
                 "supportsStreaming": true
             },
             "oai-gpt41-mini": {
@@ -292,7 +292,7 @@ var config = convict({
                 },
                 "requestsPerSecond": 50,
                 "maxTokenLength": 1000000,
-                "maxReturnTokens": 8192,
+                "maxReturnTokens": 32768,
                 "supportsStreaming": true
             },
             "oai-o1": {
@@ -803,24 +803,24 @@ if (configFile && fs.existsSync(configFile)) {
 }
 
 // Ensure merged default entity is preserved
-if (config.get('entityConfig') && defaultEntityConfig && 
+if (config.get('entityConfig') && defaultEntityConfig &&
    (Object.keys(config.get('entityConfig')).length > Object.keys(defaultEntityConfig).length)) {
     const mergedEntities = config.get('entityConfig');
-    
+
     // Turn off defaults from original default list
     for (const [key, entity] of Object.entries(mergedEntities)) {
         if (defaultEntityConfig[key] && entity.isDefault) {
             delete mergedEntities[key];
         }
     }
-    
+
     // If no default found, make first entity default
     let hasDefault = Object.values(mergedEntities).some(entity => entity.isDefault);
     if (!hasDefault && Object.keys(mergedEntities).length > 0) {
         const firstKey = Object.keys(mergedEntities)[0];
         mergedEntities[firstKey].isDefault = true;
     }
-    
+
     config.set('entityConfig', mergedEntities);
 }
 
@@ -878,8 +878,8 @@ const buildPathways = async (config) => {
     const { pathwaysPath, corePathwaysPath, basePathwayPath } = config.getProperties();
 
     const basePathwayURL = pathToFileURL(basePathwayPath).toString();
-    
-    // Load cortex base pathway 
+
+    // Load cortex base pathway
     const basePathway = await import(basePathwayURL).then(module => module.default);
 
     // Helper function to recursively load pathway files
@@ -887,13 +887,13 @@ const buildPathways = async (config) => {
         const pathways = {};
         try {
             const files = await readdir(dirPath, { withFileTypes: true });
-            
+
             for (const file of files) {
                 const fullPath = path.join(dirPath, file.name);
                 if (file.isDirectory()) {
                     // Skip the shared directory
                     if (file.name === 'shared') continue;
-                    
+
                     // Recursively load pathways from other subdirectories
                     const subPathways = await loadPathwaysFromDir(fullPath);
                     Object.assign(pathways, subPathways);
@@ -957,7 +957,7 @@ const buildPathways = async (config) => {
     // config file contains pathways that no longer exist.
     const pathways = config.get('pathways');
     const entityTools = {};
-    
+
     for (const [key, def] of Object.entries(loadedPathways)) {
         const pathway = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...def, ...pathways[key] };
         pathways[def.name || key] = pathways[key] = pathway;
@@ -969,8 +969,8 @@ const buildPathways = async (config) => {
         )) {
             try {
                 // Convert single tool definition to array for consistent processing
-                const toolDefinitions = Array.isArray(pathway.toolDefinition) 
-                    ? pathway.toolDefinition 
+                const toolDefinitions = Array.isArray(pathway.toolDefinition)
+                    ? pathway.toolDefinition
                     : [pathway.toolDefinition];
 
                 for (const toolDef of toolDefinitions) {
