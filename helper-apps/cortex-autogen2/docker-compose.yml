@@ -26,4 +26,5 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
+      - /tmp/coding:/tmp/coding  # Mount work directories for test evaluator access
       - ./logs:/tmp/coding/logs

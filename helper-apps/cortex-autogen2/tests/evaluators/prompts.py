@@ -95,6 +95,8 @@ OUTPUT_EVALUATION_PROMPT = """You are an expert evaluator assessing the quality 
 **Test Case Specific Quality Criteria (CRITICAL - SCORE=0 IF VIOLATED):**
 {test_case_quality_criteria}
 
+{agent_activity_info}
+
 **CRITICAL FAILURE CHECK**: If ANY of the test case specific quality criteria above are violated, return score=0 immediately. These are mandatory requirements that cannot be overridden by other scoring factors. Examples of critical failures include:
 - Incorrect data analysis (e.g., claiming AJE > AJA when data shows AJA > AJE)
 - Missing required deliverables

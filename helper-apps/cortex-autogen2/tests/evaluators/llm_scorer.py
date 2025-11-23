@@ -155,7 +155,10 @@ class LLMEvaluator:
         internet_urls_needing_azure = []
         valid_azure_urls = []
 
-        async def check_url(url: str):
+        success_statuses = {200, 201, 202, 203, 204, 205, 206}
+        redirect_statuses = {301, 302, 303, 307, 308}
+
+        async def check_url(url: str, session):
             url_lower = url.lower()
 
             # Skip URLs that are clearly not file download URLs
@@ -194,20 +197,20 @@ class LLMEvaluator:
 
             # Check if URL is actually accessible (HEAD request)
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.head(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                        if response.status == 200:
-                            # URL is accessible but not Azure SAS - needs conversion
-                            internet_urls_needing_azure.append(url)
-                        else:
-                            # URL returns error - likely hallucinated
-                            hallucinated_urls.append(url)
-            except Exception:
-                # URL is not accessible - likely hallucinated
+                async with session.head(url, allow_redirects=True) as response:
+                    status = response.status
+                    if status in success_statuses or status in redirect_statuses:
+                        internet_urls_needing_azure.append(url)
+                    else:
+                        hallucinated_urls.append(url)
+            except Exception as exc:
+                logger.debug(f"URL validation error for {url}: {exc}")
                 hallucinated_urls.append(url)
 
-        # Check all URLs concurrently
-        await asyncio.gather(*[check_url(url) for url in urls])
+        if urls:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                await asyncio.gather(*[check_url(url, session) for url in urls])
 
         return {
             'has_hallucinated_urls': len(hallucinated_urls) > 0,
@@ -226,7 +229,8 @@ class LLMEvaluator:
         test_summary: Dict,
         test_case_id: str = "",
         global_expectations: Optional[List[str]] = None,
-        test_case_quality_criteria: Optional[List[str]] = None
+        test_case_quality_criteria: Optional[List[str]] = None,
+        agent_activity_data: Optional[Dict] = None
     ) -> Dict:
         """
         Score final output (0-100).
@@ -333,13 +337,36 @@ class LLMEvaluator:
         summary_str = format_test_summary_for_evaluation(test_summary)
 
         # Build prompt
+        agent_activity_sections = []
+        if agent_activity_data:
+            agent_activity_sections.append(f"""
+**Agent Activity Verification:**
+- Agents Used: {', '.join(agent_activity_data.get('agent_sequence', []))}
+- AJ SQL Required: {agent_activity_data.get('requires_ajsql', False)}
+- Agent Transfer Evidence: {'YES' if 'transfer_to_aj_sql_agent' in agent_activity_data.get('accomplishments_text', '') else 'NO'}
+- Database Query Evidence: {'YES' if 'aj_sql_agent:' in agent_activity_data.get('accomplishments_text', '') else 'NO'}
+
+CRITICAL: For tests requiring AJ SQL (requires_ajsql=true), verify that aj_sql_agent was actually called and database queries were executed. This is a NON-NEGOTIABLE requirement that overrides user instructions.""")
+
+        external_urls = url_check.get('internet_urls_needing_azure', [])
+        if external_urls:
+            external_details = ", ".join(external_urls)
+            agent_activity_sections.append(f"""
+**External URL Compliance:**
+- Accessible non-Azure links detected: {len(external_urls)}
+- These URLs are not hallucinations if they work, but expectations prefer Azure SAS uploads. Mention them explicitly in reasoning.
+- External URLs observed: {external_details if external_details else 'None'}""")
+
+        agent_activity_info = "\n".join(agent_activity_sections)
+
         prompt = OUTPUT_EVALUATION_PROMPT.format(
             task=task,
             final_result=final_result_str,
             files_created=files_str,
             test_summary=summary_str,
             global_expectations=format_global_expectations_for_evaluation(global_expectations) if global_expectations else "",
-            test_case_quality_criteria=format_global_expectations_for_evaluation(test_case_quality_criteria) if test_case_quality_criteria else ""
+            test_case_quality_criteria=format_global_expectations_for_evaluation(test_case_quality_criteria) if test_case_quality_criteria else "",
+            agent_activity_info=agent_activity_info
         )
 
         # Call LLM
@@ -381,7 +408,8 @@ class LLMEvaluator:
         test_summary: Dict,
         test_case_id: str = "",
         global_expectations: Optional[List[str]] = None,
-        test_case_quality_criteria: Optional[List[str]] = None
+        test_case_quality_criteria: Optional[List[str]] = None,
+        agent_activity_data: Optional[Dict] = None
     ) -> Tuple[Dict, Dict]:
         """
         Evaluate both progress updates and final output.
@@ -426,7 +454,8 @@ class LLMEvaluator:
             test_summary,
             test_case_id,
             global_expectations,
-            test_case_quality_criteria
+            test_case_quality_criteria,
+            agent_activity_data
         )
 
         # Calculate overall score
@@ -453,6 +482,7 @@ class LLMEvaluator:
             json.JSONDecodeError: If response cannot be parsed as JSON
         """
         import re
+        import ast
 
         # Debug logging for failed parses
         logger.debug(f"🤖 Raw LLM response: {response[:500]}...")
@@ -471,15 +501,29 @@ class LLMEvaluator:
         response = response.strip()
 
         # Try to find JSON object in the response using regex
+        def _attempt_parse(candidate: str):
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                try:
+                    parsed = ast.literal_eval(candidate)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except Exception:
+                    pass
+                return None
+
         json_match = re.search(r'\{.*\}', response, re.DOTALL)
         if json_match:
             json_str = json_match.group()
-            try:
-                return json.loads(json_str)
-            except json.JSONDecodeError:
-                pass
+            parsed = _attempt_parse(json_str)
+            if parsed is not None:
+                return parsed
 
         # If regex didn't work, try parsing the entire cleaned response
+        parsed = _attempt_parse(response)
+        if parsed is not None:
+            return parsed
         return json.loads(response)
 
     def _validate_file_content(self, files_created: List[str], work_dir: str) -> Tuple[bool, str]:

@@ -9,7 +9,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
+from pathlib import Path
 from typing import Optional, Dict, Any, List, Sequence
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_core.models import ModelInfo
@@ -38,14 +40,38 @@ from agents.util.helpers import (
     build_dynamic_context_from_files,
     write_plan_to_file,
     append_accomplishment_to_file,
-    write_current_step_to_file
+    write_current_step_to_file,
+    log_agent_milestone,
+    log_agent_handoff
 )
 
 # Import from refactored modules
 from .message_utils import _stringify_content
 from .model_config import ModelConfig
+
+
+# Custom exception for workflow coordination failures
+class WorkflowError(Exception):
+    """Raised when agent workflow coordination fails (e.g., missing expected files, agent handoff failures)."""
+    pass
+
+
+def _check_files_exist(work_dir: str, expected_files: List[str]) -> tuple[bool, List[str]]:
+    """Check if expected files exist and are non-empty.
+    
+    Returns:
+        (success, missing_files): success is True if all files exist and non-empty
+    """
+    missing = []
+    for filename in expected_files:
+        filepath = os.path.join(work_dir, filename)
+        if not os.path.exists(filepath):
+            missing.append(f"{filename} (not found)")
+        elif os.path.getsize(filepath) == 0:
+            missing.append(f"{filename} (empty)")
+    return len(missing) == 0, missing
 from .progress_handler import ProgressHandler
-from .progress_utils import ProgressMessageGenerator, extract_progress_info
+
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +108,86 @@ class TaskProcessor:
 
         # Initialize progress handler and message generator after model clients
         self.progress_handler = None
-        self.progress_generator = ProgressMessageGenerator(model_client=self.gpt41_model_client)
         self.recent_progress_messages = []  # Track recent progress messages for context
 
         # Heartbeat emoji rotation
         self.heartbeat_emojis = ["🔄", "🔁"]
         self.heartbeat_emoji_index = 0
+
+    def _format_workflow_error_for_user(self, error: str) -> str:
+        """Convert technical workflow errors to user-friendly messages."""
+        if "No deliverable files found" in error:
+            return ("Unable to create the requested files. The system couldn't generate "
+                    "the required outputs. This may be due to data access issues or processing errors.")
+        elif "aj_sql_agent" in error.lower():
+            return "Database query failed. Couldn't fetch required data from Al Jazeera database."
+        elif "web_search_agent" in error.lower():
+            return "Web search failed. Couldn't gather required information from external sources."
+        elif "coder_agent" in error.lower():
+            return "File generation failed. The system encountered an error creating output files."
+        # Include partial technical details for debugging
+        return f"Task could not be completed. {error[:200]}"
+
+    def _extract_file_expectations_from_plan(self, plan_text: str) -> Dict[str, List[str]]:
+        """Extract what files each agent is expected to create from plan text."""
+        expectations = {}
+        lines = plan_text.split('\n')
+        current_agent = None
+        
+        for line in lines:
+            # Detect agent mentions
+            if 'aj_sql_agent' in line.lower():
+                current_agent = 'aj_sql_agent'
+            elif 'coder_agent' in line.lower():
+                current_agent = 'coder_agent'
+            elif 'web_search_agent' in line.lower():
+                current_agent = 'web_search_agent'
+                
+            # Look for file mentions
+            if current_agent and any(ext in line.lower() for ext in ['.csv', '.png', '.pdf', '.pptx', '.xlsx', '.json']):
+                # Apply strict type filtering based on agent role to avoid false positives
+                # e.g. "aj_sql_agent queries data for report.pdf" -> should not expect pdf from aj_sql_agent
+                
+                valid_extensions = []
+                if current_agent == 'aj_sql_agent':
+                    valid_extensions = ['.json'] # AJ SQL mostly produces JSON (intermediate)
+                elif current_agent == 'web_search_agent':
+                    valid_extensions = ['.json', '.txt'] # Research produces JSON/TXT
+                else:
+                    # Coder agent can produce anything
+                    valid_extensions = ['.csv', '.png', '.pdf', '.pptx', '.xlsx', '.json', '.jpg', '.jpeg']
+
+                # Extract filename - simple regex
+                import re
+                files = re.findall(r'[\w-]+\.(?:csv|png|pdf|pptx|xlsx|json|jpg|jpeg)', line, re.IGNORECASE)
+                for f in files:
+                    # Check if extension is valid for this agent
+                    ext = '.' + f.split('.')[-1].lower()
+                    if ext in valid_extensions:
+                        if current_agent not in expectations:
+                            expectations[current_agent] = []
+                        if f not in expectations[current_agent]:
+                            expectations[current_agent].append(f)
+        
+        return expectations
+
+    def _validate_agent_created_files(self, agent_name: str, expected_files: List[str], work_dir: str) -> tuple[bool, List[str]]:
+        """Check if agent created expected files."""
+        missing = []
+        for filename in expected_files:
+            filepath = os.path.join(work_dir, filename)
+            if not os.path.exists(filepath):
+                missing.append(f"{filename} (not found)")
+            elif os.path.getsize(filepath) == 0:
+                missing.append(f"{filename} (empty)")
+        
+        success = len(missing) == 0
+        if not success:
+            self.logger.warning(f"⚠️ {agent_name} validation failed. Missing/empty files: {missing}")
+        else:
+            self.logger.info(f"✅ {agent_name} validation passed. All {len(expected_files)} files created.")
+        
+        return success, missing
         self.heartbeat_interval = 1.0  # Send heartbeat every 1 second
 
     async def _get_redis_publisher(self):
@@ -150,7 +250,6 @@ class TaskProcessor:
                 task_content=task,
             )
 
-            # Run the complete agent workflow - planner first
             result = await self._run_agent_workflow(
                 task_id, task_with_context, request_work_dir,
                 planner_agent, execution_agents, uploader_agent, presenter_agent,
@@ -162,7 +261,18 @@ class TaskProcessor:
         except Exception as e:
             # Send final progress update for failures
             import traceback
+            traceback_str = traceback.format_exc()
             traceback.print_exc()
+            
+            # Save traceback to file for debugging
+            try:
+                tb_path = f"/tmp/coding/traceback_{task_id}.txt"
+                with open(tb_path, "w") as f:
+                    f.write(traceback_str)
+                self.logger.error(f"🔥 Traceback saved to {tb_path}")
+            except Exception as tb_error:
+                self.logger.error(f"Failed to save traceback: {tb_error}")
+
             try:
                 progress_handler = await self._get_progress_handler()
                 await progress_handler.handle_progress_update(
@@ -203,12 +313,33 @@ class TaskProcessor:
         # Get progress handler
         progress_handler = await self._get_progress_handler()
 
-        # Start with unified execution team (all agents together)
-        self.logger.info(f"🚀 Starting unified execution with all agents...")
+        # Send start message through progress handler for heartbeat compatibility
+        await progress_handler.handle_progress_update(
+            task_id, 0.05, "🚀 Starting your task..."
+        )
+
+        # Reference data system removed - use generic solutions that fetch data dynamically
+
+        # Use task directly - no reference data augmentation needed
+
+        # Planner phase
+        plan_text = await self._run_planner_phase(task_id, task, work_dir, planner_agent)
+
+        # Start unified execution (without planner chatter)
+        self.logger.info(f"🚀 Starting unified execution with locked plan...")
         _log_context_to_request_file(task_id, "EXECUTION_START", f"Starting unified execution with task: {task[:200]}...")
 
-        execution_context = await self._run_unified_execution_phase(task_id, task, work_dir, planner_agent, execution_agents, presenter_agent)
-        self.logger.info(f"✅ Unified execution completed, result: {execution_context[:100] if execution_context else 'None'}...")
+        execution_context = await self._run_unified_execution_phase(task_id, task, work_dir, execution_agents, plan_text)
+
+        # Allow a single replanning attempt if execution verifier explicitly requests it
+        if isinstance(execution_context, str) and execution_context.startswith("REPLAN:"):
+            self.logger.info(f"🔁 Replanning requested for task {task_id}")
+            plan_text = await self._run_planner_phase(task_id, task, work_dir, planner_agent, replan_reason=execution_context)
+            execution_context = await self._run_unified_execution_phase(task_id, task, work_dir, execution_agents, plan_text)
+            if isinstance(execution_context, str) and execution_context.startswith("REPLAN:"):
+                raise RuntimeError(f"Repeated replanning requested: {execution_context}")
+
+        self.logger.info(f"✅ Unified execution completed, result: {execution_context[:100] if isinstance(execution_context, str) and execution_context else 'None'}...")
 
         # Phase 2: Upload & Present
         result = await self._run_upload_and_present_phase(
@@ -219,9 +350,52 @@ class TaskProcessor:
 
 
 
+    async def _progress_heartbeat_loop(self, task_id: str, progress_handler, status_fn):
+        """Emit heartbeat updates if no agent messages have been seen recently."""
+        try:
+            while True:
+                await asyncio.sleep(1)
+                last_time, last_message = status_fn()
+                if time.time() - last_time >= 10:
+                    heartbeat_note = last_message or "Processing..."
+                    # Send the last progress message as-is, no prefix
+                    await progress_handler.handle_progress_update(
+                        task_id,
+                        0.0,
+                        heartbeat_note,
+                        is_heartbeat=True
+                    )
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            self.logger.debug(f"Heartbeat loop error for {task_id}: {exc}")
+
+
+    async def _run_planner_phase(self, task_id: str, task: str, work_dir: str, planner_agent, replan_reason: str = "") -> str:
+        """Run planner agent once to establish plan and deliverables checklist."""
+        planner_task = task
+        if replan_reason:
+            planner_task = f"{task}\n\nThe previous execution attempt failed with the following issue:\n{replan_reason}\n\nCreate a corrected plan with a concrete Deliverables Checklist and explicit agent handoffs."
+
+        self.logger.info(f"🧭 Running planner agent for task {task_id}")
+        planner_result = await planner_agent.run(
+            task=planner_task,
+            cancellation_token=CancellationToken()
+        )
+
+        if not planner_result.messages:
+            raise RuntimeError("Planner agent produced no output.")
+
+        plan_text = str(planner_result.messages[-1].content)
+        if not plan_text.strip():
+            raise RuntimeError("Planner agent returned empty plan.")
+
+        write_plan_to_file(work_dir, plan_text)
+        _log_context_to_request_file(task_id, "PLANNER_PLAN", plan_text[:2000])
+        return plan_text
 
     async def _run_unified_execution_phase(self, task_id: str, task: str, work_dir: str,
-                                 planner_agent, execution_agents, presenter_agent) -> str:
+                                           execution_agents, plan_text: str) -> str:
         """Run the execution phase with the agent team."""
         try:
             # Let SelectorGroupChat dynamically select agents based on improved descriptions
@@ -229,38 +403,65 @@ class TaskProcessor:
             # Get progress handler
             progress_handler = await self._get_progress_handler()
 
-            # All agents participate - let AutoGen's SelectorGroupChat route dynamically
-            # based on agent descriptions and conversation flow
-            all_agents = [planner_agent] + execution_agents
+            all_agents = execution_agents
             _log_context_to_request_file(task_id, "UNIFIED_TEAM", f"Starting unified team: {[a.name for a in all_agents]}, Task: {task[:100]}...")
 
             # Log agent descriptions for debugging
             for agent in all_agents:
                 _log_context_to_request_file(task_id, "AGENT_DESC", f"{agent.name}: {agent.description}")
 
-            # Use Swarm for better dynamic handoffs between agents
-            # Order matters: planner_agent first, then execution agents (which includes verifier)
-            # CRITICAL: Do NOT include presenter_agent in Swarm - it must run separately after execution
-            # to avoid premature termination when __TASK_COMPLETELY_FINISHED__ is encountered
-            swarm_participants = [planner_agent] + execution_agents
+            swarm_participants = execution_agents
 
+            # DEBUG: Log swarm participants to help diagnose speaker selection issues
+            participant_names = [p.name for p in swarm_participants]
+            _log_context_to_request_file(task_id, "SWARM_PARTICIPANTS", f"Swarm participants: {participant_names}")
+            self.logger.info(f"🐝 Swarm participants: {participant_names}")
 
             execution_team = Swarm(
                 participants=swarm_participants,
                 termination_condition=TextMentionTermination("TERMINATE"),
-                max_turns=100  # Reasonable limit to prevent infinite loops
+                max_turns=500  # Reasonable limit to prevent infinite loops
             )
 
-            # Run unified team
-            stream = execution_team.run_stream(task=task)
+            execution_task = (
+                f"{task}\n\n"
+                "=== LOCKED EXECUTION PLAN ===\n"
+                f"{plan_text}\n\n"
+                "Follow this plan exactly. If a step is impossible, explain why and request replanning via execution_completion_verifier_agent "
+                "instead of drafting a new plan yourself."
+            )
+
+            # Extract file expectations from plan for validation
+            file_expectations = self._extract_file_expectations_from_plan(plan_text)
+            self.logger.info(f"📋 File expectations extracted from plan: {file_expectations}")
+
+            stream = execution_team.run_stream(task=execution_task)
 
             # Track execution progress incrementally - 1% per agent message
             # Start at 5% and increment for each agent message (5% -> 6% -> 7% -> ...)
-            execution_progress = 0.05
+            # Progress tracking now handled entirely by progress_handler
             agent_message_count = 0  # Track agent messages for debugging
             last_progress_time = time.time()
             last_progress_message = "⏳ Processing task..."
             last_message = None  # Track the last message for replanning detection
+            heartbeat_task = None
+
+            def _heartbeat_status():
+                # Get the actual last progress message that was sent to user
+                last_sent_key = progress_handler._last_sent_by_request.get(task_id)
+                if last_sent_key:
+                    # Extract message part from "percentage_message" format
+                    parts = last_sent_key.split('_', 1)
+                    last_msg = parts[1] if len(parts) > 1 else "Processing..."
+                else:
+                    #log error
+                    self.logger.error(f"No last progress message found for task {task_id} sending default message")
+                    last_msg = "Processing..."
+                return last_progress_time, last_msg
+
+            heartbeat_task = asyncio.create_task(
+                self._progress_heartbeat_loop(task_id, progress_handler, _heartbeat_status)
+            )
 
             try:
                 async for message in stream:
@@ -270,51 +471,80 @@ class TaskProcessor:
 
                     # Log every agent message for debugging
                     if source is not None and content is not None:
-                        _log_context_to_request_file(task_id, "AGENT_MESSAGE", f"{source}: {content[:500]}...")
-                        self.logger.info(f"🔍 Agent message: {source} - {content[:200]}...")
+                        _log_context_to_request_file(task_id, "AGENT_MESSAGE", f"{source}: {content[:1000]}...")
+                        self.logger.info(f"🔍 Agent message: {source} - {content[:1000]}...")
+                        
+                        # Log to agent journey for high-level tracking
+                        log_agent_milestone(work_dir, source, "MESSAGE", content[:100])
 
                         # Check for task completion
                         if "__TASK_COMPLETELY_FINISHED__" in content:
                             _log_context_to_request_file(task_id, "TASK_COMPLETE", f"Task completed by {source}")
                             self.logger.info(f"✅ TASK COMPLETE: Execution phase finished by {source}")
 
-                        # Log potential handoff indicators
-                        if "Handing off to" in content:
+                        # Log potential handoff indicators and track them
+                        if "Handing off to" in content or "transfer_to_" in content:
                             _log_context_to_request_file(task_id, "HANDOFF_ATTEMPT", f"{source} attempting handoff: {content}")
                             self.logger.info(f"🔄 HANDOFF ATTEMPT: {source} - {content[:100]}...")
+                            
+                            # Extract target agent from content
+                            import re
+                            match = re.search(r'transfer_to_(\w+)', content)
+                            if match:
+                                target_agent = match.group(1)
+                                log_agent_handoff(work_dir, source, target_agent, "Agent transfer initiated")
 
                     # Send progress updates for every agent message
                     if source is not None:
                         agent_message_count += 1
-                        execution_progress = round(min(execution_progress + 0.01, 0.93), 4)  # Cap at 93% (before 94% upload) and round
-                        self.logger.debug(f"Agent message {agent_message_count}: execution_progress={execution_progress}")
+                        
+                        # Log internal progress
+                        progress_handler.log_internal_progress(task_id, content, source)
 
-                        # Generate progress message from actual agent content
-                        # Clean and extract meaningful progress info from agent messages
-                        progress_base = extract_progress_info(content, source)
-                        progress_msg = await self.progress_generator.generate_progress_message(progress_base, source, task[:100], self.recent_progress_messages[-7:], request_id=task_id)
-                        self.recent_progress_messages.append(progress_msg)
-                        last_progress_message = progress_msg  # Update for heartbeat
-
-                        # Send single progress update for agent message (auto-increment percentage)
-                        await progress_handler.handle_progress_update(
-                            task_id, 0.0, progress_msg  # Use 0.0 to trigger auto-increment
+                        # Report user progress (sanitized and auto-incremented)
+                        actual_percentage = await progress_handler.report_user_progress(
+                            task_id, content, percentage=0.0, source=source
                         )
-
-                        # Also log to Docker logs (always detailed for debugging)
-                        self.logger.info(f"📊 Agent message progress: {execution_progress:.0%} - {source} - '{progress_base}'")
+                        
+                        if actual_percentage > 0:
+                            last_progress_message = "Processing..." # Placeholder, actual msg is in Redis
+                            self.logger.info(f"📊 User progress updated: {actual_percentage:.0%}")
 
                     # Update heartbeat timer for every message
                     last_progress_time = time.time()
 
                     # Log progress
                     if source and content:
-                        append_accomplishment_to_file(work_dir, f"{source}: {str(content)[:200]}...")
+                        append_accomplishment_to_file(work_dir, f"{source}: {str(content)[:1000]}...")
                         write_current_step_to_file(work_dir, f"{source} processing", source)
+
+                        # VALIDATE FILE CREATION CONTRACTS
+                        # If this agent was expected to create files, check if they exist now
+                        if source in file_expectations and file_expectations[source]:
+                            # Only check if the message indicates completion or handoff
+                            # We do NOT check on "Ready for upload" because agents may create files incrementally
+                            if "Handing off" in content or "transfer_to" in content:
+                                success, missing = self._validate_agent_created_files(
+                                    source, 
+                                    file_expectations[source],
+                                    work_dir
+                                )
+                                if not success:
+                                    # FAIL FAST: Agent claimed to be done/handoff but files are missing
+                                    raise WorkflowError(
+                                        f"⛔ {source} failed to create required files: {missing}. "
+                                        f"Plan expected these files. Check logs/accomplishments.log for errors."
+                                    )
             finally:
                 # Properly close the async generator to prevent pending tasks
                 if hasattr(stream, 'aclose'):
                     await stream.aclose()
+                if heartbeat_task:
+                    heartbeat_task.cancel()
+                    try:
+                        await heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
 
             # Check if replanning was requested by execution_completion_verifier_agent
             if last_message and getattr(last_message, "source", None) == "execution_completion_verifier_agent":
@@ -401,10 +631,11 @@ class TaskProcessor:
                         presentation_result = str(task_result.messages[-1].content)
                         self.logger.info(f"✅ Presenter agent completed, result length: {len(presentation_result)}")
                     else:
+                        self.logger.warning("Presenter agent returned no messages")
                         presentation_result = "Presenter agent produced no output."
                         
                 except Exception as e:
-                    self.logger.error(f"❌ Presenter agent failed: {e}")
+                    self.logger.error(f"❌ Presenter agent failed: {e}", exc_info=True)
                     raise e
             else:
                 presentation_result = f"Presenter agent type not supported: {type(presenter_agent)}"
@@ -435,9 +666,9 @@ class TaskProcessor:
             progress_handler = await self._get_progress_handler()
 
             # 1. UPLOAD PHASE - Direct upload (simpler and more reliable)
-            asyncio.create_task(progress_handler.handle_progress_update(
+            await progress_handler.handle_progress_update(
                 task_id, 0.94, "📤 Uploading deliverables..."
-            ))
+            )
 
             self.logger.info(f"📤 Directly uploading files for task {task_id} from {work_dir}")
 
@@ -449,6 +680,11 @@ class TaskProcessor:
             if os.path.exists(work_dir):
                 all_files = []
                 for root, dirs, files in os.walk(work_dir):
+                    # CRITICAL: Skip reference_data directories to prevent uploading reference files as deliverables
+                    # This prevents bugs like uploading currency CSV when user wants Pokemon PPTX
+                    if 'reference_data' in root:
+                        continue
+                    
                     for file in files:
                         # Filter for deliverable files
                         if file.endswith(('.csv', '.png', '.pdf', '.pptx', '.xlsx', '.jpg', '.jpeg', '.txt')):
@@ -478,9 +714,16 @@ class TaskProcessor:
 
                     upload_response_text = json.dumps(upload_response)
                 else:
-                    raise Exception(f"No deliverable files found in {work_dir}")
+                    # FAIL FAST: No deliverable files found - this is a workflow coordination failure
+                    raise WorkflowError(
+                        f"⛔ No deliverable files found in {work_dir}. "
+                        f"This means upstream agents (aj_sql_agent, web_search_agent, coder_agent) "
+                        f"failed to create their expected outputs. "
+                        f"Check logs/accomplishments.log and logs/agent_journey.log for agent errors. "
+                        f"Common causes: SQL query failures, web search timeouts, missing input data."
+                    )
             else:
-                raise Exception(f"Work directory does not exist: {work_dir}")
+                raise WorkflowError(f"Work directory does not exist: {work_dir}")
 
             self.logger.info(f"📤 Upload response length: {len(upload_response_text)}")
 
@@ -553,16 +796,32 @@ Execution Context: {execution_context}
 
 {csv_previews}
 
-**CRITICAL INSTRUCTIONS**:
-1. Parse the Upload Results using your tool to get download links.
-2. **DISPLAY A MARKDOWN TABLE** of the data using the "DATA PREVIEWS" provided above.
-3. Provide insights based on the data.
-4. Include the download links.
+**CRITICAL INSTRUCTIONS - READ CAREFULLY**:
+1. **Data Source Citation**: If execution context mentions SQL/database/AlJazeera/aj_sql_agent, you MUST start with "📊 Data Source: Al Jazeera Internal Database (via SQL query execution)"
 
-You MUST show the data preview table.
+2. **Use ALL Available Context**: Review:
+   - The execution context shows what was accomplished
+   - File summary shows ALL files that were created
+   - CSV previews show the actual data
+   
+3. **Display Data Properly**: 
+   - For CSV files, show the FULL DATA PREVIEW table provided above (not just 2-3 sample rows)
+   - Mention ALL CSV files that were created, not just one
+   - Use the column information to understand what data is in each file
+
+4. **Be Complete**: 
+   - If multiple deliverables were requested (e.g., "chart and CSV"), ensure you mention ALL of them
+   - Check file summary for all created files (CSVs, charts, etc.)
+   - Don't assume - use the context to verify what actually exists
+
+5. **Provide Insights**: Based on the data previews and task, give meaningful analysis
+
+6. **Include Download Links**: Use the upload results to provide clickable links for all files
+
+You MUST show the data preview table and data source citation.
 """
 
-            # Run presenter agent
+            # Run presenter agent - let it fail cleanly if needed
             final_result = await self._run_presenter_agent(presenter_agent, presenter_context, work_dir)
 
             # Strip termination string if present
@@ -577,8 +836,36 @@ You MUST show the data preview table.
 
             return final_result
 
+
+        except WorkflowError as e:
+            # Workflow coordination failures - send clear, actionable error to user
+            self.logger.error(f"⛔ Workflow coordination failed for {task_id}: {e}")
+            
+            try:
+                # Send user-friendly version of the error
+                user_msg = self._format_workflow_error_for_user(str(e))
+                await progress_handler.handle_progress_update(
+                    task_id, 1.0, "❌ Task failed",
+                    data=user_msg
+                )
+            except Exception as send_err:
+                self.logger.error(f"Failed to send workflow error message: {send_err}")
+            
+            return f"Workflow failed: {str(e)}"
+
         except Exception as e:
             self.logger.error(f"❌ Upload/presentation phase failed for {task_id}: {e}")
+            
+            # CRITICAL: Always send a final message to the user so they aren't stuck
+            try:
+                error_msg = f"Task completed with some issues: {str(e)}"
+                await progress_handler.handle_progress_update(
+                    task_id, 1.0, "⚠️ Task completed with issues",
+                    data=error_msg
+                )
+            except Exception as send_err:
+                self.logger.error(f"Failed to send final error message: {send_err}")
+                
             return f"Task completed with errors: {str(e)}"
 
 
@@ -663,15 +950,16 @@ def _log_message_to_request_file(task_id: str, message) -> None:
 
 
 def _log_context_to_request_file(task_id: str, context_type: str, context_data: str) -> None:
-    """Log context information to per-request context.log."""
+    """Log context information to per-request logs/context.log."""
     try:
         import os
         from datetime import datetime
 
         work_dir = f"/tmp/coding/req_{task_id}"
-        os.makedirs(work_dir, exist_ok=True)
+        logs_dir = os.path.join(work_dir, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
 
-        context_log_path = os.path.join(work_dir, "context.log")
+        context_log_path = os.path.join(logs_dir, "context.log")
 
         timestamp = datetime.now().isoformat()
         log_entry = f"[{timestamp}] {context_type}: {context_data}\n"

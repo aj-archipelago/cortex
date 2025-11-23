@@ -114,3 +114,4 @@ fetch_entity_images_tool = FunctionTool(
     fetch_entity_images,
     description="Fetch images for structured entities using specialized APIs with automatic web search fallback. Works for categorized items like characters, countries, or any entity with known data sources."
 )
+

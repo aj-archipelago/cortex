@@ -337,6 +337,120 @@ async def run_all_tests_parallel(max_concurrent: int = 2):
     print(f"\n{'=' * 80}\n")
 
 
+async def run_selected_tests_parallel(test_cases: list, max_concurrent: int = 2):
+    """Run specific list of test cases with dynamic parallel execution."""
+    # This is a duplicate of the logic in run_all_tests_parallel but accepts the list directly
+    # In a perfect world we'd refactor, but for "min change" we'll just adapt the existing function
+    
+    results = []
+    pending_tests = test_cases.copy()
+    running_tasks = {}  # test_id -> task
+    runner_ids = {}  # test_id -> runner_id
+    completed_count = 0
+    next_runner_id = 1
+
+    async def run_single_test_with_completion(test_case: Dict, runner_id: int) -> Dict:
+        """Run a single test and handle completion."""
+        # Get separate logger for this runner
+        runner_logger = get_runner_logger(runner_id, test_case['id'])
+
+        # Write a marker to the log file to show this runner started
+        runner_logger.info(f"🚀 Runner {runner_id} started test: {test_case['id']}")
+        print(f"DEBUG: Runner {runner_id} starting test {test_case['id']}")
+
+        try:
+            # Run each test in its own thread to avoid blocking the event loop
+            import asyncio
+            runner_orchestrator = TestOrchestrator(logger=runner_logger)
+            runner_orchestrator._current_runner_id = runner_id  # Set runner ID for logging
+            result = await asyncio.to_thread(runner_orchestrator.run_test_sync, test_case)
+            runner_logger.info(f"✅ Runner {runner_id} completed test: {test_case['id']}")
+            return result
+        except Exception as e:
+            runner_logger.error(f"❌ Runner {runner_id} test {test_case['id']} failed with exception: {e}")
+            return {
+                'test_case_id': test_case['id'],
+                'overall_score': 0,
+                'progress_score': 0,
+                'output_score': 0,
+                'duration': 0,
+                'error': str(e)
+            }
+
+    # Process completed tasks and start new ones to maintain max_concurrent parallel execution
+    logger.info(f"🚀 Starting parallel execution: max_concurrent={max_concurrent}, total_tests={len(test_cases)}")
+    while running_tasks or pending_tests:
+        if running_tasks:
+            # Wait for any task to complete
+            done, pending = await asyncio.wait(
+                list(running_tasks.values()),
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            # Process completed tasks
+            for task in done:
+                # Find which test this was
+                completed_test_id = None
+                for test_id, running_task in running_tasks.items():
+                    if running_task == task:
+                        completed_test_id = test_id
+                        break
+
+                if completed_test_id:
+                    try:
+                        result = await task
+                        results.append(result)
+                        completed_count += 1
+                        print_test_result(result)
+                        logger.info(f"✅ Completed test: {completed_test_id} ({completed_count}/{len(test_cases)})")
+
+                        # Check if this test failed - log but continue with all tests
+                        if (result.get('overall_score', 0) < 90 or
+                            result.get('progress_score', 0) < 90 or
+                            result.get('output_score', 0) < 90):
+                            logger.warning(f"❌ Test {completed_test_id} failed with score < 90. Continuing with remaining tests.")
+                            # Continue execution instead of stopping
+
+                    except Exception as e:
+                        logger.error(f"❌ Task {completed_test_id} failed with exception: {e}")
+                        # Continue with other tasks
+
+                    finally:
+                        # Remove completed task
+                        del running_tasks[completed_test_id]
+
+        # Start new tests to maintain max_concurrent parallel execution
+        while len(running_tasks) < max_concurrent and pending_tests:
+            test_case = pending_tests.pop(0)
+            runner_id = next_runner_id
+            next_runner_id += 1
+            logger.info(f"🔄 Starting test: {test_case['id']} with runner {runner_id}")
+            task = asyncio.create_task(run_single_test_with_completion(test_case, runner_id))
+            running_tasks[test_case['id']] = task
+            runner_ids[test_case['id']] = runner_id
+            logger.info(f"✅ Started test: {test_case['id']} (running: {len(running_tasks)}, pending: {len(pending_tests)}, runner: {runner_id})")
+
+    # Print final summary
+    print("\n" + "=" * 80)
+    print("📊 Final Summary")
+    print("=" * 80 + "\n")
+
+    passed = sum(1 for r in results
+                  if r.get('overall_score', 0) >= 90 and
+                     r.get('progress_score', 0) >= 90 and
+                     r.get('output_score', 0) >= 90)
+    failed = len(results) - passed
+
+    print(f"Total Tests: {len(results)}")
+    print(f"Passed (all ≥90): {passed}")
+    print(f"Failed (any <90): {failed}")
+
+    avg_overall = sum(r.get('overall_score', 0) for r in results) / len(results) if results else 0
+    print(f"Average Overall Score: {avg_overall:.1f}/100")
+
+    print(f"\n{'=' * 80}\n")
+
+
 async def run_all_tests():
     """Run all test cases sequentially (legacy function)."""
     await run_all_tests_parallel(1)
@@ -396,8 +510,9 @@ def main():
     parser.add_argument(
         '--test',
         type=str,
+        action='append',
         metavar='TEST_ID',
-        help='Run specific test case (e.g., tc001_pokemon_pptx)'
+        help='Run specific test case (e.g., tc001_pokemon_pptx). Can be used multiple times.'
     )
 
     parser.add_argument(
@@ -427,7 +542,32 @@ def main():
         asyncio.run(run_all_tests_parallel(args.parallel))
 
     elif args.test:
-        asyncio.run(run_single_test(args.test))
+        if len(args.test) == 1:
+            asyncio.run(run_single_test(args.test[0]))
+        else:
+            # Run selected tests in parallel
+            print_header()
+            print(f"🚀 Running {len(args.test)} selected test cases with max {args.parallel} concurrent executions...\n")
+            
+            # Filter test cases
+            orchestrator = TestOrchestrator()
+            all_test_cases, _ = orchestrator.load_test_cases()
+            selected_test_cases = [tc for tc in all_test_cases if tc['id'] in args.test]
+            
+            # Verify all requested tests were found
+            found_ids = [tc['id'] for tc in selected_test_cases]
+            missing_ids = set(args.test) - set(found_ids)
+            if missing_ids:
+                print(f"⚠️  Warning: The following test cases were not found: {', '.join(missing_ids)}")
+            
+            if not selected_test_cases:
+                print("❌ No valid test cases selected.")
+                return
+
+            # Reuse the parallel runner logic but with filtered tests
+            # We need to modify run_all_tests_parallel to accept a list of tests or create a new function
+            # For now, let's just patch run_all_tests_parallel to accept optional test_list
+            asyncio.run(run_selected_tests_parallel(selected_test_cases, args.parallel))
 
     elif args.history:
         print_header()

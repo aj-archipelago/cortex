@@ -333,7 +333,7 @@ class TestOrchestrator:
             self.logger.info(f"📡 Starting data collection...")
 
             # For parallel execution, use appropriate timeout
-            parallel_timeout = min(timeout, 600)  # Allow up to 10 minutes for parallel execution
+            parallel_timeout = timeout  # Use the timeout defined in test_cases.yaml
             self.logger.info(f"⏱️ Using parallel timeout: {parallel_timeout}s")
 
             # Start progress collection immediately to catch all updates from the start
@@ -407,9 +407,16 @@ class TestOrchestrator:
         # Extract files from final result if available
         files_created = []
         if final_result:
+            self.logger.info(f"🔍 Processing final_result type: {type(final_result)}")
             if isinstance(final_result, dict):
+                self.logger.info(f"📋 final_result keys: {list(final_result.keys())}")
                 # Legacy format: dictionary with deliverables
                 deliverables = final_result.get('deliverables', [])
+                self.logger.info(f"📦 deliverables type: {type(deliverables)}, value: {deliverables}")
+                # Ensure deliverables is a list (protect against boolean values)
+                if not isinstance(deliverables, list):
+                    self.logger.warning(f"⚠️ deliverables is not a list, got {type(deliverables)}: {deliverables}")
+                    deliverables = []
                 for item in deliverables:
                     if isinstance(item, dict):
                         self.db.add_file(
@@ -479,6 +486,95 @@ class TestOrchestrator:
             'warnings_count': metrics.get('warnings_count', 0)
         }
 
+        # Convert logs to messages format for bug validation
+        messages = []
+        for log_entry in logs:
+            agent = log_entry.get('agent')
+            if agent:  # Only include logs with agent information
+                messages.append({
+                    'source': agent,
+                    'content': log_entry.get('message', ''),
+                    'timestamp': log_entry.get('timestamp')
+                })
+            elif 'aj_sql_agent' in str(log_entry.get('message', '')) or 'Processing task' in str(log_entry.get('message', '')):
+                # Also check for agent mentions in message content
+                messages.append({
+                    'source': 'aj_sql_agent' if 'aj_sql_agent' in str(log_entry.get('message', '')) else 'unknown',
+                    'content': log_entry.get('message', ''),
+                    'timestamp': log_entry.get('timestamp')
+                })
+
+        # Helper to build comprehensive accomplishments from logs
+        def build_accomplishments_text_from_logs(work_dir: str, final_response: str, message_list: list) -> str:
+            """Build comprehensive accomplishments text from all log sources."""
+            import os
+            parts = [final_response]
+            
+            logs_dir = os.path.join(work_dir, "logs")
+            
+            # Add agent journey (high-level proof)
+            journey_path = os.path.join(logs_dir, "agent_journey.log")
+            if os.path.exists(journey_path):
+                try:
+                    with open(journey_path, 'r') as f:
+                        parts.append(f"\n\n=== AGENT JOURNEY ===\n{f.read()}")
+                except:
+                    pass
+            
+            # Add accomplishments (detailed actions)
+            acc_path = os.path.join(logs_dir, "accomplishments.log")
+            if os.path.exists(acc_path):
+                try:
+                    with open(acc_path, 'r') as f:
+                        parts.append(f"\n\n=== ACCOMPLISHMENTS ===\n{f.read()}")
+                except:
+                    pass
+            
+            # Add messages (legacy)
+            parts.append(f"\n\n=== MESSAGES ===\n{str(message_list)}")
+            
+            return "".join(parts)
+
+        # Extract agent sequence from progress updates and messages for bug validation
+        agent_sequence = []
+
+        # Primary method: Check accomplishments log for agent transfers and calls
+        # Build comprehensive accomplishments text from logs/ directory
+        work_dir = f"/tmp/coding/req_{azure_message_id}"
+        accomplishments_text = build_accomplishments_text_from_logs(work_dir, final_response_text, messages)
+        self.logger.info(f"🤖 DEBUG: Checking accomplishments_text for aj_sql_agent patterns...")
+        self.logger.info(f"🤖 DEBUG: 'transfer_to_aj_sql_agent' in text: {'transfer_to_aj_sql_agent' in accomplishments_text}")
+        self.logger.info(f"🤖 DEBUG: 'aj_sql_agent:' in text: {'aj_sql_agent:' in accomplishments_text}")
+        self.logger.info(f"🤖 DEBUG: Sample accomplishments_text: {accomplishments_text[:500]}...")
+        if 'transfer_to_aj_sql_agent' in accomplishments_text or 'aj_sql_agent:' in accomplishments_text:
+            if 'aj_sql_agent' not in agent_sequence:
+                agent_sequence.append('aj_sql_agent')
+                self.logger.info(f"🤖 DEBUG: Successfully added aj_sql_agent to sequence")
+        if 'transfer_to_coder_agent' in accomplishments_text or 'coder_agent:' in accomplishments_text:
+            if 'coder_agent' not in agent_sequence:
+                agent_sequence.append('coder_agent')
+        if 'transfer_to_web_search_agent' in accomplishments_text or 'web_search_agent:' in accomplishments_text:
+            if 'web_search_agent' not in agent_sequence:
+                agent_sequence.append('web_search_agent')
+        if 'transfer_to_aj_article_writer_agent' in accomplishments_text or 'aj_article_writer_agent:' in accomplishments_text:
+            if 'aj_article_writer_agent' not in agent_sequence:
+                agent_sequence.append('aj_article_writer_agent')
+        if 'transfer_to_cognitive_search_agent' in accomplishments_text or 'cognitive_search_agent:' in accomplishments_text:
+            if 'cognitive_search_agent' not in agent_sequence:
+                agent_sequence.append('cognitive_search_agent')
+        if 'planner_agent:' in accomplishments_text:
+            if 'planner_agent' not in agent_sequence:
+                agent_sequence.append('planner_agent')
+
+        # Secondary method: Check progress messages for agent names
+        for update in progress_updates:
+            message = update.get('info', '').lower()
+            for agent_name in ['aj_sql_agent', 'coder_agent', 'web_search_agent', 'aj_article_writer_agent', 'cognitive_search_agent', 'planner_agent']:
+                if agent_name in message and agent_name not in agent_sequence:
+                    agent_sequence.append(agent_name)
+
+        self.logger.info(f"🤖 DEBUG: Final agent_sequence: {agent_sequence}")
+
         try:
             # Get test case specific quality criteria
             test_case_quality_criteria = test_case.get('quality_criteria', [])
@@ -491,7 +587,12 @@ class TestOrchestrator:
                 test_summary=test_summary,
                 test_case_id=test_case_id,
                 global_expectations=self.global_expectations,
-                test_case_quality_criteria=test_case_quality_criteria
+                test_case_quality_criteria=test_case_quality_criteria,
+                agent_activity_data={
+                    'agent_sequence': agent_sequence,
+                    'accomplishments_text': accomplishments_text,
+                    'requires_ajsql': test_case.get('requires_ajsql', False)
+                }
             )
 
             # Store evaluation in database
@@ -531,23 +632,7 @@ class TestOrchestrator:
             output_eval = {'score': 0, 'reasoning': f"Evaluation failed: {str(e)}", 'strengths': [], 'weaknesses': []}
 
         # Compile results
-        # Convert logs to messages format for bug validation
-        messages = []
-        for log_entry in logs:
-            agent = log_entry.get('agent')
-            if agent:  # Only include logs with agent information
-                messages.append({
-                    'source': agent,
-                    'content': log_entry.get('message', ''),
-                    'timestamp': log_entry.get('timestamp')
-                })
-            elif 'aj_sql_agent' in str(log_entry.get('message', '')) or 'Processing task' in str(log_entry.get('message', '')):
-                # Also check for agent mentions in message content
-                messages.append({
-                    'source': 'aj_sql_agent' if 'aj_sql_agent' in str(log_entry.get('message', '')) else 'unknown',
-                    'content': log_entry.get('message', ''),
-                    'timestamp': log_entry.get('timestamp')
-                })
+
 
         results = {
             'test_run_id': test_run_id,
@@ -567,31 +652,6 @@ class TestOrchestrator:
             'output_score': output_eval['score'],
             'overall_score': int((output_eval['score'] * 0.8) + (progress_eval['score'] * 0.2))
         }
-
-        # Extract agent sequence from progress updates and messages for bug validation
-        agent_sequence = []
-        for update in progress_updates:
-            info = update.get('info', '')
-            # Look for progress messages that mention agents
-            if ' - ' in info and ('aj_sql_agent' in info or 'coder_agent' in info or 'planner_agent' in info):
-                # Extract agent name from progress message like "📊 Agent message progress: 7% - aj_sql_agent - message"
-                parts = info.split(' - ')
-                if len(parts) >= 2:
-                    agent_name = parts[1].strip()
-                    if agent_name and agent_name not in agent_sequence:
-                        agent_sequence.append(agent_name)
-
-        # Also extract from messages (logs) as backup when debug_progress_msgs=False
-        for msg in messages:
-            source = msg.get('source', '')
-            content = msg.get('content', '')
-            if source in ['aj_sql_agent', 'coder_agent', 'planner_agent', 'execution_completion_verifier_agent', 'presentation_completion_verifier_agent']:
-                if source not in agent_sequence:
-                    agent_sequence.append(source)
-            # Also check content for agent mentions
-            elif 'aj_sql_agent' in content or 'Processing task' in content:
-                if 'aj_sql_agent' not in agent_sequence:
-                    agent_sequence.append('aj_sql_agent')
 
         results['agent_sequence'] = agent_sequence
 

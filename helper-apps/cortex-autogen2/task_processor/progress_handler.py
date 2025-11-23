@@ -17,8 +17,8 @@ from services.run_analyzer import (
 logger = logging.getLogger(__name__)
 
 
+
 class ProgressHandler:
-    """Handles progress updates, summarization, and background processing."""
 
     def __init__(self, redis_publisher, model_client):
         self.redis_publisher = redis_publisher
@@ -34,6 +34,31 @@ class ProgressHandler:
         self._message_count_by_request: Dict[str, int] = {}  # Track message count for auto-increment
         self._last_sent_by_request: Dict[str, str] = {}  # Track last sent content per request
         self._last_sent_time_by_request: Dict[str, float] = {}  # Track last sent time per request
+
+        # LLM call throttling (5+ second intervals to reduce costs)
+        self._last_llm_call_time_by_request: Dict[str, float] = {}
+        self._cached_llm_message_by_request: Dict[str, str] = {}
+        self._has_cached_message_by_request: Dict[str, bool] = {}  # Track if we've cached a message for this request
+
+        # Emoji tracking
+        self.used_emojis = set()
+        self.used_emojis_by_request = {}
+        
+        # Track published messages to prevent published duplicates
+        self._last_published_messages = set()
+
+    def log_internal_progress(self, task_id: str, message: str, source: str = None):
+        """Log detailed internal progress for debugging/audit."""
+        logger.info(f"🔍 INTERNAL PROGRESS [{task_id}] ({source}): {message}")
+
+    async def report_user_progress(self, task_id: str, message: str, percentage: float = None, source: str = None):
+        """Report clean, user-facing progress update."""
+        # Use existing logic to summarize/sanitize
+        user_msg = await self.summarize_progress(message, source=source)
+        if user_msg:
+            # percentage=0.0 triggers auto-increment logic in handle_progress_update
+            return await self.handle_progress_update(task_id, percentage if percentage is not None else 0.0, user_msg)
+        return 0.0
 
     async def _ensure_progress_worker(self) -> None:
         """Progress worker disabled - using direct publishing instead."""
@@ -89,6 +114,10 @@ class ProgressHandler:
 
     async def summarize_progress(self, content: str, message_type: str = None, source: str = None, model_client=None) -> str:
         """Summarize progress content for display with intelligent filtering."""
+        # Normalize content to string if it's a list
+        if isinstance(content, list):
+            content = str(content[0]) if content else ""
+        
         if not content:
             return ""
 
@@ -103,40 +132,18 @@ class ProgressHandler:
         return await self._get_dynamic_progress_message(source or "", cleaned)
 
     def _should_skip_progress_update(self, content: str, message_type: str = None, source: str = None) -> bool:
-        """Determine if a progress update should be skipped."""
+        """Determine if a progress update should be skipped (minimal filtering)."""
+        # Normalize content to string if it's a list
+        if isinstance(content, list):
+            content = str(content[0]) if content else ""
+        
         if not content:
             return True
 
-        content_lower = content.lower()
-
-        # Skip very short messages
+        # Only skip very short messages or internal system sources
         if len(content.strip()) < 3:
             return True
 
-        # Skip internal/technical messages
-        skip_patterns = [
-            "ready for upload",
-            "file created",
-            "columns:",
-            "rows:",
-            "preview:",
-            "http request",
-            "api call",
-            "tool call",
-            "functioncall",
-            "function call",
-            "execution complete",
-            "task completed",
-            "processing...",
-            "working...",
-            "call_",
-            "in progress",
-        ]
-
-        if any(pattern in content_lower for pattern in skip_patterns):
-            return True
-
-        # Skip if from certain sources
         if source in ["system", "internal"]:
             return True
 
@@ -144,6 +151,10 @@ class ProgressHandler:
 
     def _clean_content_for_progress(self, content: str, message_type: str = None, source: str = None) -> str:
         """Clean and prepare content for progress summarization."""
+        # Normalize content to string if it's a list
+        if isinstance(content, list):
+            content = str(content[0]) if content else ""
+        
         if not content:
             return ""
 
@@ -157,95 +168,135 @@ class ProgressHandler:
 
         return content
 
-    async def _get_dynamic_progress_message(self, source: str, content: str, task_context: str = "") -> str:
-        """Use LLM to generate dynamic, contextual progress messages instead of static mappings."""
+    async def _get_dynamic_progress_message(self, source: str, content: str, task_context: str = "", request_id: str = None) -> str:
+        """Use LLM to generate dynamic, contextual progress messages."""
         if not content or not content.strip():
             return content
 
-        # Skip if message is already a well-formed, dynamic progress message (not generic static ones)
-        # Only skip messages that are clearly LLM-generated (varied language, specific actions)
-        generic_messages = [
-            "🧭 planning your task...",
-            "🚀 creating your perfect result",
-            "⚡ running code execution...",
-            "📤 uploading files...",
-            "🎨 creating final presentation..."
-        ]
-        if content.lower().strip() in [msg.lower() for msg in generic_messages]:
-            # Force LLM processing for these generic messages
-            pass  # Continue to LLM processing
-        elif (content.startswith(("🚀", "🧭", "🔍", "📊", "💻", "⚡", "🎨", "📤", "✨")) and
-              len(content) < 60 and
-              len(content.split()) >= 4 and  # Must have multiple words
-              any(word in content.lower() for word in ["building", "analyzing", "crafting", "designing", "generating", "processing", "optimizing"])):
-            return content
+        # LLM call throttling: reuse cached message if called recently (< 7 seconds ago)
+        import time
+        current_time = time.time()
+        last_llm_time = self._last_llm_call_time_by_request.get(request_id, 0)
 
-        # Use LLM to generate dynamic progress message
-        prompt = f"""Convert this technical agent message into a concise, engaging progress update for the user.
+        if current_time - last_llm_time < 7.0:
+            # Return cached message if available and recent
+            cached_msg = self._cached_llm_message_by_request.get(request_id)
+            if cached_msg:
+                logger.debug(f"🤖 Using cached LLM message (throttled): '{cached_msg[:50]}...'")
+                return cached_msg
 
-TECHNICAL MESSAGE: "{content}"
+        # Build list of recently used emojis to avoid - last 3 emojis per request
+        avoid_emojis = ""
+        if request_id:
+            request_emojis = self.used_emojis_by_request.get(request_id, [])
+            if request_emojis:
+                recent_emojis = request_emojis[-3:]  # Last 3 used emojis for this request
+                avoid_emojis = f"\n\nFORBIDDEN EMOJIS (do NOT use these recently used ones for this task): {', '.join(recent_emojis)}"
+        elif self.used_emojis:
+            recent_emojis = list(self.used_emojis)[-7:]  # Fallback to global tracking
+            avoid_emojis = f"\n\nFORBIDDEN EMOJIS (do NOT use these recently used ones): {', '.join(recent_emojis)}"
+
+        prompt = f"""Transform this raw system message into a high-impact, engaging, and slightly witty progress update.
+
+RAW MESSAGE: "{content}"
 SOURCE AGENT: {source}
+TASK CONTEXT: {task_context}{avoid_emojis}
 
-BAD EXAMPLES TO AVOID:
-- "Double checking implementation details"
-- "Verifying code structure"
-- "Validating parameters"
-- Repetitive messages like "Processing... Processing..."
-- Technical jargon like "optimizing algorithms", "parsing data structures"
+CRITICAL RULES:
+1. **TONE**: Professional but cool. Think "Mission Impossible" meets "Data Scientist". High-tech, active, and confident.
+2. **FILTER ERRORS**: If the message implies failure or error, spin it as "Optimizing" or "Refining". NEVER show errors.
+3. **FILTER JARGON**: No internal paths, no code blocks, NO AGENT NAMES (aj_sql_agent, coder_agent, etc.). Translate "SQL query" to "Mining data vaults".
+4. **BE CONCISE**: Exactly 5-7 words.
+5. **START WITH EMOJI**: Use ONE unique, POSITIVE emoji. FORBIDDEN EMOJIS: 🚨, ⚠️, ❌, ⛔, 🛑, 🚀 (reserved for start).
+6. **FORBIDDEN PHRASES**: NEVER say "Still processing", "Working on it", or "Please wait". NEVER mention internal agent names.
+7. **ENGAGEMENT**: Use powerful verbs: Orchestrating, Synthesizing, Crunching, Deploying, Mining.
+8. **NO USER VALUE**: If the message is purely technical/internal with no value to the user (e.g., "file created", "tool call", "ready for upload"), return exactly: SKIP
 
-GOOD EXAMPLES:
-- "🚀 Building your custom solution"
-- "📊 Analyzing patterns in your data"
-- "💻 Crafting intelligent automation"
-- "🎨 Creating beautiful visualizations"
-- "⚡ Executing your plan perfectly"
+EXAMPLES:
+- Raw: "Select * from ucms_aje" -> "🕵️‍♂️ Mining the data archives"
+- Raw: "Generating chart.png" -> "🎨 Visualizing your data story"
+- Raw: "Active: Processing..." -> "🔄 Orchestrating complex workflows"
+- Raw: "Error in connection, retrying" -> "🛠️ Tuning system performance"
+- Raw: "Deploying aj_sql_agent" -> "🚀 Deploying intelligent data systems"
+- Raw: "File created: report.csv" -> "SKIP"
+- Raw: "Tool call completed" -> "SKIP"
 
-REQUIREMENTS:
-- Start with exactly one emoji (🚀🧭🔍📊💻⚡🎨📤✨)
-- Keep under 60 characters
-- Be engaging and positive
-- Focus on user benefits, not technical details
-- Use active, dynamic language
-- Never repeat the same message pattern
-
-Return ONLY the progress message, no explanation:"""
+Return ONLY the progress message (5-7 words) OR the word SKIP:"""
 
         try:
             logger.info(f"🤖 Generating dynamic progress for: '{content}'")
             response = await self._call_llm(prompt)
             dynamic_message = response.strip()
+            
+            # Handle potential list response
+            if isinstance(dynamic_message, list):
+                dynamic_message = str(dynamic_message[0]) if dynamic_message else ""
+            
+            # Check if LLM says to skip
+            if dynamic_message.strip().upper() == "SKIP":
+                logger.info(f"🤖 LLM decided to SKIP: '{content}'")
+                return ""
+            
             logger.info(f"🤖 LLM response: '{dynamic_message}'")
 
+            word_count = len(dynamic_message.split())
+
             # Validate the response
-            if (len(dynamic_message) > 10 and len(dynamic_message) < 80 and
-                any(emoji in dynamic_message for emoji in ["🚀", "🧭", "🔍", "📊", "💻", "⚡", "🎨", "📤", "✨"])):
-                logger.info(f"🤖 Dynamic progress SUCCESS: '{content}' -> '{dynamic_message}'")
+            if self._is_valid_progress_message(dynamic_message, word_count):
+                # Track used emoji for variety
+                emoji = dynamic_message[0] if dynamic_message else ""
+
+                # Track globally
+                self.used_emojis.add(emoji)
+                if len(self.used_emojis) > 15:  # Reset after 15 different emojis to keep memory fresh
+                    last_three = list(self.used_emojis)[-3:]
+                    self.used_emojis.clear()
+                    self.used_emojis.update(last_three)
+
+                # Track per request (keep last 3 used emojis)
+                if request_id:
+                    if request_id not in self.used_emojis_by_request:
+                        self.used_emojis_by_request[request_id] = []
+                    self.used_emojis_by_request[request_id].append(emoji)
+                    if len(self.used_emojis_by_request[request_id]) > 3:
+                        self.used_emojis_by_request[request_id] = self.used_emojis_by_request[request_id][-3:]
+
+                # Cache the successful LLM response for throttling
+                if request_id:
+                    # Don't cache the first message for each request (static starting message)
+                    if not self._has_cached_message_by_request.get(request_id, False):
+                        self._has_cached_message_by_request[request_id] = True
+                        logger.debug(f"🤖 Skipped caching first message for request {request_id}")
+                    else:
+                        self._last_llm_call_time_by_request[request_id] = current_time
+                        self._cached_llm_message_by_request[request_id] = dynamic_message
+
+                logger.info(f"🤖 Dynamic progress SUCCESS: '{content[:50]}...' -> '{dynamic_message}'")
                 return dynamic_message
             else:
-                # Fallback to a generic message if LLM response is invalid
-                logger.warning(f"🤖 Dynamic progress FAILED validation: '{dynamic_message}' (len={len(dynamic_message)})")
-                return "🚀 Creating your perfect result"
+                # Fallback
+                logger.warning(f"🤖 Dynamic progress FAILED validation: '{dynamic_message}'")
+                return "⚡ Processing your request..."
         except Exception as e:
             logger.error(f"🤖 Failed to generate dynamic progress message: {e}")
-            # Fallback to simple filtering
-            return self._simple_progress_filter(content)
+            return "⚡ Processing your request..."
 
-    def _simple_progress_filter(self, content: str) -> str:
-        """Simple fallback filtering for when LLM is unavailable."""
-        if not content:
-            return content
+    def _is_valid_progress_message(self, message: str, word_count: int) -> bool:
+        """Validate that the progress message meets requirements."""
+        if not message or word_count < 3 or word_count > 10:
+            return False
 
-        content_lower = content.lower()
+        # Check if it starts with an emoji
+        import unicodedata
+        if not message:
+            return False
 
-        # Simple keyword-based filtering
-        if "analyzing" in content_lower or "data" in content_lower:
-            return "📊 Analyzing and discovering insights"
-        elif "code" in content_lower or "building" in content_lower:
-            return "💻 Building intelligent solutions"
-        elif "uploading" in content_lower or "files" in content_lower:
-            return "📤 Preparing your deliverables"
-        else:
-            return "🚀 Creating your perfect result"
+        first_char = message[0]
+        if unicodedata.category(first_char) in ['So', 'Sk']:
+            if message.startswith("⚡") and "Processing" in message:
+                return True
+            return True
+        return False
 
     async def _call_llm(self, prompt: str) -> str:
         """Call the Cortex LLM API for progress message generation."""
@@ -281,8 +332,12 @@ Return ONLY the progress message, no explanation:"""
 
             return clamped
 
-    async def handle_progress_update(self, task_id: str, percentage: float, content: str, message_type: str = None, source: str = None, data: str = None, is_heartbeat: bool = False):
-        """Handle progress updates - auto-increment progress for dynamic messages."""
+    async def handle_progress_update(self, task_id: str, percentage: float, content: str, message_type: str = None, source: str = None, data: str = None, is_heartbeat: bool = False) -> float:
+        """Handle progress updates - auto-increment progress for dynamic messages.
+        
+        Returns:
+            The actual percentage sent to Redis after clamping and auto-increment.
+        """
         try:
             # Auto-increment progress for dynamic messages (use 0.0 to trigger auto-increment)
             final_percentages = [0.05, 0.94, 0.95, 1.0]  # Static percentages
@@ -311,11 +366,12 @@ Return ONLY the progress message, no explanation:"""
                 # Stop heartbeat when task is complete
                 await self._stop_continuous_heartbeat(task_id)
                 logger.info(f"🏁  PUBLISHING FINAL MESSAGE: requestId={task_id}, progress={clamped_pct}, data_length={len(data) if data else 0}")
-                return
+                return clamped_pct
 
             # For heartbeat updates, use shorter rate limiting (0.5 seconds)
             if is_heartbeat:
                 await self._send_heartbeat_update(task_id, clamped_pct, content)
+                return clamped_pct
             else:
                 # For regular updates, publish directly (no background queue needed)
                 # Prevent duplicate messages - don't send if identical to last published for this request
@@ -330,9 +386,12 @@ Return ONLY the progress message, no explanation:"""
                     if len(self._last_published_messages) > 100:
                         # Remove oldest entries (this is a simple approach)
                         self._last_published_messages = set(list(self._last_published_messages)[-50:])
+                
+                return clamped_pct
 
         except Exception as e:
             logger.debug(f"Failed to handle progress update: {e}")
+            return 0.0  # Return 0 on error
 
     async def _send_heartbeat_update(self, task_id: str, percentage: float, content: str):
         """Send heartbeat updates with more frequent rate limiting."""
@@ -344,7 +403,7 @@ Return ONLY the progress message, no explanation:"""
 
             # Only send heartbeat if enough time has passed AND progress hasn't changed
             # This prevents duplicate messages at the same progress level
-            if (current_time - last_time > 5.0 and
+            if (current_time - last_time > 1.0 and
                 abs(percentage - last_progress) < 0.001):  # Same progress level
                 self._last_progress_time_by_request[task_id] = current_time
                 await self.redis_publisher.set_transient_update(task_id, percentage, content)
@@ -376,18 +435,6 @@ Return ONLY the progress message, no explanation:"""
 
         return any(pattern in content_lower for pattern in internal_patterns)
 
-    def _is_initial_message(self, content: str) -> bool:
-        """Check if content is an initial message that shouldn't be repeated as heartbeat."""
-        if not content:
-            return True
-
-        content_lower = content.lower()
-        initial_messages = [
-            "starting your task",
-            "🚀 starting your task",
-        ]
-
-        return any(msg in content_lower for msg in initial_messages)
 
     async def _ensure_continuous_heartbeat(self, task_id: str, percentage: float, content: str):
         """Ensure a continuous heartbeat task is running for this task."""
@@ -432,7 +479,7 @@ Return ONLY the progress message, no explanation:"""
 
                 # Get the exact last progress message sent
                 last_message = self._last_summary_by_request.get(task_id)
-                if last_message and not self._is_initial_message(last_message):
+                if last_message:
                     # Send heartbeat update with exact same message and progress percentage
                     await self.redis_publisher.set_transient_update(task_id, current_progress, last_message)
                     logger.debug(f"💓 Continuous heartbeat: {current_progress:.0%} - {last_message}")
