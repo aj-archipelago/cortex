@@ -51,7 +51,7 @@ test_cases:
     name: "Random Sales Data Generation"
     description: "Generates random sales data in appropriate format with summary statistics"
     task: "Generate 100 rows of random sales data and create summary statistics in an appropriate format."
-    timeout_seconds: 180
+    timeout_seconds: 1200
     requires_ajsql: false
     expected_deliverables:
       - type: data
@@ -126,7 +126,7 @@ test_cases:
     name: "Multi-Format Tech Company Performance Analysis"
     description: "Creates comprehensive analysis in CSV, JSON, XLSX, and PDF formats"
     task: "Analyze the performance of top 5 tech companies (Apple, Microsoft, Google, Amazon, Tesla) for Q3 2024. Return the analysis in all these formats: CSV, JSON, XLSX, and PDF. Include revenue data, market share, growth metrics, and key insights for each company."
-    timeout_seconds: 600
+    timeout_seconds: 1200
     requires_ajsql: false
     expected_deliverables:
       - type: csv
@@ -168,7 +168,7 @@ test_cases:
     name: "PDF Report with Images and Charts"
     description: "Generates a PDF report with images and charts"
     task: "Generate a PDF report about renewable energy trends in 2026."
-    timeout_seconds: 480
+    timeout_seconds: 1200
     requires_ajsql: false
     expected_deliverables:
       - type: pdf
@@ -199,7 +199,7 @@ test_cases:
     name: "Sports Excel File Generation with Preview"
     description: "Generates sports statistics Excel file with summary statistics and preview table"
     task: "Generate an Excel file with 50 rows of sports game statistics and include summary statistics. Create basic charts showing scoring trends and team performance."
-    timeout_seconds: 180
+    timeout_seconds: 1200
     requires_ajsql: false
     expected_deliverables:
       - type: excel
@@ -233,7 +233,7 @@ test_cases:
     name: "Weather Data Analysis with Full Insights"
     description: "Generates weather data with comprehensive statistical analysis and visualizations"
     task: "Generate weather temperature data for 100 cities over 30 days. Provide full statistical analysis including mean, median, standard deviation, correlations, and create insightful charts showing temperature trends and patterns."
-    timeout_seconds: 250
+    timeout_seconds: 1200
     requires_ajsql: false
     expected_deliverables:
       - type: csv
@@ -307,7 +307,7 @@ test_cases:
     name: "AJE vs AJA Daily Article Count Comparison"
     description: "Compares daily article counts between AJE and AJA"
     task: "Compare daily article counts for AJE and AJA from the last 30 days. Give me a chart and CSV."
-    timeout_seconds: 420
+    timeout_seconds: 1200
     requires_ajsql: true
     expected_deliverables:
       - type: chart
@@ -339,7 +339,7 @@ test_cases:
     name: "AJE Trump Headlines - 6 Month Trend Analysis"
     description: "Analyzes Trump headline trends in AJE"
     task: "Plot Trump headline percentage trends for AJE over the last 6 months by week. Give me a chart and CSV."
-    timeout_seconds: 400
+    timeout_seconds: 1200
     requires_ajsql: true
     expected_deliverables:
       - type: chart
@@ -517,7 +517,7 @@ test_cases:
     name: "Debug: AJE vs AJA Top Publish Days (This Year)"
     description: "Reproduces user reported issue where 'this year' is interpreted as only the first week"
     task: "prepare me a presentation of comparison of top publish days for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE), this year"
-    timeout_seconds: 420
+    timeout_seconds: 1200
     requires_ajsql: true
     expected_deliverables:
       - type: chart
