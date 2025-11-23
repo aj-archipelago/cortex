@@ -219,17 +219,12 @@ class TaskProcessor:
             # Initialize progress handler
             progress_handler = await self._get_progress_handler()
 
+            # Start heartbeat - sends instant 5% message and begins background loop
+            await progress_handler.start_heartbeat(task_id, "🚀 Starting your task...")
+
             # Extract and normalize the task content
             task = self._extract_task_content(task_content)
             self.logger.info(f"🎯 Processing task {task_id}: {task[:100]}...")
-
-            # Send immediate progress update to show task started
-            # NOTE: Initial "Starting your task..." message is now sent by function_app.py for lower latency
-            # We keep this here just in case, but commented out or we can remove it.
-            # Let's remove it to avoid duplicate messages.
-            # await progress_handler.handle_progress_update(
-            #     task_id, 0.05, "🚀 Starting your task..."
-            # )
 
             # Initialize progress - continue with planning at 5%
 
@@ -275,6 +270,8 @@ class TaskProcessor:
 
             try:
                 progress_handler = await self._get_progress_handler()
+                # SAFETY: Stop heartbeat before sending error message
+                await progress_handler.stop_heartbeat(task_id)
                 await progress_handler.handle_progress_update(
                     task_id, 1.0, f"❌ Task failed: {str(e)[:100]}..."
                 )
@@ -350,25 +347,8 @@ class TaskProcessor:
 
 
 
-    async def _progress_heartbeat_loop(self, task_id: str, progress_handler, status_fn):
-        """Emit heartbeat updates if no agent messages have been seen recently."""
-        try:
-            while True:
-                await asyncio.sleep(1)
-                last_time, last_message = status_fn()
-                if time.time() - last_time >= 10:
-                    heartbeat_note = last_message or "Processing..."
-                    # Send the last progress message as-is, no prefix
-                    await progress_handler.handle_progress_update(
-                        task_id,
-                        0.0,
-                        heartbeat_note,
-                        is_heartbeat=True
-                    )
-        except asyncio.CancelledError:
-            pass
-        except Exception as exc:
-            self.logger.debug(f"Heartbeat loop error for {task_id}: {exc}")
+    # REMOVED: _progress_heartbeat_loop - now handled by progress_handler.start_heartbeat()
+    # The progress_handler manages its own 1s heartbeat repeats + 7s LLM updates
 
 
     async def _run_planner_phase(self, task_id: str, task: str, work_dir: str, planner_agent, replan_reason: str = "") -> str:
@@ -441,27 +421,8 @@ class TaskProcessor:
             # Start at 5% and increment for each agent message (5% -> 6% -> 7% -> ...)
             # Progress tracking now handled entirely by progress_handler
             agent_message_count = 0  # Track agent messages for debugging
-            last_progress_time = time.time()
-            last_progress_message = "⏳ Processing task..."
             last_message = None  # Track the last message for replanning detection
-            heartbeat_task = None
-
-            def _heartbeat_status():
-                # Get the actual last progress message that was sent to user
-                last_sent_key = progress_handler._last_sent_by_request.get(task_id)
-                if last_sent_key:
-                    # Extract message part from "percentage_message" format
-                    parts = last_sent_key.split('_', 1)
-                    last_msg = parts[1] if len(parts) > 1 else "Processing..."
-                else:
-                    #log error
-                    self.logger.error(f"No last progress message found for task {task_id} sending default message")
-                    last_msg = "Processing..."
-                return last_progress_time, last_msg
-
-            heartbeat_task = asyncio.create_task(
-                self._progress_heartbeat_loop(task_id, progress_handler, _heartbeat_status)
-            )
+            # REMOVED: heartbeat_task - now managed by progress_handler internally
 
             try:
                 async for message in stream:
@@ -507,11 +468,8 @@ class TaskProcessor:
                         )
                         
                         if actual_percentage > 0:
-                            last_progress_message = "Processing..." # Placeholder, actual msg is in Redis
                             self.logger.info(f"📊 User progress updated: {actual_percentage:.0%}")
-
-                    # Update heartbeat timer for every message
-                    last_progress_time = time.time()
+                    # REMOVED: last_progress_time tracking - no longer needed
 
                     # Log progress
                     if source and content:
@@ -539,12 +497,7 @@ class TaskProcessor:
                 # Properly close the async generator to prevent pending tasks
                 if hasattr(stream, 'aclose'):
                     await stream.aclose()
-                if heartbeat_task:
-                    heartbeat_task.cancel()
-                    try:
-                        await heartbeat_task
-                    except asyncio.CancelledError:
-                        pass
+                # REMOVED: heartbeat_task cleanup - managed by progress_handler
 
             # Check if replanning was requested by execution_completion_verifier_agent
             if last_message and getattr(last_message, "source", None) == "execution_completion_verifier_agent":

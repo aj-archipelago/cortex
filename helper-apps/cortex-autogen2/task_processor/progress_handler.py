@@ -35,6 +35,16 @@ class ProgressHandler:
         self._last_sent_by_request: Dict[str, str] = {}  # Track last sent content per request
         self._last_sent_time_by_request: Dict[str, float] = {}  # Track last sent time per request
 
+        # Heartbeat state management - tracks last message and percentage for auto-repeat
+        self._heartbeat_state: Dict[str, Dict[str, Any]] = {}
+        # {task_id: {
+        #    'last_message': str,
+        #    'last_percentage': float,
+        #    'last_update_time': float,
+        #    'heartbeat_task': asyncio.Task,
+        #    'llm_counter': int  # Counts up to 7 for LLM updates
+        # }}
+
         # LLM call throttling (5+ second intervals to reduce costs)
         self._last_llm_call_time_by_request: Dict[str, float] = {}
         self._cached_llm_message_by_request: Dict[str, str] = {}
@@ -354,17 +364,20 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
             clamped_pct = await self._clamp_progress(task_id, percentage)
             logger.debug(f"Progress update: input={percentage}, clamped={clamped_pct}, max_so_far={self._max_progress_by_request.get(task_id, 0)}")
 
-            # Heartbeat now handled by agent_workflow_processor for better coordination
-            # Disabled progress_handler heartbeat to avoid conflicts
-            # if clamped_pct > 0.05:  # Only start heartbeat after initial 5% message
-            #     await self._ensure_continuous_heartbeat(task_id, clamped_pct, content)
+            # Update heartbeat message when new progress arrives (not for heartbeat repeats)
+            if not is_heartbeat:
+                await self.update_heartbeat_message(task_id, clamped_pct, content)
+
+            # SAFETY: Stop heartbeat for any message >= 95% (handles edge cases)
+            # This ensures heartbeat stops even if we never reach exactly 100% due to clamping
+            if clamped_pct >= 0.95:
+                await self.stop_heartbeat(task_id)
+                logger.debug(f"💓 Stopped heartbeat at {clamped_pct:.0%} (>= 95%)")
 
             # For final updates with data, send immediately and mark as finalized
             if clamped_pct >= 1.0 and data is not None:
                 await self.redis_publisher.set_transient_update(task_id, clamped_pct, content, data)
                 await self.redis_publisher.mark_final(task_id)
-                # Stop heartbeat when task is complete
-                await self._stop_continuous_heartbeat(task_id)
                 logger.info(f"🏁  PUBLISHING FINAL MESSAGE: requestId={task_id}, progress={clamped_pct}, data_length={len(data) if data else 0}")
                 return clamped_pct
 
@@ -436,55 +449,171 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
         return any(pattern in content_lower for pattern in internal_patterns)
 
 
-    async def _ensure_continuous_heartbeat(self, task_id: str, percentage: float, content: str):
-        """Ensure a continuous heartbeat task is running for this task."""
-        async with self._heartbeat_lock:
-            # Stop existing heartbeat if progress has changed significantly
-            if task_id in self._heartbeat_tasks:
-                current_progress = self._max_progress_by_request.get(task_id, 0.0)
-                if abs(percentage - current_progress) > 0.05:  # 5% progress change
-                    await self._stop_continuous_heartbeat(task_id)
-
-            # Start new heartbeat if not running
-            if task_id not in self._heartbeat_tasks or self._heartbeat_tasks[task_id].done():
-                self._heartbeat_tasks[task_id] = asyncio.create_task(
-                    self._run_continuous_heartbeat(task_id, percentage, content)
-                )
-                logger.debug(f"💓 Started continuous heartbeat for task {task_id}")
-
-    async def _stop_continuous_heartbeat(self, task_id: str):
-        """Stop the continuous heartbeat for a task."""
-        async with self._heartbeat_lock:
-            if task_id in self._heartbeat_tasks:
-                task = self._heartbeat_tasks[task_id]
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-                del self._heartbeat_tasks[task_id]
-                logger.debug(f"💓 Stopped continuous heartbeat for task {task_id}")
-
-    async def _run_continuous_heartbeat(self, task_id: str, percentage: float, content: str):
-        """Run continuous heartbeat updates every 8 seconds - repeat the exact last progress message."""
+    # ========================================================================
+    # NEW HEARTBEAT API - Consolidates all heartbeat logic
+    # ========================================================================
+    
+    async def start_heartbeat(self, task_id: str, initial_message: str = "🚀 Starting your task..."):
+        """
+        Start heartbeat for a task - sends instant 5% message and begins background loop.
+        
+        This is the main entry point for starting progress updates:
+        - Sends immediate 5% progress message 
+        - Starts background heartbeat loop (1s repeats + 7s LLM updates)
+        """
+        # Send instant 5% message
+        await self.redis_publisher.set_transient_update(task_id, 0.05, initial_message)
+        self._max_progress_by_request[task_id] = 0.05
+        self._last_summary_by_request[task_id] = initial_message
+        logger.info(f"📝 Sent instant 5% message: {initial_message}")
+        
+        # Initialize heartbeat state
+        self._heartbeat_state[task_id] = {
+            'last_message': initial_message,
+            'last_percentage': 0.05,
+            'last_update_time': time.time(),
+            'heartbeat_task': None,
+            'llm_counter': 0
+        }
+        
+        # Start heartbeat loop
+        task = asyncio.create_task(self._heartbeat_loop(task_id))
+        self._heartbeat_state[task_id]['heartbeat_task'] = task
+        logger.info(f"💓 Started heartbeat loop for task {task_id}")
+    
+    async def update_heartbeat_message(self, task_id: str, percentage: float, message: str):
+        """
+        Update the message that the heartbeat will repeat.
+        
+        Called by agents when they send progress updates. This becomes the new
+        message that gets repeated every second.
+        """
+        if task_id in self._heartbeat_state:
+            self._heartbeat_state[task_id]['last_message'] = message
+            self._heartbeat_state[task_id]['last_percentage'] = percentage
+            self._heartbeat_state[task_id]['last_update_time'] = time.time()
+            self._heartbeat_state[task_id]['llm_counter'] = 0  # Reset LLM counter on new message
+            logger.debug(f"� Updated heartbeat message for {task_id}: {percentage:.0%} - {message[:50]}...")
+    
+    async def stop_heartbeat(self, task_id: str):
+        """Stop the heartbeat for a task (called when task reaches 100%)."""
+        if task_id in self._heartbeat_state:
+            task = self._heartbeat_state[task_id].get('heartbeat_task')
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            del self._heartbeat_state[task_id]
+            logger.info(f"💓 Stopped heartbeat for task {task_id}")
+    
+    async def _heartbeat_loop(self, task_id: str):
+        """
+        Main heartbeat loop - runs in background for each task.
+        
+        Mechanism:
+        - Every 1 second: Repeat last message (simple repeat, no LLM)
+        - Every 7 seconds: Generate new LLM-powered message from agent activity
+        - Stops when task reaches 100%
+        """
         try:
             while True:
-                await asyncio.sleep(8)  # Send heartbeat every 8 seconds
-
-                # Check if task is still active (not completed)
-                current_progress = self._max_progress_by_request.get(task_id, 0.0)
-                if current_progress >= 1.0:
+                await asyncio.sleep(1)  # 1-second heartbeat
+                
+                if task_id not in self._heartbeat_state:
                     break
-
-                # Get the exact last progress message sent
-                last_message = self._last_summary_by_request.get(task_id)
-                if last_message:
-                    # Send heartbeat update with exact same message and progress percentage
-                    await self.redis_publisher.set_transient_update(task_id, current_progress, last_message)
-                    logger.debug(f"💓 Continuous heartbeat: {current_progress:.0%} - {last_message}")
-
+                
+                state = self._heartbeat_state[task_id]
+                
+                # Check if task is complete
+                if state['last_percentage'] >= 1.0:
+                    await self.stop_heartbeat(task_id)
+                    break
+                
+                # Increment LLM counter
+                state['llm_counter'] += 1
+                
+                if state['llm_counter'] >= 7:
+                    # Every 7 seconds: Generate LLM-powered message
+                    try:
+                        # Get current agent activity/context
+                        # For now, we'll use a simple status message
+                        # In future, we can check agent activity logs
+                        new_message = await self._get_dynamic_progress_message(
+                            source="heartbeat",
+                            content="Processing...",
+                            task_context="",
+                            request_id=task_id
+                        )
+                        
+                        if new_message and new_message != state['last_message']:
+                            # AUTO-INCREMENT: New LLM message gets new percentage
+                            current_pct = state['last_percentage']
+                            # Increment by 1%, cap at 93% (like agent messages)
+                            new_pct = min(current_pct + 0.01, 0.93)
+                            
+                            # Update max progress tracker
+                            self._max_progress_by_request[task_id] = max(
+                                self._max_progress_by_request.get(task_id, 0.0),
+                                new_pct
+                            )
+                            
+                            # Send new LLM message with incremented percentage
+                            await self.redis_publisher.set_transient_update(
+                                task_id, 
+                                new_pct, 
+                                new_message
+                            )
+                            state['last_message'] = new_message
+                            state['last_percentage'] = new_pct  # Update state with new percentage
+                            logger.debug(f"💡 LLM heartbeat update: {new_pct:.0%} - {new_message[:50]}...")
+                        else:
+                            # Fallback to repeat if LLM fails or returns same message
+                            await self.redis_publisher.set_transient_update(
+                                task_id,
+                                state['last_percentage'],
+                                state['last_message']
+                            )
+                    except Exception as e:
+                        logger.debug(f"LLM heartbeat generation failed, using repeat: {e}")
+                        # Fallback to simple repeat
+                        await self.redis_publisher.set_transient_update(
+                            task_id,
+                            state['last_percentage'],
+                            state['last_message']
+                        )
+                    
+                    state['llm_counter'] = 0  # Reset counter
+                else:
+                    # Every 1 second: Simple repeat of last message
+                    await self.redis_publisher.set_transient_update(
+                        task_id,
+                        state['last_percentage'],
+                        state['last_message']
+                    )
+                    logger.debug(f"💓 Heartbeat repeat: {state['last_percentage']:.0%} - {state['last_message'][:30]}...")
+        
         except asyncio.CancelledError:
-            logger.debug(f"Continuous heartbeat cancelled for task {task_id}")
+            logger.debug(f"Heartbeat loop cancelled for task {task_id}")
         except Exception as e:
-            logger.debug(f"Continuous heartbeat failed for task {task_id}: {e}")
+            logger.error(f"Heartbeat loop failed for task {task_id}: {e}")
+
+
+    # ========================================================================
+    # DEPRECATED HEARTBEAT METHODS - Keeping for backwards compatibility
+    # ========================================================================
+
+    async def _ensure_continuous_heartbeat(self, task_id: str, percentage: float, content: str):
+        """DEPRECATED: Use start_heartbeat() instead."""
+        # No-op - new heartbeat is started via start_heartbeat()
+        pass
+
+    async def _stop_continuous_heartbeat(self, task_id: str):
+        """DEPRECATED: Use stop_heartbeat() instead."""
+        await self.stop_heartbeat(task_id)
+
+    async def _run_continuous_heartbeat(self, task_id: str, percentage: float, content: str):
+        """DEPRECATED: Use _heartbeat_loop() instead."""
+        # No-op - should not be called in new architecture
+        pass
