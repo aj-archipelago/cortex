@@ -114,19 +114,19 @@ const submitClientToolResultResolver = async (parent, args, contextValue, _info)
             // If parsing fails, use the string as-is
         }
         
-        // Resolve the waiting callback
-        const resolved = resolveClientToolCallback(toolCallbackId, {
+        // Resolve the waiting callback (now async, publishes to Redis if available)
+        const resolved = await resolveClientToolCallback(toolCallbackId, {
             success,
             data: parsedResult,
             error: !success ? (parsedResult.error || 'Tool execution failed') : null
         });
         
         if (!resolved) {
-            logger.warn(`No pending callback found for toolCallbackId: ${toolCallbackId}`);
+            logger.warn(`Failed to publish/resolve callback for toolCallbackId: ${toolCallbackId}`);
             return false;
         }
         
-        logger.info(`Successfully resolved client tool callback: ${toolCallbackId}`);
+        logger.info(`Successfully published/resolved client tool callback: ${toolCallbackId}`);
         return true;
     } catch (error) {
         logger.error(`Error in submitClientToolResultResolver: ${error.message}`);
