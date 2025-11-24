@@ -12,7 +12,8 @@ import hashlib
 import re
 import unicodedata
 from datetime import datetime, timedelta
-from urllib.parse import urlparse, parse_qs
+from typing import List, Union
+from urllib.parse import urlparse, parse_qs, quote
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions, ContentSettings
 from azure.core.exceptions import AzureError, ServiceResponseError
 import requests
@@ -66,7 +67,7 @@ def _validate_sas_url(url: str) -> bool:
         if expiry_time <= datetime.now().replace(tzinfo=expiry_time.tzinfo):
             return False
 
-        logger.info(f"✅ Valid SAS URL with proper expiry: {url[:100]}...")
+        # Removed verbose SAS URL validation logging
         return True
     except Exception as e:
         logger.error(f"Error validating SAS URL: {e}")
@@ -119,16 +120,46 @@ class AzureBlobUploader:
         """Generates a 30-day read-only SAS URL for a specific blob."""
         # Ensure blob_name has no leading slashes
         clean_name = blob_name.lstrip('/')
-        sas_token = generate_blob_sas(
-            account_name=self.account_name,
-            container_name=self.container_name,
-            blob_name=clean_name,
-            account_key=self.account_key,
-            permission=BlobSasPermissions(read=True),
-            expiry=datetime.utcnow() + timedelta(days=30)
-        )
-        # Build URL using account name to avoid any emulator/devhost base_url leaks
-        return f"https://{self.account_name}.blob.core.windows.net/{self.container_name}/{clean_name}?{sas_token}"
+        
+        # Validate inputs
+        if not clean_name:
+            raise ValueError("Blob name cannot be empty")
+        if not self.account_name or not self.account_key:
+            raise ValueError("Azure Storage account name and key must be set")
+        
+        try:
+            # Use blob client to get the base URL - this ensures correct URL construction
+            blob_client = self.blob_service_client.get_blob_client(container=self.container_name, blob=clean_name)
+            
+            # Generate SAS token using the exact blob name as stored
+            sas_token = generate_blob_sas(
+                account_name=self.account_name,
+                container_name=self.container_name,
+                blob_name=clean_name,
+                account_key=self.account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.utcnow() + timedelta(days=30)
+            )
+            
+            if not sas_token:
+                raise ValueError("Failed to generate SAS token")
+            
+            # Use blob client's URL property to get the correctly formatted base URL
+            # This ensures the blob name is properly handled in the URL path
+            base_url = blob_client.url
+            # Append SAS token to the base URL
+            sas_url = f"{base_url}?{sas_token}"
+            
+            # Validate the generated URL
+            if not _validate_sas_url(sas_url):
+                logger.error(f"❌ Generated SAS URL failed validation: {sas_url[:100]}...")
+                raise ValueError("Generated SAS URL failed validation")
+            
+            logger.info(f"✅ Generated SAS URL for blob: {clean_name[:50]}...")
+            return sas_url
+        except Exception as e:
+            logger.error(f"❌ Error generating SAS URL for blob '{clean_name}': {e}", exc_info=True)
+            raise
 
     def upload_file(self, file_path: str, blob_name: str = None) -> dict:
         """Uploads a local file and returns a dictionary with the SAS URL. Retries on transient errors."""
@@ -217,7 +248,7 @@ class AzureBlobUploader:
                 max_concurrency=4,
                 timeout=900,
             )
-        logger.info(f"Uploaded file: {file_path} -> {normalized_blob_name}")
+        # Removed individual file upload logging
         sas_url = self.generate_sas_url(normalized_blob_name)
         if not _validate_sas_url(sas_url):
             raise Exception("Generated SAS URL failed validation.")
@@ -226,7 +257,8 @@ class AzureBlobUploader:
                 self._sha256_to_blob[sha256_hex] = normalized_blob_name
             except Exception:
                 pass
-        return {"blob_name": blob_name, "download_url": sas_url}
+        # CRITICAL: Return normalized_blob_name (what was actually uploaded) not the original blob_name variable
+        return {"blob_name": normalized_blob_name, "download_url": sas_url}
 
 # Keep a single function for external calls to use the singleton uploader
 def upload_file_to_azure_blob(file_path: str, blob_name: str = None) -> str:
@@ -241,7 +273,7 @@ def upload_file_to_azure_blob(file_path: str, blob_name: str = None) -> str:
         try:
             uploader = AzureBlobUploader()
             result = uploader.upload_file(file_path, blob_name)
-            logger.info(f"✅ Successfully uploaded {file_path} (attempt {attempt}/{max_attempts})")
+            # Removed individual upload logging - use batch upload for summary logging
             return json.dumps(result)
         except Exception as e:
             if attempt < max_attempts:
@@ -250,6 +282,100 @@ def upload_file_to_azure_blob(file_path: str, blob_name: str = None) -> str:
             else:
                 logger.error(f"❌ Upload failed after {max_attempts} attempts for {file_path}: {e}", exc_info=True)
                 return json.dumps({"error": str(e)})
+
+def upload_files(file_paths: Union[str, List[str]], work_dir: str = None) -> dict:
+    """
+    Unified file upload function - handles single files or multiple files.
+
+    Args:
+        file_paths: Single file path (str) or list of file paths to upload
+        work_dir: Optional working directory for resolving relative paths
+
+    Returns:
+        Dict with upload results containing local filenames and download URLs
+    """
+    # Handle single file case - convert to list
+    if isinstance(file_paths, str):
+        file_paths = [file_paths]
+
+    if not file_paths:
+        return {"success": False, "error": "No file paths provided", "uploads": [], "failed": []}
+
+    results = []
+    failed = []
+
+    for file_path in file_paths:
+        try:
+            # Resolve relative paths using work_dir if provided
+            resolved_path = file_path
+            if work_dir and not os.path.isabs(file_path):
+                # Try different path resolution strategies
+                candidate_path = os.path.join(work_dir, file_path)
+                if os.path.exists(candidate_path):
+                    resolved_path = candidate_path
+                else:
+                    # Try just the filename in work_dir
+                    filename = os.path.basename(file_path)
+                    candidate_path = os.path.join(work_dir, filename)
+                    if os.path.exists(candidate_path):
+                        resolved_path = candidate_path
+                    else:
+                        # Search work_dir for the file
+                        if os.path.exists(work_dir):
+                            for root, dirs, files in os.walk(work_dir):
+                                if filename in files:
+                                    resolved_path = os.path.join(root, filename)
+                                    break
+
+            # Validate file exists and is readable
+            if not os.path.exists(resolved_path):
+                error_msg = f"File not found: {file_path}"
+                logger.error(f"❌ {error_msg}")
+                failed.append({"file": file_path, "error": error_msg})
+                continue
+
+            if not os.access(resolved_path, os.R_OK):
+                error_msg = f"File not readable: {file_path}"
+                logger.error(f"❌ {error_msg}")
+                failed.append({"file": file_path, "error": error_msg})
+                continue
+
+            # Upload file
+            uploader = AzureBlobUploader()
+            result = uploader.upload_file(resolved_path)
+
+            if result and "download_url" in result:
+                results.append({
+                    "local_filename": os.path.basename(resolved_path),
+                    "local_path": resolved_path,
+                    "blob_name": result.get("blob_name", os.path.basename(resolved_path)),
+                    "download_url": result["download_url"]
+                })
+                logger.info(f"✅ Uploaded {os.path.basename(resolved_path)}")
+            else:
+                error_msg = f"Upload failed: {result.get('error', 'Unknown error')}"
+                logger.error(f"❌ {error_msg}")
+                failed.append({"file": file_path, "error": error_msg})
+
+        except Exception as e:
+            error_msg = f"Upload error: {str(e)[:100]}"
+            logger.error(f"❌ {error_msg}")
+            failed.append({"file": file_path, "error": error_msg})
+
+    # Summary logging
+    success_count = len(results)
+    fail_count = len(failed)
+
+    if success_count > 0:
+        logger.info(f"📦 Upload complete: {success_count} succeeded, {fail_count} failed")
+
+    return {
+        "success": success_count > 0,
+        "uploads": results,
+        "failed": failed,
+        "total_uploaded": success_count,
+        "total_failed": fail_count
+    }
 
 # This function is no longer needed as the class handles text uploads if necessary,
 # and direct calls should go through the singleton.
