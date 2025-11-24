@@ -44,6 +44,7 @@ from agents.util.helpers import (
     log_agent_milestone,
     log_agent_handoff
 )
+from context.context_memory import ContextMemory
 
 # Import from refactored modules
 from .message_utils import _stringify_content
@@ -109,6 +110,9 @@ class TaskProcessor:
         # Initialize progress handler and message generator after model clients
         self.progress_handler = None
         self.recent_progress_messages = []  # Track recent progress messages for context
+
+        # Context memory for structured event tracking
+        self.context_memory = None
 
         # Heartbeat emoji rotation
         self.heartbeat_emojis = ["🔄", "🔁"]
@@ -232,6 +236,9 @@ class TaskProcessor:
             request_work_dir = f"/tmp/coding/req_{task_id}"
             os.makedirs(request_work_dir, exist_ok=True)
 
+            # Initialize context memory
+            self.context_memory = ContextMemory(request_work_dir, self.gpt41_model_client, task_id)
+
             context_files = build_dynamic_context_from_files(request_work_dir, task)
             task_with_context = f"{task}\n\nContext from previous work:\n{context_files}"
 
@@ -340,7 +347,7 @@ class TaskProcessor:
 
         # Phase 2: Upload & Present
         result = await self._run_upload_and_present_phase(
-            task_id, task, work_dir, uploader_agent, presenter_agent, execution_context
+            task_id, task, work_dir, uploader_agent, presenter_agent, execution_context, plan_text
         )
 
         return result
@@ -372,6 +379,17 @@ class TaskProcessor:
 
         write_plan_to_file(work_dir, plan_text)
         _log_context_to_request_file(task_id, "PLANNER_PLAN", plan_text[:2000])
+        
+        # Record plan creation in context memory
+        if self.context_memory:
+            self.context_memory.record_agent_action(
+                "planner_agent",
+                "plan_creation",
+                {"plan_preview": plan_text[:500]},
+                {"plan_length": len(plan_text)},
+                {}
+            )
+        
         return plan_text
 
     async def _run_unified_execution_phase(self, task_id: str, task: str, work_dir: str,
@@ -403,10 +421,34 @@ class TaskProcessor:
                 max_turns=500  # Reasonable limit to prevent infinite loops
             )
 
+            # Generate focused context summary for execution agents
+            focused_context_summary = ""
+            if self.context_memory:
+                try:
+                    # Generate a general execution context summary (for all agents)
+                    # Use a default agent name to get general context
+                    focused_context_summary = await self.context_memory.get_focused_agent_context(
+                        "coder_agent",  # Use coder_agent as default for general context
+                        "Starting execution phase",
+                        max_tokens=3000
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to generate focused context summary: {e}")
+                    focused_context_summary = ""
+
             execution_task = (
                 f"{task}\n\n"
                 "=== LOCKED EXECUTION PLAN ===\n"
                 f"{plan_text}\n\n"
+            )
+            
+            if focused_context_summary:
+                execution_task += (
+                    "=== EXECUTION CONTEXT SUMMARY ===\n"
+                    f"{focused_context_summary}\n\n"
+                )
+            
+            execution_task += (
                 "Follow this plan exactly. If a step is impossible, explain why and request replanning via execution_completion_verifier_agent "
                 "instead of drafting a new plan yourself."
             )
@@ -422,6 +464,7 @@ class TaskProcessor:
             # Progress tracking now handled entirely by progress_handler
             agent_message_count = 0  # Track agent messages for debugging
             last_message = None  # Track the last message for replanning detection
+            last_context_update = 0  # Track when we last updated context
             # REMOVED: heartbeat_task - now managed by progress_handler internally
 
             try:
@@ -437,6 +480,65 @@ class TaskProcessor:
                         
                         # Log to agent journey for high-level tracking
                         log_agent_milestone(work_dir, source, "MESSAGE", content[:100])
+
+                        # Record message in context memory
+                        if self.context_memory:
+                            self.context_memory.record_message(source, "output", str(content), {
+                                "request_id": task_id,
+                                "step_number": agent_message_count
+                            })
+                            self.context_memory.record_agent_action(source, "message", {
+                                "content_preview": str(content)[:200]
+                            }, None, {
+                                "step_number": agent_message_count
+                            })
+                        
+                        # Increment message count
+                        agent_message_count += 1
+                        
+                        # Detect file creation markers ("📁 Ready for upload: path") - check on EVERY message
+                        if self.context_memory:
+                            import re
+                            upload_markers = re.findall(r'📁\s*Ready for upload:\s*(.+)', str(content))
+                            for file_path in upload_markers:
+                                file_path = file_path.strip()
+                                if file_path and os.path.exists(file_path):
+                                    try:
+                                        # Determine file type from extension
+                                        _, ext = os.path.splitext(file_path)
+                                        file_type = ext[1:] if ext.startswith('.') else ext
+                                        
+                                        # Extract content summary based on file type
+                                        content_summary = self._extract_file_content_summary(file_path, file_type)
+                                        
+                                        # Record file creation
+                                        self.context_memory.record_file_creation(
+                                            file_path,
+                                            file_type,
+                                            content_summary,
+                                            {"file_size": os.path.getsize(file_path) if os.path.exists(file_path) else 0},
+                                            source
+                                        )
+                                        self.logger.info(f"📁 Recorded file creation: {os.path.basename(file_path)} by {source}")
+                                    except Exception as e:
+                                        self.logger.warning(f"Failed to record file creation for {file_path}: {e}")
+                        
+                        # Periodic context updates (every 10-15 messages)
+                        if self.context_memory and agent_message_count > 0 and (agent_message_count - last_context_update) >= 12:
+                            try:
+                                # Regenerate focused context summary with latest events
+                                updated_context = await self.context_memory.get_focused_agent_context(
+                                    "coder_agent",  # General context for all agents
+                                    f"Execution in progress (step {agent_message_count})",
+                                    max_tokens=3000
+                                )
+                                # Note: In Swarm, we can't directly inject messages, but the context
+                                # will be available in subsequent LLM calls through the conversation history
+                                # For now, we log it for debugging
+                                _log_context_to_request_file(task_id, "CONTEXT_UPDATE", f"Updated context at message {agent_message_count}: {updated_context[:500]}...")
+                                last_context_update = agent_message_count
+                            except Exception as e:
+                                self.logger.warning(f"Failed to update context summary: {e}")
 
                         # Check for task completion
                         if "__TASK_COMPLETELY_FINISHED__" in content:
@@ -454,10 +556,14 @@ class TaskProcessor:
                             if match:
                                 target_agent = match.group(1)
                                 log_agent_handoff(work_dir, source, target_agent, "Agent transfer initiated")
+                                
+                                # Record handoff in context memory
+                                if self.context_memory:
+                                    self.context_memory.record_handoff(source, target_agent, "Agent transfer initiated", str(content)[:500])
 
                     # Send progress updates for every agent message
                     if source is not None:
-                        agent_message_count += 1
+                        # agent_message_count already incremented above
                         
                         # Log internal progress
                         progress_handler.log_internal_progress(task_id, content, source)
@@ -506,8 +612,9 @@ class TaskProcessor:
                     self.logger.info(f"🔄 Replanning requested for task {task_id}: {content}")
                     return f"REPLAN:{content}"  # Special return value to trigger replanning
 
-            # Collect execution context for presenter agent
-            execution_context = self._collect_execution_context(work_dir)
+            # Return work_dir for context memory to use later (upload_results not available yet)
+            # Context memory will generate presenter context in _run_upload_and_present_phase
+            execution_context = work_dir
 
             self.logger.info(f"✅ Execution phase completed for task {task_id}")
             return execution_context
@@ -516,8 +623,40 @@ class TaskProcessor:
             self.logger.error(f"❌ Execution phase failed for {task_id}: {e}")
             raise
 
+    def _extract_file_content_summary(self, file_path: str, file_type: str) -> str:
+        """Extract content summary for a file based on its type."""
+        try:
+            if file_type.lower() == 'csv':
+                import pandas as pd
+                df = pd.read_csv(file_path, nrows=5)
+                return f"CSV with {len(df.columns)} columns: {list(df.columns)}"
+            elif file_type.lower() == 'json':
+                import json
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        return f"JSON array with {len(data)} items"
+                    elif isinstance(data, dict):
+                        return f"JSON object with keys: {list(data.keys())[:5]}"
+                    else:
+                        return f"JSON {type(data).__name__}"
+            elif file_type.lower() in ['png', 'jpg', 'jpeg']:
+                return f"Image file ({file_type})"
+            elif file_type.lower() == 'pdf':
+                return "PDF document"
+            elif file_type.lower() == 'pptx':
+                return "PowerPoint presentation"
+            elif file_type.lower() == 'xlsx':
+                return "Excel spreadsheet"
+            else:
+                return f"{file_type} file"
+        except Exception as e:
+            return f"{file_type} file (preview unavailable: {str(e)[:50]})"
+    
     def _collect_execution_context(self, work_dir: str) -> str:
         """Collect execution context from accomplishment files for presenter agent."""
+        # This method is kept for backward compatibility but is no longer used
+        # Context memory handles context generation now
         context_parts = []
 
         # Read accomplishments file
@@ -612,7 +751,7 @@ class TaskProcessor:
             raise
 
     async def _run_upload_and_present_phase(self, task_id: str, task: str, work_dir: str,
-                                          uploader_agent, presenter_agent, execution_context: str = "") -> str:
+                                          uploader_agent, presenter_agent, execution_context: str = "", plan_text: str = "") -> str:
         """Run upload and presentation phases using agents."""
         try:
             # Get progress handler
@@ -687,26 +826,25 @@ class TaskProcessor:
                 task_id, 0.95, present_msg
             )
 
-            # PRE-READ CSV DATA for context (Fixes missing table preview issue)
-            csv_previews = ""
-            file_summary_context = "**CREATED FILES SUMMARY:**\n"
-            
+            # Use context memory to generate comprehensive presenter context
             try:
-                import glob
-                import pandas as pd
+                upload_data = json.loads(upload_response_text)
+            except:
+                upload_data = {"uploads": []}
+            
+            # Generate presenter context using context memory
+            if self.context_memory:
+                presenter_context = await self.context_memory.get_presenter_context(
+                    task, upload_data, plan_text
+                )
                 
-                # Parse upload response to get download links
-                upload_map = {}
+                # Add image URLs section if available
                 image_urls_section = ""
                 try:
-                    upload_data = json.loads(upload_response_text)
                     if "uploads" in upload_data:
                         image_files = []
                         for upload in upload_data["uploads"]:
                             fname = upload.get("local_filename", "")
-                            if fname:
-                                upload_map[fname] = upload.get("download_url", "")
-                            # Collect image files with their SAS URLs for easy access
                             download_url = upload.get("download_url", "")
                             if download_url and fname and fname.lower().endswith(('.png', '.jpg', '.jpeg')):
                                 image_files.append(f"{fname}: {download_url}")
@@ -715,50 +853,11 @@ class TaskProcessor:
                             image_urls_section = "\n\n**IMAGE FILES WITH SAS URLs (Use these exact URLs for <img src> tags):**\n" + "\n".join(f"- {img}" for img in image_files) + "\n"
                 except:
                     pass
-
-                # Process CSVs for previews
-                csv_files = glob.glob(os.path.join(work_dir, "*.csv"))
-                if csv_files:
-                    csv_previews = "\n\n**DATA PREVIEWS (Use these to create markdown tables):**\n"
-                    for csv_file in csv_files:
-                        filename = os.path.basename(csv_file)
-                        download_link = upload_map.get(filename, "Link not available")
-                        file_summary_context += f"- CSV File: {filename} (Link: {download_link})\n"
-                        
-                        try:
-                            # Read first 15 rows
-                            df = pd.read_csv(csv_file, nrows=15)
-                            columns = list(df.columns)
-                            file_summary_context += f"  - Columns: {columns}\n"
-                            
-                            csv_content = df.to_markdown(index=False)
-                            csv_previews += f"\nFile: {filename}\nColumns: {columns}\n{csv_content}\n"
-                        except Exception as e:
-                            self.logger.warning(f"Failed to read CSV {filename} for preview: {e}")
                 
-                # Add other files to summary
-                other_files = glob.glob(os.path.join(work_dir, "*"))
-                for f in other_files:
-                    fname = os.path.basename(f)
-                    if not fname.endswith('.csv') and not fname.startswith('.'):
-                        download_link = upload_map.get(fname, "Link not available")
-                        file_summary_context += f"- File: {fname} (Link: {download_link})\n"
-
-            except Exception as e:
-                self.logger.warning(f"Failed to generate file summaries: {e}")
-
-            # Create context for presenter agent
-            presenter_context = f"""
-Task: {task}
-Work Directory: {work_dir}
-Upload Results: {upload_response_text}
-Execution Context: {execution_context}
-
-{file_summary_context}
-
-{csv_previews}
-
-{image_urls_section}
+                presenter_context += image_urls_section
+                
+                # Add critical instructions
+                presenter_context += """
 
 **CRITICAL INSTRUCTIONS - READ CAREFULLY**:
 1. **Data Source Citation**: If execution context mentions SQL/database/AlJazeera/aj_sql_agent, you MUST start with "📊 Data Source: Al Jazeera Internal Database (via SQL query execution)"
@@ -783,6 +882,15 @@ Execution Context: {execution_context}
 6. **Include Download Links**: Use the upload results to provide clickable links for all files
 
 You MUST show the data preview table and data source citation.
+"""
+            else:
+                # Fallback to old method if context_memory not available
+                self.logger.warning("ContextMemory not available, using fallback context generation")
+                presenter_context = f"""
+Task: {task}
+Work Directory: {work_dir}
+Upload Results: {upload_response_text}
+Execution Context: {execution_context}
 """
 
             # Run presenter agent - let it fail cleanly if needed

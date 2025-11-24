@@ -174,10 +174,14 @@ If you detect any critical quality criteria violations, set score=0 and clearly 
    - **CRITICAL CHECK**: NO BIG GENERIC HEADERS - avoid "Summary", "Analysis", "Findings" headers that are just labels
    - **CRITICAL CHECK**: Headers must reflect SPECIFIC findings, not generic labels
    - **CRITICAL CHECK**: NO filler text like "For further details, consult the downloadable documents"
-   - **CRITICAL CHECK**: Download links must use user-friendly names, never raw system filenames
-   - **CRITICAL FAILURE**: "Insight:" prefixes = automatic -10 points
-   - **CRITICAL FAILURE**: Generic headers or filler text = significant deduction
-   - **CRITICAL FAILURE**: Raw filenames displayed to users = automatic -20 points
+  - **CRITICAL CHECK**: Download links must use user-friendly names, never raw system filenames
+  - **CRITICAL CHECK**: Preview images must link to original files - if preview image URL is used for both `<img src>` and `<a href>`, this is incorrect. `<a href>` must point to the deliverable file (PPTX, PDF, etc.), not the preview image URL.
+  - **CRITICAL CHECK**: All download links must use HTML `<a href="URL" target="_blank">text</a>` syntax. Markdown links `[text](URL)` cannot open in new tabs and should be penalized.
+  - **CRITICAL FAILURE**: "Insight:" prefixes = automatic -10 points
+  - **CRITICAL FAILURE**: Generic headers or filler text = significant deduction
+  - **CRITICAL FAILURE**: Raw filenames displayed to users = automatic -20 points
+  - **CRITICAL FAILURE**: Preview images linking to themselves instead of original files = automatic -5 points
+  - **CRITICAL FAILURE**: Markdown download links instead of HTML `<a>` tags with `target="_blank"` = automatic -5 points
 
 4. **Engaging & Fun (15 points)**
    - Excellent: Compelling, interesting, delightful - makes users want to explore, uses insights and storytelling
