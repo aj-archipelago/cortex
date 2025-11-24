@@ -43,3 +43,26 @@ async def execute_code(code: str, work_dir: str | None = None, language: str = "
 async def execute_python_code(code: str, work_dir: str | None = None) -> str:
     """Legacy alias for execute_code with language='python'."""
     return await execute_code(code, work_dir, language="python")
+
+
+# Helper to create FunctionTool with work_dir bound
+def get_code_execution_tool(work_dir: str):
+    """
+    Create a FunctionTool for code execution with work_dir bound.
+    
+    Args:
+        work_dir: Working directory for code execution
+        
+    Returns:
+        FunctionTool configured for the specified work directory
+    """
+    from autogen_core.tools import FunctionTool
+    
+    async def execute_code_bound(code: str) -> str:
+        return await execute_python_code(code, work_dir)
+    
+    return FunctionTool(
+        execute_code_bound,
+        description="Execute Python code using LocalCommandLineCodeExecutor. Write your complete Python script and it will be executed in the work directory."
+    )
+

@@ -697,13 +697,22 @@ class TaskProcessor:
                 
                 # Parse upload response to get download links
                 upload_map = {}
+                image_urls_section = ""
                 try:
                     upload_data = json.loads(upload_response_text)
                     if "uploads" in upload_data:
+                        image_files = []
                         for upload in upload_data["uploads"]:
-                            fname = upload.get("filename", "")
+                            fname = upload.get("local_filename", "")
                             if fname:
                                 upload_map[fname] = upload.get("download_url", "")
+                            # Collect image files with their SAS URLs for easy access
+                            download_url = upload.get("download_url", "")
+                            if download_url and fname and fname.lower().endswith(('.png', '.jpg', '.jpeg')):
+                                image_files.append(f"{fname}: {download_url}")
+                        
+                        if image_files:
+                            image_urls_section = "\n\n**IMAGE FILES WITH SAS URLs (Use these exact URLs for <img src> tags):**\n" + "\n".join(f"- {img}" for img in image_files) + "\n"
                 except:
                     pass
 
@@ -748,6 +757,8 @@ Execution Context: {execution_context}
 {file_summary_context}
 
 {csv_previews}
+
+{image_urls_section}
 
 **CRITICAL INSTRUCTIONS - READ CAREFULLY**:
 1. **Data Source Citation**: If execution context mentions SQL/database/AlJazeera/aj_sql_agent, you MUST start with "📊 Data Source: Al Jazeera Internal Database (via SQL query execution)"

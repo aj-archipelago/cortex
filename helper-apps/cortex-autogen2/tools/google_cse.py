@@ -117,3 +117,11 @@ async def google_cse_search(
         return json.dumps({"error": f"google_cse_search failed: {str(exc)}"})
 
 
+
+
+# Export FunctionTool-wrapped version
+from autogen_core.tools import FunctionTool
+google_cse_search_tool = FunctionTool(
+    google_cse_search,
+    description="Google Custom Search. Returns raw JSON from CSE API."
+)

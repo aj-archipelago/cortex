@@ -34,6 +34,8 @@ class ProgressHandler:
         self._message_count_by_request: Dict[str, int] = {}  # Track message count for auto-increment
         self._last_sent_by_request: Dict[str, str] = {}  # Track last sent content per request
         self._last_sent_time_by_request: Dict[str, float] = {}  # Track last sent time per request
+        self._last_message_content: Dict[str, str] = {}  # Track last message content per request
+        self._last_message_percentage: Dict[str, float] = {}  # Track last message percentage per request
 
         # Heartbeat state management - tracks last message and percentage for auto-repeat
         self._heartbeat_state: Dict[str, Dict[str, Any]] = {}
@@ -64,7 +66,7 @@ class ProgressHandler:
     async def report_user_progress(self, task_id: str, message: str, percentage: float = None, source: str = None):
         """Report clean, user-facing progress update."""
         # Use existing logic to summarize/sanitize
-        user_msg = await self.summarize_progress(message, source=source)
+        user_msg = await self.summarize_progress(message, source=source, task_id=task_id)
         if user_msg:
             # percentage=0.0 triggers auto-increment logic in handle_progress_update
             return await self.handle_progress_update(task_id, percentage if percentage is not None else 0.0, user_msg)
@@ -99,7 +101,7 @@ class ProgressHandler:
 
                     # Summarize and publish (with rate limiting)
                     logger.info(f"⚙️ Worker processing event: pct={pct}, content='{content}', source={source}")
-                    summary = await self.summarize_progress(content, msg_type, source, None)
+                    summary = await self.summarize_progress(content, msg_type, source, None, task_id=req_id)
                     logger.info(f"⚙️ Worker summary result: '{summary}'")
                     if summary:
                         import time
@@ -122,7 +124,7 @@ class ProgressHandler:
         except Exception as e:
             logger.warning(f"Progress worker terminated unexpectedly: {e}")
 
-    async def summarize_progress(self, content: str, message_type: str = None, source: str = None, model_client=None) -> str:
+    async def summarize_progress(self, content: str, message_type: str = None, source: str = None, model_client=None, task_id: str = None) -> str:
         """Summarize progress content for display with intelligent filtering."""
         # Normalize content to string if it's a list
         if isinstance(content, list):
@@ -139,7 +141,7 @@ class ProgressHandler:
         cleaned = self._clean_content_for_progress(content, message_type, source)
 
         # Use LLM to generate dynamic progress message
-        return await self._get_dynamic_progress_message(source or "", cleaned)
+        return await self._get_dynamic_progress_message(source or "", cleaned, request_id=task_id)
 
     def _should_skip_progress_update(self, content: str, message_type: str = None, source: str = None) -> bool:
         """Determine if a progress update should be skipped (minimal filtering)."""
@@ -352,14 +354,21 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
             # Auto-increment progress for dynamic messages (use 0.0 to trigger auto-increment)
             final_percentages = [0.05, 0.94, 0.95, 1.0]  # Static percentages
             if percentage == 0.0 and not is_heartbeat:  # 0.0 triggers auto-increment
-                # Auto-increment: always increment by 1% from current max, starting from 6%
-                current_max = self._max_progress_by_request.get(task_id, 0.05)
-                if current_max < 0.06:
-                    auto_percentage = 0.06  # Start at 6%
+                # Simple check: if same content as last message, reuse its percentage
+                last_content = self._last_message_content.get(task_id)
+                if last_content == content:
+                    # Same message - reuse percentage
+                    percentage = self._last_message_percentage.get(task_id, 0.06)
+                    logger.debug(f"Reusing percentage {percentage:.0%} for same content")
                 else:
-                    auto_percentage = min(current_max + 0.01, 0.93)  # Increment by 1%, cap at 93%
-                logger.debug(f"Auto-increment: current_max={current_max}, auto_percentage={auto_percentage}")
-                percentage = auto_percentage
+                    # New message - increment
+                    current_max = self._max_progress_by_request.get(task_id, 0.05)
+                    if current_max < 0.06:
+                        auto_percentage = 0.06
+                    else:
+                        auto_percentage = min(current_max + 0.01, 0.93)
+                    percentage = auto_percentage
+                    logger.debug(f"New content - incrementing to {percentage:.0%}")
 
             clamped_pct = await self._clamp_progress(task_id, percentage)
             logger.debug(f"Progress update: input={percentage}, clamped={clamped_pct}, max_so_far={self._max_progress_by_request.get(task_id, 0)}")
@@ -394,6 +403,10 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
                 if current_key != last_sent_key:
                     await self.redis_publisher.set_transient_update(task_id, clamped_pct, content)
                     self._last_sent_by_request[task_id] = current_key
+                    
+                    # Update simple tracking
+                    self._last_message_content[task_id] = content
+                    self._last_message_percentage[task_id] = clamped_pct
 
                     # Keep only last 100 published messages to prevent memory growth
                     if len(self._last_published_messages) > 100:
@@ -548,26 +561,18 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
                         )
                         
                         if new_message and new_message != state['last_message']:
-                            # AUTO-INCREMENT: New LLM message gets new percentage
+                            # Update message but keep same percentage (heartbeat never increments)
                             current_pct = state['last_percentage']
-                            # Increment by 1%, cap at 93% (like agent messages)
-                            new_pct = min(current_pct + 0.01, 0.93)
                             
-                            # Update max progress tracker
-                            self._max_progress_by_request[task_id] = max(
-                                self._max_progress_by_request.get(task_id, 0.0),
-                                new_pct
-                            )
-                            
-                            # Send new LLM message with incremented percentage
+                            # Send new LLM message with same percentage (no increment)
                             await self.redis_publisher.set_transient_update(
                                 task_id, 
-                                new_pct, 
+                                current_pct, 
                                 new_message
                             )
                             state['last_message'] = new_message
-                            state['last_percentage'] = new_pct  # Update state with new percentage
-                            logger.debug(f"💡 LLM heartbeat update: {new_pct:.0%} - {new_message[:50]}...")
+                            # Keep same percentage - heartbeat never increments
+                            logger.debug(f"💡 LLM heartbeat update: {current_pct:.0%} - {new_message[:50]}...")
                         else:
                             # Fallback to repeat if LLM fails or returns same message
                             await self.redis_publisher.set_transient_update(

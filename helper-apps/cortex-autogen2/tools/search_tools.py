@@ -793,7 +793,8 @@ async def collect_images(query: str, count: int = 10, work_dir: Optional[str] = 
     """
     try:
         # Use Google CSE for image search
-        cse_payload = google_cse_search(query, search_type="image", num=min(count, 10))
+        raw_payload = await google_cse_search(text=query, parameters={"searchType": "image", "num": min(count, 10)})
+        cse_payload = json.loads(raw_payload) if raw_payload else {}
         images = _normalize_cse_image_results(cse_payload)
 
         # Download and verify images
@@ -810,3 +811,32 @@ async def collect_images(query: str, count: int = 10, work_dir: Optional[str] = 
     except Exception as e:
         return json.dumps({"error": f"collect_images failed: {str(e)}"})
 
+
+
+# Export FunctionTool-wrapped versions
+from autogen_core.tools import FunctionTool
+
+image_search_tool = FunctionTool(
+    image_search,
+    description="Search for images; returns ranked, downloadable candidates as JSON."
+)
+
+collect_images_tool = FunctionTool(
+    collect_images,
+    description="Search for images on the web using search terms."
+)
+
+web_search_tool = FunctionTool(
+    web_search,
+    description="Search the web using Google CSE. Returns web results as JSON."
+)
+
+combined_search_tool = FunctionTool(
+    combined_search,
+    description="Combined web and image search. Returns both result types as JSON."
+)
+
+fetch_webpage_tool = FunctionTool(
+    fetch_webpage,
+    description="Fetch a full webpage and return structured JSON with title, html, and extracted text."
+)

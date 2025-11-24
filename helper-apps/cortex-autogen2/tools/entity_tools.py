@@ -48,6 +48,7 @@ async def fetch_entity_images(
 
         for entity in entities[:5]:  # Limit to 5 entities
             entity_results = []
+            config = {}  # Initialize config with empty dict
 
             if not force_web_search and entity_type in ENTITY_REGISTRY:
                 # Try API first
@@ -83,11 +84,20 @@ async def fetch_entity_images(
             # Fallback to web search if no API results or forced
             if len(entity_results) < count_per_entity:
                 try:
-                    search_query = config.get("fallback_search_query", f"{entity} {entity_type}").format(entity=entity)
+                    # Use config for search query if available, otherwise default
+                    if config:
+                        search_query = config.get("fallback_search_query", f"{entity} {entity_type}").format(entity=entity)
+                    else:
+                        search_query = f"{entity} {entity_type}"
+                    
                     search_results = await collect_images(search_query, count=count_per_entity - len(entity_results))
                     search_data = json.loads(search_results)
-                    if isinstance(search_data, list):
-                        for item in search_data:
+                    
+                    # collect_images returns {"images": [...]} format
+                    images_list = search_data.get("images", []) if isinstance(search_data, dict) else search_data
+                    
+                    if isinstance(images_list, list):
+                        for item in images_list:
                             if isinstance(item, dict) and item.get("url"):
                                 entity_results.append({
                                     "url": item["url"],

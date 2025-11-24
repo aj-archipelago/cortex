@@ -18,7 +18,7 @@ async def list_files_in_work_dir(work_dir: Optional[str] = None) -> str:
     """List files in the working directory."""
     try:
         if not work_dir:
-            work_dir = os.getcwd()
+            work_dir = os.environ.get('CORTEX_WORK_DIR', '/tmp/coding')
 
         files = []
         for root, dirs, filenames in os.walk(work_dir):
@@ -37,18 +37,25 @@ async def read_file_from_work_dir(filename: str, work_dir: Optional[str] = None,
     """Read a file from the working directory."""
     try:
         if not work_dir:
-            work_dir = os.getcwd()
+            work_dir = os.environ.get('CORTEX_WORK_DIR', '/tmp/coding')
 
         file_path = os.path.join(work_dir, filename)
         if not os.path.exists(file_path):
             return json.dumps({"error": f"File not found: {filename}"})
 
-        # Security check - only allow reading certain file types
+        # Minimal security check - only block truly sensitive files
         ext = os.path.splitext(filename)[1].lower()
-        allowed_exts = ['.txt', '.csv', '.json', '.md', '.py', '.js', '.html', '.xml']
-        if ext not in allowed_exts:
-            return json.dumps({"error": f"File type not allowed: {ext}"})
+        blocked_exts = ['.key', '.pem', '.p12', '.pfx', '.keystore']  # Private key files only
+        if ext in blocked_exts:
+            return json.dumps({"error": f"Cannot read private key files: {ext}"})
 
+        # Detect binary vs text files
+        binary_exts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico',
+                       '.pdf', '.pptx', '.xlsx', '.docx', '.zip', '.tar', '.gz']
+        if ext in binary_exts:
+            # Binary file - return metadata only
+            return json.dumps({"file": filename, "type": "binary", "size": os.path.getsize(file_path)})
+        
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read(max_length)
 
@@ -61,15 +68,20 @@ async def create_file(filename: str, content: str, work_dir: Optional[str] = Non
     """Create a new file with the given content."""
     try:
         if not work_dir:
-            work_dir = os.getcwd()
+            work_dir = os.environ.get('CORTEX_WORK_DIR', '/tmp/coding')
 
         file_path = os.path.join(work_dir, filename)
 
-        # Security check - only allow creating certain file types
+        # Minimal security check - only block truly sensitive files
         ext = os.path.splitext(filename)[1].lower()
-        allowed_exts = ['.txt', '.csv', '.json', '.md', '.py', '.js', '.html', '.xml']
-        if ext not in allowed_exts:
-            return json.dumps({"error": f"File type not allowed: {ext}"})
+        blocked_exts = ['.key', '.pem', '.p12', '.pfx', '.keystore']  # Private key files only
+        if ext in blocked_exts:
+            return json.dumps({"error": f"Cannot create private key files: {ext}"})
+
+        # Prevent misuse: reject image files with "DOWNLOADED_IMAGE:" prefix
+        image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico']
+        if ext in image_exts and content.strip().startswith('DOWNLOADED_IMAGE:'):
+            return json.dumps({"error": f"Cannot create image file '{filename}' with 'DOWNLOADED_IMAGE:' prefix. Use the 'download_file' tool with the image URL instead."})
 
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(content)
