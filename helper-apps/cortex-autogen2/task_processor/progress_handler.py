@@ -42,7 +42,7 @@ class ProgressHandler:
         #    'last_percentage': float,
         #    'last_update_time': float,
         #    'heartbeat_task': asyncio.Task,
-        #    'llm_counter': int  # Counts up to 7 for LLM updates
+        #    'llm_counter': int  # Counts up to for LLM updates
         # }}
 
         # LLM call throttling (5+ second intervals to reduce costs)
@@ -183,12 +183,12 @@ class ProgressHandler:
         if not content or not content.strip():
             return content
 
-        # LLM call throttling: reuse cached message if called recently (< 7 seconds ago)
+        # LLM call throttling: reuse cached message if called recently (< X seconds ago)
         import time
         current_time = time.time()
         last_llm_time = self._last_llm_call_time_by_request.get(request_id, 0)
 
-        if current_time - last_llm_time < 7.0:
+        if current_time - last_llm_time < 10.0:
             # Return cached message if available and recent
             cached_msg = self._cached_llm_message_by_request.get(request_id)
             if cached_msg:
@@ -203,7 +203,7 @@ class ProgressHandler:
                 recent_emojis = request_emojis[-3:]  # Last 3 used emojis for this request
                 avoid_emojis = f"\n\nFORBIDDEN EMOJIS (do NOT use these recently used ones for this task): {', '.join(recent_emojis)}"
         elif self.used_emojis:
-            recent_emojis = list(self.used_emojis)[-7:]  # Fallback to global tracking
+            recent_emojis = list(self.used_emojis)[-10:]  # Fallback to global tracking
             avoid_emojis = f"\n\nFORBIDDEN EMOJIS (do NOT use these recently used ones): {', '.join(recent_emojis)}"
 
         prompt = f"""Transform this raw system message into a high-impact, engaging, and slightly witty progress update.
@@ -459,7 +459,7 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
         
         This is the main entry point for starting progress updates:
         - Sends immediate 5% progress message 
-        - Starts background heartbeat loop (1s repeats + 7s LLM updates)
+        - Starts background heartbeat loop (1s repeats + Xs LLM updates)
         """
         # Send instant 5% message
         await self.redis_publisher.set_transient_update(task_id, 0.05, initial_message)
@@ -514,7 +514,7 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
         
         Mechanism:
         - Every 1 second: Repeat last message (simple repeat, no LLM)
-        - Every 7 seconds: Generate new LLM-powered message from agent activity
+        - Every X seconds: Generate new LLM-powered message from agent activity
         - Stops when task reaches 100%
         """
         try:
@@ -534,8 +534,8 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
                 # Increment LLM counter
                 state['llm_counter'] += 1
                 
-                if state['llm_counter'] >= 7:
-                    # Every 7 seconds: Generate LLM-powered message
+                if state['llm_counter'] >= 10:
+                    # Every 10 seconds: Generate LLM-powered message
                     try:
                         # Get current agent activity/context
                         # For now, we'll use a simple status message
