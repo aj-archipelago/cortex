@@ -26,7 +26,7 @@ test("parseContainerNames should handle single container name", (t) => {
   // We need to reload the module to pick up the new environment variable
   // Since we can't easily reload ES modules, we'll test the logic directly
   const parseContainerNames = () => {
-    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
     return containerStr.split(',').map(name => name.trim());
   };
   
@@ -41,7 +41,7 @@ test("parseContainerNames should handle comma-separated container names", (t) =>
   process.env.AZURE_STORAGE_CONTAINER_NAME = "container1,container2,container3";
   
   const parseContainerNames = () => {
-    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
     return containerStr.split(',').map(name => name.trim());
   };
   
@@ -58,7 +58,7 @@ test("parseContainerNames should handle comma-separated names with whitespace", 
   process.env.AZURE_STORAGE_CONTAINER_NAME = " container1 , container2 , container3 ";
   
   const parseContainerNames = () => {
-    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
     return containerStr.split(',').map(name => name.trim());
   };
   
@@ -70,19 +70,19 @@ test("parseContainerNames should handle comma-separated names with whitespace", 
   t.is(result[2], "container3");
 });
 
-test("parseContainerNames should default to whispertempfiles when env var is not set", (t) => {
+test("parseContainerNames should default to cortextempfiles when env var is not set", (t) => {
   // Unset environment variable
   delete process.env.AZURE_STORAGE_CONTAINER_NAME;
   
   const parseContainerNames = () => {
-    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
     return containerStr.split(',').map(name => name.trim());
   };
   
   const result = parseContainerNames();
   
   t.is(result.length, 1);
-  t.is(result[0], "whispertempfiles");
+  t.is(result[0], "cortextempfiles");
 });
 
 test("parseContainerNames should handle empty string", (t) => {
@@ -90,14 +90,14 @@ test("parseContainerNames should handle empty string", (t) => {
   process.env.AZURE_STORAGE_CONTAINER_NAME = "";
   
   const parseContainerNames = () => {
-    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
     return containerStr.split(',').map(name => name.trim());
   };
   
   const result = parseContainerNames();
   
   t.is(result.length, 1);
-  t.is(result[0], "whispertempfiles");
+  t.is(result[0], "cortextempfiles");
 });
 
 test("parseContainerNames should handle only commas", (t) => {
@@ -105,7 +105,7 @@ test("parseContainerNames should handle only commas", (t) => {
   process.env.AZURE_STORAGE_CONTAINER_NAME = ",,,";
   
   const parseContainerNames = () => {
-    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "whispertempfiles";
+    const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
     return containerStr.split(',').map(name => name.trim());
   };
   

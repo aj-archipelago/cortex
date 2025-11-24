@@ -29,34 +29,50 @@ export default {
             return aiMemory;
         }
 
-        const validSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser', 'memoryVersion'];
+        const validSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser', 'memoryVersion', 'memoryFiles'];
+        // memoryFiles can only be accessed explicitly, not as part of memoryAll
+        const allSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser', 'memoryVersion'];
 
         // Handle single section save
         if (section !== 'memoryAll') {
             if (validSections.includes(section)) {
+                // memoryFiles should be JSON array, validate if provided
+                if (section === 'memoryFiles' && aiMemory && aiMemory.trim() !== '') {
+                    try {
+                        // Validate it's valid JSON (but keep as string for storage)
+                        JSON.parse(aiMemory);
+                    } catch (e) {
+                        // If not valid JSON, return error
+                        return JSON.stringify({ error: 'memoryFiles must be a valid JSON array' });
+                    }
+                }
                 await setvWithDoubleEncryption(`${contextId}-${section}`, aiMemory, contextKey);
             }
             return aiMemory;
         }
 
-        // if the aiMemory is an empty string, set all sections to empty strings
+        // if the aiMemory is an empty string, set all sections (excluding memoryFiles) to empty strings
         if (aiMemory.trim() === "") {
-            for (const section of validSections) {
+            for (const section of allSections) {
                 await setvWithDoubleEncryption(`${contextId}-${section}`, "", contextKey);
             }
             return "";
         }
         
-        // Handle multi-section save
+        // Handle multi-section save (excluding memoryFiles)
         try {
             const memoryObject = JSON.parse(aiMemory);
-            for (const section of validSections) {
+            for (const section of allSections) {
                 if (section in memoryObject) {
                     await setvWithDoubleEncryption(`${contextId}-${section}`, memoryObject[section], contextKey);
                 }
             }
+            // Explicitly ignore memoryFiles if present in the object
+            if ('memoryFiles' in memoryObject) {
+                // Silently ignore - memoryFiles can only be saved explicitly
+            }
         } catch {
-            for (const section of validSections) {
+            for (const section of allSections) {
                 await setvWithDoubleEncryption(`${contextId}-${section}`, "", contextKey);
             }
             await setvWithDoubleEncryption(`${contextId}-memoryUser`, aiMemory, contextKey);

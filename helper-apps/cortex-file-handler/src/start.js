@@ -7,6 +7,7 @@ import { readFileSync } from "fs";
 
 import { publicIpv4 } from "public-ip";
 import { AZURE_STORAGE_CONTAINER_NAMES, getDefaultContainerName } from "./blobHandler.js";
+import { sanitizeForLogging } from "./utils/logSecurity.js";
 
 // When running under tests we want all generated URLs to resolve to the
 // locally-running server, otherwise checks like HEAD requests inside the
@@ -48,6 +49,8 @@ const packageJson = JSON.parse(
 const version = packageJson.version;
 
 app.use(cors());
+// Parse JSON bodies for all requests (including DELETE)
+app.use(express.json());
 // Serve static files from the public folder
 app.use("/files", express.static(publicFolder));
 
@@ -64,7 +67,9 @@ app.all("/api/CortexFileHandler", async (req, res) => {
   const context = { req, res, log: console.log };
   try {
     await CortexFileHandler(context, req);
-    context.log(context.res);
+    // Redact SAS tokens from URLs before logging for security
+    const sanitizedResponse = sanitizeForLogging(context.res);
+    context.log(sanitizedResponse);
     res.status(context.res.status || 200).send(context.res.body);
   } catch (error) {
     const status = error.status || 500;
@@ -78,7 +83,9 @@ app.all("/api/MediaFileChunker", async (req, res) => {
   const context = { req, res, log: console.log };
   try {
     await CortexFileHandler(context, req);
-    context.log(context.res);
+    // Redact SAS tokens from URLs before logging for security
+    const sanitizedResponse = sanitizeForLogging(context.res);
+    context.log(sanitizedResponse);
     res.status(context.res.status || 200).send(context.res.body);
   } catch (error) {
     const status = error.status || 500;

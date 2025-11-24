@@ -39,10 +39,15 @@ class GoogleCsePlugin extends ModelPlugin {
             fileType,         // restrict by filetype
         } = parameters;
 
+        const query = q || text || '';
+        if (!query || query.trim() === '') {
+            throw new Error("Google Custom Search requires a non-empty query parameter (q or text)");
+        }
+
         const params = {
             key: apiKey,
             cx: cxParam,
-            q: q || text || '',
+            q: query,
         };
 
         // Add optional parameters if present

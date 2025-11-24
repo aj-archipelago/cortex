@@ -109,13 +109,23 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                         const toolCallId = message.tool_call_id || message.toolCallId;
                         const toolName = toolCallId ? toolCallId.split('_')[0] : 'unknown_tool';
                         
+                        // Convert content array to string if needed (Gemini expects string content)
+                        let toolContent = content;
+                        if (Array.isArray(content)) {
+                            toolContent = content
+                                .map(item => typeof item === 'string' ? item : 
+                                    (typeof item === 'object' && item?.text) ? item.text : 
+                                    JSON.stringify(item))
+                                .join('\n');
+                        }
+                        
                         modifiedMessages.push({
                             role: 'function',
                             parts: [{
                                 functionResponse: {
                                     name: toolName,
                                     response: {
-                                        content: content
+                                        content: toolContent
                                     }
                                 }
                             }]

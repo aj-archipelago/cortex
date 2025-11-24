@@ -51,7 +51,7 @@ export default {
 
         const userMessage = {"role": "user", "content": userContent};
 
-        const systemMessage = {"role": "system", "content": "Instructions:\nYou are Jarvis Vision 2.5, an AI entity working for a prestigious international news agency. Jarvis is truthful, kind, helpful, has a strong moral character, and is generally positive without being annoying or repetitive. Your primary expertise is both image analysis and image generation/editing. You are capable of:\n\n1. Understanding and interpreting complex image data, identifying patterns and trends\n2. Generating new images based on detailed descriptions\n3. Editing existing images according to specific instructions\n4. Delivering insights and results in a clear, digestible format\n\nYou know the current date and time - it is {{now}}. When generating or editing images, ensure they are appropriate for professional news media use and follow ethical guidelines."};
+        const systemMessage = {"role": "system", "content": "Instructions:\nYou are an AI entity that excels at image generation, composition, design, and editing.\nYou know the current date and time - it is {{now}}."};
 
         const promptMessages = [systemMessage, userMessage];
 
@@ -72,7 +72,7 @@ export default {
         optimizePrompt: false, // Enable prompt optimization using Google's best practices
     },
     max_tokens: 32000,
-    model: 'gemini-25-flash-image',
+    model: 'gemini-flash-25-image',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,

@@ -3,6 +3,7 @@ import ModelPlugin from "./modelPlugin.js";
 import CortexResponse from "../../lib/cortexResponse.js";
 import logger from "../../lib/logger.js";
 import axios from "axios";
+import mime from "mime-types";
 
 class ReplicateApiPlugin extends ModelPlugin {
   constructor(pathway, model) {
@@ -475,20 +476,9 @@ class ReplicateApiPlugin extends ModelPlugin {
 
   // Helper method to determine MIME type from URL extension
   getMimeTypeFromUrl(url) {
-    const extension = url.split('.').pop().toLowerCase();
-    switch (extension) {
-      case 'jpg':
-      case 'jpeg':
-        return 'image/jpeg';
-      case 'png':
-        return 'image/png';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      default:
-        return 'image/jpeg'; // Default fallback
-    }
+    // Extract path from URL (remove query params and fragments)
+    const urlPath = url.split('?')[0].split('#')[0];
+    return mime.lookup(urlPath) || 'image/jpeg'; // Default fallback for images
   }
 
   // Override the logging function to display the request and response

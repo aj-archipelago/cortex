@@ -23,44 +23,129 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
     }
     
     async tryParseMessages(messages) {
+        // Whitelist of content types we accept from parsed JSON strings
+        // Only these types will be used if a JSON string parses to an object
+        const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url'];
+        
+        // Helper to check if an object is a valid whitelisted content type
+        const isValidContentObject = (obj) => {
+            return (
+                typeof obj === 'object' && 
+                obj !== null && 
+                typeof obj.type === 'string' &&
+                WHITELISTED_CONTENT_TYPES.includes(obj.type)
+            );
+        };
+        
         return await Promise.all(messages.map(async message => {
             try {
-                // Handle tool-related message types
-                if (message.role === "tool" || (message.role === "assistant" && message.tool_calls)) {
-                    return {
-                        ...message
-                    };
-                }
-
-                if (Array.isArray(message.content)) {
-                    return {
-                        ...message,
-                        content: await Promise.all(message.content.map(async item => {
-                            const parsedItem = safeJsonParse(item);
-
-                            if (typeof parsedItem === 'string') {
-                                return { type: 'text', text: parsedItem };
+                // Parse tool_calls from string array to object array if present
+                const parsedMessage = { ...message };
+                if (message.tool_calls && Array.isArray(message.tool_calls)) {
+                    parsedMessage.tool_calls = message.tool_calls.map(tc => {
+                        if (typeof tc === 'string') {
+                            try {
+                                return JSON.parse(tc);
+                            } catch (e) {
+                                logger.warn(`Failed to parse tool_call: ${tc}`);
+                                return tc;
                             }
+                        }
+                        return tc;
+                    });
+                }
+                
+                // Process content arrays through normal handling
+                // Note: Even assistant messages with tool_calls need their content arrays validated
+                if (Array.isArray(message.content)) {
+                    parsedMessage.content = await Promise.all(message.content.map(async item => {
+                        // A content array item can be a plain string, a JSON string, or a valid content object
+                        let itemToProcess, contentType;
 
-                            if (typeof parsedItem === 'object' && parsedItem !== null) {
-                                // Handle both 'image' and 'image_url' types
-                                if (parsedItem.type === 'image' || parsedItem.type === 'image_url') {
-                                    const url = parsedItem.url || parsedItem.image_url?.url;
-                                    if (url && await this.validateImageUrl(url)) {
-                                        return { type: 'image_url', image_url: { url } };
-                                    }
-                                    return { type: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) };
-                                }
+                        // First try to parse it as a JSON string
+                        const parsedItem = safeJsonParse(item);
+                        
+                        // Check if parsed item is a known content object
+                        if (isValidContentObject(parsedItem)) {
+                            itemToProcess = parsedItem;
+                            contentType = parsedItem.type;
+                        } 
+                        // It's not, so check if original item is already a known content object
+                        else if (isValidContentObject(item)) {
+                            itemToProcess = item;
+                            contentType = item.type;
+                        } 
+                        // It's not, so return it as a text object. This covers all unknown objects and strings.
+                        else {
+                            const textContent = typeof item === 'string' ? item : JSON.stringify(item);
+                            return { type: 'text', text: textContent };
+                        }
+                        
+                        // Process whitelisted content types (we know contentType is known and valid at this point)
+                        if (contentType === 'text') {
+                            return { type: 'text', text: itemToProcess.text || '' };
+                        }
+                        
+                        if (contentType === 'image' || contentType === 'image_url') {
+                            const url = itemToProcess.url || itemToProcess.image_url?.url;
+                            if (url && await this.validateImageUrl(url)) {
+                                return { type: 'image_url', image_url: { url } };
+                            }
+                        }
+
+                        // If we got here, we failed to process something - likely the image - so we'll return it as a text object.
+                        const textContent = typeof itemToProcess === 'string' 
+                            ? itemToProcess 
+                            : JSON.stringify(itemToProcess);
+                        return { type: 'text', text: textContent };
+                    }));
+                }
+                
+                // For assistant messages with tool_calls, content can be null or string (not array)
+                // If it's an array, it was already processed above
+                if (message.role === "assistant" && parsedMessage.tool_calls) {
+                    return parsedMessage;
+                }
+                
+                // For tool messages, validate and convert content to ensure compliance
+                // Tool messages can only have: string or array of text content parts
+                if (message.role === "tool") {
+                    // If content is already a string, keep it as-is
+                    if (typeof parsedMessage.content === 'string') {
+                        return parsedMessage;
+                    }
+                    
+                    // If content is null/undefined, convert to empty string
+                    if (parsedMessage.content == null) {
+                        parsedMessage.content = '';
+                        return parsedMessage;
+                    }
+                    
+                    // If content is an array, ensure all items are text content parts
+                    if (Array.isArray(parsedMessage.content)) {
+                        parsedMessage.content = parsedMessage.content.map(item => {
+                            // If already a text content part, keep it
+                            if (typeof item === 'object' && item !== null && 
+                                item.type === 'text' && typeof item.text === 'string') {
+                                return item;
                             }
                             
-                            return parsedItem;
-                        }))
-                    };
+                            // Convert anything else to a text content part
+                            if (typeof item === 'string') {
+                                return { type: 'text', text: item };
+                            }
+                            if (typeof item === 'object' && item !== null && item.text) {
+                                return { type: 'text', text: String(item.text) };
+                            }
+                            return { type: 'text', text: JSON.stringify(item) };
+                        });
+                    }
                 }
+                
+                return parsedMessage;
             } catch (e) {
                 return message;
             }
-            return message;
         }));
     }
 

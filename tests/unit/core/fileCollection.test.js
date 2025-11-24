@@ -1,0 +1,344 @@
+// fileCollection.test.js
+// Tests for file collection utility functions
+
+import test from 'ava';
+import { 
+    extractFilesFromChatHistory,
+    formatFilesForTemplate,
+    extractFilenameFromUrl,
+    ensureFilenameExtension,
+    determineMimeTypeFromUrl
+} from '../../../lib/fileUtils.js';
+
+// Test extractFilesFromChatHistory
+test('extractFilesFromChatHistory should extract files from array content', t => {
+    const chatHistory = [
+        {
+            role: 'user',
+            content: [
+                { type: 'image_url', image_url: { url: 'https://example.com/image.jpg' }, gcs: 'gs://bucket/image.jpg', originalFilename: 'image.jpg' },
+                { type: 'file', url: 'https://example.com/doc.pdf', gcs: 'gs://bucket/doc.pdf', originalFilename: 'doc.pdf' }
+            ]
+        }
+    ];
+    
+    const files = extractFilesFromChatHistory(chatHistory);
+    t.is(files.length, 2);
+    t.is(files[0].url, 'https://example.com/image.jpg');
+    t.is(files[0].gcs, 'gs://bucket/image.jpg');
+    t.is(files[0].filename, 'image.jpg');
+    t.is(files[1].url, 'https://example.com/doc.pdf');
+    t.is(files[1].gcs, 'gs://bucket/doc.pdf');
+    t.is(files[1].filename, 'doc.pdf');
+});
+
+test('extractFilesFromChatHistory should extract files from string JSON content', t => {
+    const chatHistory = [
+        {
+            role: 'user',
+            content: JSON.stringify({
+                type: 'image_url',
+                image_url: { url: 'https://example.com/image.jpg' },
+                gcs: 'gs://bucket/image.jpg',
+                originalFilename: 'image.jpg'
+            })
+        }
+    ];
+    
+    const files = extractFilesFromChatHistory(chatHistory);
+    t.is(files.length, 1);
+    t.is(files[0].url, 'https://example.com/image.jpg');
+    t.is(files[0].gcs, 'gs://bucket/image.jpg');
+});
+
+test('extractFilesFromChatHistory should extract files from array content with file type', t => {
+    const chatHistory = [
+        {
+            role: 'user',
+            content: [
+                {
+                    type: 'file',
+                    url: 'https://example.com/doc.pdf',
+                    gcs: 'gs://bucket/doc.pdf',
+                    originalFilename: 'doc.pdf',
+                    hash: 'abc123'
+                }
+            ]
+        }
+    ];
+    
+    const files = extractFilesFromChatHistory(chatHistory);
+    t.is(files.length, 1);
+    t.is(files[0].url, 'https://example.com/doc.pdf');
+    t.is(files[0].hash, 'abc123');
+});
+
+test('extractFilesFromChatHistory should handle empty chat history', t => {
+    t.deepEqual(extractFilesFromChatHistory([]), []);
+    t.deepEqual(extractFilesFromChatHistory(null), []);
+    t.deepEqual(extractFilesFromChatHistory(undefined), []);
+});
+
+test('extractFilesFromChatHistory should handle messages without content', t => {
+    const chatHistory = [
+        { role: 'user' },
+        { role: 'assistant', content: 'Hello' }
+    ];
+    
+    const files = extractFilesFromChatHistory(chatHistory);
+    t.is(files.length, 0);
+});
+
+test('extractFilesFromChatHistory should handle invalid JSON gracefully', t => {
+    const chatHistory = [
+        {
+            role: 'user',
+            content: 'not valid json {'
+        }
+    ];
+    
+    const files = extractFilesFromChatHistory(chatHistory);
+    t.is(files.length, 0);
+});
+
+
+// Test formatFilesForTemplate
+test('formatFilesForTemplate should format files correctly', t => {
+    const collection = [
+        {
+            id: 'file-1',
+            url: 'https://example.com/image.jpg',
+            gcs: 'gs://bucket/image.jpg',
+            filename: 'image.jpg',
+            hash: 'abc123',
+            addedDate: '2024-01-01T00:00:00Z',
+            lastAccessed: '2024-01-02T00:00:00Z',
+            tags: ['photo'],
+            notes: 'Test image'
+        },
+        {
+            id: 'file-2',
+            url: 'https://example.com/doc.pdf',
+            filename: 'doc.pdf',
+            hash: 'def456',
+            addedDate: '2024-01-02T00:00:00Z',
+            lastAccessed: '2024-01-03T00:00:00Z'
+        }
+    ];
+    
+    const result = formatFilesForTemplate(collection);
+    // Should not include header or notes
+    t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
+    t.false(result.includes('Test image'));
+    // Should include hash, filename, url, date, and tags
+    t.true(result.includes('def456 | doc.pdf | https://example.com/doc.pdf'));
+    t.true(result.includes('abc123 | image.jpg | https://example.com/image.jpg'));
+    t.true(result.includes('photo')); // tags should be included
+    t.true(result.includes('Jan')); // date should be included
+    // Should be sorted by lastAccessed (most recently accessed first)
+    const docIndex = result.indexOf('def456');
+    const imageIndex = result.indexOf('abc123');
+    t.true(docIndex < imageIndex, 'More recently accessed file should appear first');
+});
+
+test('formatFilesForTemplate should handle empty collection', t => {
+    t.is(formatFilesForTemplate([]), 'No files available.');
+    t.is(formatFilesForTemplate(null), 'No files available.');
+});
+
+test('formatFilesForTemplate should handle files without optional fields', t => {
+    const collection = [
+        {
+            id: 'file-1',
+            url: 'https://example.com/image.jpg',
+            filename: 'image.jpg',
+            addedDate: '2024-01-01T00:00:00Z'
+        }
+    ];
+    
+    const result = formatFilesForTemplate(collection);
+    // Should not include header
+    t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
+    // Should include filename, url, and date even without hash or tags
+    t.true(result.includes('image.jpg'));
+    t.true(result.includes('https://example.com/image.jpg'));
+    // Date should be included (may be 2023 or 2024 due to timezone conversion)
+    t.true(result.includes('2023') || result.includes('2024'));
+    t.false(result.includes('Azure URL'));
+    t.false(result.includes('GCS URL'));
+});
+
+test('formatFilesForTemplate should limit to 10 files and show note', t => {
+    const collection = Array.from({ length: 15 }, (_, i) => ({
+        id: `file-${i}`,
+        filename: `file${i}.txt`,
+        hash: `hash${i}`,
+        url: `https://example.com/file${i}.txt`,
+        addedDate: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
+        lastAccessed: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`
+    }));
+    
+    const result = formatFilesForTemplate(collection);
+    // Should only show 10 files - count file lines (excluding the note line)
+    const lines = result.split('\n');
+    // Count file lines (lines with | that are not the note line)
+    const fileLines = lines.filter(line => 
+        line.includes('|') && !line.includes('more file(s) available')
+    );
+    const fileCount = fileLines.length;
+    t.is(fileCount, 10);
+    // Should include compact note about more files
+    t.true(result.includes('more file(s) available'));
+    t.true(result.includes('5 more file(s) available'));
+    t.true(result.includes('ListFileCollection or SearchFileCollection'));
+});
+
+test('extractFilesFromChatHistory should handle mixed content types', t => {
+    const chatHistory = [
+        {
+            role: 'user',
+            content: [
+                'Hello',
+                { type: 'image_url', image_url: { url: 'https://example.com/image.jpg' }, gcs: 'gs://bucket/image.jpg' },
+                { type: 'text', text: 'Some text' }
+            ]
+        }
+    ];
+    
+    const files = extractFilesFromChatHistory(chatHistory);
+    t.is(files.length, 1);
+    t.is(files[0].url, 'https://example.com/image.jpg');
+});
+
+test('extractFilesFromChatHistory should extract files with hash', t => {
+    const chatHistory = [
+        {
+            role: 'user',
+            content: {
+                type: 'image_url',
+                image_url: { url: 'https://example.com/image.jpg' },
+                hash: 'abc123def456'
+            }
+        }
+    ];
+    
+    const files = extractFilesFromChatHistory(chatHistory);
+    t.is(files.length, 1);
+    t.is(files[0].hash, 'abc123def456');
+});
+
+test('extractFilesFromChatHistory should handle files without gcsUrl', t => {
+    const chatHistory = [
+        {
+            role: 'user',
+            content: {
+                type: 'image_url',
+                image_url: { url: 'https://example.com/image.jpg' }
+            }
+        }
+    ];
+    
+    const files = extractFilesFromChatHistory(chatHistory);
+    t.is(files.length, 1);
+    t.is(files[0].gcs, null);
+});
+
+test('extractFilesFromChatHistory should extract filename from various fields', t => {
+    const testCases = [
+        { originalFilename: 'file1.jpg', expected: 'file1.jpg' },
+        { name: 'file2.jpg', expected: 'file2.jpg' },
+        { filename: 'file3.jpg', expected: 'file3.jpg' },
+        { url: 'https://example.com/file4.jpg', expected: null } // Will extract from URL
+    ];
+    
+    testCases.forEach((testCase, index) => {
+        const chatHistory = [{
+            role: 'user',
+            content: {
+                type: 'image_url',
+                image_url: { url: testCase.url || 'https://example.com/test.jpg' },
+                ...testCase
+            }
+        }];
+        
+        const files = extractFilesFromChatHistory(chatHistory);
+        if (testCase.expected) {
+            t.is(files[0].filename, testCase.expected, `Test case ${index} failed`);
+        }
+    });
+});
+
+// Test extractFilenameFromUrl
+test('extractFilenameFromUrl should return null when no URL provided', t => {
+    t.is(extractFilenameFromUrl(null), null);
+    t.is(extractFilenameFromUrl(null, null), null);
+    t.is(extractFilenameFromUrl(undefined), null);
+    t.is(extractFilenameFromUrl(''), null);
+});
+
+test('extractFilenameFromUrl should extract filename from Azure URL', t => {
+    t.is(extractFilenameFromUrl('https://example.com/file.pdf'), 'file.pdf');
+    t.is(extractFilenameFromUrl('https://storage.blob.core.windows.net/container/file.docx'), 'file.docx');
+});
+
+test('extractFilenameFromUrl should prefer GCS URL over Azure URL', t => {
+    const azureUrl = 'https://example.com/file1.pdf';
+    const gcsUrl = 'gs://bucket/file2.pdf';
+    t.is(extractFilenameFromUrl(azureUrl, gcsUrl), 'file2.pdf');
+});
+
+test('extractFilenameFromUrl should remove query parameters', t => {
+    t.is(extractFilenameFromUrl('https://example.com/file.pdf?token=abc123'), 'file.pdf');
+    t.is(extractFilenameFromUrl('https://example.com/file.pdf?token=abc&sig=xyz'), 'file.pdf');
+});
+
+test('extractFilenameFromUrl should handle URLs without extension', t => {
+    t.is(extractFilenameFromUrl('https://example.com/filename'), 'filename');
+    t.is(extractFilenameFromUrl('https://example.com/path/to/file'), 'file');
+});
+
+// Test ensureFilenameExtension and determineMimeTypeFromUrl (replacing deprecated combineFilenameWithUrlExtension)
+test('ensureFilenameExtension should return null when no MIME type', t => {
+    t.is(ensureFilenameExtension(null, null), null);
+    t.is(ensureFilenameExtension('file.pdf', null), 'file.pdf');
+    t.is(ensureFilenameExtension('file.pdf', 'application/octet-stream'), 'file.pdf');
+});
+
+test('ensureFilenameExtension should return original filename when no MIME type', t => {
+    t.is(ensureFilenameExtension('document.pdf', null), 'document.pdf');
+    t.is(ensureFilenameExtension('document.pdf', 'application/octet-stream'), 'document.pdf');
+});
+
+test('ensureFilenameExtension should handle empty string filename', t => {
+    // Empty string should return null (no filename to work with)
+    t.is(ensureFilenameExtension('', 'text/plain'), null);
+});
+
+test('ensureFilenameExtension should preserve base name with correct extension from MIME type', t => {
+    t.is(ensureFilenameExtension('document.docx', 'application/pdf'), 'document.pdf');
+    t.is(ensureFilenameExtension('myfile.txt', 'text/markdown'), 'myfile.md');
+    t.is(ensureFilenameExtension('image.jpg', 'image/jpeg'), 'image.jpg'); // Already correct
+});
+
+test('ensureFilenameExtension should use MIME type extension when no filename', t => {
+    t.is(ensureFilenameExtension(null, 'application/pdf'), null); // Returns null, doesn't generate filename
+});
+
+test('determineMimeTypeFromUrl should prefer GCS URL', t => {
+    const mimeType1 = determineMimeTypeFromUrl('https://example.com/file.pdf', 'gs://bucket/file.md');
+    t.is(mimeType1, 'text/markdown');
+    
+    const mimeType2 = determineMimeTypeFromUrl('https://example.com/file.pdf', null);
+    t.is(mimeType2, 'application/pdf');
+});
+
+test('ensureFilenameExtension should handle files without extension', t => {
+    t.is(ensureFilenameExtension('document', 'application/pdf'), 'document.pdf');
+    t.is(ensureFilenameExtension('document.docx', 'application/octet-stream'), 'document.docx'); // No change for binary
+});
+
+test('ensureFilenameExtension should normalize extensions (jpeg->jpg, markdown->md)', t => {
+    t.is(ensureFilenameExtension('image.jpeg', 'image/jpeg'), 'image.jpg');
+    t.is(ensureFilenameExtension('doc.markdown', 'text/markdown'), 'doc.md');
+});
+

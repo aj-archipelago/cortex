@@ -1,6 +1,7 @@
 import logger from "../lib/logger.js";
 import { publishRequestProgress } from "../lib/redisSubscription.js";
-import { alignSubtitles, getMediaChunks } from "../lib/util.js";
+import { alignSubtitles } from "../lib/util.js";
+import { getMediaChunks } from "../lib/fileUtils.js";
 import { Prompt } from "../server/prompt.js";
 
 const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide

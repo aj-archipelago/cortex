@@ -90,6 +90,10 @@ const getGraphQlType = (value) => {
       // Check if it's an integer or float
       return Number.isInteger(value) ? {type: 'Int', defaultValue: value} : {type: 'Float', defaultValue: value};
     case 'object':
+      // Handle null explicitly (typeof null === 'object' in JavaScript)
+      if (value === null) {
+        return {type: 'String', defaultValue: '""'};
+      }
       if (Array.isArray(value)) {
         if (value.length > 0 && typeof(value[0]) === 'string') {
           return {type: '[String]', defaultValue: JSON.stringify(value)};
@@ -104,7 +108,12 @@ const getGraphQlType = (value) => {
           }
         }
       } else {
-        return {type: `[${value.objName}]`, defaultValue: JSON.stringify(value)};
+        // Check if it has objName property (for custom object types)
+        if (value && value.objName) {
+          return {type: `[${value.objName}]`, defaultValue: JSON.stringify(value)};
+        }
+        // Otherwise treat as generic object (stringify it)
+        return {type: 'String', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
       }
     default:
       return {type: 'String', defaultValue: `"${value}"`};
@@ -113,7 +122,7 @@ const getGraphQlType = (value) => {
 
 const getMessageTypeDefs = () => {
   const messageType = `input Message { role: String, content: String, name: String }`;
-  const multiMessageType = `input MultiMessage { role: String, content: [String], name: String }`;
+  const multiMessageType = `input MultiMessage { role: String, content: [String], name: String, tool_calls: [String], tool_call_id: String }`;
   
   return `${messageType}\n\n${multiMessageType}`;
 };

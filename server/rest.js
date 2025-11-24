@@ -144,9 +144,14 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         } else if (type === '[MultiMessage]' && Array.isArray(value)) {
             return value.map(msg => ({
                 ...msg,
+                // These conversions are intended to pass-through already stringified objects or stringify objects as necessary
+                // In some cases this can result in invalid content blocks (e.g. arrays of strings) - but that is handled in the plugins
                 content: Array.isArray(msg.content) ? 
-                    msg.content.map(item => JSON.stringify(item)) : 
-                    msg.content
+                    msg.content.map(item => typeof item === 'string' ? item : JSON.stringify(item)) : 
+                    msg.content,
+                tool_calls: Array.isArray(msg.tool_calls) ? 
+                    msg.tool_calls.map(tc => typeof tc === 'string' ? tc : JSON.stringify(tc)) : 
+                    msg.tool_calls
             }));
         } else if (type === '[String]' && Array.isArray(value)) {
             return value;

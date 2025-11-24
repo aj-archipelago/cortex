@@ -14,6 +14,7 @@ import {
   generateBlobName,
   sanitizeFilename,
 } from "../../utils/filenameUtils.js";
+import { isTextMimeType as isTextMimeTypeUtil } from "../../utils/mimeUtils.js";
 
 export class AzureStorageProvider extends StorageProvider {
   constructor(connectionString, containerName) {
@@ -119,6 +120,26 @@ export class AzureStorageProvider extends StorageProvider {
       blobName = generateBlobName(requestId, `${shortId}${fileExtension}`);
     }
 
+    // Validate blobName is not empty
+    if (!blobName || blobName.trim().length === 0) {
+      throw new Error(`Invalid blob name generated: blobName="${blobName}", requestId="${requestId}", filename="${filename}"`);
+    }
+
+    // Determine content-type from filename
+    const sourceFilename = filename || filePath;
+    let contentType = mime.lookup(sourceFilename);
+    
+    // For text MIME types, ensure charset=utf-8 is included if not already present
+    if (contentType && this.isTextMimeType(contentType)) {
+      if (!contentType.includes('charset=')) {
+        contentType = `${contentType}; charset=utf-8`;
+      }
+    }
+
+    // Set ContentEncoding to utf-8 for text files to help browsers interpret encoding correctly
+    // Azure preserves ContentEncoding header even though it strips charset from ContentType
+    const contentEncoding = (contentType && this.isTextMimeType(contentType)) ? 'utf-8' : undefined;
+
     // Create a read stream for the file
     const fileStream = fs.createReadStream(filePath);
 
@@ -126,6 +147,8 @@ export class AzureStorageProvider extends StorageProvider {
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
     const uploadOptions = {
       blobHTTPHeaders: {
+        ...(contentType ? { blobContentType: contentType } : {}),
+        ...(contentEncoding ? { blobContentEncoding: contentEncoding } : {}),
         blobCacheControl: 'public, max-age=2592000, immutable',
       },
     };
@@ -134,23 +157,52 @@ export class AzureStorageProvider extends StorageProvider {
     // Generate SAS token after successful upload
     const sasToken = this.generateSASToken(containerClient, blobName);
 
+    const url = `${blockBlobClient.url}?${sasToken}`;
+    
+    // Validate that the URL contains a blob name (not just container)
+    // Azure blob URLs should be: https://account.blob.core.windows.net/container/blobname
+    // Container-only URLs end with /container/ or /container
+    const urlObj = new URL(url);
+    const pathParts = urlObj.pathname.split('/').filter(p => p.length > 0);
+    if (pathParts.length <= 1) {
+      // Only container name, no blob name - this is invalid
+      throw new Error(`Generated invalid Azure URL (container-only): ${url}, blobName: ${blobName}`);
+    }
+
     return {
-      url: `${blockBlobClient.url}?${sasToken}`,
+      url: url,
       blobName: blobName,
     };
   }
 
-  async uploadStream(context, encodedFilename, stream) {
+  async uploadStream(context, encodedFilename, stream, providedContentType = null) {
     const { containerClient } = await this.getBlobClient();
-    const contentType = mime.lookup(encodedFilename);
+    let contentType = providedContentType || mime.lookup(encodedFilename);
+
+    // For text MIME types, ensure charset=utf-8 is included if not already present
+    if (contentType && this.isTextMimeType(contentType)) {
+      if (!contentType.includes('charset=')) {
+        contentType = `${contentType}; charset=utf-8`;
+      }
+    }
 
     // Normalize the blob name: sanitizeFilename decodes, cleans, then we encode for Azure
     let blobName = sanitizeFilename(encodedFilename);
     blobName = encodeURIComponent(blobName);
 
+    // Validate blobName is not empty
+    if (!blobName || blobName.trim().length === 0) {
+      throw new Error(`Invalid blob name generated from encodedFilename: "${encodedFilename}"`);
+    }
+
+    // Set ContentEncoding to utf-8 for text files to help browsers interpret encoding correctly
+    // Azure preserves ContentEncoding header even though it strips charset from ContentType
+    const contentEncoding = (contentType && this.isTextMimeType(contentType)) ? 'utf-8' : undefined;
+    
     const options = {
       blobHTTPHeaders: {
         ...(contentType ? { blobContentType: contentType } : {}),
+        ...(contentEncoding ? { blobContentEncoding: contentEncoding } : {}),
         blobCacheControl: 'public, max-age=2592000, immutable',
       },
       maxConcurrency: 50,
@@ -158,12 +210,30 @@ export class AzureStorageProvider extends StorageProvider {
     };
 
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-    if (context.log) context.log(`Uploading to Azure... ${blobName}`);
+    if (context.log) {
+      context.log(`Uploading to Azure... ${blobName}`);
+      context.log(`Setting content-type: ${contentType}`);
+    }
     
     await blockBlobClient.uploadStream(stream, undefined, undefined, options);
+    
     const sasToken = this.generateSASToken(containerClient, blobName);
     
-    return `${blockBlobClient.url}?${sasToken}`;
+    const url = `${blockBlobClient.url}?${sasToken}`;
+    
+    // Validate that the URL contains a blob name (not just container)
+    const urlObj = new URL(url);
+    const pathParts = urlObj.pathname.split('/').filter(p => p.length > 0);
+    if (pathParts.length <= 1) {
+      throw new Error(`Generated invalid Azure URL (container-only) from uploadStream: ${url}, blobName: ${blobName}`);
+    }
+    
+    return url;
+  }
+
+  // Use shared utility for MIME type checking
+  isTextMimeType(mimeType) {
+    return isTextMimeTypeUtil(mimeType);
   }
 
   async deleteFiles(requestId) {
@@ -204,19 +274,52 @@ export class AzureStorageProvider extends StorageProvider {
       const urlObj = new URL(url);
       let blobName = urlObj.pathname.substring(1); // Remove leading slash
       
-      // Handle Azurite URLs which include account name in path: /devstoreaccount1/container/blob
+      // Handle different URL formats:
+      // 1. Azurite: /devstoreaccount1/container/blobname (3 segments)
+      // 2. Standard Azure: /container/blobname (2 segments)
+      // 3. Container-only: /container or /container/ (invalid)
+      
       if (blobName.includes('/')) {
-        const pathSegments = blobName.split('/');
-        if (pathSegments.length >= 2) {
-          // For Azurite: devstoreaccount1/container/blobname -> blobname
+        const pathSegments = blobName.split('/').filter(segment => segment.length > 0);
+        
+        if (pathSegments.length === 1) {
+          // Only container name, no blob name - this is invalid
+          console.warn(`Invalid blob URL (container-only): ${url}`);
+          return null;
+        } else if (pathSegments.length === 2) {
+          // Standard Azure format: container/blobname
+          // Check if first segment matches container name
+          if (pathSegments[0] === this.containerName) {
+            blobName = pathSegments[1];
+          } else {
+            // Container name doesn't match, but assume second segment is blob name
+            blobName = pathSegments[1];
+          }
+        } else if (pathSegments.length >= 3) {
+          // Azurite format: devstoreaccount1/container/blobname
           // Skip the account and container segments to get the actual blob name
-          blobName = pathSegments.slice(2).join('/');
+          // Check if second segment matches container name
+          if (pathSegments[1] === this.containerName) {
+            blobName = pathSegments.slice(2).join('/');
+          } else {
+            // Container name doesn't match, but assume remaining segments are blob name
+            blobName = pathSegments.slice(2).join('/');
+          }
         }
+      } else {
+        // No slashes - could be just container name or just blob name
+        if (blobName === this.containerName || blobName === this.containerName + '/') {
+          // URL is just the container name - invalid blob URL
+          console.warn(`Invalid blob URL (container-only): ${url}`);
+          return null;
+        }
+        // Otherwise assume it's a blob name at root level (unlikely but possible)
       }
       
-      // Remove container name prefix if present (for non-Azurite URLs)
-      if (blobName.startsWith(this.containerName + '/')) {
-        blobName = blobName.substring(this.containerName.length + 1);
+      // Validate that we have a non-empty blob name
+      if (!blobName || blobName.trim().length === 0) {
+        console.warn(`Invalid blob URL (empty blob name): ${url}`);
+        return null;
       }
       
       const blockBlobClient = containerClient.getBlockBlobClient(blobName);

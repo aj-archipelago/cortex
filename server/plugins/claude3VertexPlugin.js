@@ -120,6 +120,159 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     this.hadToolCalls = false; // Track if this stream had tool calls
   }
   
+  // Override tryParseMessages to add Claude-specific content types (tool_use, tool_result)
+  async tryParseMessages(messages) {
+    // Whitelist of content types we accept from parsed JSON strings
+    // Only these types will be used if a JSON string parses to an object
+    // Includes Claude-specific types: tool_use, tool_result
+    const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url', 'tool_use', 'tool_result'];
+    
+    // Helper to check if an object is a valid whitelisted content type
+    const isValidContentObject = (obj) => {
+      return (
+        typeof obj === 'object' && 
+        obj !== null && 
+        typeof obj.type === 'string' &&
+        WHITELISTED_CONTENT_TYPES.includes(obj.type)
+      );
+    };
+    
+    function safeJsonParse(content) {
+      try {
+        const parsedContent = JSON.parse(content);
+        return (typeof parsedContent === 'object' && parsedContent !== null) ? parsedContent : content;
+      } catch (e) {
+        return content;
+      }
+    }
+    
+    return await Promise.all(messages.map(async message => {
+      try {
+        // Parse tool_calls from string array to object array if present
+        const parsedMessage = { ...message };
+        if (message.tool_calls && Array.isArray(message.tool_calls)) {
+          parsedMessage.tool_calls = message.tool_calls.map(tc => {
+            if (typeof tc === 'string') {
+              try {
+                return JSON.parse(tc);
+              } catch (e) {
+                logger.warn(`Failed to parse tool_call: ${tc}`);
+                return tc;
+              }
+            }
+            return tc;
+          });
+        }
+        
+        // Handle tool-related message types
+        // For tool messages, OpenAI supports content as either:
+        // 1. A string (text content)
+        // 2. An array of text content parts: [{ type: "text", text: "..." }]
+        if (message.role === "tool") {
+          // If content is already a string, keep it as-is
+          if (typeof parsedMessage.content === 'string') {
+            return parsedMessage;
+          }
+          
+          // If content is an array, process it
+          if (Array.isArray(parsedMessage.content)) {
+            // Check if array is already in the correct format (array of text content parts)
+            const isTextContentPartsArray = parsedMessage.content.every(item => 
+              typeof item === 'object' && 
+              item !== null && 
+              item.type === 'text' && 
+              typeof item.text === 'string'
+            );
+            
+            if (isTextContentPartsArray) {
+              // Already in correct format, keep as array
+              return parsedMessage;
+            }
+            
+            // Convert array to array of text content parts
+            parsedMessage.content = parsedMessage.content.map(item => {
+              if (typeof item === 'string') {
+                return { type: 'text', text: item };
+              }
+              if (typeof item === 'object' && item !== null && item.text) {
+                return { type: 'text', text: String(item.text) };
+              }
+              return { type: 'text', text: JSON.stringify(item) };
+            });
+            return parsedMessage;
+          }
+          
+          // If content is null/undefined, convert to empty string
+          if (parsedMessage.content == null) {
+            parsedMessage.content = '';
+          }
+          
+          return parsedMessage;
+        }
+        
+        // For assistant messages with tool_calls, return as-is (content can be null or string)
+        if (message.role === "assistant" && parsedMessage.tool_calls) {
+          return parsedMessage;
+        }
+
+        if (Array.isArray(message.content)) {
+          return {
+            ...parsedMessage,
+            content: await Promise.all(message.content.map(async item => {
+              // A content array item can be a plain string, a JSON string, or a valid content object
+              let itemToProcess, contentType;
+
+              // First try to parse it as a JSON string
+              const parsedItem = safeJsonParse(item);
+              
+              // Check if parsed item is a known content object
+              if (isValidContentObject(parsedItem)) {
+                itemToProcess = parsedItem;
+                contentType = parsedItem.type;
+              } 
+              // It's not, so check if original item is already a known content object
+              else if (isValidContentObject(item)) {
+                itemToProcess = item;
+                contentType = item.type;
+              } 
+              // It's not, so return it as a text object. This covers all unknown objects and strings.
+              else {
+                const textContent = typeof item === 'string' ? item : JSON.stringify(item);
+                return { type: 'text', text: textContent };
+              }
+              
+              // Process whitelisted content types (we know contentType is known and valid at this point)
+              if (contentType === 'text') {
+                return { type: 'text', text: itemToProcess.text || '' };
+              }
+              
+              if (contentType === 'image' || contentType === 'image_url') {
+                const url = itemToProcess.url || itemToProcess.image_url?.url;
+                if (url && await this.validateImageUrl(url)) {
+                  return { type: 'image_url', image_url: { url } };
+                }
+              }
+
+              // Handle Claude-specific content types
+              if (contentType === 'tool_use' || contentType === 'tool_result') {
+                return itemToProcess;
+              }
+
+              // If we got here, we failed to process something - likely the image - so we'll return it as a text object.
+              const textContent = typeof itemToProcess === 'string' 
+                ? itemToProcess 
+                : JSON.stringify(itemToProcess);
+              return { type: 'text', text: textContent };
+            }))
+          };
+        }
+      } catch (e) {
+        return message;
+      }
+      return message;
+    }));
+  }
+  
   parseResponse(data) {
     if (!data) {
       return data;

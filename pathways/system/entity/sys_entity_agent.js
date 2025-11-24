@@ -2,13 +2,38 @@
 // Agentic extension of the entity system that uses OpenAI's tool calling API
 const MAX_TOOL_CALLS = 50;
 
-import { callPathway, callTool, say } from '../../../lib/pathwayTools.js';
+import { callPathway, callTool, say, sendToolStart, sendToolFinish } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
-import { chatArgsHasImageUrl, removeOldImageAndFileContent, getAvailableFiles } from '../../../lib/util.js';
+import { chatArgsHasImageUrl, removeOldImageAndFileContent } from '../../../lib/util.js';
+import { getAvailableFiles } from '../../../lib/fileUtils.js';
 import { Prompt } from '../../../server/prompt.js';
 import { getToolsForEntity, loadEntityConfig } from './tools/shared/sys_entity_tools.js';
 import CortexResponse from '../../../lib/cortexResponse.js';
+
+// Helper function to generate a smart error response using the agent
+async function generateErrorResponse(error, args, pathwayResolver) {
+    const errorMessage = error?.message || error?.toString() || String(error);
+    
+    // Clear any accumulated errors since we're handling them intelligently
+    pathwayResolver.errors = [];
+    
+    // Use sys_generator_error to create a smart response
+    try {
+        const errorResponse = await callPathway('sys_generator_error', {
+            ...args,
+            text: errorMessage,
+            chatHistory: args.chatHistory || [],
+            stream: false
+        }, pathwayResolver);
+        
+        return errorResponse;
+    } catch (errorResponseError) {
+        // Fallback if sys_generator_error itself fails
+        logger.error(`Error generating error response: ${errorResponseError.message}`);
+        return `I apologize, but I encountered an error while processing your request: ${errorMessage}. Please try again or contact support if the issue persists.`;
+    }
+}
 
 export default {
     emulateOpenAIChatModel: 'cortex-agent',
@@ -30,7 +55,8 @@ export default {
         codeRequestId: ``,
         skipCallbackMessage: false,
         entityId: ``,
-        researchMode: false, 
+        researchMode: false,
+        userInfo: '',
         model: 'oai-gpt41',
         contextKey: ``
     },
@@ -89,10 +115,18 @@ export default {
                         const toolDefinition = entityTools[toolFunction]?.definition;
                         const toolIcon = toolDefinition?.icon || '🛠️';
                         
-                        // Report status to the user
-                        const toolUserMessage = toolArgs.userMessage || `Executing tool: ${toolCall.function.name} - ${JSON.stringify(toolArgs)}`;
-                        const messageWithIcon = toolIcon ? `${toolIcon}&nbsp;&nbsp;${toolUserMessage}` : toolUserMessage;
-                        await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `${messageWithIcon}\n\n`, 1000, false);
+                        // Get the user message for the tool
+                        const toolUserMessage = toolArgs.userMessage || `Executing tool: ${toolCall.function.name}`;
+                        
+                        // Send tool start message
+                        const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+                        const toolCallId = toolCall.id;
+                        try {
+                            await sendToolStart(requestId, toolCallId, toolIcon, toolUserMessage);
+                        } catch (startError) {
+                            logger.error(`Error sending tool start message: ${startError.message}`);
+                            // Continue execution even if start message fails
+                        }
 
                         const toolResult = await callTool(toolFunction, {
                             ...args,
@@ -146,6 +180,15 @@ export default {
                             });
                         }
 
+                        // Send tool finish message (success)
+                        const hasError = toolResult?.error !== undefined;
+                        try {
+                            await sendToolFinish(requestId, toolCallId, !hasError, hasError ? toolResult.error : null);
+                        } catch (finishError) {
+                            logger.error(`Error sending tool finish message: ${finishError.message}`);
+                            // Continue execution even if finish message fails
+                        }
+
                         return { 
                             success: true, 
                             result: toolResult,
@@ -156,6 +199,17 @@ export default {
                         };
                     } catch (error) {
                         logger.error(`Error executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
+                        
+                        // Send tool finish message (error)
+                        // Get requestId and toolCallId if not already defined (in case error occurred before they were set)
+                        const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+                        const toolCallId = toolCall.id;
+                        try {
+                            await sendToolFinish(requestId, toolCallId, false, error.message);
+                        } catch (finishError) {
+                            logger.error(`Error sending tool finish message: ${finishError.message}`);
+                            // Continue execution even if finish message fails
+                        }
                         
                         // Create error message history
                         const errorMessages = JSON.parse(JSON.stringify(preToolCallMessages));
@@ -234,11 +288,20 @@ export default {
             // Add a line break to avoid running output together
             await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `\n`, 1000, false, false);
 
-            return await pathwayResolver.promptAndParse({
-                ...args,
-                tools: entityToolsOpenAiFormat,
-                tool_choice: "auto",
-            });
+            try {
+                return await pathwayResolver.promptAndParse({
+                    ...args,
+                    tools: entityToolsOpenAiFormat,
+                    tool_choice: "auto",
+                });
+            } catch (parseError) {
+                // If promptAndParse fails, generate error response instead of re-throwing
+                logger.error(`Error in promptAndParse during tool callback: ${parseError.message}`);
+                const errorResponse = await generateErrorResponse(parseError, args, pathwayResolver);
+                // Ensure errors are cleared before returning
+                pathwayResolver.errors = [];
+                return errorResponse;
+            }
         }
     },
   
@@ -296,7 +359,11 @@ export default {
                 memoryLookupRequiredPromise = Promise.race([
                     callPathway('sys_memory_lookup_required', { ...args, chatHistory: chatHistoryLastTurn, stream: false }),
                     timeoutPromise
-                ]);
+                ]).catch(error => {
+                    // Handle timeout or other errors gracefully - return null so the await doesn't throw
+                    logger.warn(`Memory lookup promise rejected: ${error.message}`);
+                    return null;
+                });
             }
         }
         
@@ -333,11 +400,12 @@ export default {
         ];
 
         // set the style model if applicable
-        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI, AI_STYLE_ANTHROPIC_RESEARCH, AI_STYLE_OPENAI_RESEARCH, AI_STYLE_OPENAI_LEGACY, AI_STYLE_OPENAI_LEGACY_RESEARCH, AI_STYLE_XAI, AI_STYLE_XAI_RESEARCH, AI_STYLE_GOOGLE, AI_STYLE_GOOGLE_RESEARCH } = args;
+        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI, AI_STYLE_ANTHROPIC_RESEARCH, AI_STYLE_OPENAI_RESEARCH, AI_STYLE_OPENAI_LEGACY, AI_STYLE_OPENAI_LEGACY_RESEARCH, AI_STYLE_XAI, AI_STYLE_XAI_RESEARCH, AI_STYLE_GOOGLE, AI_STYLE_GOOGLE_RESEARCH, AI_STYLE_OPENAI_PREVIEW, AI_STYLE_OPENAI_PREVIEW_RESEARCH } = args;
 
         // Create a mapping of AI styles to their corresponding models
         const styleModelMap = {
             "Anthropic": { normal: AI_STYLE_ANTHROPIC, research: AI_STYLE_ANTHROPIC_RESEARCH },
+            "OpenAI_Preview": { normal: AI_STYLE_OPENAI_PREVIEW, research: AI_STYLE_OPENAI_PREVIEW_RESEARCH },
             "OpenAI": { normal: AI_STYLE_OPENAI, research: AI_STYLE_OPENAI_RESEARCH },
             "OpenAI_Legacy": { normal: AI_STYLE_OPENAI_LEGACY, research: AI_STYLE_OPENAI_LEGACY_RESEARCH },
             "XAI": { normal: AI_STYLE_XAI, research: AI_STYLE_XAI_RESEARCH },
@@ -347,6 +415,7 @@ export default {
         // Get the appropriate model based on AI style and research mode
         const styleConfig = styleModelMap[aiStyle] || styleModelMap["OpenAI"]; // Default to OpenAI
         const styleModel = researchMode ? styleConfig.research : styleConfig.normal;
+        const reasoningEffort = researchMode ? 'high' : 'medium';
 
         // Limit the chat history to 20 messages to speed up processing
         if (args.messages && args.messages.length > 0) {
@@ -355,7 +424,8 @@ export default {
             args.chatHistory = args.chatHistory.slice(-20);
         }
 
-        const availableFiles = getAvailableFiles(args.chatHistory);
+        // Get available files from collection (async, syncs files from chat history)
+        const availableFiles = await getAvailableFiles(args.chatHistory, args.contextId, args.contextKey);
 
         // remove old image and file content
         const visionContentPresent = chatArgsHasImageUrl(args);
@@ -374,7 +444,18 @@ export default {
 
         try {
             if (memoryLookupRequiredPromise) {
-                memoryLookupRequired = JSON.parse(await memoryLookupRequiredPromise)?.memoryRequired;
+                const result = await memoryLookupRequiredPromise;
+                // If result is null (timeout) or empty, default to false
+                if (result && typeof result === 'string') {
+                    try {
+                        memoryLookupRequired = JSON.parse(result)?.memoryRequired || false;
+                    } catch (parseError) {
+                        logger.warn(`Failed to parse memory lookup result: ${parseError.message}`);
+                        memoryLookupRequired = false;
+                    }
+                } else {
+                    memoryLookupRequired = false;
+                }
             } else {
                 memoryLookupRequired = false;
             }
@@ -392,9 +473,15 @@ export default {
                 modelOverride: styleModel,
                 chatHistory: currentMessages,
                 availableFiles,
+                reasoningEffort,
                 tools: entityToolsOpenAiFormat,
                 tool_choice: memoryLookupRequired ? "required" : "auto"
             });
+
+            // Handle null response (can happen when ModelExecutor catches an error)
+            if (!response) {
+                throw new Error('Model execution returned null - the model request likely failed');
+            }
 
             let toolCallback = pathwayResolver.pathway.toolCallback;
 
@@ -403,15 +490,38 @@ export default {
                 (response instanceof CortexResponse && response.hasToolCalls()) ||
                 (typeof response === 'object' && response.tool_calls)
             )) {
-                response = await toolCallback(args, response, pathwayResolver);
+                try {
+                    response = await toolCallback(args, response, pathwayResolver);
+                    
+                    // Handle null response from tool callback
+                    if (!response) {
+                        throw new Error('Tool callback returned null - a model request likely failed');
+                    }
+                } catch (toolError) {
+                    // Handle errors in tool callback
+                    logger.error(`Error in tool callback: ${toolError.message}`);
+                    // Generate error response for tool callback errors
+                    const errorResponse = await generateErrorResponse(toolError, args, pathwayResolver);
+                    // Ensure errors are cleared before returning
+                    pathwayResolver.errors = [];
+                    return errorResponse;
+                }
             }
 
             return response;
 
         } catch (e) {
-            pathwayResolver.logError(e);
-            const chatResponse = await callPathway('sys_generator_quick', {...args, model: styleModel, stream: false}, pathwayResolver);
-            return chatResponse;
+            logger.error(`Error in sys_entity_agent: ${e.message}`);
+            
+            // Generate a smart error response instead of throwing
+            // Note: We don't call logError here because generateErrorResponse will clear errors
+            // and we want to handle the error gracefully rather than tracking it
+            const errorResponse = await generateErrorResponse(e, args, pathwayResolver);
+            
+            // Ensure errors are cleared before returning (in case any were added during error response generation)
+            pathwayResolver.errors = [];
+            
+            return errorResponse;
         }
     }
 }; 

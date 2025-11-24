@@ -6,6 +6,7 @@ import {
   generateBlobName,
   sanitizeFilename,
 } from "../../utils/filenameUtils.js";
+import { isTextMimeType as isTextMimeTypeUtil } from "../../utils/mimeUtils.js";
 import axios from "axios";
 
 import { StorageProvider } from "./StorageProvider.js";
@@ -73,14 +74,23 @@ export class GCSStorageProvider extends StorageProvider {
     };
   }
 
-  async uploadStream(context, encodedFilename, stream) {
+  async uploadStream(context, encodedFilename, stream, providedContentType = null) {
     const bucket = this.storage.bucket(this.bucketName);
     const blobName = sanitizeFilename(encodedFilename);
+
+    let contentType = providedContentType || this.getContentType(encodedFilename) || "application/octet-stream";
+    
+    // For text MIME types, ensure charset=utf-8 is included if not already present
+    if (this.isTextMimeType(contentType)) {
+      if (!contentType.includes('charset=')) {
+        contentType = `${contentType}; charset=utf-8`;
+      }
+    }
 
     const file = bucket.file(blobName);
     const writeStream = file.createWriteStream({
       metadata: {
-        contentType: this.getContentType(encodedFilename) || "application/octet-stream",
+        contentType: contentType,
       },
       resumable: false,
     });
@@ -92,6 +102,11 @@ export class GCSStorageProvider extends StorageProvider {
     });
 
     return `gs://${this.bucketName}/${blobName}`;
+  }
+
+  // Use shared utility for MIME type checking
+  isTextMimeType(mimeType) {
+    return isTextMimeTypeUtil(mimeType);
   }
 
   async deleteFiles(requestId) {

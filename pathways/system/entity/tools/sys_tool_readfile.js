@@ -1,148 +1,290 @@
 // sys_tool_readfile.js
-// Entity tool that reads one or more files and answers questions about them
+// Tool pathway that reads text files with line number support
+import logger from '../../../../lib/logger.js';
+import { axios } from '../../../../lib/requestExecutor.js';
+import { resolveFileParameter, getMimeTypeFromFilename, isTextMimeType } from '../../../../lib/fileUtils.js';
 
-import { Prompt } from '../../../../server/prompt.js';
+/**
+ * Check if a file is a text file type that can be read
+ * @param {string} url - File URL or path
+ * @returns {boolean} - Returns true if it's a text file, false otherwise
+ */
+function isTextFile(url) {
+    if (!url || typeof url !== 'string') {
+        return false;
+    }
+
+    // Extract filename from URL (remove query string and fragment)
+    const urlPath = url.split('?')[0].split('#')[0];
+    
+    // Use existing MIME utility to get MIME type
+    const mimeType = getMimeTypeFromFilename(urlPath);
+    
+    if (!mimeType || mimeType === 'application/octet-stream') {
+        // Unknown MIME type, reject to be safe
+        return false;
+    }
+
+    // Use shared utility function for consistency with other tools
+    return isTextMimeType(mimeType);
+}
 
 export default {
-    prompt:
-        [
-            new Prompt({ messages: [
-                {"role": "system", "content": `You are the part of an AI entity named {{aiName}} that can view, hear, and understand files of all sorts (images, videos, audio, pdfs, text, etc.) - you provide the capability to view and analyze files that the user provides.\nThe user has provided you with one or more files in this conversation - you should consider them for context when you respond.\nIf you don't see any files, something has gone wrong in the upload and you should inform the user and have them try again.\n{{renderTemplate AI_DATETIME}}`},
-                "{{chatHistory}}",
-            ]}),
-        ],
-    inputParameters: {
-        chatHistory: [{role: '', content: []}],
-        contextId: ``,
-        aiName: "Jarvis",
-        language: "English",
-    },
-    max_tokens: 8192,
-    model: 'gemini-flash-20-vision',
-    useInputChunking: false,
-    enableDuplicateRequests: false,
-    timeout: 600,
-    geminiSafetySettings: [{category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH'},
-        {category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH'},
-        {category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH'},
-        {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH'}],
-    toolDefinition: [{
+    prompt: [],
+    timeout: 60,
+    toolDefinition: { 
         type: "function",
-        icon: "📄",
+        icon: "📖",
         function: {
-            name: "AnalyzePDF",
-            description: "Use specifically for reading, analyzing, and answering questions about PDF file content. Do not use this tool for analyzing and answering questions about other file types.",
+            name: "ReadTextFile",
+            description: "Read text content from a file. Can read the entire file or specific line ranges. Use this to access and analyze text files from your file collection. Supports text files, markdown files, html, csv, and other document formats that can be converted to text.  DOES NOT support binary files, images, videos, or audio files or pdfs.",
             parameters: {
                 type: "object",
                 properties: {
-                    detailedInstructions: {
+                    file: {
                         type: "string",
-                        description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
+                        description: "The file to read: can be the file ID, filename, URL, or hash from your file collection. You can find available files in the Available Files section or ListFileCollection or SearchFileCollection."
+                    },
+                    startLine: {
+                        type: "number",
+                        description: "Optional: Starting line number (1-indexed). If not provided, reads from the beginning."
+                    },
+                    endLine: {
+                        type: "number",
+                        description: "Optional: Ending line number (1-indexed). If not provided, reads to the end. Must be >= startLine if startLine is provided."
+                    },
+                    maxLines: {
+                        type: "number",
+                        description: "Optional: Maximum number of lines to read (default: 1000). Use this to limit the size of the response."
                     },
                     userMessage: {
                         type: "string",
                         description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["detailedInstructions", "userMessage"]
+                required: ["userMessage"]
             }
         }
     },
-    {
-        type: "function",
-        icon: "📝",
-        function: {
-            name: "AnalyzeText",
-            description: "Use specifically for reading, analyzing, and answering questions about text files (including csv, json, html, etc.).",
-            parameters: {
-                type: "object",
-                properties: {
-                    detailedInstructions: {
-                        type: "string",
-                        description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
-                        },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                },
-                required: ["detailedInstructions", "userMessage"]
-            }
-        }
-    },
-    {
-        type: "function",
-        icon: "📝",
-        function: {
-            name: "AnalyzeMarkdown",
-            description: "Use specifically for reading, analyzing, and answering questions about markdown files.",
-            parameters: {
-                type: "object",
-                properties: {
-                    detailedInstructions: {
-                        type: "string",
-                        description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
-                        },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                },
-                required: ["detailedInstructions", "userMessage"]
-            }
-        }
-    },   
-    {
-        type: "function",
-        icon: "🖼️",
-        function: {
-            name: "AnalyzeImage",
-            description: "Use specifically for reading, analyzing, and answering questions about image files (jpg, gif, bmp, png, etc). This cannot be used for creating or transforming images.",
-            parameters: {
-                type: "object",
-                properties: {
-                    detailedInstructions: {
-                        type: "string",
-                        description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
-                    },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                    }
-                },
-                required: ["detailedInstructions", "userMessage"]
-            }
-        }
-    },
-    {
-        type: "function",
-        icon: "🎥",
-        function: {
-            name: "AnalyzeVideo",
-            description: "Use specifically for reading, analyzing, and answering questions about video or audio file content. You MUST use this tool to look at video or audio files.",
-            parameters: {
-                type: "object",
-                properties: {
-                    detailedInstructions: {
-                        type: "string",
-                        description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
-                    },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                    }
-                },
-                required: ["detailedInstructions", "userMessage"]
-            }
-        }
-    }],
-    
+
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        if (args.detailedInstructions) {
-            args.chatHistory.push({role: "user", content: args.detailedInstructions});
+        try {
+            let { cloudUrl, file, startLine, endLine, maxLines = 1000, contextId, contextKey } = args;
+            
+            // If file parameter is provided, resolve it to a URL using the common utility
+            if (file) {
+                if (!contextId) {
+                    const errorResult = {
+                        success: false,
+                        error: "contextId is required when using the 'file' parameter. Use ListFileCollection or SearchFileCollection to find available files."
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+                const resolvedUrl = await resolveFileParameter(file, contextId, contextKey);
+                if (!resolvedUrl) {
+                    const errorResult = {
+                        success: false,
+                        error: `File not found: "${file}". Use ListFileCollection or SearchFileCollection to find available files.`
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+                cloudUrl = resolvedUrl;
+            }
+            
+            if (!cloudUrl || typeof cloudUrl !== 'string') {
+                const errorResult = {
+                    success: false,
+                    error: "Either cloudUrl or file parameter is required and must be a string"
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
+
+            // Check if file is a text type before attempting to read
+            if (!isTextFile(cloudUrl)) {
+                const mimeType = getMimeTypeFromFilename(cloudUrl.split('?')[0].split('#')[0]);
+                const detectedType = mimeType || 'unknown type';
+                
+                const errorResult = {
+                    success: false,
+                    error: `This tool only supports text files. The file appears to be a non-text file (MIME type: ${detectedType}). For images, PDFs, videos, or other non-text files, please use the AnalyzeImage, AnalyzePDF, or AnalyzeVideo tools instead.`
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
+
+            if (startLine !== undefined) {
+                if (typeof startLine !== 'number' || !Number.isInteger(startLine) || startLine < 1) {
+                const errorResult = {
+                    success: false,
+                        error: "startLine must be a positive integer (1-indexed)"
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+                }
+            }
+
+            if (endLine !== undefined) {
+                if (typeof endLine !== 'number' || !Number.isInteger(endLine) || endLine < 1) {
+                const errorResult = {
+                    success: false,
+                        error: "endLine must be a positive integer (1-indexed)"
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+                }
+            }
+
+            if (startLine !== undefined && endLine !== undefined && endLine < startLine) {
+                const errorResult = {
+                    success: false,
+                    error: "endLine must be >= startLine"
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
+
+            if (maxLines !== undefined) {
+                if (typeof maxLines !== 'number' || !Number.isInteger(maxLines) || maxLines < 1) {
+                    const errorResult = {
+                        success: false,
+                        error: "maxLines must be a positive integer"
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+            }
+            // Download file content directly from the URL (don't use file handler for content)
+            // Use arraybuffer and explicitly decode as UTF-8 to avoid encoding issues
+            const response = await axios.get(cloudUrl, {
+                responseType: 'arraybuffer',
+                timeout: 30000,
+                validateStatus: (status) => status >= 200 && status < 400
+            });
+
+            if (response.status !== 200 || !response.data) {
+                throw new Error(`Failed to download file content: ${response.status}`);
+            }
+
+            // Secondary check: verify content-type header if available
+            const contentType = response.headers['content-type'] || response.headers['Content-Type'];
+            if (contentType && !isTextMimeType(contentType)) {
+                const errorResult = {
+                    success: false,
+                    error: `This tool only supports text files. The file appears to be a non-text file (Content-Type: ${contentType}). For images, PDFs, videos, or other non-text files, please use the AnalyzeImage, AnalyzePDF, or AnalyzeVideo tools instead.`
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
+
+            // Explicitly decode as UTF-8 to prevent mojibake (encoding corruption)
+            const textContent = Buffer.from(response.data).toString('utf8');
+            const allLines = textContent.split(/\r?\n/);
+            const totalLines = allLines.length;
+
+            // Handle empty file
+            if (totalLines === 0 || (totalLines === 1 && allLines[0] === '')) {
+                const result = {
+                    success: true,
+                    cloudUrl: cloudUrl,
+                    totalLines: 0,
+                    returnedLines: 0,
+                    startLine: 1,
+                    endLine: 0,
+                    content: '',
+                    truncated: false,
+                    isEmpty: true
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(result);
+            }
+
+            // Apply line range filtering
+            let selectedLines = allLines;
+            let actualStartLine = 1;
+            let actualEndLine = totalLines;
+            let wasTruncatedByRange = false;
+
+            if (startLine !== undefined || endLine !== undefined) {
+                const start = startLine !== undefined ? Math.max(1, Math.min(startLine, totalLines)) - 1 : 0; // Convert to 0-indexed, clamp to valid range
+                const end = endLine !== undefined ? Math.min(totalLines, Math.max(1, endLine)) : totalLines; // Clamp to valid range
+                
+                if (startLine !== undefined && startLine > totalLines) {
+                    const errorResult = {
+                        success: false,
+                        error: `startLine (${startLine}) exceeds file length (${totalLines} lines)`
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+
+                selectedLines = allLines.slice(start, end);
+                actualStartLine = start + 1; // Convert back to 1-indexed
+                actualEndLine = end;
+                wasTruncatedByRange = (endLine !== undefined && endLine < totalLines) || (startLine !== undefined && startLine > 1);
+            }
+
+            // Apply maxLines limit
+            let wasTruncatedByMaxLines = false;
+            if (selectedLines.length > maxLines) {
+                selectedLines = selectedLines.slice(0, maxLines);
+                wasTruncatedByMaxLines = true;
+            }
+
+            const result = {
+                success: true,
+                cloudUrl: cloudUrl,
+                totalLines: totalLines,
+                returnedLines: selectedLines.length,
+                startLine: actualStartLine,
+                endLine: actualEndLine,
+                content: selectedLines.join('\n'),
+                truncated: wasTruncatedByRange || wasTruncatedByMaxLines,
+                truncatedByRange: wasTruncatedByRange,
+                truncatedByMaxLines: wasTruncatedByMaxLines
+            };
+
+            resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+            return JSON.stringify(result);
+
+        } catch (e) {
+            let errorMsg;
+            if (e?.message) {
+                errorMsg = e.message;
+            } else if (e?.response) {
+                // Handle HTTP errors
+                const status = e.response.status;
+                const statusText = e.response.statusText || '';
+                errorMsg = `HTTP ${status}${statusText ? ` ${statusText}` : ''}: Failed to download file`;
+            } else if (e?.code === 'ECONNABORTED' || e?.code === 'ETIMEDOUT') {
+                errorMsg = 'Request timeout: File download took too long';
+            } else if (e?.code === 'ENOTFOUND' || e?.code === 'ECONNREFUSED') {
+                errorMsg = `Connection error: ${e.message || 'Unable to reach file server'}`;
+            } else if (typeof e === 'string') {
+                errorMsg = e;
+            } else if (e?.errors && Array.isArray(e.errors)) {
+                // Handle AggregateError
+                errorMsg = e.errors.map(err => err?.message || String(err)).join('; ');
+            } else if (e) {
+                errorMsg = String(e);
+            } else {
+                errorMsg = 'Unknown error occurred while reading file';
+            }
+
+            logger.error(`Error reading cloud file ${cloudUrl || file || 'unknown'}: ${errorMsg}`);
+            
+            const errorResult = {
+                success: false,
+                cloudUrl: cloudUrl || null,
+                file: file || null,
+                error: errorMsg
+            };
+
+            resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+            return JSON.stringify(errorResult);
         }
-        const result = await runAllPrompts({ ...args });
-        resolver.tool = JSON.stringify({ toolUsed: "vision" });
-        return result;
     }
-}
+};
+

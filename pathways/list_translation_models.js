@@ -22,7 +22,7 @@ export default {
                         supportedLanguages: 'All major languages supported'
                     },
                     'translate': {
-                        name: 'Default Translator',
+                        name: 'GPT-5 Translator',
                         description: 'Default translation service using GPT',
                         supportedLanguages: 'All languages supported'
                     },
@@ -46,8 +46,8 @@ export default {
                         description: 'Google Cloud Translation service',
                         supportedLanguages: 'Over 100 languages supported'
                     }
-                };  
-                
+                };
+
         const availableModels = Object.keys(modelDescriptions).map(modelId => ({
             id: modelId,
             ...modelDescriptions[modelId],
