@@ -46,7 +46,7 @@ export default {
         semanticConfiguration: ``,
         roleInformation: ``,    
         calculateEmbeddings: false,
-        dataSources: ["mydata", "aja", "aje", "wires", "bing"],
+        dataSources: ["mydata", "aja", "aje", "wires"],
         language: "English",
         aiName: "Jarvis",
         aiMemorySelfModify: true,

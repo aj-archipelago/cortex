@@ -23,7 +23,7 @@ Instructions: You are part of an AI entity named {{{aiName}}}. Your task is to a
 
 General guidelines:
 - AJ is for AL Jazeera, AJA is for AJ Arabic, AJE is for AJ English
-- If agent needs to search in task it can use Bing Search
+- If agent needs to search in task it can use internet search tools
 
 Always output just the valid JSON object with all these fields.`,
             },

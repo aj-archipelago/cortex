@@ -171,6 +171,48 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         };
     }
 
+    // Recursively convert numeric enums to string enums for Gemini compatibility
+    convertEnumToStrings(schema) {
+        if (!schema || typeof schema !== 'object') {
+            return schema;
+        }
+
+        // Create a deep copy to avoid mutating the original
+        const converted = Array.isArray(schema) ? [...schema] : { ...schema };
+
+        // Convert enum if it exists and contains numbers
+        if (converted.enum && Array.isArray(converted.enum)) {
+            converted.enum = converted.enum.map(value => {
+                // Convert numbers to strings, keep strings as-is
+                return typeof value === 'number' ? String(value) : value;
+            });
+        }
+
+        // Recursively process nested objects
+        if (converted.properties && typeof converted.properties === 'object') {
+            converted.properties = Object.fromEntries(
+                Object.entries(converted.properties).map(([key, value]) => [
+                    key,
+                    this.convertEnumToStrings(value)
+                ])
+            );
+        }
+
+        // Recursively process array items
+        if (converted.items && typeof converted.items === 'object') {
+            converted.items = this.convertEnumToStrings(converted.items);
+        }
+
+        // Recursively process anyOf, oneOf, allOf arrays
+        ['anyOf', 'oneOf', 'allOf'].forEach(key => {
+            if (converted[key] && Array.isArray(converted[key])) {
+                converted[key] = converted[key].map(item => this.convertEnumToStrings(item));
+            }
+        });
+
+        return converted;
+    }
+
     // Convert OpenAI tools to Gemini format
     convertOpenAIToolsToGemini(openAITools) {
         if (!openAITools || !Array.isArray(openAITools)) {
@@ -180,14 +222,19 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         // Convert OpenAI tools to Gemini functionDeclarations format
         const functionDeclarations = openAITools.map(tool => {
             if (tool.type === 'function' && tool.function) {
+                const parameters = tool.function.parameters || {
+                    type: 'object',
+                    properties: {},
+                    required: []
+                };
+                
+                // Convert numeric enums to string enums for Gemini compatibility
+                const convertedParameters = this.convertEnumToStrings(parameters);
+                
                 return {
                     name: tool.function.name,
                     description: tool.function.description || `Tool for ${tool.function.name}`,
-                    parameters: tool.function.parameters || {
-                        type: 'object',
-                        properties: {},
-                        required: []
-                    }
+                    parameters: convertedParameters
                 };
             }
             return null;

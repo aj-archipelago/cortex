@@ -47,9 +47,10 @@ export default {
     toolDefinition: [{
         type: "function",
         icon: "🤖",
+        handoff: true, // This tool hands off to an async agent, so skip task completion check
         function: {
             name: "CodeExecution",
-            description: "This tool allows you to asynchronously engage an agent to write and execute code in a sandbox to perform a task on your behalf. Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks - examples include data analysis, file manipulation, or other tasks that require code execution. With this tool you can read and write files and also access internal databases and query them directly. This will start a background task and return - you will not receive the response immediately.",
+            description: "This tool allows you to asynchronously engage an agent to write and execute code in a sandbox to perform a task on your behalf. Use when explicitly asked to run or execute code, or when a coding agent is needed to perform specific tasks - examples include data analysis, file manipulation, or other tasks that require code execution. With this tool you can read and write files and also access internal databases and query them directly. This will start a background task and return results directly to the user.  You will not receive the response.",
             parameters: {
                 type: "object",
                 properties: {
@@ -138,10 +139,7 @@ export default {
             });
 
             // Return explicit message that task has started but is not complete yet
-            const statusMessage = userMessage 
-                ? `${userMessage}\n\n⚠️ **Task Status**: This coding task has been started and is now running in the background. The task is in progress and not yet complete. You will be notified when the task finishes.`
-                : "⚠️ **Task Status**: I've started your coding task and it is now running in the background. The task is in progress and not yet complete. I will notify you when the task finishes and the results are available.";
-            
+            const statusMessage = "⚠️ **Task Status**: The coding task has been started and is now running in the background. Don't make up any information about the task or task results - just say that it has been started and is running. The user will be able to see the progress and results of the task, but you will not receive the response. No further action is required from you or the user.";         
             return statusMessage;
         } catch (error) {
             logger.error(`Error in coding agent tool: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);

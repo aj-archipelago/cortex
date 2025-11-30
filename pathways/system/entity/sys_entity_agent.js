@@ -180,18 +180,49 @@ export default {
                             });
                         }
 
-                        // Send tool finish message (success)
-                        const hasError = toolResult?.error !== undefined;
+                        // Check for errors in tool result
+                        // callTool returns { result: parsedResult, toolImages: [] }
+                        // We need to check if result has an error field
+                        let hasError = false;
+                        let errorMessage = null;
+                        
+                        if (toolResult?.error !== undefined) {
+                            // Direct error from callTool (e.g., tool returned null)
+                            hasError = true;
+                            errorMessage = toolResult.error;
+                        } else if (toolResult?.result) {
+                            // Check if result is a string that might contain error JSON
+                            if (typeof toolResult.result === 'string') {
+                                try {
+                                    const parsed = JSON.parse(toolResult.result);
+                                    if (parsed.error) {
+                                        hasError = true;
+                                        errorMessage = parsed.error;
+                                    }
+                                } catch (e) {
+                                    // Not JSON, ignore
+                                }
+                            } else if (typeof toolResult.result === 'object' && toolResult.result !== null) {
+                                // Check if result object has error field
+                                if (toolResult.result.error !== undefined) {
+                                    hasError = true;
+                                    errorMessage = toolResult.result.error;
+                                }
+                            }
+                        }
+                        
+                        // Send tool finish message
                         try {
-                            await sendToolFinish(requestId, toolCallId, !hasError, hasError ? toolResult.error : null);
+                            await sendToolFinish(requestId, toolCallId, !hasError, errorMessage);
                         } catch (finishError) {
                             logger.error(`Error sending tool finish message: ${finishError.message}`);
                             // Continue execution even if finish message fails
                         }
 
                         return { 
-                            success: true, 
+                            success: !hasError, 
                             result: toolResult,
+                            error: errorMessage,
                             toolCall,
                             toolArgs,
                             toolFunction,
@@ -267,13 +298,30 @@ export default {
 
                 pathwayResolver.toolCallCount = (pathwayResolver.toolCallCount || 0) + toolResults.length;
 
+                // Check if any of the executed tools are hand-off tools (async agents)
+                // Hand-off tools don't return results immediately, so we skip the completion check
+                const hasHandoffTool = toolResults.some(result => {
+                    if (!result || !result.toolFunction) return false;
+                    const toolDefinition = entityTools[result.toolFunction]?.definition;
+                    return toolDefinition?.handoff === true;
+                });
+
+                // Inject oversight message after tools are executed to encourage task completion
+                // Skip this check if a hand-off tool was used (async agents handle their own completion)
+                if (!hasHandoffTool) {
+                    finalMessages.push({
+                        role: "user",
+                        content: "[System: Task Completion Check] Please evaluate whether you have completed your task based on the tool results you just received. If the task is not yet complete, you should call additional tools as needed to finish the work. Only respond to the user when the task is fully complete or you have gathered all necessary information. If you need to read more of a file, search for more information, or perform additional operations, do so now before responding."
+                    });
+                }
+
             } else {
                 finalMessages.push({
                     role: "user",
                     content: [
                         {
                             type: "text",
-                            text: "This agent has reached the maximum number of tool calls - no more tool calls will be executed."
+                            text: "[System: Tool Limit Reached] This agent has reached the maximum number of tool calls - no more tool calls will be executed."
                         }
                     ]
                 });
@@ -415,7 +463,7 @@ export default {
         // Get the appropriate model based on AI style and research mode
         const styleConfig = styleModelMap[aiStyle] || styleModelMap["OpenAI"]; // Default to OpenAI
         const styleModel = researchMode ? styleConfig.research : styleConfig.normal;
-        const reasoningEffort = researchMode ? 'high' : 'medium';
+        const reasoningEffort = researchMode ? 'high' : 'none';
 
         // Limit the chat history to 20 messages to speed up processing
         if (args.messages && args.messages.length > 0) {

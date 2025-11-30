@@ -174,6 +174,24 @@ export default {
             return cleanResult;
         };
 
+        // Helper function to check if error is related to date filter format
+        const hasDateFilterError = (errorMessage) => {
+            if (typeof errorMessage !== 'string') return false;
+            return (
+                (errorMessage.includes('unsupported data type') && errorMessage.includes('Date')) ||
+                errorMessage.includes('date ge') ||
+                errorMessage.includes('date filter')
+            );
+        };
+
+        // Helper function to get recovery message based on error type
+        const getRecoveryMessage = (errorMessage, filter) => {
+            if (hasDateFilterError(errorMessage) && filter) {
+                return `The date filter format is incorrect. Azure Cognitive Search requires dates in ISO 8601 format with time (e.g., 'date ge 2025-11-25T00:00:00Z' instead of 'date ge 2025-11-25'). Please adjust the filter parameter and try again, or try without a date filter.`;
+            }
+            return "This tool failed. You can try again or try the backup tool for this function if one is available.";
+        };
+
         // Get the tool name from the function call
         const toolName = args.toolFunction;
         const toolIndexName = indexName || toolToIndex[toolName];
@@ -194,9 +212,63 @@ export default {
                 semanticConfiguration,
                 stream: stream || false,
                 chatId
-            });
+            }, resolver);
 
-            const parsedResponse = JSON.parse(response);
+            // Check for errors in resolver
+            if (resolver.errors && resolver.errors.length > 0) {
+                const errorMessages = Array.isArray(resolver.errors) 
+                    ? resolver.errors.map(err => err.message || err)
+                    : [resolver.errors.message || resolver.errors];
+                
+                const errorMessageStr = errorMessages.join('; ');
+                const recoveryMessage = getRecoveryMessage(errorMessageStr, filter);
+                
+                logger.error(`Cognitive search error for index ${toolIndexName}: ${errorMessageStr}`);
+                return JSON.stringify({ 
+                    error: errorMessageStr, 
+                    recoveryMessage: recoveryMessage 
+                });
+            }
+
+            // Check if response is null or empty
+            if (!response) {
+                const errorMessage = `No response received from cognitive search for index ${toolIndexName}`;
+                logger.error(errorMessage);
+                const recoveryMessage = getRecoveryMessage(errorMessage, filter);
+                return JSON.stringify({ 
+                    error: errorMessage, 
+                    recoveryMessage: recoveryMessage 
+                });
+            }
+
+            // Parse the response
+            let parsedResponse;
+            try {
+                parsedResponse = JSON.parse(response);
+            } catch (parseError) {
+                const errorMessage = `Invalid response format from cognitive search: ${parseError.message}`;
+                logger.error(`Failed to parse cognitive search response for index ${toolIndexName}: ${parseError.message}`);
+                const recoveryMessage = getRecoveryMessage(errorMessage, filter);
+                return JSON.stringify({ 
+                    error: errorMessage, 
+                    recoveryMessage: recoveryMessage 
+                });
+            }
+
+            // Check if parsed response indicates an error
+            if (parsedResponse.error || parsedResponse.Error) {
+                const errorMsg = parsedResponse.error?.message || parsedResponse.Error?.message || 
+                               parsedResponse.error || parsedResponse.Error || 
+                               'Unknown error from cognitive search';
+                logger.error(`Cognitive search API error for index ${toolIndexName}: ${errorMsg}`);
+                
+                const recoveryMessage = getRecoveryMessage(errorMsg, filter);
+                
+                return JSON.stringify({ 
+                    error: errorMsg, 
+                    recoveryMessage: recoveryMessage 
+                });
+            }
 
             const combinedResults = [];
 
@@ -243,8 +315,16 @@ export default {
 
             return JSON.stringify({ _type: "SearchResponse", value: combinedResults });
         } catch (e) {
-            logger.error(`Error in cognitive search for index ${indexName}: ${e}`);
-            throw e;
+            const errorMessage = e?.message || e?.toString() || String(e);
+            logger.error(`Error in cognitive search for index ${toolIndexName}: ${errorMessage}`);
+            
+            const recoveryMessage = getRecoveryMessage(errorMessage, filter);
+            
+            // Return error response instead of throwing so agent can see and adjust
+            return JSON.stringify({ 
+                error: errorMessage, 
+                recoveryMessage: recoveryMessage 
+            });
         }
     }
 }; 
