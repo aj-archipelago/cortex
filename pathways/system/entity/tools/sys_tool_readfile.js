@@ -286,11 +286,7 @@ export default {
 
             // Character-based reading mode (takes precedence)
             if (startChar !== undefined) {
-                let start = Math.max(0, Math.min(startChar, totalChars));
-                let end = endChar !== undefined 
-                    ? Math.min(totalChars, Math.max(start + 1, endChar))
-                    : Math.min(totalChars, start + MAX_CHARS); // Default limit if endChar not specified
-
+                // Check for out-of-bounds before clamping
                 if (startChar > totalChars) {
                     const errorResult = {
                         success: false,
@@ -300,18 +296,19 @@ export default {
                     return JSON.stringify(errorResult);
                 }
 
+                let start = Math.max(0, Math.min(startChar, totalChars));
+                let end = endChar !== undefined 
+                    ? Math.min(totalChars, Math.max(start + 1, endChar))
+                    : Math.min(totalChars, start + MAX_CHARS); // Default limit if endChar not specified
+
                 let selectedContent = textContent.substring(start, end);
-                let wasTruncatedByRange = (endChar !== undefined && endChar < totalChars) || (startChar !== undefined && startChar > 0);
+                let wasTruncatedByRange = (endChar !== undefined && endChar < totalChars) || (startChar > 0);
                 let wasTruncatedByLimit = (endChar === undefined && end < totalChars);
                 const isTruncated = wasTruncatedByRange || wasTruncatedByLimit;
 
                 let instruction = '';
                 if (isTruncated) {
-                    if (wasTruncatedByRange) {
-                        instruction = `⚠️ IMPORTANT: This is NOT the complete file. You are viewing characters ${start} to ${end} of ${totalChars} total characters (${selectedContent.length} characters shown). The file has ${totalChars} total characters. To read more, call ReadTextFile again with startChar=${end} (and optionally endChar=${Math.min(end + MAX_CHARS, totalChars)}) to read the next chunk. To avoid context overflow and data loss, make sure you're done processing your current chunk before you read the next one.`;
-                    } else {
-                        instruction = `⚠️ IMPORTANT: This is NOT the complete file. You are viewing characters ${start} to ${end} of ${totalChars} total characters (${selectedContent.length} characters shown). The file has ${totalChars} total characters. To read more, call ReadTextFile again with startChar=${end} (and optionally endChar=${Math.min(end + MAX_CHARS, totalChars)}) to read the next chunk. To avoid context overflow and data loss, make sure you're done processing your current chunk before you read the next one.`;
-                    }
+                    instruction = `⚠️ IMPORTANT: This is NOT the complete file. You are viewing characters ${start} to ${end} of ${totalChars} total characters (${selectedContent.length} characters shown). The file has ${totalChars} total characters. To read more, call ReadTextFile again with startChar=${end} (and optionally endChar=${Math.min(end + MAX_CHARS, totalChars)}) to read the next chunk. To avoid context overflow and data loss, make sure you're done processing your current chunk before you read the next one.`;
                 }
 
                 const result = {
@@ -379,11 +376,7 @@ export default {
 
             let instruction = '';
             if (isTruncated) {
-                if (wasTruncatedByRange) {
-                    instruction = `⚠️ IMPORTANT: This is NOT the complete file. You are viewing lines ${actualStartLine} to ${actualEndLine} of ${totalLines} total lines (${selectedLines.length} lines shown). The file has ${totalLines} total lines and ${totalChars} total characters. To read more, call ReadTextFile again with startLine=${actualEndLine + 1} (and optionally endLine=${Math.min(actualEndLine + MAX_LINES, totalLines)}) to read the next chunk. To avoid context overflow and data loss, make sure you're done processing your current chunk before you read the next one.`;
-                } else {
-                    instruction = `⚠️ IMPORTANT: This is NOT the complete file. You are viewing lines ${actualStartLine} to ${actualEndLine} of ${totalLines} total lines (${selectedLines.length} lines shown). The file has ${totalLines} total lines and ${totalChars} total characters. To read more, call ReadTextFile again with startLine=${actualEndLine + 1} (and optionally endLine=${Math.min(actualEndLine + MAX_LINES, totalLines)}) to read the next chunk. To avoid context overflow and data loss, make sure you're done processing your current chunk before you read the next one.`;
-                }
+                instruction = `⚠️ IMPORTANT: This is NOT the complete file. You are viewing lines ${actualStartLine} to ${actualEndLine} of ${totalLines} total lines (${selectedLines.length} lines shown). The file has ${totalLines} total lines and ${totalChars} total characters. To read more, call ReadTextFile again with startLine=${actualEndLine + 1} (and optionally endLine=${Math.min(actualEndLine + MAX_LINES, totalLines)}) to read the next chunk. To avoid context overflow and data loss, make sure you're done processing your current chunk before you read the next one.`;
             }
 
             const result = {

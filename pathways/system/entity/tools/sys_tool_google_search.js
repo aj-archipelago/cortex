@@ -231,9 +231,22 @@ export default {
 
             // Check if parsed response indicates an error
             if (parsedResponse.error || parsedResponse.Error) {
-                const errorMsg = parsedResponse.error?.message || parsedResponse.Error?.message || 
-                               parsedResponse.error || parsedResponse.Error || 
-                               'Unknown error from Google CSE';
+                let errorMsg;
+                if (parsedResponse.Error !== undefined) {
+                    if (typeof parsedResponse.Error === 'object') {
+                        errorMsg = parsedResponse.Error.message || JSON.stringify(parsedResponse.Error);
+                    } else {
+                        errorMsg = parsedResponse.Error;
+                    }
+                } else if (parsedResponse.error !== undefined) {
+                    if (typeof parsedResponse.error === 'object') {
+                        errorMsg = parsedResponse.error.message || JSON.stringify(parsedResponse.error);
+                    } else {
+                        errorMsg = parsedResponse.error;
+                    }
+                } else {
+                    errorMsg = 'Unknown error from Google CSE';
+                }
                 logger.error(`Google CSE API error: ${errorMsg}`);
                 
                 // Provide helpful recovery message based on error type

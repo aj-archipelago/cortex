@@ -195,7 +195,7 @@ export default {
                             if (typeof toolResult.result === 'string') {
                                 try {
                                     const parsed = JSON.parse(toolResult.result);
-                                    if (parsed.error) {
+                                    if (parsed.error !== undefined) {
                                         hasError = true;
                                         errorMessage = parsed.error;
                                     }
@@ -463,6 +463,7 @@ export default {
         // Get the appropriate model based on AI style and research mode
         const styleConfig = styleModelMap[aiStyle] || styleModelMap["OpenAI"]; // Default to OpenAI
         const styleModel = researchMode ? styleConfig.research : styleConfig.normal;
+        // Use 'high' reasoning effort in research mode for thorough analysis, 'none' in normal mode for faster responses
         const reasoningEffort = researchMode ? 'high' : 'none';
 
         // Limit the chat history to 20 messages to speed up processing
