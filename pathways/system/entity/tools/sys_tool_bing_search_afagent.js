@@ -88,7 +88,8 @@ export default {
                 const errorMessages = Array.isArray(resolver.errors) 
                     ? resolver.errors.map(err => err.message || err)
                     : [resolver.errors.message || resolver.errors];
-                return JSON.stringify({ _type: "SearchError", value: errorMessages });
+                const errorMessageStr = errorMessages.join('; ');
+                return JSON.stringify({ error: errorMessageStr, recoveryMessage: "This tool failed. You should try the backup tool for this function." });
             }
 
             // Transform response to match expected SearchResponse format
@@ -161,8 +162,14 @@ export default {
                 text: transformedData.transformedText // The full transformed text with citations
             });
         } catch (e) {
-            logger.error(`Error in Bing search: ${e}`);
-            throw e;
+            const errorMessage = e?.message || e?.toString() || String(e);
+            logger.error(`Error in Bing search: ${errorMessage}`);
+            
+            // Return error response instead of throwing so agent can see and adjust
+            return JSON.stringify({ 
+                error: errorMessage, 
+                recoveryMessage: "This tool failed. You should try the backup tool for this function." 
+            });
         }
     }
 }; 

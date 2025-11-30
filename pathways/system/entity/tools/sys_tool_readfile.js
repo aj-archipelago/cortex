@@ -20,13 +20,36 @@ function isTextFile(url) {
     // Use existing MIME utility to get MIME type
     const mimeType = getMimeTypeFromFilename(urlPath);
     
-    if (!mimeType || mimeType === 'application/octet-stream') {
-        // Unknown MIME type, reject to be safe
-        return false;
+    // If we have a valid MIME type (not unknown/octet-stream), check it
+    if (mimeType && mimeType !== 'application/octet-stream') {
+        return isTextMimeType(mimeType);
     }
-
-    // Use shared utility function for consistency with other tools
-    return isTextMimeType(mimeType);
+    
+    // Fallback: Check file extension for common text/code file types
+    // This handles cases where MIME type detection fails
+    const extension = urlPath.split('.').pop()?.toLowerCase();
+    if (extension) {
+        const textExtensions = [
+            // Code files
+            'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rs', 'java', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'hxx',
+            'rb', 'php', 'pl', 'lua', 'sql', 'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'cmd',
+            // Config/data files
+            'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'config', 'xml', 'csv', 'tsv',
+            // Markup/documentation
+            'md', 'markdown', 'txt', 'text', 'log', 'diff', 'patch',
+            // Web
+            'html', 'htm', 'css', 'scss', 'sass', 'less', 'vue', 'svelte',
+            // Other text formats
+            'rtf', 'rtfd', 'tex', 'latex', 'bib', 'r', 'm', 'swift', 'kt', 'scala', 'clj', 'cljs', 'edn',
+            'dart', 'elm', 'ex', 'exs', 'fs', 'fsx', 'ml', 'mli', 'hs', 'lhs', 'vim', 'vimrc'
+        ];
+        if (textExtensions.includes(extension)) {
+            return true;
+        }
+    }
+    
+    // Unknown type, reject to be safe
+    return false;
 }
 
 export default {
@@ -37,7 +60,7 @@ export default {
         icon: "📖",
         function: {
             name: "ReadTextFile",
-            description: "Read text content from a file. Can read the entire file or specific line ranges. Use this to access and analyze text files from your file collection. Supports text files, markdown files, html, csv, and other document formats that can be converted to text.  DOES NOT support binary files, images, videos, or audio files or pdfs.",
+            description: "Read text content from a text type file. Can read the file using line ranges (for line-based files) or character ranges (for files like JSON where line-based reading doesn't work well). Use this to access text files from your file collection. Supports text files, markdown files, html, csv, json, and other document formats that can be converted to text. DOES NOT support binary files, images, videos, or audio files or pdfs. Reading large files in chunks is recommended to avoid token limits. Use character ranges (startChar/endChar) for JSON and other structured formats. Use line ranges (startLine/endLine) for code and text files. If no range is specified, reads from the beginning with default limits.",
             parameters: {
                 type: "object",
                 properties: {
@@ -45,17 +68,21 @@ export default {
                         type: "string",
                         description: "The file to read: can be the file ID, filename, URL, or hash from your file collection. You can find available files in the Available Files section or ListFileCollection or SearchFileCollection."
                     },
+                    startChar: {
+                        type: "number",
+                        description: "Optional: Starting character position (0-indexed). If provided, character-based reading is used instead of line-based. Use this for JSON and other structured formats. Must be >= 0."
+                    },
+                    endChar: {
+                        type: "number",
+                        description: "Optional: Ending character position (0-indexed, exclusive). If provided with startChar, character-based reading is used. Must be > startChar if startChar is provided. Maximum range is 100000 characters."
+                    },
                     startLine: {
                         type: "number",
-                        description: "Optional: Starting line number (1-indexed). If not provided, reads from the beginning."
+                        description: "Optional: Starting line number (1-indexed). If not provided, reads from the beginning. Ignored if startChar is provided."
                     },
                     endLine: {
                         type: "number",
-                        description: "Optional: Ending line number (1-indexed). If not provided, reads to the end. Must be >= startLine if startLine is provided."
-                    },
-                    maxLines: {
-                        type: "number",
-                        description: "Optional: Maximum number of lines to read (default: 1000). Use this to limit the size of the response."
+                        description: "Optional: Ending line number (1-indexed). If not provided, reads to the end. Must be >= startLine if startLine is provided. Ignored if startChar is provided. Maximum range is 1000 lines."
                     },
                     userMessage: {
                         type: "string",
@@ -69,7 +96,11 @@ export default {
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
         try {
-            let { cloudUrl, file, startLine, endLine, maxLines = 1000, contextId, contextKey } = args;
+            // Internal limits for safety
+            const MAX_CHARS = 100000;
+            const MAX_LINES = 1000;
+            
+            let { cloudUrl, file, startChar, endChar, startLine, endLine, contextId, contextKey } = args;
             
             // If file parameter is provided, resolve it to a URL using the common utility
             if (file) {
@@ -115,29 +146,75 @@ export default {
                 return JSON.stringify(errorResult);
             }
 
-            if (startLine !== undefined) {
+            // Validate character-based parameters
+            if (startChar !== undefined) {
+                if (typeof startChar !== 'number' || !Number.isInteger(startChar) || startChar < 0) {
+                    const errorResult = {
+                        success: false,
+                        error: "startChar must be a non-negative integer (0-indexed)"
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+            }
+
+            if (endChar !== undefined) {
+                if (typeof endChar !== 'number' || !Number.isInteger(endChar) || endChar < 0) {
+                    const errorResult = {
+                        success: false,
+                        error: "endChar must be a non-negative integer (0-indexed)"
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+            }
+
+            if (startChar !== undefined && endChar !== undefined && endChar <= startChar) {
+                const errorResult = {
+                    success: false,
+                    error: "endChar must be > startChar"
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(errorResult);
+            }
+
+            // Check if character range exceeds limit (only if both start and end are specified)
+            if (startChar !== undefined && endChar !== undefined) {
+                const rangeSize = endChar - startChar;
+                if (rangeSize > MAX_CHARS) {
+                    const errorResult = {
+                        success: false,
+                        error: `Requested character range (${rangeSize} characters) exceeds maximum allowed range of ${MAX_CHARS} characters. Please request a smaller range.`
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+            }
+
+            // Validate line-based parameters (only if not using character mode)
+            if (startChar === undefined && startLine !== undefined) {
                 if (typeof startLine !== 'number' || !Number.isInteger(startLine) || startLine < 1) {
-                const errorResult = {
-                    success: false,
+                    const errorResult = {
+                        success: false,
                         error: "startLine must be a positive integer (1-indexed)"
-                };
-                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
-                return JSON.stringify(errorResult);
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
                 }
             }
 
-            if (endLine !== undefined) {
+            if (startChar === undefined && endLine !== undefined) {
                 if (typeof endLine !== 'number' || !Number.isInteger(endLine) || endLine < 1) {
-                const errorResult = {
-                    success: false,
+                    const errorResult = {
+                        success: false,
                         error: "endLine must be a positive integer (1-indexed)"
-                };
-                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
-                return JSON.stringify(errorResult);
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
                 }
             }
 
-            if (startLine !== undefined && endLine !== undefined && endLine < startLine) {
+            if (startChar === undefined && startLine !== undefined && endLine !== undefined && endLine < startLine) {
                 const errorResult = {
                     success: false,
                     error: "endLine must be >= startLine"
@@ -146,11 +223,13 @@ export default {
                 return JSON.stringify(errorResult);
             }
 
-            if (maxLines !== undefined) {
-                if (typeof maxLines !== 'number' || !Number.isInteger(maxLines) || maxLines < 1) {
+            // Check if line range exceeds limit
+            if (startChar === undefined && startLine !== undefined && endLine !== undefined) {
+                const rangeSize = endLine - startLine + 1; // +1 because endLine is inclusive
+                if (rangeSize > MAX_LINES) {
                     const errorResult = {
                         success: false,
-                        error: "maxLines must be a positive integer"
+                        error: `Requested line range (${rangeSize} lines) exceeds maximum allowed range of ${MAX_LINES} lines. Please request a smaller range.`
                     };
                     resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
                     return JSON.stringify(errorResult);
@@ -181,35 +260,88 @@ export default {
 
             // Explicitly decode as UTF-8 to prevent mojibake (encoding corruption)
             const textContent = Buffer.from(response.data).toString('utf8');
+            const totalChars = textContent.length;
+            const totalBytes = response.data.length;
             const allLines = textContent.split(/\r?\n/);
             const totalLines = allLines.length;
 
             // Handle empty file
-            if (totalLines === 0 || (totalLines === 1 && allLines[0] === '')) {
+            if (totalChars === 0) {
                 const result = {
                     success: true,
                     cloudUrl: cloudUrl,
+                    totalChars: 0,
+                    totalBytes: totalBytes,
                     totalLines: 0,
+                    returnedChars: 0,
                     returnedLines: 0,
-                    startLine: 1,
-                    endLine: 0,
                     content: '',
                     truncated: false,
-                    isEmpty: true
+                    isEmpty: true,
+                    mode: 'character'
                 };
                 resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
                 return JSON.stringify(result);
             }
 
-            // Apply line range filtering
+            // Character-based reading mode (takes precedence)
+            if (startChar !== undefined) {
+                // Check for out-of-bounds before clamping
+                if (startChar > totalChars) {
+                    const errorResult = {
+                        success: false,
+                        error: `startChar (${startChar}) exceeds file length (${totalChars} characters)`
+                    };
+                    resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                    return JSON.stringify(errorResult);
+                }
+
+                let start = Math.max(0, Math.min(startChar, totalChars));
+                let end = endChar !== undefined 
+                    ? Math.min(totalChars, Math.max(start + 1, endChar))
+                    : Math.min(totalChars, start + MAX_CHARS); // Default limit if endChar not specified
+
+                let selectedContent = textContent.substring(start, end);
+                let wasTruncatedByRange = (endChar !== undefined && endChar < totalChars) || (startChar > 0);
+                let wasTruncatedByLimit = (endChar === undefined && end < totalChars);
+                const isTruncated = wasTruncatedByRange || wasTruncatedByLimit;
+
+                let instruction = '';
+                if (isTruncated) {
+                    instruction = `⚠️ IMPORTANT: This is NOT the complete file. You are viewing characters ${start} to ${end} of ${totalChars} total characters (${selectedContent.length} characters shown). The file has ${totalChars} total characters. To read more, call ReadTextFile again with startChar=${end} (and optionally endChar=${Math.min(end + MAX_CHARS, totalChars)}) to read the next chunk. To avoid context overflow and data loss, make sure you're done processing your current chunk before you read the next one.`;
+                }
+
+                const result = {
+                    success: true,
+                    cloudUrl: cloudUrl,
+                    totalChars: totalChars,
+                    totalBytes: totalBytes,
+                    totalLines: totalLines,
+                    returnedChars: selectedContent.length,
+                    startChar: start,
+                    endChar: end,
+                    content: selectedContent,
+                    truncated: isTruncated,
+                    truncatedByRange: wasTruncatedByRange,
+                    truncatedByLimit: wasTruncatedByLimit,
+                    mode: 'character',
+                    ...(instruction ? { instruction } : {})
+                };
+
+                resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
+                return JSON.stringify(result);
+            }
+
+            // Line-based reading mode (default)
             let selectedLines = allLines;
             let actualStartLine = 1;
             let actualEndLine = totalLines;
             let wasTruncatedByRange = false;
+            let wasTruncatedByLimit = false;
 
             if (startLine !== undefined || endLine !== undefined) {
                 const start = startLine !== undefined ? Math.max(1, Math.min(startLine, totalLines)) - 1 : 0; // Convert to 0-indexed, clamp to valid range
-                const end = endLine !== undefined ? Math.min(totalLines, Math.max(1, endLine)) : totalLines; // Clamp to valid range
+                let end = endLine !== undefined ? Math.min(totalLines, Math.max(1, endLine)) : Math.min(totalLines, start + MAX_LINES); // Default limit if endLine not specified
                 
                 if (startLine !== undefined && startLine > totalLines) {
                     const errorResult = {
@@ -220,30 +352,49 @@ export default {
                     return JSON.stringify(errorResult);
                 }
 
+                // If endLine not specified, apply default limit
+                if (endLine === undefined && (end - start) > MAX_LINES) {
+                    end = start + MAX_LINES;
+                    wasTruncatedByLimit = true;
+                }
+
                 selectedLines = allLines.slice(start, end);
                 actualStartLine = start + 1; // Convert back to 1-indexed
                 actualEndLine = end;
                 wasTruncatedByRange = (endLine !== undefined && endLine < totalLines) || (startLine !== undefined && startLine > 1);
+            } else {
+                // No range specified - apply default limit from beginning
+                if (selectedLines.length > MAX_LINES) {
+                    selectedLines = selectedLines.slice(0, MAX_LINES);
+                    actualEndLine = MAX_LINES;
+                    wasTruncatedByLimit = true;
+                }
             }
 
-            // Apply maxLines limit
-            let wasTruncatedByMaxLines = false;
-            if (selectedLines.length > maxLines) {
-                selectedLines = selectedLines.slice(0, maxLines);
-                wasTruncatedByMaxLines = true;
+            const selectedContent = selectedLines.join('\n');
+            const isTruncated = wasTruncatedByRange || wasTruncatedByLimit;
+
+            let instruction = '';
+            if (isTruncated) {
+                instruction = `⚠️ IMPORTANT: This is NOT the complete file. You are viewing lines ${actualStartLine} to ${actualEndLine} of ${totalLines} total lines (${selectedLines.length} lines shown). The file has ${totalLines} total lines and ${totalChars} total characters. To read more, call ReadTextFile again with startLine=${actualEndLine + 1} (and optionally endLine=${Math.min(actualEndLine + MAX_LINES, totalLines)}) to read the next chunk. To avoid context overflow and data loss, make sure you're done processing your current chunk before you read the next one.`;
             }
 
             const result = {
                 success: true,
                 cloudUrl: cloudUrl,
+                totalChars: totalChars,
+                totalBytes: totalBytes,
                 totalLines: totalLines,
+                returnedChars: selectedContent.length,
                 returnedLines: selectedLines.length,
                 startLine: actualStartLine,
                 endLine: actualEndLine,
-                content: selectedLines.join('\n'),
-                truncated: wasTruncatedByRange || wasTruncatedByMaxLines,
+                content: selectedContent,
+                truncated: isTruncated,
                 truncatedByRange: wasTruncatedByRange,
-                truncatedByMaxLines: wasTruncatedByMaxLines
+                truncatedByLimit: wasTruncatedByLimit,
+                mode: 'line',
+                ...(instruction ? { instruction } : {})
             };
 
             resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });

@@ -56,6 +56,7 @@ export default {
     },
     {
         type: "function",
+        enabled: false,
         icon: "📝",
         function: {
             name: "AnalyzeText",
@@ -78,6 +79,7 @@ export default {
     },
     {
         type: "function",
+        enabled: false,
         icon: "📝",
         function: {
             name: "AnalyzeMarkdown",
@@ -100,6 +102,7 @@ export default {
     },   
     {
         type: "function",
+        enabled: false,
         icon: "🖼️",
         function: {
             name: "AnalyzeImage",

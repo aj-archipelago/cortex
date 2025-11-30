@@ -190,7 +190,7 @@ test('ReadFile: Read line range', async t => {
     }
 });
 
-test('ReadFile: Read with maxLines limit', async t => {
+test('ReadFile: Read with line range limit', async t => {
     const contextId = createTestContext();
     
     try {
@@ -215,11 +215,12 @@ test('ReadFile: Read with maxLines limit', async t => {
         
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Read with maxLines limit
+        // Read with endLine limit (first 10 lines)
         const readResult = await callPathway('sys_tool_readfile', {
             contextId,
             file: writeParsed.fileId || 'largetest.txt',
-            maxLines: 10,
+            startLine: 1,
+            endLine: 10,
             userMessage: 'Reading with limit'
         });
         

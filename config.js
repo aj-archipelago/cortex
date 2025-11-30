@@ -340,16 +340,6 @@ var config = convict({
                 "maxReturnTokens": 100000,
                 "supportsStreaming": true
             },
-            "azure-bing": {
-                "type": "AZURE-BING",
-                "url": "https://api.bing.microsoft.com/v7.0/search",
-                "headers": {
-                    "Ocp-Apim-Subscription-Key": "{{AZURE_BING_KEY}}",
-                    "Content-Type": "application/json"
-                },
-                "requestsPerSecond": 10,
-                "maxTokenLength": 200000
-            },
             "google-cse": {
                 "type": "GOOGLE-CSE",
                 "url": "https://www.googleapis.com/customsearch/v1",

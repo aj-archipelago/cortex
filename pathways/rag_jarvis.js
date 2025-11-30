@@ -158,28 +158,13 @@ export default {
                 }
             }
 
-            const bingAvailable = !!config.getEnv()["AZURE_BING_KEY"];
-            if(bingAvailable && searchBing){
-                const handleRejection = (promise) => {
-                    return promise.catch((error) => {
-                        logger.error(`Error occurred: ${error}`);
-                        return null; 
-                    });
-                }
-
-                promises.push(handleRejection(callPathway('bing', { ...args, ...generateExtraArgs(searchBing)})));
-            }
-
-            const parseBing = (response) => {
-                return JSON.parse(response)?.webPages?.value.map(({ name, url, snippet }) => ({ title: name, url, content: snippet }));
-            }
 
             // Sample results from the index searches proportionally to the number of results returned
             const maxSearchResults = 10;
             const promiseResults = await Promise.all(promises);
             const promiseData = promiseResults
                 .filter(r => r !== undefined && r !== null)
-                .map(r => JSON.parse(r)?._type=="SearchResponse" ? parseBing(r) : JSON.parse(r)?.value || []);
+                .map(r => JSON.parse(r)?.value || []);
             
             let totalLength = promiseData.reduce((sum, data) => sum + data.length, 0);
             let remainingSlots = maxSearchResults;

@@ -191,88 +191,12 @@ Here are the information sources that were found:
                 promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchWires), indexName: 'indexwires', stream: false }));
             }
 
-            const bingAvailable = !!config.getEnv()["AZURE_BING_KEY"];
-            if(bingAvailable && searchBing && (allowAllSources || dataSources.includes('bing'))){
-                const handleRejection = (promise) => {
-                    return promise.catch((error) => {
-                        logger.error(`Error occurred searching Bing: ${error}`);
-                        return null; 
-                    });
-                }
-
-                promises.push(handleRejection(callPathway('bing', { ...args, ...generateExtraArgs(searchBing), stream: false})));
-            }
-
-            const parseBing = (response) => {
-                const parsedResponse = JSON.parse(response);
-                const results = [];
-
-                if (parsedResponse.webPages && parsedResponse.webPages.value) {
-                    results.push(...parsedResponse.webPages.value.map(({ name, url, snippet }) => ({ title: name, url, content: snippet })));
-                }
-
-                if (parsedResponse.computation) {
-                    results.push({
-                        title: "Computation Result",
-                        content: `Expression: ${parsedResponse.computation.expression}, Value: ${parsedResponse.computation.value}`
-                    });
-                }
-
-                if (parsedResponse.entities && parsedResponse.entities.value) {
-                    results.push(...parsedResponse.entities.value.map(entity => ({
-                        title: entity.name,
-                        content: entity.description,
-                        url: entity.webSearchUrl
-                    })));
-                }
-
-                if (parsedResponse.news && parsedResponse.news.value) {
-                    results.push(...parsedResponse.news.value.map(news => ({
-                        title: news.name,
-                        content: news.description,
-                        url: news.url
-                    })));
-                }
-
-                if (parsedResponse.videos && parsedResponse.videos.value) {
-                    results.push(...parsedResponse.videos.value.map(video => ({
-                        title: video.name,
-                        content: video.description,
-                        url: video.contentUrl
-                    })));
-                }
-
-                if (parsedResponse.places && parsedResponse.places.value) {
-                    results.push(...parsedResponse.places.value.map(place => ({
-                        title: place.name,
-                        content: `Address: ${place.address.addressLocality}, ${place.address.addressRegion}, ${place.address.addressCountry}`,
-                        url: place.webSearchUrl
-                    })));
-                }
-
-                if (parsedResponse.timeZone) {
-                    results.push({
-                        title: "Time Zone Information",
-                        content: parsedResponse.timeZone.primaryResponse || parsedResponse.timeZone.description
-                    });
-                }
-
-                if (parsedResponse.translations && parsedResponse.translations.value) {
-                    results.push(...parsedResponse.translations.value.map(translation => ({
-                        title: "Translation",
-                        content: `Original (${translation.inLanguage}): ${translation.originalText}, Translated (${translation.translatedLanguageName}): ${translation.translatedText}`
-                    })));
-                }
-
-                return results;
-            };
-
             // Sample results from the index searches proportionally to the number of results returned
             const maxSearchResults = titleOnly ? 500 : 50;
             const promiseResults = await Promise.all(promises);
             const promiseData = promiseResults
                 .filter(r => r !== undefined && r !== null)
-                .map(r => JSON.parse(r)?._type=="SearchResponse" ? parseBing(r) : JSON.parse(r)?.value || []);
+                .map(r => JSON.parse(r)?.value || []);
             
             let totalLength = promiseData.reduce((sum, data) => sum + data.length, 0);
             let remainingSlots = maxSearchResults;
