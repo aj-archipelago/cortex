@@ -64,7 +64,12 @@ class TestOrchestrator:
             raise ValueError("AZURE_STORAGE_CONNECTION_STRING environment variable must be set")
 
         # Load test cases and global expectations
-        self.test_cases, self.global_expectations = self.load_test_cases()
+        self.test_cases = self.load_test_cases()
+        # Import global expectations from shared source of truth
+        # This is the same GLOBAL_QUALITY_EXPECTATIONS used by execution_completion_verifier_agent
+        # Source: agents/constants/global_quality_standards.py
+        from agents.constants import GLOBAL_QUALITY_EXPECTATIONS
+        self.global_expectations = GLOBAL_QUALITY_EXPECTATIONS
 
         # Performance monitoring
         self.performance_metrics = {
@@ -154,21 +159,21 @@ class TestOrchestrator:
         print("="*80)
 
         summary = report['summary']
-        print(f"\n📈 SUMMARY:")
+        print("📈 SUMMARY:")
         print(f"   Total Tests: {summary['total_tests']}")
         print(f"   Passed: {summary['passed']} ({summary['success_rate']:.1f}%)")
         print(f"   Failed: {summary['failed']}")
         print(f"   Skipped: {summary['skipped']}")
         print(f"   Average Duration: {summary['average_duration']:.1f}s")
         errors = report['error_breakdown']
-        print(f"\n🚨 ERROR BREAKDOWN:")
+        print("🚨 ERROR BREAKDOWN:")
         print(f"   Agent Errors: {errors['agent_errors']}")
         print(f"   File Errors: {errors['file_errors']}")
         print(f"   Data Errors: {errors['data_errors']}")
         print(f"   Sequence Errors: {errors['sequence_errors']}")
 
         if report['recommendations']:
-            print(f"\n💡 RECOMMENDATIONS:")
+            print("💡 RECOMMENDATIONS:")
             for rec in report['recommendations']:
                 print(f"   • {rec}")
 
@@ -187,7 +192,7 @@ class TestOrchestrator:
             'scores': {'overall': 0, 'progress': 0, 'output': 0}
         }
 
-    def load_test_cases(self, test_cases_path: Optional[str] = None) -> Tuple[List[Dict], List[str]]:
+    def load_test_cases(self, test_cases_path: Optional[str] = None) -> List[Dict]:
         """
         Load test cases from YAML file.
 
@@ -195,7 +200,7 @@ class TestOrchestrator:
             test_cases_path: Path to test_cases.yaml (defaults to tests/test_cases.yaml)
 
         Returns:
-            Tuple of (test_cases list, global_expectations list)
+            List of test cases
         """
         if test_cases_path is None:
             test_cases_path = Path(__file__).parent / "test_cases.yaml"
@@ -204,16 +209,13 @@ class TestOrchestrator:
             data = yaml.safe_load(f)
 
         test_cases = data.get('test_cases', [])
-        global_expectations = data.get('global_expectations', [])
-        
-        self.logger.info(f"📋 Loaded {len(test_cases)} test cases")
-        self.logger.info(f"📋 Loaded {len(global_expectations)} global expectations")
 
-        return test_cases, global_expectations
+        self.logger.info(f"📋 Loaded {len(test_cases)} test cases")
+
+        return test_cases
 
     def run_test_sync(self, test_case: Dict) -> Dict:
         """Synchronous wrapper for run_test to run in thread pool."""
-        import asyncio
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -245,7 +247,7 @@ class TestOrchestrator:
         self.logger.info(f"   ID: {test_case_id}")
         self.logger.info(f"   Timeout: {timeout}s")
         if requires_ajsql:
-            self.logger.info(f"   Requires AJ SQL: Yes")
+            self.logger.info("   Requires AJ SQL: Yes")
 
         # Comprehensive prerequisite validation
         self.logger.info("🔍 Running prerequisite validation...")
@@ -260,7 +262,7 @@ class TestOrchestrator:
 
         # Check Azure Queue configuration
         if not self.azure_queue_conn_str:
-            self.logger.error(f"❌ MISSING AZURE QUEUE CONFIGURATION")
+            self.logger.error("❌ MISSING AZURE QUEUE CONFIGURATION")
             self.logger.error(f"⏭️ SKIPPING test {test_case_id} - Azure queue not configured")
             return self._create_error_result(test_case_id, "Azure queue not configured")
 
@@ -303,7 +305,6 @@ class TestOrchestrator:
         request_id = f"test_{test_case_id}_{uuid.uuid4().hex[:8]}"
 
         # Create test run record in database (run in thread to avoid blocking)
-        import asyncio
         test_run_id = await asyncio.to_thread(
             self.db.create_test_run,
             test_case_id=test_case_id,
@@ -330,7 +331,7 @@ class TestOrchestrator:
         # NOTE: Use Azure Queue message ID, not our custom request_id!
         # The system publishes progress updates with the Azure Queue message ID.
         try:
-            self.logger.info(f"📡 Starting data collection...")
+            self.logger.info("📡 Starting data collection...")
 
             # For parallel execution, use appropriate timeout
             parallel_timeout = timeout  # Use the timeout defined in test_cases.yaml
@@ -342,7 +343,7 @@ class TestOrchestrator:
             # Now that progress is complete, collect logs using docker logs command
             logs = await log_collector.collect_logs_since_task(azure_message_id)
 
-            self.logger.info(f"✅ Data collection complete")
+            self.logger.info("✅ Data collection complete")
             self.logger.info(f"   Progress updates: {len(progress_updates)}")
             self.logger.info(f"   Log entries: {len(logs)}")
 
@@ -392,7 +393,7 @@ class TestOrchestrator:
                 self.logger.info(f"💾 Saved final response to database ({len(final_response_text)} chars)")
 
                 # Log the final response content for visibility during test runs
-                self.logger.info(f"\n📝 Final Response:")
+                self.logger.info("📝 Final Response:")
                 self.logger.info(f"{final_response_text}")
             except Exception as e:
                 self.logger.warning(f"⚠️ Failed to save final response to database: {e}")
@@ -466,7 +467,7 @@ class TestOrchestrator:
             files_created = self.db.get_files(test_run_id)
 
         # Calculate metrics
-        self.logger.info(f"\n📊 Calculating metrics...")
+        self.logger.info("\n📊 Calculating metrics...")
         metrics = MetricsCollector.calculate_metrics(
             test_run_data,
             progress_updates,
@@ -477,7 +478,7 @@ class TestOrchestrator:
         self.db.save_metrics(test_run_id, **metrics)
 
         # Run LLM evaluation
-        self.logger.info(f"\n🤖 Running LLM evaluation...")
+        self.logger.info("\n🤖 Running LLM evaluation...")
 
         test_summary = {
             'duration_seconds': test_run_data.get('duration_seconds', 0),
@@ -517,8 +518,8 @@ class TestOrchestrator:
             if os.path.exists(journey_path):
                 try:
                     with open(journey_path, 'r') as f:
-                        parts.append(f"\n\n=== AGENT JOURNEY ===\n{f.read()}")
-                except:
+                        parts.append("\n\n=== AGENT JOURNEY ===\n" + f.read())
+                except Exception:
                     pass
             
             # Add accomplishments (detailed actions)
@@ -526,8 +527,8 @@ class TestOrchestrator:
             if os.path.exists(acc_path):
                 try:
                     with open(acc_path, 'r') as f:
-                        parts.append(f"\n\n=== ACCOMPLISHMENTS ===\n{f.read()}")
-                except:
+                        parts.append("\n\n=== ACCOMPLISHMENTS ===\n" + f.read())
+                except Exception:
                     pass
             
             # Add messages (legacy)
@@ -535,45 +536,137 @@ class TestOrchestrator:
             
             return "".join(parts)
 
-        # Extract agent sequence from progress updates and messages for bug validation
+        # Extract agent sequence from JSONL logs for bug validation
         agent_sequence = []
 
-        # Primary method: Check accomplishments log for agent transfers and calls
-        # Build comprehensive accomplishments text from logs/ directory
-        work_dir = f"/tmp/coding/req_{azure_message_id}"
-        accomplishments_text = build_accomplishments_text_from_logs(work_dir, final_response_text, messages)
-        self.logger.info(f"🤖 DEBUG: Checking accomplishments_text for aj_sql_agent patterns...")
-        self.logger.info(f"🤖 DEBUG: 'transfer_to_aj_sql_agent' in text: {'transfer_to_aj_sql_agent' in accomplishments_text}")
-        self.logger.info(f"🤖 DEBUG: 'aj_sql_agent:' in text: {'aj_sql_agent:' in accomplishments_text}")
-        self.logger.info(f"🤖 DEBUG: Sample accomplishments_text: {accomplishments_text[:500]}...")
-        if 'transfer_to_aj_sql_agent' in accomplishments_text or 'aj_sql_agent:' in accomplishments_text:
-            if 'aj_sql_agent' not in agent_sequence:
-                agent_sequence.append('aj_sql_agent')
-                self.logger.info(f"🤖 DEBUG: Successfully added aj_sql_agent to sequence")
-        if 'transfer_to_coder_agent' in accomplishments_text or 'coder_agent:' in accomplishments_text:
-            if 'coder_agent' not in agent_sequence:
-                agent_sequence.append('coder_agent')
-        if 'transfer_to_web_search_agent' in accomplishments_text or 'web_search_agent:' in accomplishments_text:
-            if 'web_search_agent' not in agent_sequence:
-                agent_sequence.append('web_search_agent')
-        if 'transfer_to_aj_article_writer_agent' in accomplishments_text or 'aj_article_writer_agent:' in accomplishments_text:
-            if 'aj_article_writer_agent' not in agent_sequence:
-                agent_sequence.append('aj_article_writer_agent')
-        if 'transfer_to_cognitive_search_agent' in accomplishments_text or 'cognitive_search_agent:' in accomplishments_text:
-            if 'cognitive_search_agent' not in agent_sequence:
-                agent_sequence.append('cognitive_search_agent')
-        if 'planner_agent:' in accomplishments_text:
-            if 'planner_agent' not in agent_sequence:
-                agent_sequence.append('planner_agent')
+        # Primary method: Extract from logs.jsonl and messages.jsonl
+        logs_dir = f"./logs/req_{azure_message_id}/logs"
+        logs_jsonl_path = os.path.join(logs_dir, "logs.jsonl")
+        messages_jsonl_path = os.path.join(logs_dir, "messages.jsonl")
 
-        # Secondary method: Check progress messages for agent names
+        # Read agent messages from logs.jsonl
+        if os.path.exists(logs_jsonl_path):
+            try:
+                with open(logs_jsonl_path, 'r') as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line.strip())
+                            agent_name = entry.get('agent_name')
+                            if agent_name and agent_name not in agent_sequence:
+                                # Only add actual agents, not 'system'
+                                if agent_name in ['aj_sql_agent', 'coder_agent', 'web_search_agent',
+                                                'aj_article_writer_agent', 'cognitive_search_agent', 'planner_agent']:
+                                    agent_sequence.append(agent_name)
+                                    self.logger.info(f"🤖 DEBUG: Added {agent_name} to sequence from logs.jsonl")
+                        except json.JSONDecodeError:
+                            continue
+            except Exception as e:
+                self.logger.warning(f"Could not read logs.jsonl: {e}")
+
+        # Also check messages.jsonl for any additional agent activity
+        if os.path.exists(messages_jsonl_path):
+            try:
+                with open(messages_jsonl_path, 'r') as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line.strip())
+                            agent_name = entry.get('agent_name')
+                            if agent_name and agent_name not in agent_sequence:
+                                if agent_name in ['aj_sql_agent', 'coder_agent', 'web_search_agent',
+                                                'aj_article_writer_agent', 'cognitive_search_agent', 'planner_agent']:
+                                    agent_sequence.append(agent_name)
+                                    self.logger.info(f"🤖 DEBUG: Added {agent_name} to sequence from messages.jsonl")
+                        except json.JSONDecodeError:
+                            continue
+            except Exception as e:
+                self.logger.warning(f"Could not read messages.jsonl: {e}")
+
+        # Secondary method: Check progress messages for agent names (keep existing)
         for update in progress_updates:
             message = update.get('info', '').lower()
             for agent_name in ['aj_sql_agent', 'coder_agent', 'web_search_agent', 'aj_article_writer_agent', 'cognitive_search_agent', 'planner_agent']:
                 if agent_name in message and agent_name not in agent_sequence:
                     agent_sequence.append(agent_name)
 
-        self.logger.info(f"🤖 DEBUG: Final agent_sequence: {agent_sequence}")
+        self.logger.info(f"🤖 DEBUG: Final agent_sequence from JSONL: {agent_sequence}")
+
+        # Build accomplishments text from JSONL logs to provide evidence for evaluator
+        accomplishments_text = ""
+        accomplishments_parts = []
+        
+        # Extract evidence from logs.jsonl
+        if os.path.exists(logs_jsonl_path):
+            try:
+                with open(logs_jsonl_path, 'r') as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line.strip())
+                            agent_name = entry.get('agent_name', '')
+                            content = entry.get('content', '')
+                            message = entry.get('message', '')
+                            
+                            # Check for aj_sql_agent activity
+                            if agent_name == 'aj_sql_agent' or 'aj_sql_agent' in str(content).lower() or 'aj_sql_agent' in str(message).lower():
+                                accomplishments_parts.append(f"aj_sql_agent: {content or message}")
+                            
+                            # Check for SQL query execution patterns
+                            content_str = str(content) + str(message)
+                            if any(pattern in content_str for pattern in [
+                                'EXECUTING SQL QUERY',
+                                'SQL QUERY COMPLETED',
+                                'execute_aj_sql_query',
+                                'transfer_to_aj_sql_agent',
+                                'aj_sql_agent:'
+                            ]):
+                                accomplishments_parts.append(content_str)
+                        except json.JSONDecodeError:
+                            continue
+            except Exception as e:
+                self.logger.warning(f"Could not read logs.jsonl for accomplishments: {e}")
+        
+        # Extract evidence from messages.jsonl
+        if os.path.exists(messages_jsonl_path):
+            try:
+                with open(messages_jsonl_path, 'r') as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line.strip())
+                            agent_name = entry.get('agent_name', '')
+                            content = entry.get('content', '')
+                            
+                            # Check for aj_sql_agent activity
+                            if agent_name == 'aj_sql_agent':
+                                accomplishments_parts.append(f"aj_sql_agent: {content}")
+                            
+                            # Check for SQL query execution patterns
+                            content_str = str(content)
+                            if any(pattern in content_str for pattern in [
+                                'EXECUTING SQL QUERY',
+                                'SQL QUERY COMPLETED',
+                                'execute_aj_sql_query',
+                                'transfer_to_aj_sql_agent',
+                                'aj_sql_agent:'
+                            ]):
+                                accomplishments_parts.append(content_str)
+                        except json.JSONDecodeError:
+                            continue
+            except Exception as e:
+                self.logger.warning(f"Could not read messages.jsonl for accomplishments: {e}")
+        
+        # Read accomplishments.log if it exists
+        acc_path = os.path.join(logs_dir, "accomplishments.log")
+        if os.path.exists(acc_path):
+            try:
+                with open(acc_path, 'r') as f:
+                    accomplishments_parts.append(f.read())
+            except Exception as e:
+                self.logger.warning(f"Could not read accomplishments.log: {e}")
+        
+        # Combine all evidence into accomplishments_text
+        accomplishments_text = "\n".join(accomplishments_parts)
+        
+        if accomplishments_text:
+            self.logger.info(f"📋 Built accomplishments_text ({len(accomplishments_text)} chars) with evidence from logs")
 
         try:
             # Get test case specific quality criteria
@@ -608,10 +701,10 @@ class TestOrchestrator:
             )
 
 
-            self.logger.info(f"\n**Progress Evaluation:**")
+            self.logger.info("\n**Progress Evaluation:**")
             self.logger.info(f"{progress_eval['reasoning']}")
 
-            self.logger.info(f"\n**Output Evaluation:**")
+            self.logger.info("\n**Output Evaluation:**")
             self.logger.info(f"{output_eval['reasoning']}")
 
 
@@ -716,8 +809,6 @@ class TestOrchestrator:
         Returns:
             List of test results
         """
-        import asyncio
-
         async def run_single_test_with_error_handling(test_case: Dict) -> Dict:
             """Run a single test with error handling."""
             try:
@@ -796,7 +887,7 @@ class TestOrchestrator:
         self._print_summary(results)
 
         # Generate and save report
-        self.logger.info(f"📄 Generating test report...")
+        self.logger.info("📄 Generating test report...")
         report = self._generate_test_report(results, test_cases)
 
         # Save report to file with timestamp
@@ -808,7 +899,7 @@ class TestOrchestrator:
             f.write(report)
 
         self.logger.info(f"📄 Test report saved to: {report_path}")
-        self.logger.info(f"   You can review detailed results and final messages in this file.\n")
+        self.logger.info("   You can review detailed results and final messages in this file.\n")
 
         # Print performance report
         self.print_performance_report()
@@ -848,7 +939,7 @@ class TestOrchestrator:
     def _print_summary(self, results: List[Dict]):
         """Print summary of all test results."""
         self.logger.info(f"\n\n{'='*80}")
-        self.logger.info(f"📊 TEST SUMMARY")
+        self.logger.info("📊 TEST SUMMARY")
         self.logger.info(f"{'='*80}\n")
 
         total_tests = len(results)
@@ -873,10 +964,10 @@ class TestOrchestrator:
             self.logger.info(f"Skipped: {skipped} (AJ SQL database not accessible)")
         self.logger.info(f"Passed (≥70): {passed}")
         self.logger.info(f"Failed (<70): {failed}")
-        self.logger.info(f"")
+        self.logger.info("")
 
         if completed_count > 0:
-            self.logger.info(f"Average Scores:")
+            self.logger.info("Average Scores:")
             self.logger.info(f"  Progress: {avg_progress:.1f}/100")
             self.logger.info(f"  Output: {avg_output:.1f}/100")
             self.logger.info(f"  Overall: {avg_overall:.1f}/100")

@@ -2,9 +2,11 @@
 Core Coding Tool for Cortex-AutoGen2
 """
 from pathlib import Path
+from typing import Optional
 from autogen_core import CancellationToken
 from autogen_core.code_executor import CodeBlock
 from autogen_ext.code_executors.local import LocalCommandLineCodeExecutor
+from autogen_core.tools import FunctionTool
 
 
 async def execute_code(code: str, work_dir: str | None = None, language: str = "python") -> str:
@@ -46,7 +48,7 @@ async def execute_python_code(code: str, work_dir: str | None = None) -> str:
 
 
 # Helper to create FunctionTool with work_dir bound
-def get_code_execution_tool(work_dir: str):
+def get_code_execution_tool(work_dir: Optional[str] = None) -> FunctionTool:
     """
     Create a FunctionTool for code execution with work_dir bound.
     
@@ -58,11 +60,13 @@ def get_code_execution_tool(work_dir: str):
     """
     from autogen_core.tools import FunctionTool
     
-    async def execute_code_bound(code: str) -> str:
-        return await execute_python_code(code, work_dir)
+    async def execute_code_bound(code: str, language: str = "python") -> str:
+        """Execute code with work directory pre-bound."""
+        # work_dir is already bound from the outer scope (passed to get_code_execution_tool)
+        # No need to call get_work_dir again - it's already the correct per-request directory
+        return await execute_code(code, work_dir, language)
     
     return FunctionTool(
         execute_code_bound,
-        description="Execute Python code using LocalCommandLineCodeExecutor. Write your complete Python script and it will be executed in the work directory."
+        description="Execute Python or bash code using LocalCommandLineCodeExecutor. Write your complete code script and it will be executed in the work directory."
     )
-

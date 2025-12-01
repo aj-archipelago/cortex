@@ -15,8 +15,13 @@ redis_client = None
 def connect_redis() -> bool:
     """Check and ensure Redis connection is active - matches working version pattern"""
     global redis_client
-    
+
     redis_conn_string = os.getenv("REDIS_CONNECTION_STRING")
+
+    # If no Redis connection string is configured, disable Redis
+    if not redis_conn_string:
+        logger.warning("REDIS_CONNECTION_STRING not configured, Redis functionality will be disabled")
+        return False
 
     # Initialize client if not exists
     if redis_client is None:
@@ -61,7 +66,7 @@ def publish_request_progress(data: Dict[str, Any]) -> bool:
     if connect_redis():
         try:
             message = json.dumps(data)
-            result = redis_client.publish(os.getenv("REDIS_CHANNEL"), message)
+            result = redis_client.publish(os.getenv("REDIS_CHANNEL", "requestProgress"), message)
             try:
                 rid = data.get('requestId')
                 info = data.get('info')
@@ -115,16 +120,16 @@ class RedisPublisher:
         self.connected = connect_redis()
         if self.connected:
             logger.info("Connected to Redis successfully")
+            # Start heartbeat loop once per process only if Redis is connected
+            if self._heartbeat_task is None:
+                try:
+                    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+                    logger.info("Started Redis progress heartbeat task")
+                except Exception as e:
+                    logger.warning(f"Failed to start heartbeat task: {e}")
         else:
             logger.warning("Failed to connect to Redis")
             logger.warning("Redis progress publishing will be disabled")
-        # Start heartbeat loop once per process
-        if self._heartbeat_task is None:
-            try:
-                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-                logger.info("Started Redis progress heartbeat task")
-            except Exception as e:
-                logger.warning(f"Failed to start heartbeat task: {e}")
     
     def publish_request_progress(self, data: Dict[str, Any]) -> bool:
         """Publish progress data to Redis channel"""

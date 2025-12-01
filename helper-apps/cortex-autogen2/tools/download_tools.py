@@ -5,6 +5,15 @@ import requests
 import os
 import mimetypes
 from urllib.parse import urlparse
+from typing import Optional
+from autogen_core.tools import FunctionTool
+
+# Use same User-Agent as search_tools for consistency
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
 
 def download_file(url: str, filename: str = None, work_dir: str = None) -> str:
     """
@@ -19,7 +28,8 @@ def download_file(url: str, filename: str = None, work_dir: str = None) -> str:
         A success or error message string.
     """
     try:
-        response = requests.get(url, stream=True, timeout=30)
+        headers = {"User-Agent": USER_AGENT}
+        response = requests.get(url, headers=headers, stream=True, timeout=30)
         response.raise_for_status()
 
         if not filename:
@@ -37,7 +47,7 @@ def download_file(url: str, filename: str = None, work_dir: str = None) -> str:
 
         # Use work_dir if provided, otherwise use environment variable or default
         if not work_dir:
-            work_dir = os.environ.get('CORTEX_WORK_DIR', '/tmp/coding')
+            work_dir = os.getenv('CORTEX_WORK_DIR', '/tmp/coding')
         
         # Ensure work_dir exists
         os.makedirs(work_dir, exist_ok=True)
@@ -66,7 +76,7 @@ def download_file(url: str, filename: str = None, work_dir: str = None) -> str:
 
 
 # Factory function to create download tool with work_dir bound
-def get_download_file_tool(work_dir: str):
+def get_download_file_tool(work_dir: Optional[str] = None) -> FunctionTool:
     """
     Create a FunctionTool for file downloads with work_dir bound.
     
@@ -92,4 +102,3 @@ download_file_tool = FunctionTool(
     download_file,
     description="Download a file from a URL and save it with automatic filename detection."
 )
-

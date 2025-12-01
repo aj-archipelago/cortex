@@ -157,3 +157,4 @@ azure_cognitive_search_tool = FunctionTool(
     azure_cognitive_search,
     description="Perform one or more searches on Azure Cognitive Search indexes in parallel."
 )
+

@@ -23,6 +23,9 @@ from autogen_agentchat.conditions import TextMentionTermination
 from services.azure_queue import get_queue_service
 from services.redis_publisher import get_redis_publisher
 from services.azure_ai_search import search_similar_rest, upsert_run_rest
+
+from .simple_workflow import SimplifiedWorkflow
+
 from services.run_analyzer import (
     collect_run_metrics,
     extract_errors,
@@ -117,6 +120,22 @@ class TaskProcessor:
         # Heartbeat emoji rotation
         self.heartbeat_emojis = ["🔄", "🔁"]
         self.heartbeat_emoji_index = 0
+
+    async def initialize(self):
+        """Initialize async services."""
+        # Pre-initialize redis publisher and progress handler
+        if self.redis_publisher is None:
+            self.redis_publisher = await get_redis_publisher()
+        if self.progress_handler is None:
+            from .progress_handler import ProgressHandler
+            self.progress_handler = ProgressHandler(self.redis_publisher, self.gpt41_model_client)
+        self.logger.info("✅ TaskProcessor initialized successfully")
+
+    async def close(self):
+        """Clean up async services."""
+        if self.redis_publisher:
+            await self.redis_publisher.close()
+        self.logger.info("🔌 TaskProcessor connections closed")
 
     def _format_workflow_error_for_user(self, error: str) -> str:
         """Convert technical workflow errors to user-friendly messages."""
@@ -224,11 +243,11 @@ class TaskProcessor:
             progress_handler = await self._get_progress_handler()
 
             # Start heartbeat - sends instant 5% message and begins background loop
-            await progress_handler.start_heartbeat(task_id, "🚀 Starting your task...")
+            # await progress_handler.start_heartbeat(task_id, "🚀 Starting your task...")
 
             # Extract and normalize the task content
             task = self._extract_task_content(task_content)
-            self.logger.info(f"🎯 Processing task {task_id}: {task[:100]}...")
+            self.logger.info(f"🎯 Processing task {task_id}: {task}")
 
             # Initialize progress - continue with planning at 5%
 
@@ -243,7 +262,7 @@ class TaskProcessor:
             task_with_context = f"{task}\n\nContext from previous work:\n{context_files}"
 
             # Get agents for this task
-            planner_agent, execution_agents, uploader_agent, presenter_agent = await get_agents(
+            planner_agent, execution_agents, presenter_agent = await get_agents(
                 self.gpt41_model_client,
                 self.o3_model_client,
                 self.gpt41_model_client,
@@ -252,10 +271,19 @@ class TaskProcessor:
                 task_content=task,
             )
 
+            # Extract execution completion verifier agent from execution_agents
+            execution_completion_verifier_agent = None
+            filtered_execution_agents = []
+            for agent in execution_agents:
+                if agent.name == "execution_completion_verifier_agent":
+                    execution_completion_verifier_agent = agent
+                else:
+                    filtered_execution_agents.append(agent)
+
             result = await self._run_agent_workflow(
                 task_id, task_with_context, request_work_dir,
-                planner_agent, execution_agents, uploader_agent, presenter_agent,
-                self.gpt41_model_client
+                planner_agent, filtered_execution_agents, presenter_agent,
+                execution_completion_verifier_agent, self.gpt41_model_client
             )
 
             return result
@@ -309,18 +337,46 @@ class TaskProcessor:
 
     async def _run_agent_workflow(
         self, task_id: str, task: str, work_dir: str,
-        planner_agent, execution_agents, uploader_agent, presenter_agent,
-        model_client=None
+        planner_agent, execution_agents, presenter_agent,
+        execution_completion_verifier_agent, model_client=None
     ) -> str:
         """Run the complete agent workflow: unified execution → upload → presentation."""
         print(f"DEBUG: _run_agent_workflow called for task {task_id}")
         # Get progress handler
         progress_handler = await self._get_progress_handler()
 
-        # Send start message through progress handler for heartbeat compatibility
-        await progress_handler.handle_progress_update(
-            task_id, 0.05, "🚀 Starting your task..."
+        # Note: Heartbeat is started in simplified_workflow.run_workflow() which sends initial message
+
+        # Use simplified workflow with SelectorGroupChat for intelligent routing
+        simplified_workflow = SimplifiedWorkflow(self.gpt41_model_client)
+
+        # Run the complete simplified workflow
+        result = await simplified_workflow.run_workflow(
+            task=task,
+            planner_agent=planner_agent,
+            execution_agents=execution_agents,
+            presenter_agent=presenter_agent,
+            execution_completion_verifier_agent=execution_completion_verifier_agent,
+            task_id=task_id,
+            work_dir=work_dir,
+            progress_handler=progress_handler
         )
+
+
+
+            # Send final progress update
+        await progress_handler.handle_progress_update(
+            task_id, 1.0, "🎉 Your task is complete!",
+            data=result if result else "❌ Error processing task!"
+        )
+
+        logger.info(f"🤝 SIMPLE WORKFLOW COMPLETED: {result}")
+
+        return result
+
+
+        #########################################################
+        #########################################################
 
         # Reference data system removed - use generic solutions that fetch data dynamically
 
@@ -347,15 +403,11 @@ class TaskProcessor:
 
         # Phase 2: Upload & Present
         result = await self._run_upload_and_present_phase(
-            task_id, task, work_dir, uploader_agent, presenter_agent, execution_context, plan_text
+            task_id, task, work_dir, presenter_agent, execution_context, plan_text
         )
 
         return result
 
-
-
-    # REMOVED: _progress_heartbeat_loop - now handled by progress_handler.start_heartbeat()
-    # The progress_handler manages its own 1s heartbeat repeats + 7s LLM updates
 
 
     async def _run_planner_phase(self, task_id: str, task: str, work_dir: str, planner_agent, replan_reason: str = "") -> str:
@@ -544,6 +596,13 @@ class TaskProcessor:
                         if "__TASK_COMPLETELY_FINISHED__" in content:
                             _log_context_to_request_file(task_id, "TASK_COMPLETE", f"Task completed by {source}")
                             self.logger.info(f"✅ TASK COMPLETE: Execution phase finished by {source}")
+
+                        # Check for file upload markers - terminate when files are ready
+                        if "📁 Ready for upload:" in content:
+                            _log_context_to_request_file(task_id, "FILES_READY", f"Files marked for upload by {source}")
+                            self.logger.info(f"📁 FILES READY: Execution phase terminating - {source} marked files for upload")
+                            # Terminate the swarm since files are ready for upload
+                            break
 
                         # Log potential handoff indicators and track them
                         if "Handing off to" in content or "transfer_to_" in content:
@@ -751,7 +810,7 @@ class TaskProcessor:
             raise
 
     async def _run_upload_and_present_phase(self, task_id: str, task: str, work_dir: str,
-                                          uploader_agent, presenter_agent, execution_context: str = "", plan_text: str = "") -> str:
+                                          presenter_agent, execution_context: str = "", plan_text: str = "") -> str:
         """Run upload and presentation phases using agents."""
         try:
             # Get progress handler

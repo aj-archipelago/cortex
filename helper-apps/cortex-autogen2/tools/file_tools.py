@@ -18,7 +18,7 @@ async def list_files_in_work_dir(work_dir: Optional[str] = None) -> str:
     """List files in the working directory."""
     try:
         if not work_dir:
-            work_dir = os.environ.get('CORTEX_WORK_DIR', '/tmp/coding')
+            work_dir = os.getenv('CORTEX_WORK_DIR', '/tmp/coding')
 
         files = []
         for root, dirs, filenames in os.walk(work_dir):
@@ -37,7 +37,7 @@ async def read_file_from_work_dir(filename: str, work_dir: Optional[str] = None,
     """Read a file from the working directory."""
     try:
         if not work_dir:
-            work_dir = os.environ.get('CORTEX_WORK_DIR', '/tmp/coding')
+            work_dir = os.getenv('CORTEX_WORK_DIR', '/tmp/coding')
 
         file_path = os.path.join(work_dir, filename)
         if not os.path.exists(file_path):
@@ -68,7 +68,7 @@ async def create_file(filename: str, content: str, work_dir: Optional[str] = Non
     """Create a new file with the given content."""
     try:
         if not work_dir:
-            work_dir = os.environ.get('CORTEX_WORK_DIR', '/tmp/coding')
+            work_dir = os.getenv('CORTEX_WORK_DIR', '/tmp/coding')
 
         file_path = os.path.join(work_dir, filename)
 

@@ -405,8 +405,11 @@ def _is_downloadable_image(url: str, session=None, timeout: int = 15) -> bool:
         s = None
     try:
         if not s:
-            s = requests
-        r = s.get(url, stream=True, timeout=timeout, allow_redirects=True)
+            # Fallback: use requests with headers
+            headers = {"User-Agent": USER_AGENT}
+            r = requests.get(url, headers=headers, stream=True, timeout=timeout, allow_redirects=True)
+        else:
+            r = s.get(url, stream=True, timeout=timeout, allow_redirects=True)
         ct = (r.headers.get("content-type") or "").lower()
         if r.status_code != 200:
             return False

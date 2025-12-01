@@ -197,12 +197,18 @@ RELEVANT EVENTS: {events_json}
 
 Create a concise summary (max {max_tokens} tokens estimated) with:
 1. **CURRENT STATUS**: What step we're on, what's been accomplished
-2. **AVAILABLE FILES**: Files created that this agent might need (with metadata: columns for CSV, structure for JSON)
-3. **RECENT ACCOMPLISHMENTS**: What previous agents did (relevant to this agent's role)
-4. **WHAT TO DO NEXT**: Based on plan and current step, what this agent should do
+2. **STEPS TAKEN SO FAR**: Sequential list of actions taken (agent name, action type, what was attempted, result)
+   - This helps detect loops - if same action repeated 2+ times, it's a loop
+   - Include tool calls, file operations, agent messages
+   - Show pattern: "web_search_agent called fetch_webpage 3 times with same URL" = LOOP
+3. **AVAILABLE FILES**: Files created that this agent might need (with metadata: columns for CSV, structure for JSON)
+4. **RECENT ACCOMPLISHMENTS**: What previous agents did (relevant to this agent's role)
+5. **LOOP DETECTION**: If you see repeated actions (same tool call 2+ times, same message 2+ times), explicitly flag it
+6. **WHAT TO DO NEXT**: Based on plan and current step, what this agent should do
 
 Be specific, actionable, and focused. Only include information relevant to {agent_name}'s role.
-Keep the summary concise - aim for {max_tokens} tokens or less."""
+Keep the summary concise - aim for {max_tokens} tokens or less.
+CRITICAL: Always include "STEPS TAKEN SO FAR" section to help agent detect loops."""
         
         try:
             from autogen_core.models import UserMessage
@@ -333,10 +339,16 @@ Keep the summary concise - aim for {max_tokens} tokens or less."""
             
             file_list.append(file_info)
         
+        # Extract steps taken from events for loop detection
+        steps_taken = self._extract_steps_taken(relevant_events)
+        
         # Combine everything
         context = f"""**EXECUTION CONTEXT SUMMARY**
 
 **CURRENT STEP**: {current_step}
+
+**STEPS TAKEN SO FAR** (for loop detection):
+{steps_taken}
 
 {llm_summary}
 
@@ -353,6 +365,62 @@ Keep the summary concise - aim for {max_tokens} tokens or less."""
             context = context[:target_length] + "\n\n[Context truncated to fit token limit]"
         
         return context
+    
+    def _extract_steps_taken(self, events: List[dict]) -> str:
+        """
+        Extract sequential steps taken from events for loop detection.
+        
+        Args:
+            events: List of relevant events
+            
+        Returns:
+            Formatted string showing steps taken
+        """
+        if not events:
+            return "No steps taken yet."
+        
+        steps = []
+        action_counts = {}  # Track repeated actions
+        
+        for event in events[-30:]:  # Last 30 events
+            agent = event.get("agent_name", "unknown")
+            event_type = event.get("event_type", "unknown")
+            action = event.get("action", "unknown")
+            details = event.get("details", {})
+            
+            # Create step description
+            step_desc = f"{agent} - {event_type}"
+            if action != "unknown":
+                step_desc += f" ({action})"
+            
+            # Track action repetition
+            action_key = f"{agent}:{action}"
+            action_counts[action_key] = action_counts.get(action_key, 0) + 1
+            
+            # Add details if available
+            if event_type == "tool_execution":
+                tool_name = details.get("tool_name", action)
+                step_desc += f": {tool_name}"
+            elif event_type == "file_creation":
+                file_path = details.get("file_path", "unknown")
+                step_desc += f": {os.path.basename(file_path)}"
+            
+            steps.append(step_desc)
+        
+        # Format steps
+        steps_text = "\n".join([f"{i+1}. {step}" for i, step in enumerate(steps)])
+        
+        # Add loop detection warnings
+        loop_warnings = []
+        for action_key, count in action_counts.items():
+            if count >= 2:
+                agent, action = action_key.split(":", 1)
+                loop_warnings.append(f"⚠️ LOOP DETECTED: {agent} repeated '{action}' {count} times")
+        
+        if loop_warnings:
+            steps_text += "\n\n**LOOP WARNINGS**:\n" + "\n".join(loop_warnings)
+        
+        return steps_text
     
     def _format_complete_event_history(self) -> str:
         """

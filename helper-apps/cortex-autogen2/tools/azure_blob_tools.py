@@ -73,6 +73,28 @@ def _validate_sas_url(url: str) -> bool:
         logger.error(f"Error validating SAS URL: {e}")
         return False
 
+def _verify_sas_url(url: str, timeout: int = 10):
+    """
+    Verify that a SAS URL actually works by making a HEAD request.
+    Returns (success: bool, error_message: str)
+    """
+    try:
+        response = requests.head(url, timeout=timeout, allow_redirects=True)
+        if response.status_code == 200:
+            return True, ""
+        elif response.status_code == 403:
+            return False, f"AuthenticationFailed: SAS URL signature invalid (403)"
+        elif response.status_code == 404:
+            return False, f"BlobNotFound: Blob does not exist (404)"
+        else:
+            return False, f"HTTP {response.status_code}: {response.reason}"
+    except requests.exceptions.Timeout:
+        return False, "Timeout: Request took too long"
+    except requests.exceptions.RequestException as e:
+        return False, f"Request failed: {str(e)}"
+    except Exception as e:
+        return False, f"Unexpected error: {str(e)}"
+
 class AzureBlobUploader:
     """A centralized class for handling uploads and SAS URL generation for Azure Blob Storage."""
     _instance = None
@@ -86,12 +108,12 @@ class AzureBlobUploader:
     def __init__(self):
         if self._initialized:
             return
-        
+
         self.connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
         self.container_name = os.getenv("AZURE_BLOB_CONTAINER", "autogentempfiles")
         # In-memory deduplication cache: sha256 -> blob_name
         self._sha256_to_blob: dict = {}
-        
+
         if not self.connection_string:
             raise ValueError("AZURE_STORAGE_CONNECTION_STRING environment variable is required")
 
@@ -102,7 +124,42 @@ class AzureBlobUploader:
             self.account_key = parts.get('AccountKey')
             if not self.account_name or not self.account_key:
                 raise ValueError("Connection string must contain AccountName and AccountKey")
+
+            # CRITICAL: Validate Azure connectivity by testing container access
+            self._validate_azure_connectivity()
             self._initialized = True
+        except Exception as e:
+            logger.error(f"❌ Azure Blob Storage initialization failed: {e}")
+            raise ValueError(f"Azure Blob Storage connection failed: {e}")
+
+    def _validate_azure_connectivity(self) -> None:
+        """
+        Validates that Azure storage account and container are accessible.
+        Raises exception if connectivity fails.
+        """
+        try:
+            # Try to get container client to validate connectivity
+            container_client = self.blob_service_client.get_container_client(self.container_name)
+
+            # Test connectivity by checking if we can get container properties
+            # This will fail if account doesn't exist or credentials are invalid
+            container_client.get_container_properties()
+
+            logger.info(f"✅ Azure Blob Storage connectivity validated: {self.account_name}/{self.container_name}")
+        except ServiceResponseError as e:
+            if e.status_code == 403:
+                raise ValueError(f"Azure access denied (403). Check AccountKey permissions for account '{self.account_name}'")
+            elif e.status_code == 404:
+                raise ValueError(f"Azure storage account '{self.account_name}' or container '{self.container_name}' not found (404)")
+            else:
+                raise ValueError(f"Azure connectivity failed ({e.status_code}): {e.message}")
+        except Exception as e:
+            # Handle network issues, DNS failures, etc.
+            error_msg = str(e)
+            if "connect" in error_msg.lower() or "network" in error_msg.lower():
+                raise ValueError(f"Azure network connectivity failed: {error_msg}")
+            else:
+                raise ValueError(f"Azure storage validation failed: {error_msg}")
             self.ensure_container_exists()
         except Exception as e:
             raise ValueError(f"Invalid Azure Storage connection string or configuration error: {e}")
@@ -132,12 +189,14 @@ class AzureBlobUploader:
             blob_client = self.blob_service_client.get_blob_client(container=self.container_name, blob=clean_name)
             
             # Generate SAS token using the exact blob name as stored
+            # CRITICAL: Add start_time to prevent clock skew authentication failures
             sas_token = generate_blob_sas(
                 account_name=self.account_name,
                 container_name=self.container_name,
                 blob_name=clean_name,
                 account_key=self.account_key,
                 permission=BlobSasPermissions(read=True),
+                start_time=datetime.utcnow() - timedelta(minutes=5),  # Prevent clock skew
                 expiry=datetime.utcnow() + timedelta(days=30)
             )
             
@@ -155,7 +214,21 @@ class AzureBlobUploader:
                 logger.error(f"❌ Generated SAS URL failed validation: {sas_url[:100]}...")
                 raise ValueError("Generated SAS URL failed validation")
             
-            logger.info(f"✅ Generated SAS URL for blob: {clean_name[:50]}...")
+            logger.info(f"✅ Generated SAS URL for blob: {clean_name} (full name for debugging)")
+            
+            # Verify the SAS URL actually works to catch authentication failures early
+            # Use lenient verification - log warnings but don't block URL generation
+            # Azure blobs may need a moment to become accessible after upload
+            verify_success, verify_error = _verify_sas_url(sas_url)
+            if not verify_success:
+                # Log warning but don't raise exception - URL might be valid but not immediately accessible
+                # The evaluator will catch truly invalid URLs later
+                logger.warning(f"⚠️ SAS URL verification failed for blob '{clean_name}': {verify_error}")
+                logger.warning(f"   URL will be returned anyway - may be valid but not immediately accessible")
+                logger.warning(f"   Generated URL: {sas_url[:150]}...")
+            else:
+                logger.info(f"✅ SAS URL verification passed for blob '{clean_name}'")
+            
             return sas_url
         except Exception as e:
             logger.error(f"❌ Error generating SAS URL for blob '{clean_name}': {e}", exc_info=True)
@@ -240,23 +313,49 @@ class AzureBlobUploader:
             sha256_hex = None
 
         # Simple upload; SDK will handle block uploads automatically for large blobs
-        with open(file_path, "rb") as data:
-            blob_client.upload_blob(
-                data,
-                overwrite=True,
-                content_settings=content_settings,
-                max_concurrency=4,
-                timeout=900,
-            )
-        # Removed individual file upload logging
-        sas_url = self.generate_sas_url(normalized_blob_name)
-        if not _validate_sas_url(sas_url):
-            raise Exception("Generated SAS URL failed validation.")
+        try:
+            with open(file_path, "rb") as data:
+                blob_client.upload_blob(
+                    data,
+                    overwrite=True,
+                    content_settings=content_settings,
+                    max_concurrency=4,
+                    timeout=900,
+                )
+        except ServiceResponseError as e:
+            if e.status_code == 403:
+                raise Exception(f"Azure upload failed (403 Forbidden): Access denied to account '{self.account_name}'. Check AccountKey permissions.")
+            elif e.status_code == 404:
+                raise Exception(f"Azure upload failed (404 Not Found): Container '{self.container_name}' not found in account '{self.account_name}'.")
+            elif e.status_code == 409:
+                raise Exception(f"Azure upload failed (409 Conflict): Container '{self.container_name}' already exists with different settings.")
+            else:
+                raise Exception(f"Azure upload failed ({e.status_code}): {e.message}")
+        except Exception as e:
+            # Handle network issues, timeouts, etc.
+            error_msg = str(e)
+            if "timeout" in error_msg.lower():
+                raise Exception(f"Azure upload timed out: {error_msg}")
+            elif "connect" in error_msg.lower():
+                raise Exception(f"Azure network connection failed: {error_msg}")
+            else:
+                raise Exception(f"Azure upload failed: {error_msg}")
+
+        # Generate SAS URL only after successful upload
+        try:
+            sas_url = self.generate_sas_url(normalized_blob_name)
+            if not _validate_sas_url(sas_url):
+                raise Exception("Generated SAS URL failed validation.")
+        except Exception as e:
+            raise Exception(f"Failed to generate SAS URL after successful upload: {e}")
+
         if sha256_hex:
             try:
                 self._sha256_to_blob[sha256_hex] = normalized_blob_name
             except Exception:
                 pass
+
+        logger.info(f"✅ Successfully uploaded {os.path.basename(file_path)} to Azure")
         # CRITICAL: Return normalized_blob_name (what was actually uploaded) not the original blob_name variable
         return {"blob_name": normalized_blob_name, "download_url": sas_url}
 
@@ -329,31 +428,72 @@ def upload_files(file_paths: Union[str, List[str]], work_dir: str = None) -> dic
 
             # Validate file exists and is readable
             if not os.path.exists(resolved_path):
-                error_msg = f"File not found: {file_path}"
+                error_msg = f"File not found: {file_path} (resolved to: {resolved_path})"
+                logger.error(f"❌ {error_msg}")
+                failed.append({"file": file_path, "error": error_msg})
+                continue
+
+            if not os.path.isfile(resolved_path):
+                error_msg = f"Path is not a file: {file_path} (resolved to: {resolved_path})"
                 logger.error(f"❌ {error_msg}")
                 failed.append({"file": file_path, "error": error_msg})
                 continue
 
             if not os.access(resolved_path, os.R_OK):
-                error_msg = f"File not readable: {file_path}"
+                error_msg = f"File not readable: {file_path} (resolved to: {resolved_path})"
                 logger.error(f"❌ {error_msg}")
                 failed.append({"file": file_path, "error": error_msg})
                 continue
 
-            # Upload file
-            uploader = AzureBlobUploader()
-            result = uploader.upload_file(resolved_path)
+            # Validate file size > 0 (not empty)
+            file_size = os.path.getsize(resolved_path)
+            if file_size == 0:
+                error_msg = f"File is empty (0 bytes): {file_path} (resolved to: {resolved_path})"
+                logger.error(f"❌ {error_msg}")
+                failed.append({"file": file_path, "error": error_msg})
+                continue
 
-            if result and "download_url" in result:
-                results.append({
-                    "local_filename": os.path.basename(resolved_path),
-                    "local_path": resolved_path,
-                    "blob_name": result.get("blob_name", os.path.basename(resolved_path)),
-                    "download_url": result["download_url"]
-                })
-                logger.info(f"✅ Uploaded {os.path.basename(resolved_path)}")
-            else:
-                error_msg = f"Upload failed: {result.get('error', 'Unknown error')}"
+            # Additional validation for specific file types
+            _, ext = os.path.splitext(resolved_path.lower())
+            if ext == '.pptx' and file_size < 50000:
+                error_msg = f"PPTX file too small ({file_size} bytes < 50KB), likely empty or corrupted: {file_path}"
+                logger.warning(f"⚠️ {error_msg}")
+                # Don't fail, but log warning - small PPTX might be valid
+            elif ext == '.pdf' and file_size < 10000:
+                error_msg = f"PDF file too small ({file_size} bytes < 10KB), likely empty or corrupted: {file_path}"
+                logger.warning(f"⚠️ {error_msg}")
+                # Don't fail, but log warning - small PDF might be valid
+            elif ext in ['.png', '.jpg', '.jpeg'] and file_size < 1024:
+                error_msg = f"Image file too small ({file_size} bytes < 1KB), likely corrupted: {file_path}"
+                logger.warning(f"⚠️ {error_msg}")
+                # Don't fail, but log warning
+
+            # Upload file
+            try:
+                uploader = AzureBlobUploader()
+                result = uploader.upload_file(resolved_path)
+
+                if result and "download_url" in result:
+                    results.append({
+                        "local_filename": os.path.basename(resolved_path),
+                        "local_path": resolved_path,
+                        "blob_name": result.get("blob_name", os.path.basename(resolved_path)),
+                        "download_url": result["download_url"]
+                    })
+                    # Upload success logging moved to upload_file method
+                else:
+                    error_msg = f"Upload failed: Invalid result format from Azure uploader"
+                    logger.error(f"❌ {error_msg}")
+                    failed.append({"file": file_path, "error": error_msg})
+
+            except ValueError as e:
+                # Azure connectivity/initialization errors
+                error_msg = f"Azure configuration error: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                failed.append({"file": file_path, "error": error_msg})
+            except Exception as e:
+                # Azure upload errors
+                error_msg = f"Azure upload failed: {str(e)[:200]}"  # Truncate long error messages
                 logger.error(f"❌ {error_msg}")
                 failed.append({"file": file_path, "error": error_msg})
 

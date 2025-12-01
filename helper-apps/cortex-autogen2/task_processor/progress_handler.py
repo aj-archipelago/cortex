@@ -65,10 +65,13 @@ class ProgressHandler:
 
     async def report_user_progress(self, task_id: str, message: str, percentage: float = None, source: str = None):
         """Report clean, user-facing progress update."""
+        # Auto-start heartbeat for new tasks
+        if task_id not in self._heartbeat_state:
+            await self.start_heartbeat(task_id, "🚀 Starting your task...")
+
         # Use existing logic to summarize/sanitize
         user_msg = await self.summarize_progress(message, source=source, task_id=task_id)
         if user_msg:
-            # percentage=0.0 triggers auto-increment logic in handle_progress_update
             return await self.handle_progress_update(task_id, percentage if percentage is not None else 0.0, user_msg)
         return 0.0
 
@@ -158,6 +161,25 @@ class ProgressHandler:
 
         if source in ["system", "internal"]:
             return True
+
+        # Filter technical error messages - these should never reach users
+        content_upper = content.upper()
+        error_patterns = [
+            "CODE EXECUTION FAILED",
+            "SYNTAXERROR",
+            "TYPEERROR",
+            "NAMEERROR",
+            "OSERROR",
+            "FILENOTFOUNDERROR",
+            "TRACEBACK (MOST RECENT CALL LAST)",
+            "FILE NOT FOUND",
+            "EXIT CODE"  # Non-zero exit codes indicate failures
+        ]
+        
+        # Check if content contains any error pattern
+        for pattern in error_patterns:
+            if pattern in content_upper:
+                return True
 
         return False
 
@@ -344,124 +366,6 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
 
             return clamped
 
-    async def handle_progress_update(self, task_id: str, percentage: float, content: str, message_type: str = None, source: str = None, data: str = None, is_heartbeat: bool = False) -> float:
-        """Handle progress updates - auto-increment progress for dynamic messages.
-        
-        Returns:
-            The actual percentage sent to Redis after clamping and auto-increment.
-        """
-        try:
-            # Auto-increment progress for dynamic messages (use 0.0 to trigger auto-increment)
-            final_percentages = [0.05, 0.94, 0.95, 1.0]  # Static percentages
-            if percentage == 0.0 and not is_heartbeat:  # 0.0 triggers auto-increment
-                # Simple check: if same content as last message, reuse its percentage
-                last_content = self._last_message_content.get(task_id)
-                if last_content == content:
-                    # Same message - reuse percentage
-                    percentage = self._last_message_percentage.get(task_id, 0.06)
-                    logger.debug(f"Reusing percentage {percentage:.0%} for same content")
-                else:
-                    # New message - increment
-                    current_max = self._max_progress_by_request.get(task_id, 0.05)
-                    if current_max < 0.06:
-                        auto_percentage = 0.06
-                    else:
-                        auto_percentage = min(current_max + 0.01, 0.93)
-                    percentage = auto_percentage
-                    logger.debug(f"New content - incrementing to {percentage:.0%}")
-
-            clamped_pct = await self._clamp_progress(task_id, percentage)
-            logger.debug(f"Progress update: input={percentage}, clamped={clamped_pct}, max_so_far={self._max_progress_by_request.get(task_id, 0)}")
-
-            # Update heartbeat message when new progress arrives (not for heartbeat repeats)
-            if not is_heartbeat:
-                await self.update_heartbeat_message(task_id, clamped_pct, content)
-
-            # SAFETY: Stop heartbeat for any message >= 95% (handles edge cases)
-            # This ensures heartbeat stops even if we never reach exactly 100% due to clamping
-            if clamped_pct >= 0.95:
-                await self.stop_heartbeat(task_id)
-                logger.debug(f"💓 Stopped heartbeat at {clamped_pct:.0%} (>= 95%)")
-
-            # For final updates with data, send immediately and mark as finalized
-            if clamped_pct >= 1.0 and data is not None:
-                await self.redis_publisher.set_transient_update(task_id, clamped_pct, content, data)
-                await self.redis_publisher.mark_final(task_id)
-                logger.info(f"🏁  PUBLISHING FINAL MESSAGE: requestId={task_id}, progress={clamped_pct}, data_length={len(data) if data else 0}")
-                return clamped_pct
-
-            # For heartbeat updates, use shorter rate limiting (0.5 seconds)
-            if is_heartbeat:
-                await self._send_heartbeat_update(task_id, clamped_pct, content)
-                return clamped_pct
-            else:
-                # For regular updates, publish directly (no background queue needed)
-                # Prevent duplicate messages - don't send if identical to last published for this request
-                current_key = f"{clamped_pct:.2f}_{content}"
-                last_sent_key = self._last_sent_by_request.get(task_id)
-
-                if current_key != last_sent_key:
-                    await self.redis_publisher.set_transient_update(task_id, clamped_pct, content)
-                    self._last_sent_by_request[task_id] = current_key
-                    
-                    # Update simple tracking
-                    self._last_message_content[task_id] = content
-                    self._last_message_percentage[task_id] = clamped_pct
-
-                    # Keep only last 100 published messages to prevent memory growth
-                    if len(self._last_published_messages) > 100:
-                        # Remove oldest entries (this is a simple approach)
-                        self._last_published_messages = set(list(self._last_published_messages)[-50:])
-                
-                return clamped_pct
-
-        except Exception as e:
-            logger.debug(f"Failed to handle progress update: {e}")
-            return 0.0  # Return 0 on error
-
-    async def _send_heartbeat_update(self, task_id: str, percentage: float, content: str):
-        """Send heartbeat updates with more frequent rate limiting."""
-        try:
-            import time
-            current_time = time.time()
-            last_time = self._last_progress_time_by_request.get(task_id, 0)
-            last_progress = self._max_progress_by_request.get(task_id, 0)
-
-            # Only send heartbeat if enough time has passed AND progress hasn't changed
-            # This prevents duplicate messages at the same progress level
-            if (current_time - last_time > 1.0 and
-                abs(percentage - last_progress) < 0.001):  # Same progress level
-                self._last_progress_time_by_request[task_id] = current_time
-                await self.redis_publisher.set_transient_update(task_id, percentage, content)
-                logger.debug(f"💓 Heartbeat update sent: {percentage:.0%} - {content}")
-        except Exception as e:
-            logger.debug(f"Failed to send heartbeat update: {e}")
-
-    def _is_internal_selector_message(self, content: str) -> bool:
-        """Check if content is an internal selector message that shouldn't be shown to users."""
-        if not content:
-            return True
-
-        content_lower = content.lower()
-
-        # Internal routing messages
-        internal_patterns = [
-            "routing to",
-            "🎯 selector:",
-            "delegating to",
-            "switching to",
-            "selecting agent",
-            "agent selection",
-            "execution complete",
-            "task completed",
-            "ready for upload",
-            "files uploaded",
-            "finalizing results"
-        ]
-
-        return any(pattern in content_lower for pattern in internal_patterns)
-
-
     # ========================================================================
     # NEW HEARTBEAT API - Consolidates all heartbeat logic
     # ========================================================================
@@ -472,7 +376,7 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
         
         This is the main entry point for starting progress updates:
         - Sends immediate 5% progress message 
-        - Starts background heartbeat loop (1s repeats + Xs LLM updates)
+        - Starts background heartbeat loop (1s repeats)
         """
         # Send instant 5% message
         await self.redis_publisher.set_transient_update(task_id, 0.05, initial_message)
@@ -485,8 +389,7 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
             'last_message': initial_message,
             'last_percentage': 0.05,
             'last_update_time': time.time(),
-            'heartbeat_task': None,
-            'llm_counter': 0
+            'heartbeat_task': None
         }
         
         # Start heartbeat loop
@@ -505,8 +408,7 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
             self._heartbeat_state[task_id]['last_message'] = message
             self._heartbeat_state[task_id]['last_percentage'] = percentage
             self._heartbeat_state[task_id]['last_update_time'] = time.time()
-            self._heartbeat_state[task_id]['llm_counter'] = 0  # Reset LLM counter on new message
-            logger.debug(f"� Updated heartbeat message for {task_id}: {percentage:.0%} - {message[:50]}...")
+            logger.debug(f"💓 Updated heartbeat message for {task_id}: {percentage:.0%} - {message[:50]}...")
     
     async def stop_heartbeat(self, task_id: str):
         """Stop the heartbeat for a task (called when task reaches 100%)."""
@@ -527,7 +429,6 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
         
         Mechanism:
         - Every 1 second: Repeat last message (simple repeat, no LLM)
-        - Every X seconds: Generate new LLM-powered message from agent activity
         - Stops when task reaches 100%
         """
         try:
@@ -544,65 +445,89 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
                     await self.stop_heartbeat(task_id)
                     break
                 
-                # Increment LLM counter
-                state['llm_counter'] += 1
-                
-                if state['llm_counter'] >= 10:
-                    # Every 10 seconds: Generate LLM-powered message
-                    try:
-                        # Get current agent activity/context
-                        # For now, we'll use a simple status message
-                        # In future, we can check agent activity logs
-                        new_message = await self._get_dynamic_progress_message(
-                            source="heartbeat",
-                            content="Processing...",
-                            task_context="",
-                            request_id=task_id
-                        )
-                        
-                        if new_message and new_message != state['last_message']:
-                            # Update message but keep same percentage (heartbeat never increments)
-                            current_pct = state['last_percentage']
-                            
-                            # Send new LLM message with same percentage (no increment)
-                            await self.redis_publisher.set_transient_update(
-                                task_id, 
-                                current_pct, 
-                                new_message
-                            )
-                            state['last_message'] = new_message
-                            # Keep same percentage - heartbeat never increments
-                            logger.debug(f"💡 LLM heartbeat update: {current_pct:.0%} - {new_message[:50]}...")
-                        else:
-                            # Fallback to repeat if LLM fails or returns same message
-                            await self.redis_publisher.set_transient_update(
-                                task_id,
-                                state['last_percentage'],
-                                state['last_message']
-                            )
-                    except Exception as e:
-                        logger.debug(f"LLM heartbeat generation failed, using repeat: {e}")
-                        # Fallback to simple repeat
-                        await self.redis_publisher.set_transient_update(
-                            task_id,
-                            state['last_percentage'],
-                            state['last_message']
-                        )
-                    
-                    state['llm_counter'] = 0  # Reset counter
-                else:
-                    # Every 1 second: Simple repeat of last message
-                    await self.redis_publisher.set_transient_update(
-                        task_id,
-                        state['last_percentage'],
-                        state['last_message']
-                    )
-                    logger.debug(f"💓 Heartbeat repeat: {state['last_percentage']:.0%} - {state['last_message'][:30]}...")
+                # Every 1 second: Simple repeat of last message
+                await self.redis_publisher.set_transient_update(
+                    task_id,
+                    state['last_percentage'],
+                    state['last_message']
+                )
+                logger.debug(f"💓 Heartbeat repeat: {state['last_percentage']:.0%} - {state['last_message'][:30]}...")
         
         except asyncio.CancelledError:
             logger.debug(f"Heartbeat loop cancelled for task {task_id}")
         except Exception as e:
             logger.error(f"Heartbeat loop failed for task {task_id}: {e}")
+
+    async def handle_progress_update(self, task_id: str, percentage: float, content: str, message_type: str = None, source: str = None, data: str = None, is_heartbeat: bool = False) -> float:
+        """Handle progress updates - auto-increment progress for dynamic messages.
+        
+        Returns:
+            The actual percentage sent to Redis after clamping and auto-increment.
+        """
+        try:
+            # Check for duplicates (same content as last time)
+            last_content = self._last_message_content.get(task_id)
+            if content == last_content and not is_heartbeat and not data:
+                # Duplicate message - ignore to prevent spamming/incrementing
+                return self._max_progress_by_request.get(task_id, 0.0)
+
+            # Auto-increment logic:
+            # If percentage is not provided (or 0/low) AND it's a new message
+            current_max = self._max_progress_by_request.get(task_id, 0.0)
+            
+            if percentage <= 0.0 or (percentage <= current_max and not is_heartbeat):
+                # Auto-increment by 1%
+                percentage = current_max + 0.01
+            
+            # Cap auto-increment at 95% (unless explicitly higher)
+            if percentage < 0.95:
+                percentage = min(percentage, 0.94)
+
+            clamped_pct = await self._clamp_progress(task_id, percentage)
+            logger.debug(f"Progress update: input={percentage}, clamped={clamped_pct}, max_so_far={current_max}")
+
+            # Update heartbeat message when new progress arrives (not for heartbeat repeats)
+            if not is_heartbeat:
+                await self.update_heartbeat_message(task_id, clamped_pct, content)
+
+            # SAFETY: Stop heartbeat for any message >= 95% (handles edge cases)
+            if clamped_pct >= 0.95:
+                await self.stop_heartbeat(task_id)
+                logger.debug(f"💓 Stopped heartbeat at {clamped_pct:.0%} (>= 95%)")
+
+            # For final updates with data, send immediately and mark as finalized
+            if clamped_pct >= 1.0 and data is not None:
+                await self.redis_publisher.set_transient_update(task_id, clamped_pct, content, data)
+                await self.redis_publisher.mark_final(task_id)
+                logger.info(f"🏁  PUBLISHING FINAL MESSAGE: requestId={task_id}, progress={clamped_pct}, data_length={len(data) if data else 0}")
+                return clamped_pct
+
+            # For heartbeat updates, use shorter rate limiting (0.5 seconds)
+            if is_heartbeat:
+                await self._send_heartbeat_update(task_id, clamped_pct, content)
+                return clamped_pct
+            else:
+                # For regular updates, publish directly
+                current_key = f"{clamped_pct:.2f}_{content}"
+                last_sent_key = self._last_sent_by_request.get(task_id)
+
+                if current_key != last_sent_key:
+                    await self.redis_publisher.set_transient_update(task_id, clamped_pct, content)
+                    self._last_sent_by_request[task_id] = current_key
+                    
+                    # Update simple tracking
+                    self._last_message_content[task_id] = content
+                    self._last_message_percentage[task_id] = clamped_pct
+
+                    # Keep only last 100 published messages
+                    if len(self._last_published_messages) > 100:
+                        self._last_published_messages = set(list(self._last_published_messages)[-50:])
+                
+                return clamped_pct
+
+        except Exception as e:
+            logger.debug(f"Failed to handle progress update: {e}")
+            return 0.0  # Return 0 on error
 
 
     # ========================================================================

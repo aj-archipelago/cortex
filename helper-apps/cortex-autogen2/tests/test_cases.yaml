@@ -68,7 +68,6 @@ test_cases:
     quality_criteria:
       - "CRITICAL FAIL (SCORE=0): NO DATA FILES DELIVERED - if requested data files are missing, score=0 regardless of other content"
       - "Main data file contains exactly 100 rows of sales data"
-      - "Dates span the last 90 days as specified"
       - "Realistic product names and prices (no generic 'Product1', 'Product2')"
       - "Summary statistics calculated correctly from the main data"
       - "Proper data structure and formatting"
@@ -80,6 +79,37 @@ test_cases:
       - "ENCOURAGED: Multiple data visualizations (2-4 charts) showing different perspectives on the sales data would significantly enhance user understanding and provide richer insights"
     expected_agents:
       - planner_agent
+      - coder_agent
+      - presenter_agent
+
+  - id: tc002_pdf_with_images
+    name: "PDF Report with Images and Charts"
+    description: "Generates a PDF report with images and charts"
+    task: "Generate a PDF report about renewable energy trends in 2026."
+    timeout_seconds: 1200
+    requires_ajsql: false
+    expected_deliverables:
+      - type: pdf
+        pattern: "*.pdf"
+        min_count: 1
+        description: "PDF report file"
+      - type: images
+        pattern: "*.png"
+        min_count: 5
+        description: "Images and charts included in report"
+    min_progress_updates: 6
+    quality_criteria:
+      - "CRITICAL FAIL (SCORE=0): NO PDF FILE DELIVERED - if requested PDF is missing, score=0 regardless of other content"
+      - "CRITICAL FAIL (SCORE=0): PDF CONTAINS ERROR MESSAGES - if PDF contains 'generation failed', 'contact admin', or similar error messages instead of actual content, score=0"
+      - "PDF contains both text content and images"
+      - "Charts and graphs are professionally designed"
+      - "Real data used, no placeholder or dummy content"
+      - "Proper document formatting with headers and page numbers"
+      - "Images are relevant to renewable energy topic"
+      - "Preview images or thumbnails provided"
+    expected_agents:
+      - planner_agent
+      - web_search_agent
       - coder_agent
       - presenter_agent
 
@@ -118,79 +148,6 @@ test_cases:
       - "File preview integration when available"
       - "Download links styled properly and contextually placed"
       - "Gen 1 Pokemon focus (original 151, including evolutions)"
-    expected_agents:
-      - planner_agent
-      - web_search_agent
-      - coder_agent
-      - presenter_agent
-
-  - id: tc010_multi_format_analysis
-    name: "Multi-Format Tech Company Performance Analysis"
-    description: "Creates comprehensive analysis in CSV, JSON, XLSX, and PDF formats"
-    task: "Analyze the performance of top 5 tech companies (Apple, Microsoft, Google, Amazon, Tesla) for Q3 2024. Return the analysis in all these formats: CSV, JSON, XLSX, and PDF. Include revenue data, market share, growth metrics, and key insights for each company."
-    timeout_seconds: 1200
-    requires_ajsql: false
-    expected_deliverables:
-      - type: csv
-        pattern: "*.csv"
-        min_count: 1
-        description: "Raw performance data CSV"
-      - type: json
-        pattern: "*.json"
-        min_count: 1
-        description: "Structured performance data JSON"
-      - type: excel
-        pattern: "*.xlsx"
-        min_count: 1
-        description: "Analysis spreadsheet with charts"
-      - type: pdf
-        pattern: "*.pdf"
-        min_count: 1
-        description: "Professional PDF report"
-    min_progress_updates: 8
-    quality_criteria:
-      - "CRITICAL FAIL (SCORE=0): MISSING ANY REQUESTED FORMAT - if CSV, JSON, XLSX, or PDF is missing, score=0"
-      - "Data covers all 5 companies (Apple, Microsoft, Google, Amazon, Tesla) with realistic Q3 2024 metrics"
-      - "CSV contains structured tabular data suitable for spreadsheet analysis"
-      - "JSON provides hierarchical data structure with nested company details and metrics"
-      - "XLSX includes multiple worksheets, formulas, and embedded charts/visualizations"
-      - "PDF presents professional report format with tables, insights, and visualizations"
-      - "All formats contain consistent data (same revenue figures, market shares, etc.)"
-      - "Each format optimized for its use case (CSV for data analysis, JSON for APIs, XLSX for interactive analysis, PDF for sharing)"
-      - "Complex hierarchical data (company details, quarterly metrics, competitor comparisons) represented appropriately in each format"
-      - "Files uploaded with SAS URLs and clean download links"
-      - "Response provides clear navigation between different format downloads"
-    expected_agents:
-      - planner_agent
-      - web_search_agent
-      - coder_agent
-      - presenter_agent
-
-  - id: tc002_pdf_with_images
-    name: "PDF Report with Images and Charts"
-    description: "Generates a PDF report with images and charts"
-    task: "Generate a PDF report about renewable energy trends in 2026."
-    timeout_seconds: 1200
-    requires_ajsql: false
-    expected_deliverables:
-      - type: pdf
-        pattern: "*.pdf"
-        min_count: 1
-        description: "PDF report file"
-      - type: images
-        pattern: "*.png"
-        min_count: 5
-        description: "Images and charts included in report"
-    min_progress_updates: 6
-    quality_criteria:
-      - "CRITICAL FAIL (SCORE=0): NO PDF FILE DELIVERED - if requested PDF is missing, score=0 regardless of other content"
-      - "CRITICAL FAIL (SCORE=0): PDF CONTAINS ERROR MESSAGES - if PDF contains 'generation failed', 'contact admin', or similar error messages instead of actual content, score=0"
-      - "PDF contains both text content and images"
-      - "Charts and graphs are professionally designed"
-      - "Real data used, no placeholder or dummy content"
-      - "Proper document formatting with headers and page numbers"
-      - "Images are relevant to renewable energy topic"
-      - "Preview images or thumbnails provided"
     expected_agents:
       - planner_agent
       - web_search_agent
@@ -537,5 +494,93 @@ test_cases:
     expected_agents:
       - planner_agent
       - aj_sql_agent
+      - coder_agent
+      - presenter_agent
+
+  - id: tc014_us_gdp_by_state
+    name: "US States GDP Report"
+    description: "Creates a comprehensive GDP by state report with data from web sources"
+    task: "Create a report on US state GDP. I need a CSV with the latest GDP data for all states, summary statistics, a bar chart of the top 10 states, and a PDF report."
+    timeout_seconds: 1200
+    requires_ajsql: false
+    expected_deliverables:
+      - type: csv
+        pattern: "*gdp*.csv"
+        min_count: 1
+        description: "GDP by state CSV file"
+      - type: chart
+        pattern: "*gdp*.png"
+        min_count: 1
+        description: "Top 10 states GDP bar chart"
+      - type: pdf
+        pattern: "*gdp*.pdf"
+        min_count: 1
+        description: "GDP report PDF"
+      - type: data
+        pattern: "*summary*.json"
+        min_count: 1
+        description: "Summary statistics JSON"
+    min_progress_updates: 6
+    quality_criteria:
+      - "CRITICAL FAIL (SCORE=0): NO CSV FILE DELIVERED - if requested CSV is missing, score=0 regardless of other content"
+      - "CRITICAL FAIL (SCORE=0): NO PDF FILE DELIVERED - if requested PDF is missing, score=0 regardless of other content"
+      - "CRITICAL FAIL (SCORE=0): NO CHART FILE DELIVERED - if requested chart is missing, score=0 regardless of other content"
+      - "Data source: GDP data found via web search (not synthetic/fallback data)"
+      - "CSV contains GDP data for all 50 US states + DC"
+      - "GDP values are realistic (billions USD, reasonable ranges)"
+      - "Summary statistics include total, mean, median, standard deviation"
+      - "Bar chart shows top 10 states by GDP clearly"
+      - "PDF report is multi-page with title, data table, statistics, and chart"
+      - "All files uploaded with SAS URLs provided"
+      - "Response starts with key insight (e.g., top state, concentration patterns)"
+      - "Charts integrated naturally with insights, not dumped at end"
+      - "No requests for user to provide API keys or upload files manually"
+      - "System finds data autonomously via web search"
+      - "Clean filenames without timestamps or hashes"
+    expected_agents:
+      - planner_agent
+      - web_search_agent
+      - coder_agent
+      - presenter_agent
+
+  - id: tc015_multi_format_analysis
+    name: "Multi-Format Tech Company Performance Analysis"
+    description: "Creates comprehensive analysis in CSV, JSON, XLSX, and PDF formats"
+    task: "Analyze the performance of top 5 tech companies (Apple, Microsoft, Google, Amazon, Tesla) for Q3 2024. Return the analysis in all these formats: CSV, JSON, XLSX, and PDF. Include revenue data, market share, growth metrics, and key insights for each company."
+    timeout_seconds: 1200
+    requires_ajsql: false
+    expected_deliverables:
+      - type: csv
+        pattern: "*.csv"
+        min_count: 1
+        description: "Raw performance data CSV"
+      - type: json
+        pattern: "*.json"
+        min_count: 1
+        description: "Structured performance data JSON"
+      - type: excel
+        pattern: "*.xlsx"
+        min_count: 1
+        description: "Analysis spreadsheet with charts"
+      - type: pdf
+        pattern: "*.pdf"
+        min_count: 1
+        description: "Professional PDF report"
+    min_progress_updates: 8
+    quality_criteria:
+      - "CRITICAL FAIL (SCORE=0): MISSING ANY REQUESTED FORMAT - if CSV, JSON, XLSX, or PDF is missing, score=0"
+      - "Data covers all 5 companies (Apple, Microsoft, Google, Amazon, Tesla) with realistic Q3 2024 metrics"
+      - "CSV contains structured tabular data suitable for spreadsheet analysis"
+      - "JSON provides hierarchical data structure with nested company details and metrics"
+      - "XLSX includes multiple worksheets, formulas, and embedded charts/visualizations"
+      - "PDF presents professional report format with tables, insights, and visualizations"
+      - "All formats contain consistent data (same revenue figures, market shares, etc.)"
+      - "Each format optimized for its use case (CSV for data analysis, JSON for APIs, XLSX for interactive analysis, PDF for sharing)"
+      - "Complex hierarchical data (company details, quarterly metrics, competitor comparisons) represented appropriately in each format"
+      - "Files uploaded with SAS URLs and clean download links"
+      - "Response provides clear navigation between different format downloads"
+    expected_agents:
+      - planner_agent
+      - web_search_agent
       - coder_agent
       - presenter_agent

@@ -62,39 +62,38 @@ python-bidi       = "^0.4.2"
 nltk              = "^3.9.1"
 spacy             = "^3.8.4"
 
-# ─────────────────────────────────────────────────
-# Optional groups (install with: poetry install --with media,archives,science …)
-# ─────────────────────────────────────────────────
+# Media – images / audio / video
+opencv-python     = "^4.9.0"
+imageio           = { version = "^2.34.0", extras = ["ffmpeg"] }
+CairoSVG          = "^2.7.1"
+pyheif            = "^0.6.3"
+moviepy           = "^1.0.3"
+librosa           = "^0.10.1"
+soundfile         = "^0.12.1"
+pydub             = "^0.25.1"
+imageio-ffmpeg    = "^0.4.9"
 
-[tool.poetry.group.media.dependencies]  # images / audio / video
-opencv-python    = "^4.9.0"
-imageio          = { version = "^2.34.0", extras = ["ffmpeg"] }
-pyheif           = "^0.6.3"
-moviepy          = "^1.0.3"
-librosa          = "^0.10.1"
-soundfile        = "^0.12.1"
-pydub            = "^0.25.1"
+# Archives
+patool            = "^1.12"
+py7zr             = "^0.21.0"
+rarfile           = "^4.0"
 
-[tool.poetry.group.archives.dependencies]
-patool   = "^1.12"
-py7zr    = "^0.21.0"
-rarfile  = "^4.0"
+# Scientific computing
+scipy             = "^1.14.0"
+tabula-py         = "^2.8.1"
+h5py              = "^3.10.0"
+netCDF4           = "^1.6.5"
+ezdxf             = "^1.1.1"
+python-lzf        = "^0.2.4"
 
-[tool.poetry.group.science.dependencies]
-tabula-py = "^2.8.1"
-h5py      = "^3.10.0"
-netCDF4   = "^1.6.5"
-ezdxf     = "^1.1.1"
+# Communication / web / e-books
+eml-parser        = "^1.15.0"
+msg-parser        = ">=1.2.0,<2.0"
+beautifulsoup4    = "^4.12.3"
+ebooklib          = "^0.18"
 
-[tool.poetry.group.comm.dependencies]  # email / web / e-books
-eml-parser       = "^1.15.0"
-msg-parser       = ">=1.2.0,<2.0"
-beautifulsoup4   = "^4.12.3"
-ebooklib         = "^0.18"
-
-[tool.poetry.group.extras.dependencies]  # seldom-needed odds & ends
-imageio-ffmpeg = "^0.4.9"
-python-lzf     = "^0.2.4"
+# Azure
+azure-functions   = "^1.20.0"
 
 # ─────────────────────────────────────────────────
 # Development-only deps

@@ -109,7 +109,10 @@ async def google_cse_search(
         params["key"] = api_key
 
         url = "https://www.googleapis.com/customsearch/v1"
-        resp = requests.get(url, params=params, timeout=20)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        }
+        resp = requests.get(url, headers=headers, params=params, timeout=20)
         resp.raise_for_status()
         data = resp.json()
         return json.dumps(data)

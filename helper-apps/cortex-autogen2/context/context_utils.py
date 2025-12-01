@@ -1,7 +1,7 @@
 """
 Utility functions for context generation.
 """
-from typing import List, Dict
+from typing import List, Dict, Any
 from .config import AGENT_ROLE_DESCRIPTIONS
 
 
@@ -21,7 +21,7 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-def filter_relevant_events(agent_name: str, events: List[dict]) -> List[dict]:
+def filter_relevant_events(agent_name: str, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Filter events relevant to specific agent's role.
     

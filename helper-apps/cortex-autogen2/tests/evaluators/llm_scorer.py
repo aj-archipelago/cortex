@@ -47,7 +47,7 @@ class LLMEvaluator:
         if not self.api_key:
             raise ValueError("CORTEX_API_KEY environment variable must be set")
 
-        logger.info(f"🤖 LLM Evaluator initialized")
+        logger.info("🤖 LLM Evaluator initialized")
         logger.info(f"   API URL: {self.api_base_url}")
         logger.info(f"   Model: {self.model}")
 
@@ -173,15 +173,18 @@ class LLMEvaluator:
                 logger.debug(f"Skipping likely truncated URL: {url}")
                 return
 
-            # Check if it's a real Azure SAS URL
-            is_real_azure_url = (
-                'blob.core.windows.net' in url_lower and
-                ('?sv=' in url or '&sv=' in url) and  # SAS version parameter
-                ('sig=' in url)  # SAS signature parameter
-            )
-
-            if is_real_azure_url:
-                valid_azure_urls.append(url)
+            # Check if it's a real Azure blob URL (with or without SAS params)
+            # Azure blob URLs are valid even without query params - they're base URLs that may need SAS tokens
+            is_azure_blob_url = 'blob.core.windows.net' in url_lower
+            
+            if is_azure_blob_url:
+                # If it has SAS params, it's a full SAS URL
+                if ('?sv=' in url or '&sv=' in url) and 'sig=' in url:
+                    valid_azure_urls.append(url)
+                else:
+                    # Base Azure blob URL without SAS params - still valid, just needs SAS token
+                    # Don't mark as hallucinated - it's a real Azure blob URL
+                    valid_azure_urls.append(url)
                 return
 
             # Check for obviously hallucinated domains
@@ -214,10 +217,11 @@ class LLMEvaluator:
 
         return {
             'has_hallucinated_urls': len(hallucinated_urls) > 0,
+            'has_valid_azure_urls': len(valid_azure_urls) > 0,
             'has_internet_urls_needing_azure': len(internet_urls_needing_azure) > 0,
             'hallucinated_urls': hallucinated_urls,
-            'internet_urls_needing_azure': internet_urls_needing_azure,
-            'valid_azure_urls': valid_azure_urls
+            'valid_azure_urls': valid_azure_urls,
+            'internet_urls_needing_azure': internet_urls_needing_azure
         }
 
 
@@ -241,13 +245,14 @@ class LLMEvaluator:
             files_created: List of files created during execution
             test_summary: Summary of test run (duration, errors, etc.)
             test_case_id: ID of the test case
-            global_expectations: Global expectations for all tests
+            global_expectations: Global expectations for all tests (from GLOBAL_QUALITY_EXPECTATIONS
+                                 in agents/constants/global_quality_standards.py - shared with execution_completion_verifier_agent)
             test_case_quality_criteria: Specific quality criteria for this test case
 
         Returns:
             Dictionary with score, reasoning, strengths, and weaknesses
         """
-        logger.info(f"📊 Evaluating final output...")
+        logger.info("📊 Evaluating final output...")
 
         # CRITICAL: Check URL validity - distinguish between hallucinated and internet URLs
         url_check = await self._check_url_validity(task, final_result)
@@ -265,6 +270,12 @@ class LLMEvaluator:
                     "System must never create fake URLs"
                 ]
             }
+
+        # Valid Azure SAS URLs = automatically accepted (no accessibility test needed)
+        if url_check.get('has_valid_azure_urls', False):
+            valid_azure_count = len(url_check.get('valid_azure_urls', []))
+            logger.info(f"✅ VALID AZURE SAS URLS FOUND: {valid_azure_count} properly formatted Azure SAS URLs - automatically accepted")
+            # Valid Azure SAS URLs don't need accessibility testing
 
         # Check that all URLs are actually accessible - allow any working URL
         if url_check['has_internet_urls_needing_azure']:
@@ -461,7 +472,7 @@ CRITICAL: For tests requiring AJ SQL (requires_ajsql=true), verify that aj_sql_a
         # Calculate overall score
         overall_score = int((progress_eval['score'] + output_eval['score']) / 2)
 
-        logger.info(f"✅ Evaluation complete:")
+        logger.info("✅ Evaluation complete:")
         logger.info(f"   Progress: {progress_eval['score']}/100")
         logger.info(f"   Output: {output_eval['score']}/100")
         logger.info(f"   Overall: {overall_score}/100")
@@ -690,5 +701,6 @@ CRITICAL: For tests requiring AJ SQL (requires_ajsql=true), verify that aj_sql_a
                     logger.error(f"LLM call failed after {max_retries} attempts: {e}")
                     raise
             except Exception as e:
+                logger.error(f"LLM call error: {e}", exc_info=True)
                 # Re-raise non-timeout exceptions immediately
                 raise
