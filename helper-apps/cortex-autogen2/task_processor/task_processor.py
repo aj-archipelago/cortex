@@ -97,7 +97,10 @@ class TaskProcessor:
     async def _get_progress_handler(self):
         if self.progress_handler is None:
             redis_pub = await self._get_redis_publisher()
-            self.progress_handler = ProgressHandler(redis_pub, self.gpt41_model_client)
+            self.progress_handler = ProgressHandler(redis_pub, 
+             self.gpt41_model_client
+            #self.gpt5_mini_model_client
+            )
         return self.progress_handler
 
     async def process_task(self, task_id: str, task_content: str, runner_info: dict = None) -> str:
@@ -184,10 +187,23 @@ class TaskProcessor:
         await progress_handler.handle_progress_update(task_id, 0.05, "🚀 Starting your task...")
 
         # Group phase (SelectorGroupChat handles everything: planning + execution)
+        # Wrap in timeout to ensure presenter phase always executes
         self.logger.info("🤝 Starting group phase...")
-        execution_context = await self.group_phase.run_group_phase(task_id, task, work_dir, planner_agent, execution_agents)
+        group_phase_timeout = int(os.getenv('GROUP_PHASE_TIMEOUT_SECONDS', '1000'))
+        try:
+            execution_context = await asyncio.wait_for(
+                self.group_phase.run_group_phase(task_id, task, work_dir, planner_agent, execution_agents),
+                timeout=group_phase_timeout
+            )
+        except asyncio.TimeoutError:
+            self.logger.warning(f"⏱️ Group phase timed out after {group_phase_timeout} seconds. Proceeding to presenter phase.")
+            execution_context = work_dir  # Use work_dir as fallback context
+        except Exception as e:
+            self.logger.error(f"❌ Group phase failed with error: {e}. Proceeding to presenter phase.")
+            execution_context = work_dir  # Use work_dir as fallback context
 
         # Present phase - presenter_agent handles both upload and presentation
+        # Always execute presenter phase regardless of group phase outcome
         result = await self.delivery_phase.run_present_phase(
             task_id, task, work_dir, presenter_agent, execution_context, ""
         )

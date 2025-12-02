@@ -110,6 +110,9 @@ class TaskProcessor:
         self.gpt41_model_client = ModelConfig.create_model_client("gpt-4.1")
         self.o3_model_client = ModelConfig.create_model_client("o3")
 
+        self.gpt5_mini_model_client = ModelConfig.create_model_client("gpt-5-mini")
+        self.gpt5_model_client = ModelConfig.create_model_client("gpt-5")
+
         # Initialize progress handler and message generator after model clients
         self.progress_handler = None
         self.recent_progress_messages = []  # Track recent progress messages for context
@@ -128,7 +131,11 @@ class TaskProcessor:
             self.redis_publisher = await get_redis_publisher()
         if self.progress_handler is None:
             from .progress_handler import ProgressHandler
-            self.progress_handler = ProgressHandler(self.redis_publisher, self.gpt41_model_client)
+            self.progress_handler = ProgressHandler(self.redis_publisher, 
+                self.gpt41_model_client
+                # self.gpt5_mini_model_client
+                # self.gpt5_model_client
+            )
         self.logger.info("✅ TaskProcessor initialized successfully")
 
     async def close(self):
@@ -223,7 +230,11 @@ class TaskProcessor:
         """Lazily initialize and return progress handler."""
         if self.progress_handler is None:
             redis_pub = await self._get_redis_publisher()
-            self.progress_handler = ProgressHandler(redis_pub, self.gpt41_model_client)
+            self.progress_handler = ProgressHandler(redis_pub, 
+            self.gpt41_model_client
+            # self.gpt5_mini_model_client
+            #self.gpt5_model_client
+            )
         return self.progress_handler
 
     async def process_task(self, task_id: str, task_content: str, runner_info: dict = None) -> str:
@@ -264,8 +275,12 @@ class TaskProcessor:
             # Get agents for this task
             planner_agent, execution_agents, presenter_agent = await get_agents(
                 self.gpt41_model_client,
+                # self.gpt5_mini_model_client,
+                # self.gpt5_model_client,
                 self.o3_model_client,
                 self.gpt41_model_client,
+                # self.gpt5_mini_model_client,
+                # self.gpt5_model_client,
                 request_work_dir=request_work_dir,
                 request_id=task_id,
                 task_content=task,
@@ -283,7 +298,9 @@ class TaskProcessor:
             result = await self._run_agent_workflow(
                 task_id, task_with_context, request_work_dir,
                 planner_agent, filtered_execution_agents, presenter_agent,
-                execution_completion_verifier_agent, self.gpt41_model_client
+                execution_completion_verifier_agent, 
+                self.gpt41_model_client
+                # self.gpt5_model_client
             )
 
             return result
@@ -348,7 +365,11 @@ class TaskProcessor:
         # Note: Heartbeat is started in simplified_workflow.run_workflow() which sends initial message
 
         # Use simplified workflow with SelectorGroupChat for intelligent routing
-        simplified_workflow = SimplifiedWorkflow(self.gpt41_model_client)
+        simplified_workflow = SimplifiedWorkflow(
+             self.gpt41_model_client
+            # self.gpt5_mini_model_client
+            #self.gpt5_model_client
+        )
 
         # Run the complete simplified workflow
         result = await simplified_workflow.run_workflow(

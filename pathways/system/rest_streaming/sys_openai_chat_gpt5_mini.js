@@ -18,4 +18,5 @@ export default {
     model: 'oai-gpt5-mini',
     useInputChunking: false,
     emulateOpenAIChatModel: 'gpt-5-mini',
+    timeout: 900
 } 

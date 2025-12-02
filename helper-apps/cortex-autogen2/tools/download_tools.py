@@ -4,6 +4,7 @@ File download tools.
 import requests
 import os
 import mimetypes
+import zipfile
 from urllib.parse import urlparse
 from typing import Optional
 from autogen_core.tools import FunctionTool
@@ -58,14 +59,40 @@ def download_file(url: str, filename: str = None, work_dir: str = None) -> str:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
         
-        # Validate image file size to catch corrupted downloads
+        # Validate file format to catch invalid downloads
         file_ext = os.path.splitext(filename)[1].lower()
+        
+        # Validate image files
         image_exts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico']
         if file_ext in image_exts:
             file_size = os.path.getsize(filepath)
             if file_size < 1000:  # Images should be at least 1KB
                 os.remove(filepath)  # Clean up corrupted file
                 return f"Error downloading image: File '{filename}' is too small ({file_size} bytes). The download may have failed or returned an error page instead of image data."
+        
+        # Validate CSV files - check for HTML/JavaScript content
+        if file_ext == '.csv':
+            try:
+                with open(filepath, 'rb') as f:
+                    first_bytes = f.read(512).decode('utf-8', errors='ignore').strip()
+                    # Check for HTML/JavaScript markers
+                    if first_bytes.startswith(('<!DOCTYPE', '<html', '<script', '<HTML', '<SCRIPT')):
+                        os.remove(filepath)
+                        return f"Error downloading CSV: File '{filename}' contains HTML/JavaScript instead of CSV data. The URL may have returned an error page or requires authentication."
+            except Exception:
+                pass  # If validation fails, allow file to pass through
+        
+        # Validate ZIP files - check ZIP structure
+        if file_ext == '.zip':
+            try:
+                with zipfile.ZipFile(filepath, 'r') as zip_ref:
+                    # Try to read the ZIP file structure
+                    zip_ref.testzip()
+            except (zipfile.BadZipFile, zipfile.LargeZipFile) as e:
+                os.remove(filepath)
+                return f"Error downloading ZIP: File '{filename}' is not a valid ZIP file. The download may have failed or returned an error page instead of ZIP data: {e}"
+            except Exception:
+                pass  # If validation fails, allow file to pass through
         
         return f"Successfully downloaded '{url}' and saved as '{filename}' in {work_dir}"
 

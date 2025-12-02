@@ -14,6 +14,70 @@ from autogen_agentchat.conditions import FunctionalTermination
 logger = logging.getLogger(__name__)
 
 
+def detect_loop_pattern(messages: List) -> bool:
+    """
+    Detect repetitive patterns indicating infinite loop.
+    
+    This is a programmatic safety net that detects loops before relying on the LLM verifier agent.
+    Checks for:
+    1. Same agent + same/empty content repeating 6+ times consecutively
+    2. High percentage of alternating empty messages (>50% of last 10)
+    3. LLM request timeout messages appearing 2+ times (indicates backend issues causing loops)
+    
+    Returns True if loop detected, False otherwise.
+    """
+    if len(messages) < 10:
+        return False
+    
+    # Check last 30 messages for patterns
+    recent = messages[-30:] if len(messages) >= 30 else messages
+    
+    # Pattern 1: Same agent + same/empty content repeating
+    agent_content_pairs = []
+    timeout_count = 0
+    
+    for msg in recent:
+        if hasattr(msg, 'source') and hasattr(msg, 'content'):
+            source = msg.source
+            content = str(msg.content).strip()
+            agent_content_pairs.append((source, content))
+            
+            # Pattern 3: Detect LLM timeout messages
+            if "Request timed out after" in content or "timed out after" in content.lower():
+                timeout_count += 1
+    
+    # If we see 2+ timeout messages in recent history, we're in a timeout loop
+    if timeout_count >= 2:
+        logger.warning(f"🛑 Loop Pattern 3 detected: {timeout_count} LLM timeout messages in recent history (backend issues causing loop)")
+        return True
+    
+    # Count consecutive repetitions
+    if len(agent_content_pairs) >= 6:
+        last_6 = agent_content_pairs[-6:]
+        # Check if all 6 are identical (same agent, same content)
+        if all(pair == last_6[0] for pair in last_6):
+            logger.warning(f"🛑 Loop Pattern 1 detected: {last_6[0][0]} repeating identical content 6+ times")
+            return True
+    
+    # Pattern 2: Two agents alternating with empty/same content
+    if len(agent_content_pairs) >= 10:
+        alternating_empty_count = 0
+        for i in range(len(agent_content_pairs) - 1):
+            curr = agent_content_pairs[i]
+            next_pair = agent_content_pairs[i + 1]
+            # Check if content is empty or very short (< 10 chars)
+            if len(curr[1]) < 10 or len(next_pair[1]) < 10:
+                alternating_empty_count += 1
+        
+        # If >50% of recent messages are empty alternations
+        if alternating_empty_count > len(agent_content_pairs) * 0.5:
+            logger.warning(f"🛑 Loop Pattern 2 detected: {alternating_empty_count}/{len(agent_content_pairs)} messages are empty alternations (>50%)")
+            return True
+    
+    return False
+
+
+
 def create_score_based_termination(all_messages, threshold: int = 90):
     """
     Create a termination condition based on presentation quality score.
@@ -64,6 +128,12 @@ def create_score_based_termination(all_messages, threshold: int = 90):
 
         if len(all_messages) < 2:
             return False
+
+        # PROGRAMMATIC LOOP DETECTION - Auto-terminate on loops (safety net)
+        # This catches loops even if verifier_agent doesn't return score=-1
+        if detect_loop_pattern(all_messages):
+            logger.warning(f"🛑 PROGRAMMATIC LOOP DETECTOR: Repetitive pattern detected. Auto-terminating to prevent infinite loop.")
+            return True
 
         # CIRCUIT BREAKER: Detect empty message loops (minimal fix)
         # Check last 20 messages for presenter empty + verifier score 0 pattern (10+ times)

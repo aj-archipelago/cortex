@@ -130,11 +130,30 @@ class LLMEvaluator:
         import asyncio
 
         # Extract all URLs from the final result
+        # Only extract URLs from actual download links, not attribution/context text
         urls = []
         if isinstance(final_result, str):
-            # Find all URLs in the string
-            url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
-            urls = re.findall(url_pattern, final_result)
+            # First, extract URLs from download links (HTML <a href> or markdown links)
+            # Pattern 1: HTML href="URL" or src="URL"
+            html_link_pattern = r'(?:href|src)=["\'](https?://[^"\']+?)["\']'
+            html_urls = re.findall(html_link_pattern, final_result)
+            
+            # Pattern 2: Markdown links [text](URL) or ![alt](URL)
+            markdown_link_pattern = r'(?:\[[^\]]*\]|!\[[^\]]*\])\s*\(\s*(https?://[^)]+?)\s*\)'
+            markdown_urls = re.findall(markdown_link_pattern, final_result)
+            
+            # Combine and deduplicate
+            urls = list(set(html_urls + markdown_urls))
+            
+            # Also check for Azure blob URLs that might be in text (but clean trailing punctuation)
+            # Only if we didn't find any in links above
+            if not urls:
+                # Fallback: find Azure blob URLs in text (these are deliverable URLs)
+                # Only validate Azure blob URLs from text - skip other URLs (likely attribution)
+                azure_pattern = r'https?://[^\s<>"{}|\\^`\[\]()]+\.blob\.core\.windows\.net[^\s<>"{}|\\^`\[\]()]*'
+                azure_urls = re.findall(azure_pattern, final_result)
+                # Clean trailing punctuation from Azure URLs
+                urls = [url.rstrip('.,;:!?)') for url in azure_urls]
         elif isinstance(final_result, dict):
             # Recursively find URLs in dict values
             def find_urls(obj):
@@ -146,7 +165,17 @@ class LLMEvaluator:
                     for item in obj:
                         found.extend(find_urls(item))
                 elif isinstance(obj, str):
-                    found.extend(re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+', obj))
+                    # Extract from HTML/markdown links first, then fallback
+                    html_link_pattern = r'(?:href|src)=["\'](https?://[^"\']+?)["\']'
+                    markdown_link_pattern = r'(?:\[[^\]]*\]|!\[[^\]]*\])\s*\(\s*(https?://[^)]+?)\s*\)'
+                    html_urls = re.findall(html_link_pattern, obj)
+                    markdown_urls = re.findall(markdown_link_pattern, obj)
+                    if html_urls or markdown_urls:
+                        found.extend(list(set(html_urls + markdown_urls)))
+                    else:
+                        # Fallback: clean trailing punctuation
+                        fallback_urls = re.findall(r'https?://[^\s<>"{}|\\^`\[\]()]+', obj)
+                        found.extend([url.rstrip('.,;:!?)') for url in fallback_urls if not url.rstrip('.,;:!?)').endswith(('.', ',', ';', ':', '!', '?', ')', ']'))])
                 return found
             urls = find_urls(final_result)
 

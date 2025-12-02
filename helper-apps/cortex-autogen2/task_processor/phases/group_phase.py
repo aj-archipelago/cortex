@@ -5,9 +5,10 @@ import os
 import logging
 
 from autogen_agentchat.teams import SelectorGroupChat
-from autogen_agentchat.conditions import TextMentionTermination
+from autogen_agentchat.conditions import TextMentionTermination, MaxMessagesTermination
 
 from context.logging_utils import log_phase_start, log_phase_complete
+from task_processor.loop_termination import create_loop_detection_termination
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,38 @@ class GroupPhase:
         print(f"🔥 DEBUG: _run_unified_execution_phase called for task {task_id}")
         self.logger.info(f"🔥 DEBUG: _run_unified_execution_phase called for task {task_id}")
 
+        # Track messages for loop detection
+        all_messages = []
+        
+        # Create termination conditions
+        normal_termination = TextMentionTermination("EXECUTION_PHASE_COMPLETE")
+        loop_termination = create_loop_detection_termination(all_messages, max_repetitions=3)
+        max_messages = int(os.getenv('SELECTOR_MAX_TURNS', '250'))
+        max_messages_termination = MaxMessagesTermination(max_messages)
+        
+        # Combine termination conditions (terminate if any condition is met)
+        def combined_termination(messages):
+            # Check normal termination first
+            if normal_termination(messages):
+                self.logger.info("✅ Normal termination: EXECUTION_PHASE_COMPLETE detected")
+                return True
+            # Check loop termination
+            if loop_termination(messages):
+                self.logger.warning("🛑 Loop termination: Infinite loop detected, terminating execution phase")
+                return True
+            # Check max messages termination
+            if max_messages_termination(messages):
+                self.logger.warning(f"⏱️ Max messages termination: Reached {max_messages} messages, terminating execution phase")
+                return True
+            return False
+        
+        from autogen_agentchat.conditions import FunctionalTermination
+        combined_termination_condition = FunctionalTermination(combined_termination)
+
         execution_team = SelectorGroupChat(
             participants=[planner_agent] + execution_agents,  # Planner first, then execution agents
             model_client=self.gpt41_model_client,
-            termination_condition=TextMentionTermination("EXECUTION_PHASE_COMPLETE"),
+            termination_condition=combined_termination_condition,
             max_turns=int(os.getenv('SELECTOR_MAX_TURNS', '250')),
             allow_repeated_speaker=True
         )

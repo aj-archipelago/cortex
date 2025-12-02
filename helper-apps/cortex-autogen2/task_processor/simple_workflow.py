@@ -159,7 +159,7 @@ class SimplifiedWorkflow:
                     current_time = time.time()
                     last_report_time = self._last_report_time.get(task_id, 0)
 
-                    if current_time - last_report_time >= 15.0:
+                    if current_time - last_report_time >= 30.0:
                         # Fire-and-forget - send with percentage=None to trigger auto-increment (+1%)
                         asyncio.create_task(progress_handler.report_user_progress(
                             task_id, content_str, percentage=None, source=message_source

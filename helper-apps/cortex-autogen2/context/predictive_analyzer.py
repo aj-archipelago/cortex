@@ -523,3 +523,4 @@ def get_predictive_analyzer(learning_memory) -> PredictiveAnalyzer:
         _predictive_analyzer = PredictiveAnalyzer(learning_memory)
     return _predictive_analyzer
 
+

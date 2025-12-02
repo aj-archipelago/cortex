@@ -4,6 +4,7 @@ These tools are shared across multiple agents.
 """
 
 import os
+import time
 import logging
 from typing import List, Dict, Any, Optional, Union
 
@@ -43,20 +44,40 @@ def validate_uploaded_urls(uploads: List[Dict[str, Any]]) -> Dict[str, Any]:
             })
             continue
 
-        # Validate URL accessibility
-        validation_result = validate_url_accessibility(url, timeout_seconds=5)
-
-        if validation_result.get('accessible', False):
-            validated.append(upload)
-            logging.info(f"✅ URL validated: {upload.get('local_filename')}")
-        else:
+        # Retry validation with delay to allow SAS URL propagation
+        # Wait 2 seconds before first attempt, then retry up to 3 times with exponential backoff
+        max_retries = 3
+        retry_delays = [2, 4, 8]  # Exponential backoff: 2s, 4s, 8s
+        validation_result = None
+        
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                # Wait before retry (exponential backoff)
+                delay = retry_delays[attempt - 1]
+                logging.info(f"⏳ Retrying URL validation for {upload.get('local_filename')} after {delay}s delay (attempt {attempt + 1}/{max_retries + 1})")
+                time.sleep(delay)
+            elif attempt == 0:
+                # Wait 2 seconds before first validation to allow SAS URL propagation
+                logging.info(f"⏳ Waiting 2s for SAS URL propagation before validating {upload.get('local_filename')}")
+                time.sleep(2)
+            
+            # Validate URL accessibility
+            validation_result = validate_url_accessibility(url, timeout_seconds=5)
+            
+            if validation_result.get('accessible', False):
+                validated.append(upload)
+                logging.info(f"✅ URL validated: {upload.get('local_filename')} (attempt {attempt + 1})")
+                break
+        
+        # If all retries failed
+        if not validation_result or not validation_result.get('accessible', False):
             failed.append({
                 "file": upload.get('local_filename', 'unknown'),
                 "url": url,
-                "error": validation_result.get('error', 'Unknown validation error'),
-                "status_code": validation_result.get('status_code')
+                "error": validation_result.get('error', 'Unknown validation error') if validation_result else 'Validation failed after all retries',
+                "status_code": validation_result.get('status_code') if validation_result else None
             })
-            logging.error(f"❌ URL validation failed: {upload.get('local_filename')} - {validation_result.get('error')}")
+            logging.error(f"❌ URL validation failed after {max_retries + 1} attempts: {upload.get('local_filename')} - {validation_result.get('error') if validation_result else 'No validation result'}")
 
     return {
         "validated_uploads": validated,

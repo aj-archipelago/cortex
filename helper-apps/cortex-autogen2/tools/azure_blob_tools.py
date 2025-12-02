@@ -221,8 +221,14 @@ class AzureBlobUploader:
             # Azure blobs may need a moment to become accessible after upload
             verify_success, verify_error = _verify_sas_url(sas_url)
             if not verify_success:
-                # Log warning but don't raise exception - URL might be valid but not immediately accessible
-                # The evaluator will catch truly invalid URLs later
+                # CRITICAL FIX: If we get a 403, the SAS token is definitely invalid/broken.
+                # We must NOT return this URL, or agents will get stuck in a loop.
+                if "403" in verify_error or "AuthenticationFailed" in verify_error:
+                    logger.error(f"❌ SAS URL verification failed with 403 Forbidden: {verify_error}")
+                    raise ValueError(f"Generated SAS URL is invalid (403 Forbidden): {verify_error}")
+                
+                # For other errors (like 404 immediate check), log warning but proceed
+                # as propagation might take a moment
                 logger.warning(f"⚠️ SAS URL verification failed for blob '{clean_name}': {verify_error}")
                 logger.warning(f"   URL will be returned anyway - may be valid but not immediately accessible")
                 logger.warning(f"   Generated URL: {sas_url[:150]}...")
@@ -307,10 +313,16 @@ class AzureBlobUploader:
             if sha256_hex in self._sha256_to_blob:
                 # Return prior URL for identical content
                 prior_blob = self._sha256_to_blob[sha256_hex]
-                sas_url = self.generate_sas_url(prior_blob)
-                return {"blob_name": prior_blob, "download_url": sas_url, "deduplicated": True}
+                try:
+                    sas_url = self.generate_sas_url(prior_blob)
+                    return {"blob_name": prior_blob, "download_url": sas_url, "deduplicated": True}
+                except Exception as e:
+                    logger.warning(f"⚠️ Cached blob '{prior_blob}' SAS generation failed: {e}. Invalidating cache and re-uploading.")
+                    # Invalidate cache and fall through to fresh upload
+                    del self._sha256_to_blob[sha256_hex]
         except Exception:
-            sha256_hex = None
+            # If hashing fails, just proceed to upload
+            pass
 
         # Simple upload; SDK will handle block uploads automatically for large blobs
         try:
