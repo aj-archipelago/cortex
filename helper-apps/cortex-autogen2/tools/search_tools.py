@@ -24,6 +24,8 @@ import html as html_lib
 from .google_cse import google_cse_search
 from urllib.parse import urljoin, urlparse
 
+logger = logging.getLogger(__name__)
+
 # try:
 # except ImportError:
 #     logging.warning("matplotlib.pyplot not found. Plotting functionality will be disabled.")
@@ -208,43 +210,6 @@ def _extract_snippet_near(html: str, start_pos: int) -> Optional[str]:
 
 
 
-def _enrich_web_results_with_meta(results: List[Dict[str, Any]], max_fetch: int = 3, timeout_s: int = 8) -> List[Dict[str, Any]]:
-    if not results:
-        return results
-    headers = {"User-Agent": USER_AGENT}
-    enriched: List[Dict[str, Any]] = []
-    for idx, item in enumerate(results):
-        if idx < max_fetch and (not item.get("snippet") or len(item.get("snippet") or "") < 40):
-            url = item.get("url")
-            try:
-                resp = requests.get(url, headers=headers, timeout=timeout_s)
-                resp.raise_for_status()
-                html = resp.text
-                # meta description
-                md = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']', html, flags=re.I)
-                if not md:
-                    md = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']description["\']', html, flags=re.I)
-                if not md:
-                    md = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', html, flags=re.I)
-                snippet = html_lib.unescape(md.group(1)).strip() if md else None
-                if not snippet:
-                    # fallback: plain text excerpt from body
-                    body = re.search(r'<body[^>]*>([\s\S]*?)</body>', html, flags=re.I)
-                    if body:
-                        text_only = re.sub('<script[\s\S]*?</script>', ' ', body.group(1), flags=re.I)
-                        text_only = re.sub('<style[\s\S]*?</style>', ' ', text_only, flags=re.I)
-                        text_only = re.sub('<[^<]+?>', ' ', text_only)
-                        text_only = re.sub(r'\s+', ' ', text_only).strip()
-                        snippet = text_only[:300] if text_only else None
-                if snippet:
-                    item = dict(item)
-                    item["snippet"] = snippet
-            except Exception:
-                pass
-        enriched.append(item)
-    return enriched
-
-
 def _html_to_text(html: str, max_chars: int = 200000) -> str:
     # Normalize line breaks for block elements before stripping
     block_tags = [
@@ -271,11 +236,36 @@ def _html_to_text(html: str, max_chars: int = 200000) -> str:
     return text
 
 
-async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max_chars: int = 200000) -> str:
+def _safe_filename_from_url(url: str) -> str:
+    """Generate a safe filename from URL."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    host = parsed.netloc.replace('www.', '').replace('.', '_')
+    safe_path = parsed.path.strip('/').replace('/', '_') or 'index'
+    # Remove unsafe characters
+    safe_path = re.sub(r'[^\w\-_]', '_', safe_path)
+    if len(safe_path) > 100:
+        safe_path = safe_path[:100]
+    filename = f"{host}_{safe_path}.html"
+    return filename
+
+
+def _save_html_to_workdir(work_dir: str, url: str, html: str) -> str:
+    """Save full HTML content to work directory."""
+    os.makedirs(work_dir, exist_ok=True)
+    filename = _safe_filename_from_url(url)
+    path = os.path.join(work_dir, filename)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(html)
+    return path
+
+
+async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max_chars: int = 200000, work_dir: Optional[str] = None) -> str:
     """
     Fetch a full webpage and return structured JSON with title, html, and extracted text.
     - render=False: simple HTTP fetch (no JS)
     - render=True: try Playwright to render JS (falls back to simple fetch if unavailable)
+    - work_dir: If provided, automatically saves FULL HTML to a file (not truncated)
     """
     try:
         # Normalize URL
@@ -283,12 +273,22 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
             url = 'https://' + url
 
         headers = {"User-Agent": USER_AGENT}
+        saved_html_path = None
 
         # Helper: requests-based fetch
         def fetch_via_requests(target_url: str) -> Dict[str, Any]:
             r = requests.get(target_url, headers=headers, timeout=timeout_s)
             r.raise_for_status()
             html = r.text
+            
+            # Save FULL HTML to file if work_dir provided
+            saved_html_path = None
+            if work_dir:
+                try:
+                    saved_html_path = _save_html_to_workdir(work_dir, target_url, html)
+                except Exception as e:
+                    logger.warning(f"Failed to save HTML to work_dir: {e}")
+            
             # Title
             mt = re.search(r'<title[^>]*>([\s\S]*?)</title>', html, flags=re.I)
             title = html_lib.unescape(mt.group(1)).strip() if mt else None
@@ -298,13 +298,27 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
                 md = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', html, flags=re.I)
             meta_desc = html_lib.unescape(md.group(1)).strip() if md else None
             text = _html_to_text(html, max_chars=max_chars)
-            return {
-                "url": str(r.url or target_url),
-                "title": title,
-                "meta_description": meta_desc,
-                "html": html if len(html) <= max_chars else html[:max_chars],
-                "text": text,
-            }
+            
+            # When work_dir is provided, return minimal JSON (no huge HTML) - guide LLM to use saved file
+            if saved_html_path:
+                result = {
+                    "url": str(r.url or target_url),
+                    "title": title,
+                    "meta_description": meta_desc,
+                    "text": text[:500],  # Very small text preview (<1KB) since we have file path
+                    "saved_html": saved_html_path,
+                    "note": "Full HTML saved to file. Use saved_html path for pandas.read_html() or file operations."
+                }
+            else:
+                # No work_dir: return HTML in response (backward compatibility)
+                result = {
+                    "url": str(r.url or target_url),
+                    "title": title,
+                    "meta_description": meta_desc,
+                    "html": html if len(html) <= max_chars else html[:max_chars],  # Truncated for JSON response
+                    "text": text,
+                }
+            return result
 
         if not render:
             data = fetch_via_requests(url)
@@ -318,6 +332,7 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
             return json.dumps(data, indent=2)
 
         try:
+            saved_html_path = None
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 context = await browser.new_context()
@@ -331,6 +346,13 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
                 html = await page.content()
                 await browser.close()
 
+                # Save FULL HTML to file if work_dir provided
+                if work_dir:
+                    try:
+                        saved_html_path = _save_html_to_workdir(work_dir, final_url, html)
+                    except Exception as e:
+                        logger.warning(f"Failed to save HTML to work_dir: {e}")
+
                 text = _html_to_text(html, max_chars=max_chars)
                 # Meta description from rendered HTML
                 md = re.search(r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']', html, flags=re.I)
@@ -338,13 +360,25 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
                     md = re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']', html, flags=re.I)
                 meta_desc = html_lib.unescape(md.group(1)).strip() if md else None
 
-                data = {
-                    "url": final_url,
-                    "title": title or None,
-                    "meta_description": meta_desc,
-                    "html": html if len(html) <= max_chars else html[:max_chars],
-                    "text": text,
-                }
+                # When work_dir is provided, return minimal JSON (no huge HTML) - guide LLM to use saved file
+                if saved_html_path:
+                    data = {
+                        "url": final_url,
+                        "title": title or None,
+                        "meta_description": meta_desc,
+                        "text": text[:500],  # Very small text preview (<1KB) since we have file path
+                        "saved_html": saved_html_path,
+                        "note": "Full HTML saved to file. Use saved_html path for pandas.read_html() or file operations."
+                    }
+                else:
+                    # No work_dir: return HTML in response (backward compatibility)
+                    data = {
+                        "url": final_url,
+                        "title": title or None,
+                        "meta_description": meta_desc,
+                        "html": html if len(html) <= max_chars else html[:max_chars],  # Truncated for JSON response
+                        "text": text,
+                    }
                 return json.dumps(data, indent=2)
         except Exception:
             # Fallback to non-rendered fetch on any Playwright runtime error
@@ -355,7 +389,7 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
 
 
 
-async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
+async def web_search(query: str, count: int = 25) -> str:
     try:
         results: List[Dict[str, Any]] = []
         used_google = False
@@ -369,11 +403,6 @@ async def web_search(query: str, count: int = 25, enrich: bool = True) -> str:
             except Exception:
                 used_google = False
                 results = []
-
-
-        if enrich and results:
-            # Enrich only for web-page items
-            results = _enrich_web_results_with_meta(results)
 
         if not results:
             return json.dumps({"status": "No relevant results found."})
@@ -750,35 +779,106 @@ async def image_search(query: str, count: int = 25, verify_download: bool = True
         return json.dumps({"error": f"Image search failed: {str(exc)}"})
 
 
-async def combined_search(query: str, count: int = 25, enrich: bool = True) -> str:
+def _deduplicate_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove duplicate results based on URL."""
+    seen_urls = set()
+    unique_results = []
+    for result in results:
+        url = result.get("url") or result.get("link")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            unique_results.append(result)
+    return unique_results
+
+
+async def combined_search(query: str, count: int = 25) -> str:
+    """
+    Combined parallel search - runs all search functions in parallel.
+    Returns merged, deduplicated results from web_search, image_search, google_cse_search, and collect_images.
+    """
     try:
-        combined: List[Dict[str, Any]] = []
-        # Prefer Google for both, with fallback to DDG
-        web_results: List[Dict[str, Any]] = []
-        img_results: List[Dict[str, Any]] = []
-
-        if _has_google_cse_env():
+        # Run all 5 search functions in parallel
+        tasks = [
+            web_search(query, count),
+            image_search(query, count),
+            google_cse_search(text=query, parameters={"num": max(1, min(count, 10))}),
+            google_cse_search(text=query, parameters={"num": max(1, min(count, 10)), "searchType": "image"}),
+            collect_images(query, count),
+        ]
+        
+        search_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Parse and extract results from each
+        all_results: List[Dict[str, Any]] = []
+        
+        # 1. web_search - returns list of web results
+        if not isinstance(search_results[0], Exception):
             try:
-                raw_web = await google_cse_search(text=query, parameters={"num": max(1, min(count, 10))})
-                data_web = json.loads(raw_web) if raw_web else {}
-                web_results = _normalize_cse_web_results(data_web)
-            except Exception:
-                web_results = []
+                web_data = json.loads(search_results[0]) if isinstance(search_results[0], str) else search_results[0]
+                if isinstance(web_data, list):
+                    all_results.extend(web_data)
+                elif isinstance(web_data, dict) and "error" not in web_data and "status" not in web_data:
+                    # Handle dict response
+                    if "results" in web_data:
+                        all_results.extend(web_data["results"])
+            except Exception as e:
+                logger.warning(f"[combined_search] Failed to parse web_search results: {e}")
+        
+        # 2. image_search - returns list of image results
+        if not isinstance(search_results[1], Exception):
             try:
-                raw_img = await google_cse_search(text=query, parameters={"num": max(1, min(count, 10)), "searchType": "image"})
-                data_img = json.loads(raw_img) if raw_img else {}
-                img_results = _normalize_cse_image_results(data_img)
-            except Exception:
-                img_results = []
-
-            if enrich and web_results:
-                web_results = _enrich_web_results_with_meta(web_results)
-        combined.extend(web_results)
-        combined.extend(img_results)
-        if not combined:
+                img_data = json.loads(search_results[1]) if isinstance(search_results[1], str) else search_results[1]
+                if isinstance(img_data, list):
+                    all_results.extend(img_data)
+                elif isinstance(img_data, dict) and "error" not in img_data and "status" not in img_data:
+                    if "results" in img_data:
+                        all_results.extend(img_data["results"])
+            except Exception as e:
+                logger.warning(f"[combined_search] Failed to parse image_search results: {e}")
+        
+        # 3. google_cse_search (web) - raw CSE, need to normalize
+        if not isinstance(search_results[2], Exception):
+            try:
+                raw_web = json.loads(search_results[2]) if isinstance(search_results[2], str) else search_results[2]
+                if isinstance(raw_web, dict) and "error" not in raw_web:
+                    cse_web_results = _normalize_cse_web_results(raw_web)
+                    all_results.extend(cse_web_results)
+            except Exception as e:
+                logger.warning(f"[combined_search] Failed to parse google_cse_search (web) results: {e}")
+        
+        # 4. google_cse_search (image) - raw CSE, need to normalize
+        if not isinstance(search_results[3], Exception):
+            try:
+                raw_img = json.loads(search_results[3]) if isinstance(search_results[3], str) else search_results[3]
+                if isinstance(raw_img, dict) and "error" not in raw_img:
+                    cse_img_results = _normalize_cse_image_results(raw_img)
+                    all_results.extend(cse_img_results)
+            except Exception as e:
+                logger.warning(f"[combined_search] Failed to parse google_cse_search (image) results: {e}")
+        
+        # 5. collect_images - returns {"images": [...]}
+        if not isinstance(search_results[4], Exception):
+            try:
+                collect_data = json.loads(search_results[4]) if isinstance(search_results[4], str) else search_results[4]
+                if isinstance(collect_data, dict):
+                    if "images" in collect_data:
+                        all_results.extend(collect_data["images"])
+                    elif "error" not in collect_data and "status" not in collect_data:
+                        # Might return list directly
+                        if isinstance(collect_data.get("results"), list):
+                            all_results.extend(collect_data["results"])
+            except Exception as e:
+                logger.warning(f"[combined_search] Failed to parse collect_images results: {e}")
+        
+        # Deduplicate by URL
+        unique_results = _deduplicate_results(all_results)
+        
+        if not unique_results:
             return json.dumps({"status": "No relevant results found."})
-        return json.dumps(combined, indent=2)
+        
+        return json.dumps(unique_results, indent=2)
     except Exception as exc:
+        logger.error(f"[combined_search] Unexpected error: {exc}")
         return json.dumps({"error": f"Combined search failed: {str(exc)}"})
 
 
@@ -821,25 +921,42 @@ from autogen_core.tools import FunctionTool
 
 image_search_tool = FunctionTool(
     image_search,
-    description="Search for images; returns ranked, downloadable candidates as JSON."
+    description="Search for images using Google CSE. Returns normalized image results with verification. Use this for image search."
 )
 
 collect_images_tool = FunctionTool(
     collect_images,
-    description="Search for images on the web using search terms."
+    description="Collect and verify downloadable images using Google CSE. Returns verified image URLs. Use this when you need downloadable images."
 )
 
 web_search_tool = FunctionTool(
     web_search,
-    description="Search the web using Google CSE. Returns web results as JSON."
+    description="Search for web pages using Google CSE. Returns normalized web results with title, URL, and snippet. Use this for web page search."
 )
 
 combined_search_tool = FunctionTool(
     combined_search,
-    description="Combined web and image search. Returns both result types as JSON."
+    description="Combined parallel search - runs web_search, image_search, google_cse_search (web), google_cse_search (image), and collect_images in parallel. Returns merged, deduplicated results. Use this for comprehensive search. For fetching specific URLs, use fetch_webpage or cortex_browser directly."
 )
 
+def get_fetch_webpage_tool(work_dir: Optional[str] = None):
+    """
+    Factory function to create fetch_webpage tool with work_dir bound.
+    When work_dir is provided, fetch_webpage automatically saves FULL HTML to files.
+    """
+    
+    async def fetch_webpage_bound(url: str, render: bool = False, timeout_s: int = 20, max_chars: int = 200000) -> str:
+        """Bound version of fetch_webpage with work_dir automatically set."""
+        return await fetch_webpage(url, render=render, timeout_s=timeout_s, max_chars=max_chars, work_dir=work_dir)
+    
+    return FunctionTool(
+        fetch_webpage_bound,
+        description="Fetch a specific webpage by URL (not query). Takes URL as input, not search query. Use this AFTER search results to get full HTML content. Automatically saves HTML to file when work_dir is provided."
+    )
+
+
+# Keep unbound version for backward compatibility
 fetch_webpage_tool = FunctionTool(
     fetch_webpage,
-    description="Fetch a full webpage and return structured JSON with title, html, and extracted text."
+    description="Fetch a specific webpage by URL (not query). Takes URL as input, not search query. Use this AFTER search results to get full HTML content. Automatically saves HTML to file when work_dir is provided."
 )

@@ -71,14 +71,32 @@ def validate_uploaded_urls(uploads: List[Dict[str, Any]]) -> Dict[str, Any]:
         
         # If all retries failed
         if not validation_result or not validation_result.get('accessible', False):
+            error_msg = validation_result.get('error', 'Unknown validation error') if validation_result else 'Validation failed after all retries'
+            status_code = validation_result.get('status_code') if validation_result else None
+            
+            # CRITICAL: 403 errors indicate broken SAS tokens - fail immediately, no retries
+            if status_code == 403 or "403" in str(error_msg) or "AuthenticationFailed" in str(error_msg):
+                logging.error(f"❌ CRITICAL: SAS URL returned 403 Forbidden for {upload.get('local_filename')} - SAS token is invalid/broken")
+                logging.error(f"   Blob name: {upload.get('blob_name', 'unknown')}")
+                logging.error(f"   This indicates a fundamental issue with SAS token generation - upload should have failed earlier")
+                # Raise exception to fail the entire upload - 403s are not recoverable
+                raise ValueError(f"CRITICAL: SAS URL validation failed with 403 Forbidden for {upload.get('local_filename')}. This indicates the SAS token is invalid. Upload should not have succeeded. Blob: {upload.get('blob_name', 'unknown')}")
+            
             failed.append({
                 "file": upload.get('local_filename', 'unknown'),
                 "url": url,
-                "error": validation_result.get('error', 'Unknown validation error') if validation_result else 'Validation failed after all retries',
-                "status_code": validation_result.get('status_code') if validation_result else None
+                "error": error_msg,
+                "status_code": status_code
             })
-            logging.error(f"❌ URL validation failed after {max_retries + 1} attempts: {upload.get('local_filename')} - {validation_result.get('error') if validation_result else 'No validation result'}")
+            logging.error(f"❌ URL validation failed after {max_retries + 1} attempts: {upload.get('local_filename')} - {error_msg}")
 
+    # CRITICAL: If any upload failed validation, fail the entire operation
+    # 403 errors should have been caught above and raised, but check for other failures too
+    if failed:
+        failed_files = [f.get('file', 'unknown') for f in failed]
+        failed_errors = [f.get('error', 'unknown') for f in failed]
+        raise ValueError(f"Upload validation failed for {len(failed)} file(s): {failed_files}. Errors: {failed_errors}. All files must be accessible for upload to succeed.")
+    
     return {
         "validated_uploads": validated,
         "failed_validations": failed,
@@ -110,22 +128,33 @@ def upload_files_unified(file_paths: Union[str, List[str]], work_dir: Optional[s
     # Upload files
     result = upload_files(file_paths, work_dir)
 
-    # Validate URLs are accessible
+    # Validate URLs are accessible - this will raise ValueError if any 403 errors are detected
     if result.get('success', False) and 'uploads' in result:
-        validation_result = validate_uploaded_urls(result['uploads'])
+        try:
+            validation_result = validate_uploaded_urls(result['uploads'])
+            
+            # Update result with only validated uploads
+            result['validated_uploads'] = validation_result['validated_uploads']
+            result['failed_validations'] = validation_result['failed_validations']
+            result['total_validated'] = validation_result['total_validated']
+            result['total_failed'] = validation_result['total_failed']
 
-        # Update result with only validated uploads
-        result['validated_uploads'] = validation_result['validated_uploads']
-        result['failed_validations'] = validation_result['failed_validations']
-        result['total_validated'] = validation_result['total_validated']
-        result['total_failed'] = validation_result['total_failed']
-
-        # Replace uploads array with only validated ones
-        result['uploads'] = validation_result['validated_uploads']
-
-        # Update success status based on validation
-        if validation_result['total_failed'] > 0:
-            result['validation_warnings'] = f"{validation_result['total_failed']} URLs failed validation and were excluded"
+            # Replace uploads array with only validated ones
+            result['uploads'] = validation_result['validated_uploads']
+            
+            # CRITICAL: If validation failed, mark upload as failed
+            if validation_result['total_failed'] > 0:
+                result['success'] = False
+                result['error'] = f"Upload validation failed: {validation_result['total_failed']} file(s) returned inaccessible URLs"
+        except ValueError as e:
+            # 403 errors or other critical validation failures - fail the entire upload
+            result['success'] = False
+            result['error'] = str(e)
+            result['uploads'] = []
+            result['validated_uploads'] = []
+            result['failed_validations'] = result.get('uploads', [])
+            result['total_validated'] = 0
+            result['total_failed'] = len(result.get('uploads', []))
 
     return json.dumps(result)
 

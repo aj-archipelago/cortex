@@ -433,7 +433,7 @@ Return ONLY the progress message (5-7 words) OR the word SKIP:"""
         """
         try:
             while True:
-                await asyncio.sleep(1)  # 1-second heartbeat
+                await asyncio.sleep(5)  # X-second heartbeat
                 
                 if task_id not in self._heartbeat_state:
                     break

@@ -918,28 +918,47 @@ class TaskProcessor:
                     task, upload_data, plan_text
                 )
                 
-                # Add image URLs section if available
-                image_urls_section = ""
+                # Add prominent structured data mapping section - CRITICAL for preventing value reconstruction
+                structured_data_section = ""
                 try:
-                    if "uploads" in upload_data:
-                        image_files = []
+                    if "uploads" in upload_data and upload_data["uploads"]:
+                        structured_data_section = "\n\n" + "="*80 + "\n"
+                        structured_data_section += "🚨🚨🚨 MANDATORY STRUCTURED DATA MAPPING - USE EXACT VALUES 🚨🚨🚨\n"
+                        structured_data_section += "="*80 + "\n"
+                        structured_data_section += "**CRITICAL PRINCIPLE**: Structured data provides exact values - use them EXACTLY as provided.\n"
+                        structured_data_section += "**FORBIDDEN**: DO NOT reconstruct values from related fields - it causes authentication failures!\n"
+                        structured_data_section += "**REQUIRED**: Copy the EXACT field values below - do NOT modify, strip, or reconstruct.\n\n"
+                        
                         for upload in upload_data["uploads"]:
                             fname = upload.get("local_filename", "")
                             download_url = upload.get("download_url", "")
-                            if download_url and fname and fname.lower().endswith(('.png', '.jpg', '.jpeg')):
-                                image_files.append(f"{fname}: {download_url}")
+                            
+                            if download_url:
+                                structured_data_section += f"📁 File: {fname}\n"
+                                structured_data_section += f"   ✅ EXACT VALUE TO USE (copy this entire value):\n"
+                                structured_data_section += f"   {download_url}\n"
+                                structured_data_section += f"   ⚠️  Use this EXACT value - do NOT reconstruct from filename or other fields!\n\n"
                         
-                        if image_files:
-                            image_urls_section = "\n\n**IMAGE FILES WITH SAS URLs (Use these exact URLs for <img src> tags):**\n" + "\n".join(f"- {img}" for img in image_files) + "\n"
-                except:
-                    pass
+                        structured_data_section += "="*80 + "\n"
+                        structured_data_section += "**MANDATORY VALIDATION**: Before outputting content, verify every value matches an EXACT value from above.\n"
+                        structured_data_section += "="*80 + "\n\n"
+                except Exception as e:
+                    self.logger.warning(f"Failed to generate structured data mapping section: {e}")
                 
-                presenter_context += image_urls_section
+                presenter_context += structured_data_section
                 
-                # Add critical instructions
+                # Add critical instructions with structured data validation emphasis
                 presenter_context += """
 
-**CRITICAL INSTRUCTIONS - READ CAREFULLY**:
+**🚨🚨🚨 CRITICAL INSTRUCTIONS - READ CAREFULLY 🚨🚨🚨**:
+
+**MANDATORY STRUCTURED DATA VALIDATION (DO THIS FIRST)**:
+1. **FIND STRUCTURED DATA MAPPING**: Look for the "MANDATORY STRUCTURED DATA MAPPING" section above - it shows exact values to use
+2. **EXTRACT EXACT VALUES**: Copy the EXACT field values from the mapping - do NOT reconstruct from related fields
+3. **VERIFY COMPLETENESS**: Ensure values include all required components (not truncated or partial)
+4. **VALIDATE BEFORE OUTPUT**: Before outputting final content, verify every value matches an EXACT value from the mapping
+
+**OTHER CRITICAL INSTRUCTIONS**:
 1. **Data Source Citation**: If execution context mentions SQL/database/AlJazeera/aj_sql_agent, you MUST start with "📊 Data Source: Al Jazeera Internal Database (via SQL query execution)"
 
 2. **Use ALL Available Context**: Review:
@@ -959,7 +978,7 @@ class TaskProcessor:
 
 5. **Provide Insights**: Based on the data previews and task, give meaningful analysis
 
-6. **Include Download Links**: Use the upload results to provide clickable links for all files
+6. **Include Download Links**: Use the EXACT values from the structured data mapping above - do NOT reconstruct values from related fields
 
 You MUST show the data preview table and data source citation.
 """

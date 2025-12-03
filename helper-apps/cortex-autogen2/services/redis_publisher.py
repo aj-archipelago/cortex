@@ -120,13 +120,8 @@ class RedisPublisher:
         self.connected = connect_redis()
         if self.connected:
             logger.info("Connected to Redis successfully")
-            # Start heartbeat loop once per process only if Redis is connected
-            if self._heartbeat_task is None:
-                try:
-                    self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-                    logger.info("Started Redis progress heartbeat task")
-                except Exception as e:
-                    logger.warning(f"Failed to start heartbeat task: {e}")
+            # Heartbeat loop removed - set_transient_update already publishes immediately
+            # No need for redundant re-publishing loop
         else:
             logger.warning("Failed to connect to Redis")
             logger.warning("Redis progress publishing will be disabled")
@@ -170,6 +165,7 @@ class RedisPublisher:
 
             # CRITICAL FIX: Immediately publish the update (not just cache it)
             # This ensures progress updates are received even if heartbeat fails or isn't running
+            # Use asyncio.to_thread to prevent blocking the event loop
             try:
                 message_data = {
                     "requestId": request_id,
@@ -177,7 +173,7 @@ class RedisPublisher:
                     "info": str(info),
                     "data": data
                 }
-                self.publish_request_progress(message_data)
+                await asyncio.to_thread(self.publish_request_progress, message_data)
             except Exception as pub_err:
                 logger.debug(f"Immediate publish error for {request_id}: {pub_err}")
         except Exception as e:
@@ -214,7 +210,7 @@ class RedisPublisher:
                                     "progress": float(payload.get("progress", 0.0)),
                                     "info": str(payload.get("info", ""))
                                 }
-                                self.publish_request_progress(message_data)
+                                await asyncio.to_thread(self.publish_request_progress, message_data)
                             except Exception as pub_err:
                                 logger.debug(f"Heartbeat publish error for {rid}: {pub_err}")
                 except Exception as loop_err:
@@ -254,12 +250,8 @@ class RedisPublisher:
     async def close(self):
         """Close Redis connection gracefully"""
         global redis_client
-        # CRITICAL: Do NOT cancel heartbeat task here - it should run continuously
-        # for all tasks. The heartbeat is a long-lived background task that should
-        # only be cancelled when the entire process shuts down, not per-task.
-        # This ensures progress updates are sent every second as a heartbeat.
-        # The heartbeat will automatically skip finalized requests, so it's safe
-        # to keep it running even after tasks complete.
+        # Note: Heartbeat loop removed - set_transient_update publishes immediately
+        # No cleanup needed for heartbeat task
         if redis_client:
             try:
                 # Don't actually close the connection in non-continuous mode
@@ -282,9 +274,9 @@ async def get_redis_publisher() -> RedisPublisher:
         _redis_publisher = RedisPublisher()
         await _redis_publisher.connect()
     else:
-        # Ensure connectivity and heartbeat are active for new tasks
+        # Ensure connectivity is active for new tasks
         try:
-            if (not getattr(_redis_publisher, 'connected', False)) or getattr(_redis_publisher, '_heartbeat_task', None) is None:
+            if not getattr(_redis_publisher, 'connected', False):
                 await _redis_publisher.connect()
         except Exception:
             # Best-effort reconnect

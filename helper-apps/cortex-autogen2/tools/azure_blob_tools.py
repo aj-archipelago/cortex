@@ -214,26 +214,54 @@ class AzureBlobUploader:
                 logger.error(f"❌ Generated SAS URL failed validation: {sas_url[:100]}...")
                 raise ValueError("Generated SAS URL failed validation")
             
-            logger.info(f"✅ Generated SAS URL for blob: {clean_name} (full name for debugging)")
+            logger.info(f"✅ Generated SAS URL for blob: {clean_name}")
+            logger.debug(f"   Blob name (exact): '{clean_name}'")
+            logger.debug(f"   SAS URL (first 100 chars): {sas_url[:100]}...")
+            
+            # CRITICAL: Verify blob name consistency in URL
+            # Extract blob name from base_url to ensure it matches what we used for SAS generation
+            from urllib.parse import urlparse, unquote
+            parsed_url = urlparse(base_url)
+            url_blob_path = unquote(parsed_url.path).lstrip('/')
+            # Remove container name from path to get just the blob name
+            if url_blob_path.startswith(f"{self.container_name}/"):
+                url_blob_name = url_blob_path[len(f"{self.container_name}/"):]
+            else:
+                url_blob_name = url_blob_path
+            
+            if url_blob_name != clean_name:
+                logger.error(f"❌ CRITICAL: Blob name mismatch detected!")
+                logger.error(f"   Blob name used for SAS generation: '{clean_name}'")
+                logger.error(f"   Blob name in URL: '{url_blob_name}'")
+                logger.error(f"   This mismatch will cause 403 errors - SAS token signature won't match")
+                raise ValueError(f"Blob name mismatch: SAS generated for '{clean_name}' but URL contains '{url_blob_name}'. This will cause 403 Forbidden errors.")
             
             # Verify the SAS URL actually works to catch authentication failures early
-            # Use lenient verification - log warnings but don't block URL generation
-            # Azure blobs may need a moment to become accessible after upload
+            # CRITICAL: 403 errors are hard failures - never proceed if we get 403
             verify_success, verify_error = _verify_sas_url(sas_url)
             if not verify_success:
                 # CRITICAL FIX: If we get a 403, the SAS token is definitely invalid/broken.
                 # We must NOT return this URL, or agents will get stuck in a loop.
                 if "403" in verify_error or "AuthenticationFailed" in verify_error:
-                    logger.error(f"❌ SAS URL verification failed with 403 Forbidden: {verify_error}")
-                    raise ValueError(f"Generated SAS URL is invalid (403 Forbidden): {verify_error}")
+                    logger.error(f"❌ CRITICAL: SAS URL verification failed with 403 Forbidden for blob '{clean_name}'")
+                    logger.error(f"   Blob name used in SAS: '{clean_name}'")
+                    logger.error(f"   Blob name in URL: '{url_blob_name}'")
+                    logger.error(f"   Container: '{self.container_name}'")
+                    logger.error(f"   Account: '{self.account_name}'")
+                    logger.error(f"   Error: {verify_error}")
+                    logger.error(f"   SAS URL (first 200 chars): {sas_url[:200]}...")
+                    logger.error(f"   This indicates the SAS token signature is invalid - check blob name, account key, and permissions")
+                    raise ValueError(f"CRITICAL: Generated SAS URL is invalid (403 Forbidden) for blob '{clean_name}'. SAS token signature mismatch. Error: {verify_error}")
                 
                 # For other errors (like 404 immediate check), log warning but proceed
                 # as propagation might take a moment
                 logger.warning(f"⚠️ SAS URL verification failed for blob '{clean_name}': {verify_error}")
+                logger.warning(f"   Blob name: '{clean_name}'")
                 logger.warning(f"   URL will be returned anyway - may be valid but not immediately accessible")
-                logger.warning(f"   Generated URL: {sas_url[:150]}...")
+                logger.warning(f"   Generated URL (first 150 chars): {sas_url[:150]}...")
             else:
-                logger.info(f"✅ SAS URL verification passed for blob '{clean_name}'")
+                logger.info(f"✅ SAS URL verification passed for blob '{clean_name}' (HTTP 200)")
+                logger.debug(f"   Verified blob name: '{clean_name}' (matches URL: {url_blob_name})")
             
             return sas_url
         except Exception as e:
@@ -289,8 +317,20 @@ class AzureBlobUploader:
         # Detect content type for better browser handling
         content_type, _ = mimetypes.guess_type(file_path)
         if not content_type:
-            content_type = "application/octet-stream"
+            # Explicit content types for common file formats
+            _, ext = os.path.splitext(file_path.lower())
+            content_type_map = {
+                '.csv': 'text/csv',
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.pdf': 'application/pdf',
+                '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            }
+            content_type = content_type_map.get(ext, 'application/octet-stream')
         content_settings = ContentSettings(content_type=content_type)
+        logger.debug(f"📄 Uploading {os.path.basename(file_path)} with content-type: {content_type}")
 
         # Hint SDK to use smaller single-put and block sizes to avoid timeouts on moderate networks
         try:
@@ -315,11 +355,37 @@ class AzureBlobUploader:
                 prior_blob = self._sha256_to_blob[sha256_hex]
                 try:
                     sas_url = self.generate_sas_url(prior_blob)
-                    return {"blob_name": prior_blob, "download_url": sas_url, "deduplicated": True}
+                    # Verify the cached SAS URL still works (might have expired or been invalidated)
+                    verify_success, verify_error = _verify_sas_url(sas_url, timeout=5)
+                    if verify_success:
+                        logger.info(f"✅ Using cached blob '{prior_blob}' for identical content")
+                        return {"blob_name": prior_blob, "download_url": sas_url, "deduplicated": True}
+                    elif "403" in verify_error or "AuthenticationFailed" in verify_error:
+                        # 403 means the cached blob's SAS is invalid - invalidate and re-upload
+                        logger.warning(f"⚠️ Cached blob '{prior_blob}' SAS URL returned 403. Invalidating cache and re-uploading.")
+                        del self._sha256_to_blob[sha256_hex]
+                        # Fall through to fresh upload
+                    else:
+                        # Other errors (404, timeout) - might be transient, but invalidate cache to be safe
+                        logger.warning(f"⚠️ Cached blob '{prior_blob}' SAS verification failed: {verify_error}. Invalidating cache and re-uploading.")
+                        del self._sha256_to_blob[sha256_hex]
+                        # Fall through to fresh upload
+                except ValueError as e:
+                    # 403 errors from generate_sas_url - invalidate cache
+                    if "403" in str(e) or "AuthenticationFailed" in str(e):
+                        logger.warning(f"⚠️ Cached blob '{prior_blob}' SAS generation failed with 403. Invalidating cache and re-uploading.")
+                        if sha256_hex in self._sha256_to_blob:
+                            del self._sha256_to_blob[sha256_hex]
+                    else:
+                        logger.warning(f"⚠️ Cached blob '{prior_blob}' SAS generation failed: {e}. Invalidating cache and re-uploading.")
+                        if sha256_hex in self._sha256_to_blob:
+                            del self._sha256_to_blob[sha256_hex]
+                    # Fall through to fresh upload
                 except Exception as e:
                     logger.warning(f"⚠️ Cached blob '{prior_blob}' SAS generation failed: {e}. Invalidating cache and re-uploading.")
                     # Invalidate cache and fall through to fresh upload
-                    del self._sha256_to_blob[sha256_hex]
+                    if sha256_hex in self._sha256_to_blob:
+                        del self._sha256_to_blob[sha256_hex]
         except Exception:
             # If hashing fails, just proceed to upload
             pass
@@ -354,12 +420,56 @@ class AzureBlobUploader:
                 raise Exception(f"Azure upload failed: {error_msg}")
 
         # Generate SAS URL only after successful upload
-        try:
-            sas_url = self.generate_sas_url(normalized_blob_name)
-            if not _validate_sas_url(sas_url):
-                raise Exception("Generated SAS URL failed validation.")
-        except Exception as e:
-            raise Exception(f"Failed to generate SAS URL after successful upload: {e}")
+        # Add retry logic to wait for blob to be fully committed before generating SAS
+        max_retries = 3
+        retry_delay = 1.0  # seconds
+        sas_url = None
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                # Wait a moment for blob to be fully committed (especially important for large files)
+                if attempt > 0:
+                    time.sleep(retry_delay * attempt)  # Exponential backoff
+                
+                sas_url = self.generate_sas_url(normalized_blob_name)
+                if not _validate_sas_url(sas_url):
+                    raise Exception("Generated SAS URL failed validation.")
+                
+                # Note: generate_sas_url already verifies the URL and raises on 403
+                # But we double-check here for extra safety
+                verify_success, verify_error = _verify_sas_url(sas_url, timeout=10)
+                if verify_success:
+                    break  # Success! Exit retry loop
+                elif "403" in verify_error or "AuthenticationFailed" in verify_error:
+                    # CRITICAL: 403 is a hard failure - don't retry, raise immediately
+                    # This should never happen if generate_sas_url is working correctly
+                    logger.error(f"❌ CRITICAL: 403 detected in upload_file retry loop for blob '{normalized_blob_name}'")
+                    logger.error(f"   This should have been caught by generate_sas_url - indicates a bug")
+                    raise ValueError(f"CRITICAL: SAS URL verification failed with 403 Forbidden for blob '{normalized_blob_name}'. This should have been caught earlier. Error: {verify_error}")
+                else:
+                    # Other errors (404, timeout) - might be transient, retry
+                    last_error = verify_error
+                    if attempt == max_retries - 1:
+                        # Last attempt failed - log warning but proceed (might be propagation delay)
+                        logger.warning(f"⚠️ SAS URL verification failed after {max_retries} attempts: {verify_error}")
+                        logger.warning(f"   URL will be returned anyway - may be valid but not immediately accessible")
+                    continue
+                    
+            except ValueError as e:
+                # 403 errors should not be retried - re-raise immediately
+                if "403" in str(e) or "AuthenticationFailed" in str(e):
+                    raise
+                last_error = str(e)
+                if attempt == max_retries - 1:
+                    raise Exception(f"Failed to generate valid SAS URL after {max_retries} attempts: {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                if attempt == max_retries - 1:
+                    raise Exception(f"Failed to generate SAS URL after successful upload (after {max_retries} attempts): {last_error}")
+        
+        if not sas_url:
+            raise Exception(f"Failed to generate SAS URL after {max_retries} attempts: {last_error}")
 
         if sha256_hex:
             try:
@@ -367,7 +477,16 @@ class AzureBlobUploader:
             except Exception:
                 pass
 
-        logger.info(f"✅ Successfully uploaded {os.path.basename(file_path)} to Azure")
+        # CRITICAL FINAL CHECK: Verify the SAS URL one more time before returning
+        # This is a last-ditch safety check to ensure we never return a broken URL
+        if sas_url:
+            final_verify, final_error = _verify_sas_url(sas_url, timeout=5)
+            if not final_verify and ("403" in final_error or "AuthenticationFailed" in final_error):
+                logger.error(f"❌ CRITICAL: Final verification detected 403 for blob '{normalized_blob_name}' - this should never happen")
+                raise ValueError(f"CRITICAL: Final SAS URL verification failed with 403 Forbidden. This indicates a serious bug. Blob: '{normalized_blob_name}', Error: {final_error}")
+        
+        logger.info(f"✅ Successfully uploaded {os.path.basename(file_path)} to Azure with verified SAS URL")
+        logger.debug(f"   Blob: '{normalized_blob_name}', URL verified: ✅")
         # CRITICAL: Return normalized_blob_name (what was actually uploaded) not the original blob_name variable
         return {"blob_name": normalized_blob_name, "download_url": sas_url}
 

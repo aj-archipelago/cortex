@@ -536,12 +536,18 @@ CRITICAL: Always include "STEPS TAKEN SO FAR" section to help agent detect loops
             else:
                 file_summary_text += f"- Preview: {str(content_preview)}\n\n"
         
-        # Format upload results
-        upload_text = "**UPLOAD RESULTS**:\n"
+        # Format upload results with prominent header emphasizing structured data principles
+        upload_text = "\n" + "="*80 + "\n"
+        upload_text += "🚨🚨🚨 STRUCTURED DATA - EXACT VALUES REQUIRED 🚨🚨🚨\n"
+        upload_text += "="*80 + "\n"
+        upload_text += "**CRITICAL PRINCIPLE**: Structured data provides exact values - use them EXACTLY as provided.\n"
+        upload_text += "**FORBIDDEN**: DO NOT reconstruct values from related fields - use EXACT field values.\n"
+        upload_text += "**REQUIRED**: Extract exact 'download_url' values - do NOT modify, strip, or reconstruct.\n\n"
         if isinstance(upload_results, dict):
             upload_text += json.dumps(upload_results, indent=2)
         else:
             upload_text += str(upload_results)
+        upload_text += "\n" + "="*80 + "\n\n"
         
         # Combine everything with full execution plan
         execution_plan_full = execution_plan if execution_plan else "No plan available"
