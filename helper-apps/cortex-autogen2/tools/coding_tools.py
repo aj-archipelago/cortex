@@ -1,72 +1,72 @@
 """
 Core Coding Tool for Cortex-AutoGen2
 """
+from pathlib import Path
+from typing import Optional
+from autogen_core import CancellationToken
+from autogen_core.code_executor import CodeBlock
+from autogen_ext.code_executors.local import LocalCommandLineCodeExecutor
+from autogen_core.tools import FunctionTool
 
-import os
-import sys
-import subprocess
-from contextlib import redirect_stdout, redirect_stderr
-from io import StringIO
-import traceback
-from typing import Dict, Any
-import json
 
-def _execute_code_sync(code: str) -> Dict[str, Any]:
+async def execute_code(code: str, work_dir: str | None = None, language: str = "python") -> str:
     """
-    Execute Python code in a sandboxed environment and return structured results.
+    Execute Python or bash code using LocalCommandLineCodeExecutor.
+
+    Args:
+        code: A string containing the code to be executed.
+        work_dir: Working directory for code execution.
+        language: Language of the code - "python" or "bash".
+
+    Returns:
+        A string containing the execution results.
+    """
+    # Create executor with work directory
+    executor = LocalCommandLineCodeExecutor(work_dir=Path(work_dir) if work_dir else Path("/tmp/coding"))
+
+    # Log code execution
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"🐍 EXECUTING CODE ({language}):\n{code}")
+
+    # Execute the code
+    result = await executor.execute_code_blocks(
+        code_blocks=[CodeBlock(language=language, code=code)],
+        cancellation_token=CancellationToken(),
+    )
+
+    if result.exit_code == 0:
+        return f"CODE EXECUTION SUCCESSFUL ({language}).\nOutput:\n{result.output}"
+    else:
+        return f"CODE EXECUTION FAILED ({language}) with exit code {result.exit_code}.\nOutput:\n{result.output}"
+
+
+# Keep backward compatibility alias
+async def execute_python_code(code: str, work_dir: str | None = None) -> str:
+    """Legacy alias for execute_code with language='python'."""
+    return await execute_code(code, work_dir, language="python")
+
+
+# Helper to create FunctionTool with work_dir bound
+def get_code_execution_tool(work_dir: Optional[str] = None) -> FunctionTool:
+    """
+    Create a FunctionTool for code execution with work_dir bound.
     
     Args:
-        code: Python code to execute
+        work_dir: Working directory for code execution
         
     Returns:
-        Dict with status, stdout, and stderr
+        FunctionTool configured for the specified work directory
     """
-    try:
-        # Capture output
-        stdout_buffer = StringIO()
-        stderr_buffer = StringIO()
-        
-        # Execute the code in a restricted environment
-        with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
-            exec(code, {'__builtins__': __builtins__, 'os': os, 'sys': sys})
-        
-        stdout = stdout_buffer.getvalue()
-        stderr = stderr_buffer.getvalue()
-        
-        if stderr:
-            return {
-                "status": "error",
-                "stdout": stdout,
-                "stderr": stderr,
-                "traceback": stderr,
-            }
-        
-        return {
-            "status": "success",
-            "stdout": stdout,
-            "stderr": stderr,
-        }
-        
-    except Exception:
-        tb = traceback.format_exc()
-        return {
-            "status": "error",
-            "stdout": "",
-            "stderr": tb,
-            "traceback": tb,
-        }
-
-async def execute_code(code: str) -> str:
-    """
-    Executes a block of Python code and returns the output.
-    This tool is essential for any task that requires generating and running code.
+    from autogen_core.tools import FunctionTool
     
-    Args:
-        code: A string containing the Python code to be executed.
-        
-    Returns:
-        A JSON string containing the execution status, stdout, and stderr.
-    """
-    result = _execute_code_sync(code)
-    return json.dumps(result, indent=2)
-
+    async def execute_code_bound(code: str, language: str = "python") -> str:
+        """Execute code with work directory pre-bound."""
+        # work_dir is already bound from the outer scope (passed to get_code_execution_tool)
+        # No need to call get_work_dir again - it's already the correct per-request directory
+        return await execute_code(code, work_dir, language)
+    
+    return FunctionTool(
+        execute_code_bound,
+        description="Execute Python or bash code using LocalCommandLineCodeExecutor. Write your complete code script and it will be executed in the work directory."
+    )

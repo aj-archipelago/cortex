@@ -19,16 +19,18 @@ logger = logging.getLogger(__name__)
 class ProgressCollector:
     """Collects progress updates from Redis pub/sub channel."""
 
-    def __init__(self, redis_url: str, channel: str):
+    def __init__(self, redis_url: str, channel: str, logger=None):
         """
         Initialize the progress collector.
 
         Args:
             redis_url: Redis connection string (e.g., "redis://localhost:6379")
             channel: Redis channel name to subscribe to
+            logger: Logger instance to use for logging (optional)
         """
         self.redis_url = redis_url
         self.channel = channel
+        self.logger = logger or logging.getLogger(__name__)
         self.updates: List[Dict] = []
         self.is_collecting = False
         self.final_result = None
@@ -60,9 +62,9 @@ class ProgressCollector:
             pubsub = redis_client.pubsub()
             pubsub.subscribe(self.channel)
 
-            logger.info(f"📡 Progress collector started for request {request_id}")
-            logger.info(f"   Subscribed to channel: {self.channel}")
-            logger.info(f"   Timeout: {timeout}s")
+            self.logger.info(f"📡 Progress collector started for request {request_id}")
+            self.logger.info(f"   Subscribed to channel: {self.channel}")
+            self.logger.info(f"   Timeout: {timeout}s")
 
             start_time = datetime.now()
             message_count = 0
@@ -77,12 +79,17 @@ class ProgressCollector:
                         data = json.loads(message['data'])
 
                         # Only collect updates for our request
-                        if data.get('requestId') == request_id:
+                        msg_request_id = data.get('requestId') or data.get('request_id')
+                        progress_val = data.get('progress', 0)
+                        has_data = 'data' in data and data['data'] is not None
+
+                        # Strict filtering: only process messages for our exact request ID
+                        if msg_request_id and msg_request_id == request_id:
                             message_count += 1
 
                             update = {
                                 'timestamp': datetime.now().isoformat(),
-                                'progress': data.get('progress', 0.0),
+                                'progress': round(data.get('progress', 0.0), 4),  # Round to 4 decimal places to avoid floating point issues
                                 'info': data.get('info', ''),
                                 'data': data.get('data')
                             }
@@ -91,31 +98,31 @@ class ProgressCollector:
 
                             # Log progress update
                             progress_pct = int(update['progress'] * 100)
-                            logger.info(f"   Progress: {progress_pct}% - {update['info']}")
+                            self.logger.info(f"📊 Progress: {progress_pct}% - {update['info']}")
 
                             # Check if this is the final update
                             if stop_on_final:
                                 if update['data'] is not None:
                                     self.final_result = update['data']
-                                    logger.info(f"✅ Final result received (with data field)")
+                                    self.logger.info(f"✅ Final result received with data")
                                     break
                                 elif update['progress'] >= 1.0:
-                                    logger.info(f"✅ Final progress reached (100%)")
+                                    self.logger.info(f"✅ Final progress reached (100%)")
                                     # Wait a bit more to catch any late final result
                                     await asyncio.sleep(2)
                                     break
 
                     except json.JSONDecodeError as e:
-                        logger.warning(f"Failed to parse message: {e}")
+                        self.logger.warning(f"Failed to parse message: {e}")
                         continue
                     except Exception as e:
-                        logger.error(f"Error processing message: {e}")
+                        self.logger.error(f"Error processing message: {e}")
                         continue
 
                 # Check timeout
                 elapsed = (datetime.now() - start_time).total_seconds()
                 if elapsed > timeout:
-                    logger.warning(f"⏱️  Progress collection timeout after {timeout}s")
+                    self.logger.warning(f"⏱️  Progress collection timeout after {timeout}s")
                     break
 
             # Cleanup
@@ -123,12 +130,12 @@ class ProgressCollector:
             pubsub.close()
             redis_client.close()
 
-            logger.info(f"📊 Progress collection completed: {message_count} updates collected")
+            self.logger.info(f"📊 Progress collection completed: {message_count} updates collected")
 
         except redis.ConnectionError as e:
-            logger.error(f"❌ Redis connection error: {e}")
+            self.logger.error(f"❌ Redis connection error: {e}")
         except Exception as e:
-            logger.error(f"❌ Progress collection error: {e}", exc_info=True)
+            self.logger.error(f"❌ Progress collection error: {e}", exc_info=True)
         finally:
             self.is_collecting = False
 
@@ -137,7 +144,7 @@ class ProgressCollector:
     def stop_collecting(self):
         """Stop collecting progress updates."""
         self.is_collecting = False
-        logger.info("🛑 Progress collection stopped manually")
+        self.logger.info("🛑 Progress collection stopped manually")
 
     def get_updates(self) -> List[Dict]:
         """Get all collected updates."""

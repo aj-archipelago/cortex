@@ -8,6 +8,8 @@ from the SQLite database.
 import sqlite3
 import json
 import os
+import time
+import random
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from pathlib import Path
@@ -44,9 +46,26 @@ class TestRepository:
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get a database connection with row factory."""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)  # Increased timeout for concurrent access
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _execute_with_retry(self, operation, max_retries=5, base_delay=0.1):
+        """Execute database operation with retry logic for handling locks."""
+        last_exception = None
+        for attempt in range(max_retries):
+            try:
+                return operation()
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) or "database table is locked" in str(e):
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        # Exponential backoff with jitter
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
+                        time.sleep(delay)
+                        continue
+                raise e
+        raise last_exception
 
     # ==================== Test Runs ====================
 
@@ -62,19 +81,23 @@ class TestRepository:
         Returns:
             test_run_id: The ID of the created test run
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        def _create():
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
 
-        cursor.execute("""
-            INSERT INTO test_runs (test_case_id, task_description, request_id, started_at, status)
-            VALUES (?, ?, ?, ?, 'running')
-        """, (test_case_id, task_description, request_id, datetime.now()))
+                cursor.execute("""
+                    INSERT INTO test_runs (test_case_id, task_description, request_id, started_at, status)
+                    VALUES (?, ?, ?, ?, 'running')
+                """, (test_case_id, task_description, request_id, datetime.now()))
 
-        test_run_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
+                test_run_id = cursor.lastrowid
+                conn.commit()
+                return test_run_id
+            finally:
+                conn.close()
 
-        return test_run_id
+        return self._execute_with_retry(_create)
 
     def update_test_run_status(
         self,
@@ -84,29 +107,36 @@ class TestRepository:
         error_message: Optional[str] = None
     ):
         """Update test run status and completion time."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        def _update():
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
 
-        if completed_at is None and status in ('completed', 'failed', 'timeout'):
-            completed_at = datetime.now()
+                # Ensure completed_at is set if status indicates completion
+                final_completed_at = completed_at
+                if final_completed_at is None and status in ('completed', 'failed', 'timeout'):
+                    final_completed_at = datetime.now()
 
-        # Calculate duration if completed
-        duration_seconds = None
-        if completed_at:
-            cursor.execute("SELECT started_at FROM test_runs WHERE id = ?", (test_run_id,))
-            row = cursor.fetchone()
-            if row:
-                started_at = datetime.fromisoformat(row['started_at'])
-                duration_seconds = (completed_at - started_at).total_seconds()
+                # Calculate duration if completed
+                duration_seconds = None
+                if final_completed_at:
+                    cursor.execute("SELECT started_at FROM test_runs WHERE id = ?", (test_run_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        started_at = datetime.fromisoformat(row['started_at'])
+                        duration_seconds = (final_completed_at - started_at).total_seconds()
 
-        cursor.execute("""
-            UPDATE test_runs
-            SET status = ?, completed_at = ?, duration_seconds = ?, error_message = ?
-            WHERE id = ?
-        """, (status, completed_at, duration_seconds, error_message, test_run_id))
+                cursor.execute("""
+                    UPDATE test_runs
+                    SET status = ?, completed_at = ?, duration_seconds = ?, error_message = ?
+                    WHERE id = ?
+                """, (status, final_completed_at, duration_seconds, error_message, test_run_id))
 
-        conn.commit()
-        conn.close()
+                conn.commit()
+            finally:
+                conn.close()
+
+        self._execute_with_retry(_update)
 
     def save_final_response(self, test_run_id: int, final_response: str):
         """
@@ -177,16 +207,21 @@ class TestRepository:
         is_final: bool = False
     ):
         """Add a progress update to the database."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        def _add():
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
 
-        cursor.execute("""
-            INSERT INTO progress_updates (test_run_id, timestamp, progress, info, is_final)
-            VALUES (?, ?, ?, ?, ?)
-        """, (test_run_id, timestamp, progress, info, is_final))
+                cursor.execute("""
+                    INSERT INTO progress_updates (test_run_id, timestamp, progress, info, is_final)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (test_run_id, timestamp, progress, info, is_final))
 
-        conn.commit()
-        conn.close()
+                conn.commit()
+            finally:
+                conn.close()
+
+        self._execute_with_retry(_add)
 
     def get_progress_updates(self, test_run_id: int) -> List[Dict[str, Any]]:
         """Get all progress updates for a test run."""
