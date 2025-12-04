@@ -113,6 +113,9 @@ class TaskProcessor:
         self.gpt5_mini_model_client = ModelConfig.create_model_client("gpt-5-mini")
         self.gpt5_model_client = ModelConfig.create_model_client("gpt-5")
 
+        self.gpt51_model_client = ModelConfig.create_model_client("gpt-5.1")
+        self.gpt51_chat_model_client = ModelConfig.create_model_client("gpt-5.1-chat")
+
         # Initialize progress handler and message generator after model clients
         self.progress_handler = None
         self.recent_progress_messages = []  # Track recent progress messages for context
@@ -132,7 +135,8 @@ class TaskProcessor:
         if self.progress_handler is None:
             from .progress_handler import ProgressHandler
             self.progress_handler = ProgressHandler(self.redis_publisher, 
-                self.gpt41_model_client
+                #self.gpt41_model_client
+                self.gpt51_model_client
                 # self.gpt5_mini_model_client
                 # self.gpt5_model_client
             )
@@ -231,9 +235,10 @@ class TaskProcessor:
         if self.progress_handler is None:
             redis_pub = await self._get_redis_publisher()
             self.progress_handler = ProgressHandler(redis_pub, 
-            self.gpt41_model_client
-            # self.gpt5_mini_model_client
-            #self.gpt5_model_client
+                #self.gpt41_model_client
+                self.gpt51_model_client
+                # self.gpt5_mini_model_client
+                #self.gpt5_model_client
             )
         return self.progress_handler
 
@@ -274,11 +279,13 @@ class TaskProcessor:
 
             # Get agents for this task
             planner_agent, execution_agents, presenter_agent = await get_agents(
-                self.gpt41_model_client,
+                #self.gpt41_model_client,
+                self.gpt51_model_client,
                 # self.gpt5_mini_model_client,
                 # self.gpt5_model_client,
                 self.o3_model_client,
-                self.gpt41_model_client,
+                #self.gpt41_model_client,
+                self.gpt51_model_client,
                 # self.gpt5_mini_model_client,
                 # self.gpt5_model_client,
                 request_work_dir=request_work_dir,
@@ -366,7 +373,8 @@ class TaskProcessor:
 
         # Use simplified workflow with SelectorGroupChat for intelligent routing
         simplified_workflow = SimplifiedWorkflow(
-             self.gpt41_model_client
+             # self.gpt41_model_client
+             self.gpt51_model_client
             # self.gpt5_mini_model_client
             #self.gpt5_model_client
         )

@@ -70,6 +70,28 @@ class ModelConfig:
             family="openai",
             structured_output=False
         ),
+        "gpt-5.1": ModelInfo(
+            model="gpt-5.1",
+            name="Cortex gpt-5.1",
+            max_tokens=128000,
+            cost_per_token=0.0,
+            vision=False,
+            function_calling=True,
+            json_output=False,
+            family="openai",
+            structured_output=False
+        ),
+        "gpt-5.1-chat": ModelInfo(
+            model="gpt-5.1-chat",
+            name="Cortex gpt-5.1-chat",
+            max_tokens=128000,
+            cost_per_token=0.0,
+            vision=False,
+            function_calling=True,
+            json_output=False,
+            family="openai",
+            structured_output=False
+        ),
         "claude-4-sonnet": ModelInfo(
             model="claude-4-sonnet",
             name="Cortex claude-4-sonnet",

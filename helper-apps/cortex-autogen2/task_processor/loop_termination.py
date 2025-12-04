@@ -97,23 +97,11 @@ def create_loop_detection_termination(all_messages, max_repetitions: int = 3):
                     # Reset count if agent made a tool call
                     agent_selections[agent] = 0
         
-        # Pattern 4: Same error message repeated
-        error_messages = {}
-        for msg in recent_messages:
-            if hasattr(msg, 'content'):
-                content = str(getattr(msg, 'content', ''))
-                # Look for error indicators
-                if any(indicator in content for indicator in ['⛔', 'Cannot proceed', 'file missing', 'CSV missing', 'blocked']):
-                    error_key = content.strip()[:150]  # First 150 chars
-                    error_messages[error_key] = error_messages.get(error_key, 0) + 1
-                    
-                    if error_messages[error_key] >= max_repetitions:
-                        logger.warning(f"🛑 LOOP DETECTED: Same error message repeated {error_messages[error_key]} times")
-                        return True
         
         return False
     
     return FunctionalTermination(check_termination)
+
 
 
 

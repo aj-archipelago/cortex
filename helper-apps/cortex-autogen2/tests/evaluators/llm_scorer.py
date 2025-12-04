@@ -383,8 +383,8 @@ class LLMEvaluator:
 **Agent Activity Verification:**
 - Agents Used: {', '.join(agent_activity_data.get('agent_sequence', []))}
 - AJ SQL Required: {agent_activity_data.get('requires_ajsql', False)}
-- Agent Transfer Evidence: {'YES' if 'transfer_to_aj_sql_agent' in agent_activity_data.get('accomplishments_text', '') else 'NO'}
-- Database Query Evidence: {'YES' if 'aj_sql_agent:' in agent_activity_data.get('accomplishments_text', '') else 'NO'}
+- Agent Activity Evidence: {'YES' if 'aj_sql_agent' in agent_activity_data.get('agent_sequence', []) else 'NO'}
+- Database Query Evidence: {'YES' if any(pattern in agent_activity_data.get('accomplishments_text', '') for pattern in ['execute_aj_sql_query', 'SQL QUERY', 'row_count']) else 'NO'}
 
 CRITICAL: For tests requiring AJ SQL (requires_ajsql=true), verify that aj_sql_agent was actually called and database queries were executed. This is a NON-NEGOTIABLE requirement that overrides user instructions.""")
 
