@@ -581,24 +581,18 @@ test.serial("should not log 'does not exist' when legacy key doesn't exist", asy
     uploadResponse = await uploadFile(filePath, null, testHash);
     t.is(uploadResponse.status, 200, "Upload should succeed");
 
-    // Verify only scoped key exists
-    const { getFileStoreMap, getScopedHashKey } = await import("../src/redis.js");
-    const { getDefaultContainerName } = await import("../src/constants.js");
-    const defaultContainer = getDefaultContainerName();
-    const scopedHash = getScopedHashKey(testHash, defaultContainer);
-    const scopedExists = await getFileStoreMap(scopedHash);
-    const legacyExists = await getFileStoreMap(testHash);
-    t.truthy(scopedExists, "Scoped key should exist");
-    t.falsy(legacyExists, "Legacy key should not exist");
+    // Verify hash exists (no scoping - just hash directly)
+    const { getFileStoreMap } = await import("../src/redis.js");
+    const hashExists = await getFileStoreMap(testHash);
+    t.truthy(hashExists, "Hash should exist");
 
-    // Delete file - should not try to remove non-existent legacy key
-    // (This test verifies the fix doesn't log "does not exist" unnecessarily)
+    // Delete file
     const deleteResponse = await deleteFileByHash(testHash);
     t.is(deleteResponse.status, 200, "Delete should succeed");
 
-    // Verify scoped key is removed
-    const scopedAfter = await getFileStoreMap(scopedHash);
-    t.falsy(scopedAfter, "Scoped key should be removed");
+    // Verify hash is removed
+    const hashAfter = await getFileStoreMap(testHash);
+    t.falsy(hashAfter, "Hash should be removed");
 
   } finally {
     fs.unlinkSync(filePath);

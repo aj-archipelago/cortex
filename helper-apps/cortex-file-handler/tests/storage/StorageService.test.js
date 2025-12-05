@@ -348,8 +348,8 @@ test("should handle delete file by hash with empty URL in Redis", async (t) => {
   }
 });
 
-// Container-specific tests
-test("should upload file with specific container name", async (t) => {
+// Container-specific tests - now using single container only
+test("should upload file using default container", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
@@ -364,33 +364,20 @@ test("should upload file with specific container name", async (t) => {
   fs.writeFileSync(testFile, "test content");
   
   try {
-    // Mock environment to have multiple containers
-    const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-    process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
+    // Test upload - container parameter is ignored, always uses default
+    const result = await service.uploadFileWithProviders(
+      { log: () => {} }, // mock context
+      testFile,
+      "test-request",
+      null,
+      null
+    );
     
-    try {
-      // Test upload with specific container
-      const result = await service.uploadFileWithProviders(
-        { log: () => {} }, // mock context
-        testFile,
-        "test-request",
-        null,
-        "test2"
-      );
-      
-      t.truthy(result.url);
-      t.truthy(result.url.includes("test2") || result.url.includes("/test2/"));
-      
-      // Cleanup
-      await service.deleteFiles("test-request");
-    } finally {
-      // Restore original env
-      if (originalEnv) {
-        process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-      } else {
-        delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-      }
-    }
+    t.truthy(result.url);
+    t.truthy(result.shortLivedUrl);
+    
+    // Cleanup
+    await service.deleteFiles("test-request");
   } finally {
     // Cleanup temp file
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -431,7 +418,7 @@ test("should use default container when no container specified", async (t) => {
   }
 });
 
-test("should pass container parameter through uploadFile method", async (t) => {
+test("should upload file using uploadFile method (container parameter ignored)", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
@@ -446,32 +433,20 @@ test("should pass container parameter through uploadFile method", async (t) => {
   fs.writeFileSync(testFile, "test content");
   
   try {
-    // Mock environment to have multiple containers
-    const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-    process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
+    // Test upload using the uploadFile method - container parameter is ignored
+    const result = await service.uploadFile(
+      { log: () => {} }, // context
+      testFile,         // filePath
+      "test-request",   // requestId
+      null,             // hash
+      null              // filename (containerName parameter removed)
+    );
     
-    try {
-      // Test upload using the uploadFile method with container parameter
-      const result = await service.uploadFile(
-        { log: () => {} }, // context
-        testFile,         // filePath
-        "test-request",   // requestId
-        null,             // hash
-        "test3"           // containerName
-      );
-      
-      t.truthy(result.url);
-      
-      // Cleanup
-      await service.deleteFiles("test-request");
-    } finally {
-      // Restore original env
-      if (originalEnv) {
-        process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-      } else {
-        delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-      }
-    }
+    t.truthy(result.url);
+    t.truthy(result.shortLivedUrl);
+    
+    // Cleanup
+    await service.deleteFiles("test-request");
   } finally {
     // Cleanup temp file
     fs.rmSync(tempDir, { recursive: true, force: true });

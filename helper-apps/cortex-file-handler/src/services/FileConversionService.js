@@ -34,13 +34,14 @@ export class FileConversionService extends ConversionService {
     return downloadFile(url, destination);
   }
 
-  async _saveConvertedFile(filePath, requestId, filename = null, containerName = null) {
+  async _saveConvertedFile(filePath, requestId, filename = null) {
     // Generate a fallback requestId if none supplied (e.g. during checkHash calls)
     const reqId = requestId || uuidv4();
 
     let fileUrl;
     if (this.useAzure) {
-      const provider = await this.storageFactory.getAzureProvider(containerName);
+      // Container parameter is ignored - always uses default container from env var
+      const provider = await this.storageFactory.getAzureProvider();
       const result = await provider.uploadFile({}, filePath, reqId, null, filename);
       fileUrl = result.url;
     } else {
