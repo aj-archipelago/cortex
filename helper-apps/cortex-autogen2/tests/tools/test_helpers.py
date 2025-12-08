@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
-from agents.util.helpers import append_accomplishment_to_file
+from dynamic_agent_loader import helpers
+append_accomplishment_to_file = helpers.append_accomplishment_to_file
 
 
 def test_append_accomplishment_mirrors(tmp_path):

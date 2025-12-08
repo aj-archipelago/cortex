@@ -34,19 +34,7 @@ from services.run_analyzer import (
     build_run_document,
     summarize_prior_learnings,
 )
-from agents.util.agent_factory import get_agents
-from agents.constants.data_validation import (
-    EMPTY_DATA_VALIDATION_PRESENTER,
-    FACTUAL_ACCURACY_VALIDATION
-)
-from agents.util.helpers import (
-    build_dynamic_context_from_files,
-    write_plan_to_file,
-    append_accomplishment_to_file,
-    write_current_step_to_file,
-    log_agent_milestone,
-    log_agent_handoff
-)
+from dynamic_agent_loader import agent_factory, constants, helpers, get_agents
 from context.context_memory import ContextMemory
 
 # Import from refactored modules
@@ -274,7 +262,7 @@ class TaskProcessor:
             # Initialize context memory
             self.context_memory = ContextMemory(request_work_dir, self.gpt41_model_client, task_id)
 
-            context_files = build_dynamic_context_from_files(request_work_dir, task)
+            context_files = helpers.build_dynamic_context_from_files(request_work_dir, task)
             task_with_context = f"{task}\n\nContext from previous work:\n{context_files}"
 
             # Get agents for this task
@@ -458,7 +446,7 @@ class TaskProcessor:
         if not plan_text.strip():
             raise RuntimeError("Planner agent returned empty plan.")
 
-        write_plan_to_file(work_dir, plan_text)
+        helpers.write_plan_to_file(work_dir, plan_text)
         _log_context_to_request_file(task_id, "PLANNER_PLAN", plan_text[:2000])
         
         # Record plan creation in context memory
@@ -560,7 +548,7 @@ class TaskProcessor:
                         self.logger.info(f"🔍 Agent message: {source} - {content[:1000]}...")
                         
                         # Log to agent journey for high-level tracking
-                        log_agent_milestone(work_dir, source, "MESSAGE", content[:100])
+                        helpers.log_agent_milestone(work_dir, source, "MESSAGE", content[:100])
 
                         # Record message in context memory
                         if self.context_memory:
@@ -643,7 +631,7 @@ class TaskProcessor:
                             match = re.search(r'transfer_to_(\w+)', content)
                             if match:
                                 target_agent = match.group(1)
-                                log_agent_handoff(work_dir, source, target_agent, "Agent transfer initiated")
+                                helpers.log_agent_handoff(work_dir, source, target_agent, "Agent transfer initiated")
                                 
                                 # Record handoff in context memory
                                 if self.context_memory:
@@ -667,8 +655,8 @@ class TaskProcessor:
 
                     # Log progress
                     if source and content:
-                        append_accomplishment_to_file(work_dir, f"{source}: {str(content)[:1000]}...")
-                        write_current_step_to_file(work_dir, f"{source} processing", source)
+                        helpers.append_accomplishment_to_file(work_dir, f"{source}: {str(content)[:1000]}...")
+                        helpers.write_current_step_to_file(work_dir, f"{source} processing", source)
 
                         # VALIDATE FILE CREATION CONTRACTS
                         # If this agent was expected to create files, check if they exist now

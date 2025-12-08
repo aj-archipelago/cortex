@@ -149,7 +149,7 @@ def print_history(limit: int = 10):
     print("\n📜 Recent Test Runs:\n")
 
     if not runs:
-        print("  No test runs found in database.")
+        print("  No test runs found (persistence is in-memory; check logs/ for artifacts).")
         return
 
     print(f"{'ID':<6} {'Test Case':<30} {'Status':<12} {'Duration':<10} {'Scores (P/O/Overall)':<20} {'Date'}")

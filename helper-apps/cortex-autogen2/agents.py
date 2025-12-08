@@ -60,15 +60,19 @@ When you find an answer, verify the answer carefully. Include verifiable evidenc
 async def get_agents(default_model_client, big_model_client, small_model_client, request_work_dir: Optional[str] = None, planner_learnings: Optional[str] = None, task_context: Optional[str] = None):
 
     # Resolve work dir (prefer per-request dir if provided or from env)
-    work_dir = request_work_dir or os.getenv("CORTEX_WORK_DIR", "/home/site/wwwroot/coding")
+    from dynamic_agent_loader import helpers
+    get_work_dir = helpers.get_work_dir
+    work_dir = get_work_dir(request_work_dir)
     try:
         # In Azure Functions, ensure /tmp is used for write access if an /app path was set
         if os.getenv("WEBSITE_INSTANCE_ID") and work_dir.startswith("/app/"):
             work_dir = "/tmp/coding"
+            os.environ['CORTEX_WORK_DIR'] = work_dir  # Update env var
         os.makedirs(work_dir, exist_ok=True)
     except Exception:
         try:
             work_dir = "/tmp/coding"
+            os.environ['CORTEX_WORK_DIR'] = work_dir  # Update env var
             os.makedirs(work_dir, exist_ok=True)
         except Exception:
             pass

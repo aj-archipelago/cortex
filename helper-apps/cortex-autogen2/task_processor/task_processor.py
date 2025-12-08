@@ -10,8 +10,7 @@ from autogen_core import CancellationToken
 
 from services.azure_queue import get_queue_service
 from services.redis_publisher import get_redis_publisher
-from agents.util.agent_factory import get_agents
-from agents.util.helpers import build_dynamic_context_from_files
+from dynamic_agent_loader import agent_factory, helpers, get_agents
 
 from .progress_handler import ProgressHandler
 from .message_utils import _stringify_content
@@ -129,7 +128,7 @@ class TaskProcessor:
             task_preview = task[:200] + "..." if len(task) > 200 else task
             await progress_handler.start_heartbeat(task_id, "🚀 Starting your task...", task_context=task_preview)
 
-            context_files = build_dynamic_context_from_files(request_work_dir, task)
+            context_files = helpers.build_dynamic_context_from_files(request_work_dir, task)
             task_with_context = f"{task}\n\nContext from previous work:\n{context_files}"
 
             planner_agent, execution_agents, presenter_agent = await get_agents(

@@ -13,15 +13,18 @@ import base64
 import asyncio
 import logging
 import re
+import tempfile
+from io import BytesIO
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
+import os
 
 # Add parent directory to path to import project modules
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from azure.storage.queue import QueueClient
-from tests.database.repository import TestRepository
+from tests.database.repository import TestRepository  # null/in-memory (no DB)
 from tests.collectors.progress_collector import ProgressCollector
 from tests.collectors.log_collector import LogCollector
 from tests.evaluators.llm_scorer import LLMEvaluator
@@ -45,7 +48,7 @@ class TestOrchestrator:
         Initialize the test orchestrator.
 
         Args:
-            db_path: Path to SQLite database (defaults to tests/database/test_results.db)
+            db_path: Unused placeholder for backward compatibility (no database is written)
             redis_url: Redis connection URL (defaults to env var)
             redis_channel: Redis channel name (defaults to env var)
             logger: Logger instance to use (defaults to module logger)
@@ -68,7 +71,8 @@ class TestOrchestrator:
         # Import global expectations from shared source of truth
         # This is the same GLOBAL_QUALITY_EXPECTATIONS used by execution_completion_verifier_agent
         # Source: agents/constants/global_quality_standards.py
-        from agents.constants import GLOBAL_QUALITY_EXPECTATIONS
+        from dynamic_agent_loader import constants
+        GLOBAL_QUALITY_EXPECTATIONS = constants.GLOBAL_QUALITY_EXPECTATIONS
         self.global_expectations = GLOBAL_QUALITY_EXPECTATIONS
 
         # Performance monitoring
@@ -408,63 +412,17 @@ class TestOrchestrator:
         # Extract files from final result if available
         files_created = []
         if final_result:
-            self.logger.info(f"🔍 Processing final_result type: {type(final_result)}")
-            if isinstance(final_result, dict):
-                self.logger.info(f"📋 final_result keys: {list(final_result.keys())}")
-                # Legacy format: dictionary with deliverables
-                deliverables = final_result.get('deliverables', [])
-                self.logger.info(f"📦 deliverables type: {type(deliverables)}, value: {deliverables}")
-                # Ensure deliverables is a list (protect against boolean values)
-                if not isinstance(deliverables, list):
-                    self.logger.warning(f"⚠️ deliverables is not a list, got {type(deliverables)}: {deliverables}")
-                    deliverables = []
-                for item in deliverables:
-                    if isinstance(item, dict):
-                        self.db.add_file(
-                            test_run_id=test_run_id,
-                            file_path=item.get('path', 'unknown'),
-                            file_type=item.get('type', 'unknown'),
-                        sas_url=item.get('sas_url')
-                    )
-            elif isinstance(final_result, str):
-                # New format: HTML/Markdown string with SAS URLs - parse to extract files
-                import re
-                # Extract SAS URLs from HTML links/images AND Markdown links/images
-                # Pattern 1: HTML href="...blob.core.windows.net/...?se=..." or src="...blob.core.windows.net/...?se=..."
-                # Pattern 2: Markdown [text](...blob.core.windows.net/...?se=...) or ![alt](...blob.core.windows.net/...?se=...)
-                html_pattern = r'(?:href|src)=["\'](https://[^"\']+\.blob\.core\.windows\.net/[^"\']+\?[^"\']+)["\']'
-                markdown_pattern = r'(?:\[[^\]]*\]|!\[[^\]]*\])\s*\(\s*(https://[^)]+\.blob\.core\.windows\.net/[^)]+\?[^)]+)\s*\)'
-                
-                html_matches = re.findall(html_pattern, final_result)
-                markdown_matches = re.findall(markdown_pattern, final_result)
-                matches = html_matches + markdown_matches
+            files_created = self._extract_files_from_final_result(final_result, test_run_id)
 
-                # Deduplicate URLs to avoid counting the same file multiple times
-                unique_urls = list(set(matches))
-
-                # Extract filenames from URLs or from link text
-                for url in unique_urls:
-                    # Extract filename from URL (blob name before query params)
-                    blob_match = re.search(r'/([^/?]+\.(csv|png|pdf|pptx|xlsx|docx|jpg|jpeg))', url)
-                    if blob_match:
-                        blob_name = blob_match.group(1)
-                        file_ext = blob_match.group(2).lower()
-                        # Map extension to file type
-                        file_type_map = {
-                            'csv': 'csv', 'png': 'image', 'jpg': 'image', 'jpeg': 'image',
-                            'pdf': 'pdf', 'pptx': 'presentation', 'xlsx': 'spreadsheet', 'docx': 'document'
-                        }
-                        file_type = file_type_map.get(file_ext, 'unknown')
-                        
-                        self.db.add_file(
-                            test_run_id=test_run_id,
-                            file_path=blob_name,
-                            file_type=file_type,
-                            sas_url=url
-                        )
-                        self.logger.info(f"📁 Extracted file from final response: {blob_name} ({file_type})")
-        
-            files_created = self.db.get_files(test_run_id)
+        # Fallback: if no final_result captured (e.g., timeout) try to recover last presenter message from logs
+        if not final_result:
+            recovered = self._recover_final_result_from_logs(azure_message_id)
+            if recovered:
+                self.logger.warning("⚠️ final_result missing; recovered presenter output from logs")
+                final_result = recovered
+                final_response_text = recovered if isinstance(recovered, str) else str(recovered)
+                self.db.save_final_response(test_run_id, final_response_text)
+                files_created = self._extract_files_from_final_result(final_result, test_run_id)
 
         # Calculate metrics
         self.logger.info("\n📊 Calculating metrics...")
@@ -1212,3 +1170,95 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             validation_results["issues"].append(f"❌ Upload marker count ({upload_markers}) doesn't match uploaded files ({len(uploaded_files)})")
 
         return validation_results
+
+    # ------------------------------------------------------------------
+    # Helpers: final_result recovery and file extraction
+    # ------------------------------------------------------------------
+    def _recover_final_result_from_logs(self, azure_message_id: str) -> Optional[str]:
+        """
+        Recover the last presenter_agent message from request logs if final_result is missing.
+        Looks in ./logs/req_{id}/logs/messages.jsonl and logs.jsonl.
+        """
+        candidate_paths = [
+            os.path.join("logs", f"req_{azure_message_id}", "logs", "messages.jsonl"),
+            os.path.join("logs", f"req_{azure_message_id}", "logs", "logs.jsonl"),
+        ]
+        for path in candidate_paths:
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                # Scan from bottom to find latest presenter_agent message
+                for line in reversed(lines):
+                    try:
+                        obj = json.loads(line)
+                        if obj.get("agent_name") == "presenter_agent" or obj.get("source") == "presenter_agent":
+                            content = obj.get("content")
+                            if content:
+                                return content
+                    except Exception:
+                        continue
+            except Exception as e:
+                self.logger.debug(f"Recover final_result: failed to read {path}: {e}")
+        return None
+
+    def _extract_files_from_final_result(self, final_result, test_run_id: int) -> List[Dict]:
+        """
+        Parse final_result (dict or str) and register files in the in-memory repository.
+        Returns list of files for the run.
+        """
+        if not final_result:
+            return []
+
+        # If dict with deliverables
+        if isinstance(final_result, dict):
+            deliverables = final_result.get("deliverables", [])
+            if not isinstance(deliverables, list):
+                deliverables = []
+            for item in deliverables:
+                if isinstance(item, dict):
+                    self.db.add_file(
+                        test_run_id=test_run_id,
+                        file_path=item.get("path", "unknown"),
+                        file_type=item.get("type", "unknown"),
+                        sas_url=item.get("sas_url"),
+                    )
+            return self.db.get_files(test_run_id)
+
+        # If string (HTML/Markdown with SAS URLs)
+        if isinstance(final_result, str):
+            html_pattern = r'(?:href|src)=["\'](https://[^"\']+\.blob\.core\.windows\.net/[^"\']+\?[^"\']+)["\']'
+            markdown_pattern = r'(?:\[[^\]]*\]|!\[[^\]]*\])\s*\(\s*(https://[^)]+\.blob\.core\.windows\.net/[^)]+\?[^)]+)\s*\)'
+            html_matches = re.findall(html_pattern, final_result)
+            markdown_matches = re.findall(markdown_pattern, final_result)
+            unique_urls = list(set(html_matches + markdown_matches))
+
+            file_type_map = {
+                "csv": "csv",
+                "json": "json",
+                "png": "image",
+                "jpg": "image",
+                "jpeg": "image",
+                "pdf": "pdf",
+                "pptx": "presentation",
+                "xlsx": "spreadsheet",
+                "docx": "document",
+            }
+
+            for url in unique_urls:
+                blob_match = re.search(r"/([^/?]+\.(csv|json|png|pdf|pptx|xlsx|docx|jpg|jpeg))", url)
+                if blob_match:
+                    blob_name = blob_match.group(1)
+                    file_ext = blob_match.group(2).lower()
+                    file_type = file_type_map.get(file_ext, "unknown")
+                    self.db.add_file(
+                        test_run_id=test_run_id,
+                        file_path=blob_name,
+                        file_type=file_type,
+                        sas_url=url,
+                    )
+
+            return self.db.get_files(test_run_id)
+
+        return []

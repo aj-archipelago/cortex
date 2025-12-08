@@ -51,7 +51,8 @@ async def _navigate_with_playwright(url: str, actions: Optional[List[Dict[str, A
             page = await context.new_page()
             logger.info(f"Playwright launched browser for URL {url}")
             try:
-                from agents.util.helpers import append_accomplishment_to_file
+                from dynamic_agent_loader import helpers
+                append_accomplishment_to_file = helpers.append_accomplishment_to_file
                 append_accomplishment_to_file(work_dir, f"WEB_SEARCH_AGENT: Attempting Playwright render: {url}")
             except Exception:
                 pass
@@ -80,7 +81,8 @@ async def _navigate_with_playwright(url: str, actions: Optional[List[Dict[str, A
                                 messages.append(f"Downloaded: {download_path}")
                                 logger.info(f"Playwright action downloaded file: {download_path}")
                                 try:
-                                    from agents.util.helpers import append_accomplishment_to_file
+                                    from dynamic_agent_loader import helpers
+                                    append_accomplishment_to_file = helpers.append_accomplishment_to_file
                                     append_accomplishment_to_file(work_dir, f"WEB_SEARCH_AGENT: 📁 Ready for upload: {download_path}")
                                 except Exception:
                                     pass
@@ -111,7 +113,8 @@ async def _navigate_with_playwright(url: str, actions: Optional[List[Dict[str, A
             html = await page.content()
             saved_html = _save_html_to_workdir(work_dir, url, html)
             try:
-                from agents.util.helpers import append_accomplishment_to_file
+                from dynamic_agent_loader import helpers
+                append_accomplishment_to_file = helpers.append_accomplishment_to_file
                 append_accomplishment_to_file(work_dir, f"WEB_SEARCH_AGENT: 📁 Saved webpage HTML: {saved_html}")
             except Exception:
                 pass

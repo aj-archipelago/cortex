@@ -106,3 +106,4 @@ matplotlib>=3.9.0
 # -------------------------------------------------------------------
 imageio-ffmpeg>=0.4.9
 python-lzf>=0.2.4
+pandas_datareader

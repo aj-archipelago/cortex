@@ -1,103 +1,81 @@
 """
-Database repository for test results storage and retrieval.
+In-memory / null repository for test result metadata.
 
-This module provides a clean interface for storing and querying test data
-from the SQLite database.
+There is no test database anymore. All methods are lightweight, process-local,
+and safe no-ops for callers that still expect the old interface.
 """
 
-import sqlite3
-import json
-import os
-import time
-import random
+import threading
 from datetime import datetime
-from typing import List, Dict, Optional, Any
-from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 
 class TestRepository:
-    """Repository for managing test results in SQLite database."""
+    """In-memory stand-in for the former SQLite-backed repository (no DB)."""
+
+    # Class-level storage shared across instances in the same process
+    _lock = threading.RLock()
+    _runs: Dict[int, Dict[str, Any]] = {}
+    _progress: Dict[int, List[Dict[str, Any]]] = {}
+    _logs: Dict[int, List[Dict[str, Any]]] = {}
+    _files: Dict[int, List[Dict[str, Any]]] = {}
+    _evaluations: Dict[int, Dict[str, Any]] = {}
+    _metrics: Dict[int, Dict[str, Any]] = {}
+    _suggestions: Dict[int, List[Dict[str, Any]]] = {}
+    _next_id: int = 1
 
     def __init__(self, db_path: Optional[str] = None):
-        """
-        Initialize the repository.
+        # Signature kept for backward compatibility; db_path is unused (no DB).
+        self._lock = self.__class__._lock
 
-        Args:
-            db_path: Path to SQLite database file. If None, uses default location.
-        """
-        if db_path is None:
-            db_dir = Path(__file__).parent
-            db_path = db_dir / "test_results.db"
+    # ==================== Helpers ====================
+    @staticmethod
+    def _iso(dt: datetime) -> str:
+        return dt.isoformat()
 
-        self.db_path = str(db_path)
-        self._initialize_database()
+    @classmethod
+    def _new_id(cls) -> int:
+        with cls._lock:
+            test_run_id = cls._next_id
+            cls._next_id += 1
+            return test_run_id
 
-    def _initialize_database(self):
-        """Create database and tables if they don't exist."""
-        schema_path = Path(__file__).parent / "schema.sql"
-
-        with open(schema_path, 'r') as f:
-            schema = f.read()
-
-        conn = sqlite3.connect(self.db_path)
-        conn.executescript(schema)
-        conn.commit()
-        conn.close()
-
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get a database connection with row factory."""
-        conn = sqlite3.connect(self.db_path, timeout=30.0)  # Increased timeout for concurrent access
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _execute_with_retry(self, operation, max_retries=5, base_delay=0.1):
-        """Execute database operation with retry logic for handling locks."""
-        last_exception = None
-        for attempt in range(max_retries):
-            try:
-                return operation()
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e) or "database table is locked" in str(e):
-                    last_exception = e
-                    if attempt < max_retries - 1:
-                        # Exponential backoff with jitter
-                        delay = base_delay * (2 ** attempt) + random.uniform(0, 0.1)
-                        time.sleep(delay)
-                        continue
-                raise e
-        raise last_exception
+    @classmethod
+    def _get_run(cls, test_run_id: int) -> Optional[Dict[str, Any]]:
+        return cls._runs.get(test_run_id)
 
     # ==================== Test Runs ====================
-
     def create_test_run(
         self,
         test_case_id: str,
         task_description: str,
         request_id: str
     ) -> int:
-        """
-        Create a new test run record.
+        """Create a new in-memory test run record."""
+        now = datetime.now()
+        test_run_id = self._new_id()
+        run_record = {
+            'id': test_run_id,
+            'test_case_id': test_case_id,
+            'task_description': task_description,
+            'request_id': request_id,
+            'started_at': self._iso(now),
+            'status': 'running',
+            'error_message': None,
+            'final_response': None,
+            'completed_at': None,
+            'duration_seconds': None,
+            'created_at': self._iso(now),
+        }
 
-        Returns:
-            test_run_id: The ID of the created test run
-        """
-        def _create():
-            conn = self._get_connection()
-            try:
-                cursor = conn.cursor()
+        with self._lock:
+            self._runs[test_run_id] = run_record
+            self._progress[test_run_id] = []
+            self._logs[test_run_id] = []
+            self._files[test_run_id] = []
+            self._suggestions[test_run_id] = []
 
-                cursor.execute("""
-                    INSERT INTO test_runs (test_case_id, task_description, request_id, started_at, status)
-                    VALUES (?, ?, ?, ?, 'running')
-                """, (test_case_id, task_description, request_id, datetime.now()))
-
-                test_run_id = cursor.lastrowid
-                conn.commit()
-                return test_run_id
-            finally:
-                conn.close()
-
-        return self._execute_with_retry(_create)
+        return test_run_id
 
     def update_test_run_status(
         self,
@@ -106,98 +84,47 @@ class TestRepository:
         completed_at: Optional[datetime] = None,
         error_message: Optional[str] = None
     ):
-        """Update test run status and completion time."""
-        def _update():
-            conn = self._get_connection()
-            try:
-                cursor = conn.cursor()
+        """Update test run status, completion time, and duration."""
+        with self._lock:
+            run = self._get_run(test_run_id)
+            if not run:
+                return
 
-                # Ensure completed_at is set if status indicates completion
-                final_completed_at = completed_at
-                if final_completed_at is None and status in ('completed', 'failed', 'timeout'):
-                    final_completed_at = datetime.now()
+            finished_at = completed_at or (datetime.now() if status in ('completed', 'failed', 'timeout') else None)
+            if finished_at:
+                run['completed_at'] = self._iso(finished_at)
+                try:
+                    started_at = datetime.fromisoformat(run['started_at'])
+                    run['duration_seconds'] = (finished_at - started_at).total_seconds()
+                except Exception:
+                    run['duration_seconds'] = None
 
-                # Calculate duration if completed
-                duration_seconds = None
-                if final_completed_at:
-                    cursor.execute("SELECT started_at FROM test_runs WHERE id = ?", (test_run_id,))
-                    row = cursor.fetchone()
-                    if row:
-                        started_at = datetime.fromisoformat(row['started_at'])
-                        duration_seconds = (final_completed_at - started_at).total_seconds()
-
-                cursor.execute("""
-                    UPDATE test_runs
-                    SET status = ?, completed_at = ?, duration_seconds = ?, error_message = ?
-                    WHERE id = ?
-                """, (status, final_completed_at, duration_seconds, error_message, test_run_id))
-
-                conn.commit()
-            finally:
-                conn.close()
-
-        self._execute_with_retry(_update)
+            run['status'] = status
+            run['error_message'] = error_message
 
     def save_final_response(self, test_run_id: int, final_response: str):
-        """
-        Save the final response message sent to the user.
-
-        This stores the complete final message including file URLs,
-        making it easy to retrieve outputs from any test run.
-
-        Args:
-            test_run_id: ID of the test run
-            final_response: The complete final message text with URLs
-        """
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            UPDATE test_runs
-            SET final_response = ?
-            WHERE id = ?
-        """, (final_response, test_run_id))
-
-        conn.commit()
-        conn.close()
+        """Store the final response text for a run."""
+        with self._lock:
+            run = self._get_run(test_run_id)
+            if run is not None:
+                run['final_response'] = final_response
 
     def get_test_run(self, test_run_id: int) -> Optional[Dict[str, Any]]:
-        """Get test run by ID."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT * FROM test_runs WHERE id = ?", (test_run_id,))
-        row = cursor.fetchone()
-        conn.close()
-
-        return dict(row) if row else None
+        """Get a copy of a test run by ID."""
+        with self._lock:
+            run = self._get_run(test_run_id)
+            return dict(run) if run else None
 
     def get_recent_runs(self, test_case_id: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent test runs, optionally filtered by test case."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        if test_case_id:
-            cursor.execute("""
-                SELECT * FROM test_runs
-                WHERE test_case_id = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-            """, (test_case_id, limit))
-        else:
-            cursor.execute("""
-                SELECT * FROM test_runs
-                ORDER BY created_at DESC
-                LIMIT ?
-            """, (limit,))
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        return [dict(row) for row in rows]
+        """Return recent runs (newest first), optionally filtered by test case."""
+        with self._lock:
+            runs = list(self._runs.values())
+            if test_case_id:
+                runs = [r for r in runs if r.get('test_case_id') == test_case_id]
+            runs.sort(key=lambda r: r.get('created_at', ''), reverse=True)
+            return [dict(r) for r in runs[:limit]]
 
     # ==================== Progress Updates ====================
-
     def add_progress_update(
         self,
         test_run_id: int,
@@ -206,41 +133,23 @@ class TestRepository:
         info: str,
         is_final: bool = False
     ):
-        """Add a progress update to the database."""
-        def _add():
-            conn = self._get_connection()
-            try:
-                cursor = conn.cursor()
-
-                cursor.execute("""
-                    INSERT INTO progress_updates (test_run_id, timestamp, progress, info, is_final)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (test_run_id, timestamp, progress, info, is_final))
-
-                conn.commit()
-            finally:
-                conn.close()
-
-        self._execute_with_retry(_add)
+        """Append a progress update to the in-memory log."""
+        update = {
+            'timestamp': self._iso(timestamp),
+            'progress': progress,
+            'info': info,
+            'is_final': is_final
+        }
+        with self._lock:
+            self._progress.setdefault(test_run_id, []).append(update)
 
     def get_progress_updates(self, test_run_id: int) -> List[Dict[str, Any]]:
-        """Get all progress updates for a test run."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT * FROM progress_updates
-            WHERE test_run_id = ?
-            ORDER BY timestamp ASC
-        """, (test_run_id,))
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        return [dict(row) for row in rows]
+        """Get sorted progress updates for a run."""
+        with self._lock:
+            updates = list(self._progress.get(test_run_id, []))
+        return sorted(updates, key=lambda u: u.get('timestamp', ''))
 
     # ==================== Logs ====================
-
     def add_log(
         self,
         test_run_id: int,
@@ -249,43 +158,25 @@ class TestRepository:
         agent: Optional[str],
         message: str
     ):
-        """Add a log entry."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            INSERT INTO logs (test_run_id, timestamp, level, agent, message)
-            VALUES (?, ?, ?, ?, ?)
-        """, (test_run_id, timestamp, level, agent, message))
-
-        conn.commit()
-        conn.close()
+        """Append a log entry for a run."""
+        entry = {
+            'timestamp': self._iso(timestamp),
+            'level': level,
+            'agent': agent,
+            'message': message
+        }
+        with self._lock:
+            self._logs.setdefault(test_run_id, []).append(entry)
 
     def get_logs(self, test_run_id: int, level: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get logs for a test run, optionally filtered by level."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
+        """Get logs for a run, optionally filtered by level."""
+        with self._lock:
+            logs = list(self._logs.get(test_run_id, []))
         if level:
-            cursor.execute("""
-                SELECT * FROM logs
-                WHERE test_run_id = ? AND level = ?
-                ORDER BY timestamp ASC
-            """, (test_run_id, level))
-        else:
-            cursor.execute("""
-                SELECT * FROM logs
-                WHERE test_run_id = ?
-                ORDER BY timestamp ASC
-            """, (test_run_id,))
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        return [dict(row) for row in rows]
+            logs = [log for log in logs if log.get('level') == level]
+        return sorted(logs, key=lambda l: l.get('timestamp', ''))
 
     # ==================== Files ====================
-
     def add_file(
         self,
         test_run_id: int,
@@ -294,36 +185,24 @@ class TestRepository:
         file_size_bytes: Optional[int] = None,
         sas_url: Optional[str] = None
     ):
-        """Add a file created during test execution."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            INSERT INTO files_created (test_run_id, file_path, file_type, file_size_bytes, sas_url)
-            VALUES (?, ?, ?, ?, ?)
-        """, (test_run_id, file_path, file_type, file_size_bytes, sas_url))
-
-        conn.commit()
-        conn.close()
+        """Record a created file for a run."""
+        entry = {
+            'file_path': file_path,
+            'file_type': file_type,
+            'file_size_bytes': file_size_bytes,
+            'sas_url': sas_url,
+            'created_at': self._iso(datetime.now())
+        }
+        with self._lock:
+            self._files.setdefault(test_run_id, []).append(entry)
 
     def get_files(self, test_run_id: int) -> List[Dict[str, Any]]:
-        """Get all files created during a test run."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT * FROM files_created
-            WHERE test_run_id = ?
-            ORDER BY created_at ASC
-        """, (test_run_id,))
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        return [dict(row) for row in rows]
+        """Return files created during a run."""
+        with self._lock:
+            files = list(self._files.get(test_run_id, []))
+        return sorted(files, key=lambda f: f.get('created_at', ''))
 
     # ==================== Evaluations ====================
-
     def save_evaluation(
         self,
         test_run_id: int,
@@ -337,49 +216,27 @@ class TestRepository:
     ):
         """Save evaluation scores and reasoning."""
         overall_score = int((output_score * 0.8) + (progress_score * 0.2))
-
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            INSERT OR REPLACE INTO evaluations (
-                test_run_id, progress_score, output_score, overall_score,
-                progress_reasoning, output_reasoning,
-                progress_issues, output_strengths, output_weaknesses
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            test_run_id, progress_score, output_score, overall_score,
-            progress_reasoning, output_reasoning,
-            json.dumps(progress_issues or []),
-            json.dumps(output_strengths or []),
-            json.dumps(output_weaknesses or [])
-        ))
-
-        conn.commit()
-        conn.close()
+        evaluation = {
+            'test_run_id': test_run_id,
+            'progress_score': progress_score,
+            'output_score': output_score,
+            'overall_score': overall_score,
+            'progress_reasoning': progress_reasoning,
+            'output_reasoning': output_reasoning,
+            'progress_issues': progress_issues or [],
+            'output_strengths': output_strengths or [],
+            'output_weaknesses': output_weaknesses or []
+        }
+        with self._lock:
+            self._evaluations[test_run_id] = evaluation
 
     def get_evaluation(self, test_run_id: int) -> Optional[Dict[str, Any]]:
         """Get evaluation for a test run."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT * FROM evaluations WHERE test_run_id = ?", (test_run_id,))
-        row = cursor.fetchone()
-        conn.close()
-
-        if row:
-            result = dict(row)
-            # Parse JSON fields
-            result['progress_issues'] = json.loads(result['progress_issues'])
-            result['output_strengths'] = json.loads(result['output_strengths'])
-            result['output_weaknesses'] = json.loads(result['output_weaknesses'])
-            return result
-
-        return None
+        with self._lock:
+            evaluation = self._evaluations.get(test_run_id)
+            return dict(evaluation) if evaluation else None
 
     # ==================== Metrics ====================
-
     def save_metrics(
         self,
         test_run_id: int,
@@ -394,43 +251,30 @@ class TestRepository:
         errors_count: int,
         warnings_count: int
     ):
-        """Save performance metrics."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            INSERT OR REPLACE INTO metrics (
-                test_run_id, time_to_first_progress, time_to_completion,
-                total_progress_updates, avg_update_interval,
-                min_update_interval, max_update_interval,
-                files_created, sas_urls_provided,
-                errors_count, warnings_count
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            test_run_id, time_to_first_progress, time_to_completion,
-            total_progress_updates, avg_update_interval,
-            min_update_interval, max_update_interval,
-            files_created, sas_urls_provided,
-            errors_count, warnings_count
-        ))
-
-        conn.commit()
-        conn.close()
+        """Save calculated metrics for a run."""
+        metrics = {
+            'test_run_id': test_run_id,
+            'time_to_first_progress': time_to_first_progress,
+            'time_to_completion': time_to_completion,
+            'total_progress_updates': total_progress_updates,
+            'avg_update_interval': avg_update_interval,
+            'min_update_interval': min_update_interval,
+            'max_update_interval': max_update_interval,
+            'files_created': files_created,
+            'sas_urls_provided': sas_urls_provided,
+            'errors_count': errors_count,
+            'warnings_count': warnings_count
+        }
+        with self._lock:
+            self._metrics[test_run_id] = metrics
 
     def get_metrics(self, test_run_id: int) -> Optional[Dict[str, Any]]:
         """Get metrics for a test run."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT * FROM metrics WHERE test_run_id = ?", (test_run_id,))
-        row = cursor.fetchone()
-        conn.close()
-
-        return dict(row) if row else None
+        with self._lock:
+            metrics = self._metrics.get(test_run_id)
+            return dict(metrics) if metrics else None
 
     # ==================== Suggestions ====================
-
     def add_suggestion(
         self,
         test_run_id: int,
@@ -440,97 +284,65 @@ class TestRepository:
         code_reference: Optional[str] = None
     ):
         """Add an improvement suggestion."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            INSERT INTO suggestions (test_run_id, suggestion, category, priority, code_reference)
-            VALUES (?, ?, ?, ?, ?)
-        """, (test_run_id, suggestion, category, priority, code_reference))
-
-        conn.commit()
-        conn.close()
+        entry = {
+            'suggestion': suggestion,
+            'category': category,
+            'priority': priority,
+            'code_reference': code_reference,
+            'created_at': self._iso(datetime.now())
+        }
+        with self._lock:
+            self._suggestions.setdefault(test_run_id, []).append(entry)
 
     def get_suggestions(self, test_run_id: int) -> List[Dict[str, Any]]:
-        """Get all suggestions for a test run."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT * FROM suggestions
-            WHERE test_run_id = ?
-            ORDER BY priority DESC, created_at ASC
-        """, (test_run_id,))
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        return [dict(row) for row in rows]
+        """Get suggestions for a run."""
+        with self._lock:
+            suggestions = list(self._suggestions.get(test_run_id, []))
+        return sorted(suggestions, key=lambda s: (s.get('priority', ''), s.get('created_at', '')))
 
     # ==================== Analytics ====================
-
     def get_average_scores(self, test_case_id: Optional[str] = None, limit: int = 10) -> Dict[str, float]:
-        """Get average scores for recent test runs."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        """Compute average scores from stored evaluations."""
+        with self._lock:
+            evals = list(self._evaluations.values())
+            if test_case_id:
+                allowed_ids = {rid for rid, run in self._runs.items() if run.get('test_case_id') == test_case_id}
+                evals = [e for e in evals if e['test_run_id'] in allowed_ids]
 
-        if test_case_id:
-            cursor.execute("""
-                SELECT AVG(e.progress_score) as avg_progress,
-                       AVG(e.output_score) as avg_output,
-                       AVG(e.overall_score) as avg_overall
-                FROM evaluations e
-                JOIN test_runs tr ON e.test_run_id = tr.id
-                WHERE tr.test_case_id = ? AND tr.status = 'completed'
-                AND tr.id IN (
-                    SELECT id FROM test_runs
-                    WHERE test_case_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                )
-            """, (test_case_id, test_case_id, limit))
-        else:
-            cursor.execute("""
-                SELECT AVG(e.progress_score) as avg_progress,
-                       AVG(e.output_score) as avg_output,
-                       AVG(e.overall_score) as avg_overall
-                FROM evaluations e
-                JOIN test_runs tr ON e.test_run_id = tr.id
-                WHERE tr.status = 'completed'
-                AND tr.id IN (
-                    SELECT id FROM test_runs
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                )
-            """, (limit,))
+            # Consider only the most recent `limit` runs
+            recent_runs = self.get_recent_runs(test_case_id=test_case_id, limit=limit)
+            recent_ids = {r['id'] for r in recent_runs}
+            evals = [e for e in evals if e['test_run_id'] in recent_ids]
 
-        row = cursor.fetchone()
-        conn.close()
+        if not evals:
+            return {'avg_progress_score': 0, 'avg_output_score': 0, 'avg_overall_score': 0}
 
-        if row:
-            return {
-                'avg_progress_score': row['avg_progress'] or 0,
-                'avg_output_score': row['avg_output'] or 0,
-                'avg_overall_score': row['avg_overall'] or 0
-            }
+        avg_progress = sum(e['progress_score'] for e in evals) / len(evals)
+        avg_output = sum(e['output_score'] for e in evals) / len(evals)
+        avg_overall = sum(e['overall_score'] for e in evals) / len(evals)
 
-        return {'avg_progress_score': 0, 'avg_output_score': 0, 'avg_overall_score': 0}
+        return {
+            'avg_progress_score': avg_progress,
+            'avg_output_score': avg_output,
+            'avg_overall_score': avg_overall
+        }
 
     def get_score_trend(self, test_case_id: str, limit: int = 20) -> List[Dict[str, Any]]:
         """Get score trend over time for a specific test case."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        recent_runs = self.get_recent_runs(test_case_id=test_case_id, limit=limit)
+        recent_ids = {r['id'] for r in recent_runs}
 
-        cursor.execute("""
-            SELECT tr.created_at, e.progress_score, e.output_score, e.overall_score
-            FROM test_runs tr
-            JOIN evaluations e ON tr.id = e.test_run_id
-            WHERE tr.test_case_id = ? AND tr.status = 'completed'
-            ORDER BY tr.created_at ASC
-            LIMIT ?
-        """, (test_case_id, limit))
+        trend = []
+        with self._lock:
+            for run in sorted(recent_runs, key=lambda r: r.get('created_at', '')):
+                eval_data = self._evaluations.get(run['id'])
+                if not eval_data:
+                    continue
+                trend.append({
+                    'created_at': run.get('created_at'),
+                    'progress_score': eval_data.get('progress_score', 0),
+                    'output_score': eval_data.get('output_score', 0),
+                    'overall_score': eval_data.get('overall_score', 0)
+                })
 
-        rows = cursor.fetchall()
-        conn.close()
-
-        return [dict(row) for row in rows]
+        return trend

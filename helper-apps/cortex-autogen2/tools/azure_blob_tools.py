@@ -274,6 +274,7 @@ class AzureBlobUploader:
             raise FileNotFoundError(f"File not found: {file_path}")
 
         # Determine if we should preserve the exact filename or add timestamp/UUID
+        # Default keeps timestamp/UUID to avoid collisions with prior uploads unless explicitly overridden.
         preserve = (os.getenv("PRESERVE_BLOB_FILENAME", "false").lower() in ("1", "true", "yes"))
         prefix = (os.getenv("AZURE_BLOB_PREFIX") or "").strip().strip("/")
 

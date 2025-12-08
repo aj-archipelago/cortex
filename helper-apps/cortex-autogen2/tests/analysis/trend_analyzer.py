@@ -20,7 +20,7 @@ class TrendAnalyzer:
         Initialize the trend analyzer.
 
         Args:
-            db_path: Path to SQLite database
+            db_path: Unused placeholder retained for compatibility (no database writes)
         """
         self.db = TestRepository(db_path)
 

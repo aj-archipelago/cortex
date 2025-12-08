@@ -11,10 +11,10 @@ import logging
 import os
 import requests
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Iterable
 import hashlib
 from PIL import Image
-import asyncio # Import asyncio
+import asyncio  # Import asyncio
 import aiohttp  # Add async HTTP client
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -174,6 +174,64 @@ def _normalize_cse_image_results(payload: Dict[str, Any]) -> List[Dict[str, Any]
     return normalized
 
 
+async def _aggregate_cse_pages(base_query: str, search_type: str = "web", max_results: int = 30) -> List[Dict[str, Any]]:
+    """
+    Fetch multiple CSE pages (num=10, start stepping) and aggregate normalized results.
+    """
+    aggregated: List[Dict[str, Any]] = []
+    page_size = 10
+    # Google CSE supports num up to 10 per request; we paginate via start
+    for start in range(1, max_results + 1, page_size):
+        try:
+            params = {
+                "num": page_size,
+                "start": start,
+            }
+            if search_type == "image":
+                params["searchType"] = "image"
+            payload_str = await google_cse_search(text=base_query, parameters=params)
+            payload = json.loads(payload_str)
+        except Exception as exc:
+            logging.warning(f"[CSE paginate] error fetching page start={start} q={base_query}: {exc}")
+            continue
+        if not payload or "items" not in payload:
+            # Stop if no items
+            break
+        if search_type == "image":
+            aggregated.extend(_normalize_cse_image_results(payload))
+        else:
+            aggregated.extend(_normalize_cse_web_results(payload))
+        # If fewer than page_size items returned, likely no more pages
+        if len(payload.get("items", [])) < page_size:
+            break
+    return aggregated
+
+
+def _variant_queries(q: str) -> List[str]:
+    """
+    Build query variants to broaden coverage when CSE is sparse.
+    NOTE: Do NOT use operators like filetype:, site:, inurl: - they don't work with Google CSE.
+    """
+    variants = [q]
+    # Add data format context as regular words (NOT as operators)
+    variants.append(f"{q} CSV download")
+    variants.append(f"{q} data")
+    # Add source context as regular words
+    if "FRED" not in q.upper():
+        variants.append(f"{q} FRED")
+    # Try simplifying by removing all-caps codes (likely API identifiers)
+    simplified = re.sub(r'\b[A-Z]{5,}\b', '', q).strip()
+    if simplified and simplified != q:
+        variants.append(simplified)
+    # Dedup while preserving order
+    seen = set()
+    uniq = []
+    for v in variants:
+        v = v.strip()
+        if v and v not in seen:
+            uniq.append(v)
+            seen.add(v)
+    return uniq
 def _has_google_cse_env() -> bool:
     """Check if Google CSE is properly configured."""
     key = os.getenv("GOOGLE_CSE_KEY")
@@ -390,24 +448,40 @@ async def fetch_webpage(url: str, render: bool = False, timeout_s: int = 20, max
 
 
 async def web_search(query: str, count: int = 25) -> str:
+    """
+    Search the web using Google Custom Search. Returns JSON array of results with title, url, and snippet.
+    
+    CRITICAL USAGE GUIDELINES:
+    - Use NATURAL LANGUAGE queries - write queries the way a human would ask Google
+    - Do NOT use search operators (site:, filetype:, inurl:, quoted strings) - they return ZERO results
+    - Do NOT use API codes or database identifiers - describe concepts in plain English instead
+    - Use FULL NAMES instead of abbreviations or ISO codes
+    - If a query returns no results, simplify by removing technical terms
+    
+    Args:
+        query: Natural language search query describing what data you're looking for
+        count: Maximum number of results to return (default 25, max 100)
+    
+    Returns:
+        JSON string with array of results or {"status": "No relevant results found."}
+    """
     try:
         results: List[Dict[str, Any]] = []
-        used_google = False
-        # Prefer Google CSE when configured
         if _has_google_cse_env():
-            try:
-                raw = await google_cse_search(text=query, parameters={"num": max(1, min(count, 10))})
-                data = json.loads(raw) if raw else {}
-                results = _normalize_cse_web_results(data)
-                used_google = True
-            except Exception:
-                used_google = False
-                results = []
+            # Expand variants and paginate to aggregate richer results
+            variants = _variant_queries(query)
+            # Default page size 10; honor requested count up to 100
+            target = max(10, min(count, 100))
+            for v in variants:
+                results.extend(await _aggregate_cse_pages(v, search_type="web", max_results=target))
+                if len(results) >= target:
+                    break
 
         if not results:
             return json.dumps({"status": "No relevant results found."})
 
-        return json.dumps(results, indent=2)
+        # Trim to requested count (no dedupe to preserve all variants)
+        return json.dumps(results[:count], indent=2)
     except Exception as exc:
         return json.dumps({"error": f"Web search failed: {str(exc)}"})
 
@@ -458,6 +532,25 @@ def _is_downloadable_image(url: str, session=None, timeout: int = 15) -> bool:
 
 
 async def image_search(query: str, count: int = 25, verify_download: bool = True, required_terms: Optional[List[str]] = None, allowed_domains: Optional[List[str]] = None, strict_entity: bool = False) -> str:
+    """
+    Search for images using Google Custom Search. Returns JSON array of image results with URLs.
+    
+    USAGE GUIDELINES:
+    - Use NATURAL LANGUAGE queries describing what image you want
+    - Do NOT use search operators (site:, filetype:, inurl:) - they may return no results
+    - Use descriptive terms that would appear on image hosting sites
+    
+    Args:
+        query: Natural language description of the image you're looking for
+        count: Maximum number of images to return (default 25)
+        verify_download: Whether to verify images are downloadable (default True)
+        required_terms: Optional list of terms that must appear in image title/URL
+        allowed_domains: Optional list of allowed domain names
+        strict_entity: If True, require entity name in image metadata
+    
+    Returns:
+        JSON string with array of image results or error status
+    """
     try:
         # Enhanced query variants - prioritize high-quality results with diverse strategies
         def generate_query_variants(q: str) -> List[str]:
@@ -884,16 +977,20 @@ async def combined_search(query: str, count: int = 25) -> str:
 
 async def collect_images(query: str, count: int = 10, work_dir: Optional[str] = None) -> str:
     """
-    Collect images using Google CSE web search.
+    Collect and download images using Google CSE web search.
 
     Args:
         query: Search terms for images
         count: Number of images to collect (max 10)
-        work_dir: Working directory for downloads
+        work_dir: Working directory for downloads - if provided, images are downloaded to local files
 
     Returns:
-        JSON string with collected images
+        JSON string with collected images (includes local_path if work_dir provided)
     """
+    import aiohttp
+    import hashlib
+    import os
+    
     try:
         # Use Google CSE for image search
         raw_payload = await google_cse_search(text=query, parameters={"searchType": "image", "num": min(count, 10)})
@@ -902,15 +999,47 @@ async def collect_images(query: str, count: int = 10, work_dir: Optional[str] = 
 
         # Download and verify images
         verified_images = []
-        for img in images[:count]:
+        for img in images[:count * 2]:  # Try more to get enough
+            if len(verified_images) >= count:
+                break
             try:
-                # Try to download and verify the image
-                if _is_downloadable_image(img["url"]):
-                    verified_images.append(img)
+                url = img.get("url", "")
+                if not url:
+                    continue
+                    
+                # If work_dir provided, actually download the image
+                if work_dir:
+                    try:
+                        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                                if resp.status == 200:
+                                    content_type = resp.headers.get('Content-Type', '')
+                                    if 'image' in content_type.lower():
+                                        data = await resp.read()
+                                        if len(data) > 1000:  # Minimum size check
+                                            # Generate clean filename from query
+                                            safe_query = "".join(c if c.isalnum() else "_" for c in query[:30])
+                                            ext = ".jpg" if "jpeg" in content_type or "jpg" in url.lower() else ".png"
+                                            filename = f"{safe_query}_{len(verified_images)+1}{ext}"
+                                            filepath = os.path.join(work_dir, filename)
+                                            with open(filepath, 'wb') as f:
+                                                f.write(data)
+                                            img["local_path"] = filepath
+                                            img["local_filename"] = filename
+                                            verified_images.append(img)
+                                            logger.info(f"Downloaded image: {filename}")
+                    except Exception as e:
+                        logger.warning(f"Failed to download {url}: {e}")
+                        continue
+                else:
+                    # No work_dir - just verify URL is downloadable
+                    if _is_downloadable_image(url):
+                        verified_images.append(img)
             except:
                 continue
 
-        return json.dumps({"images": verified_images[:count]})
+        return json.dumps({"images": verified_images[:count], "downloaded": work_dir is not None})
     except Exception as e:
         return json.dumps({"error": f"collect_images failed: {str(e)}"})
 
@@ -921,17 +1050,17 @@ from autogen_core.tools import FunctionTool
 
 image_search_tool = FunctionTool(
     image_search,
-    description="Search for images using Google CSE. Returns normalized image results with verification. Use this for image search."
+    description="Search for images using Google CSE. Use natural language queries describing the image you want - avoid operators like site:, filetype:. Returns normalized image results with verification."
 )
 
 collect_images_tool = FunctionTool(
     collect_images,
-    description="Collect and verify downloadable images using Google CSE. Returns verified image URLs. Use this when you need downloadable images."
+    description="Collect and DOWNLOAD images using Google CSE. When work_dir is provided, images are downloaded to local files and local_path is included in results. Use this when you need actual image files for presentations/documents."
 )
 
 web_search_tool = FunctionTool(
     web_search,
-    description="Search for web pages using Google CSE. Returns normalized web results with title, URL, and snippet. Use this for web page search."
+    description="Search for web pages using Google CSE. IMPORTANT: Use natural language queries only - do NOT use operators like site:, filetype:, or quoted strings as they return zero results. Use full names instead of codes/abbreviations. Returns normalized results with title, URL, and snippet."
 )
 
 combined_search_tool = FunctionTool(

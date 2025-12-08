@@ -3,7 +3,8 @@ Planner phase handler for task execution planning.
 """
 import logging
 
-from agents.util.workflow_utils import run_agent_with_timeout
+from dynamic_agent_loader import helpers
+run_agent_with_timeout = helpers.run_agent_with_timeout
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,9 @@ Upload and presentation phase handler.
 import json
 import logging
 
-from agents.util.workflow_utils import run_agent_with_timeout, extract_json_from_response
+from dynamic_agent_loader import helpers
+run_agent_with_timeout = helpers.run_agent_with_timeout
+extract_json_from_response = helpers.extract_json_from_response
 from context.logging_utils import log_phase_start
 from .presenter_phase import PresenterPhase
 
