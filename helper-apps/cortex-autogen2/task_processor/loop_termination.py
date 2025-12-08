@@ -57,7 +57,7 @@ def create_loop_detection_termination(all_messages, max_repetitions: int = 3):
         
         # === PATTERN 2: Planner appearing 20+ times total ===
         planner_count = sum(1 for a in agent_sequence if 'planner' in a.lower())
-        if planner_count >= 20:
+        if planner_count >= 10:
             logger.warning(f"🛑 LOOP DETECTED: Excessive replanning ({planner_count} planner invocations)")
             return True
         
