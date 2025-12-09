@@ -1,5 +1,6 @@
 {
   "version": "2.0",
+  "functionTimeout": "00:59:00",
   "logging": {
     "applicationInsights": {
       "samplingSettings": {
@@ -16,5 +17,10 @@
     "queues": {
       "maxPollingInterval": "00:00:01"
     }
+  },
+  "concurrency": {
+    "dynamicConcurrencyEnabled": true,
+    "snapshotPersistenceEnabled": true,
+    "maxConcurrentRequestsPerInstance": 10
   }
 }

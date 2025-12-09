@@ -1,5 +1,5 @@
--- Cortex AutoGen2 Test Results Database Schema
--- SQLite database for storing test runs, evaluations, and metrics
+-- Legacy SQLite schema (kept for reference; persistence removed)
+-- No database writes are performed by the test harness
 
 -- Test runs table - stores information about each test execution
 CREATE TABLE IF NOT EXISTS test_runs (

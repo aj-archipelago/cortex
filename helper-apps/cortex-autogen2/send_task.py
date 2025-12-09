@@ -97,7 +97,7 @@ def main():
     
     # Use synchronous client for instant execution
     queue_client = QueueClient.from_connection_string(connection_string, queue_name)
-    queue_client.send_message(encoded_message)
+    queue_client.send_message(encoded_message, visibility_timeout=0)
     print(f"Task sent to queue '{queue_name}': {task}")
     print(f"Message encoded as Base64: {encoded_message[:50]}...")
 

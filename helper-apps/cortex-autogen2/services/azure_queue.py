@@ -36,13 +36,14 @@ class AzureQueueService:
         """
         try:
             messages = self.queue_client.receive_messages(
-                messages_per_page=1, 
+                messages_per_page=1,
                 visibility_timeout=1800,
                 timeout=30
             )
-            
+
             async for message in messages:
                 logger.info(f"📨 Azure Queue: Received message with ID: {message.id}")
+                logger.debug(f"📨 Raw message content: {message.content}")
                 return {
                     "id": message.id,
                     "content": message.content,
@@ -67,6 +68,23 @@ class AzureQueueService:
             logger.error(f"💥 Failed to delete message {message_id}: {e}")
             raise
 
+    async def peek_messages(self, max_messages: int = 1) -> list:
+        """
+        Peek at messages in the queue without consuming them.
+        """
+        try:
+            messages = self.queue_client.peek_messages(max_messages=max_messages)
+            result = []
+            async for message in messages:
+                result.append({
+                    "id": message.id,
+                    "content": message.content,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"❌ Error peeking messages: {e}")
+            return []
+
     async def close(self):
         """
         Closes the QueueClient.
@@ -79,7 +97,12 @@ async def get_queue_service() -> AzureQueueService:
     """
     connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
     queue_name = os.getenv("AZURE_QUEUE_NAME")
-    
+
+    if not connection_string:
+        raise ValueError("AZURE_STORAGE_CONNECTION_STRING environment variable is required")
+    if not queue_name:
+        raise ValueError("AZURE_QUEUE_NAME environment variable is required")
+
     queue_service = AzureQueueService(connection_string, queue_name)
     await queue_service.initialize()
     return queue_service 

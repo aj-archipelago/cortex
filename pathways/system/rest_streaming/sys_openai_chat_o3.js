@@ -19,4 +19,5 @@ export default {
     useInputChunking: false,
     emulateOpenAIChatModel: 'o3',
     enableDuplicateRequests: false,
+    timeout: 900
 }
