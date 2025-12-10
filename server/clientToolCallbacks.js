@@ -9,8 +9,9 @@ import { config } from '../config.js';
 // Key: toolCallbackId, Value: { resolve, reject, timeout, requestId }
 const pendingCallbacks = new Map();
 
-// Default timeout for client tool responses (60 seconds)
-const DEFAULT_TIMEOUT = 60000;
+// Default timeout for client tool responses (5 minutes)
+// Increased from 60s to 5min to accommodate longer operations like CreateApplet
+const DEFAULT_TIMEOUT = 300000;
 
 // Redis setup for cross-instance communication
 const connectionString = config.get('storageConnectionString');
