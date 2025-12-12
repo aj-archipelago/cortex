@@ -261,9 +261,18 @@ class TaskProcessor:
 
             # Initialize context memory
             self.context_memory = ContextMemory(request_work_dir, self.gpt41_model_client, task_id)
+            
+            # Initialize cognitive journey tracking
+            from context.cognitive_journey_mapper import get_cognitive_journey_mapper
+            journey_mapper = get_cognitive_journey_mapper()
+            journey_mapper.start_journey(task_id, ["planner_agent", "coder_agent", "web_search_agent", "presenter_agent"])
 
             context_files = helpers.build_dynamic_context_from_files(request_work_dir, task)
             task_with_context = f"{task}\n\nContext from previous work:\n{context_files}"
+
+            # Retrieve learnings from Azure Cognitive Search
+            from services.learning_service import get_learnings_for_task
+            learnings = await get_learnings_for_task(task, task_id, self.gpt41_model_client, self.context_memory)
 
             # Get agents for this task
             planner_agent, execution_agents, presenter_agent = await get_agents(
@@ -279,6 +288,7 @@ class TaskProcessor:
                 request_work_dir=request_work_dir,
                 request_id=task_id,
                 task_content=task,
+                planner_learnings=learnings,
             )
 
             # Extract execution completion verifier agent from execution_agents
@@ -376,18 +386,19 @@ class TaskProcessor:
             execution_completion_verifier_agent=execution_completion_verifier_agent,
             task_id=task_id,
             work_dir=work_dir,
-            progress_handler=progress_handler
+            progress_handler=progress_handler,
+            context_memory=self.context_memory,
+            model_client_for_processing=self.gpt41_model_client
         )
-
-
-
-            # Send final progress update
-        await progress_handler.handle_progress_update(
-            task_id, 1.0, "🎉 Your task is complete!",
-            data=result if result else "❌ Error processing task!"
-        )
-
-        logger.info(f"🤝 SIMPLE WORKFLOW COMPLETED: {result}")
+        
+        # Complete cognitive journey tracking
+        if self.context_memory:
+            try:
+                from context.cognitive_journey_mapper import get_cognitive_journey_mapper
+                journey_mapper = get_cognitive_journey_mapper()
+                journey_mapper.complete_journey(task_id, "completed" if "ERROR" not in str(result) else "failed")
+            except Exception as e:
+                logger.warning(f"Failed to complete cognitive journey: {e}")
 
         return result
 

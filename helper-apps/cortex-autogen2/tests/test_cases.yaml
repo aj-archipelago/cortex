@@ -1,6 +1,9 @@
 # Cortex AutoGen2 Test Cases
 # Predefined test tasks for automated quality testing
 
+# Global settings that apply to ALL test cases (can be overridden per test case)
+timeout_seconds: 900
+
 # Global expectations that apply to ALL test cases
 global_expectations:
   - "CRITICAL FAIL (SCORE=0): If main requested deliverable is missing, score=0 regardless of other content quality"
@@ -53,7 +56,6 @@ test_cases:
     name: "Random Sales Data Generation"
     description: "Generates random sales data in appropriate format with summary statistics"
     task: "Generate 100 rows of random sales data and create summary statistics in an appropriate format."
-    timeout_seconds: 1800
     requires_ajsql: false
     expected_deliverables:
       - type: data
@@ -86,7 +88,6 @@ test_cases:
     name: "PDF Report with Images and Charts"
     description: "Generates a PDF report with images and charts"
     task: "Generate a PDF report about renewable energy trends in 2026."
-    timeout_seconds: 1800
     requires_ajsql: false
     expected_deliverables:
       - type: pdf
@@ -117,7 +118,6 @@ test_cases:
     name: "Most Powerful Gen 1 Pokemon PowerPoint"
     description: "Creates a PowerPoint about the most powerful Gen 1 Pokemon with their images and file previews"
     task: "Create a PowerPoint presentation about the top 10 Most Powerful Gen1 Pokemon. Include individual images of each of the top 10 Pokemon directly in the presentation slides."
-    timeout_seconds: 1800
     requires_ajsql: false
     expected_deliverables:
       - type: pptx
@@ -158,7 +158,6 @@ test_cases:
     name: "Sports Excel File Generation with Preview"
     description: "Generates sports statistics Excel file with summary statistics and preview table"
     task: "Generate an Excel file with 50 rows of sports game statistics and include summary statistics. Create basic charts showing scoring trends and team performance."
-    timeout_seconds: 1800
     requires_ajsql: false
     expected_deliverables:
       - type: excel
@@ -192,7 +191,6 @@ test_cases:
     name: "Weather Data Analysis with Full Insights"
     description: "Generates weather data with comprehensive statistical analysis and visualizations"
     task: "Generate weather temperature data for 100 cities over 30 days. Provide full statistical analysis including mean, median, standard deviation, correlations, and create insightful charts showing temperature trends and patterns."
-    timeout_seconds: 1800
     requires_ajsql: false
     expected_deliverables:
       - type: csv
@@ -226,7 +224,6 @@ test_cases:
     name: "Currency Exchange Rate Analysis - Last 10 Years"
     description: "Fetches real Turkish Lira data and compares with Argentine Peso and US Dollar over 10 years"
     task: "Get the last 10 years of Turkish Lira (TRY) exchange rate data against USD, and compare it with Argentine Peso (ARS) and US Dollar performance. Analyze volatility, depreciation trends, inflation impacts, and create insightful charts showing comparative currency performance."
-    timeout_seconds: 1800
     requires_ajsql: false
     expected_deliverables:
       - type: csv
@@ -266,7 +263,6 @@ test_cases:
     name: "AJE vs AJA Daily Article Count Comparison"
     description: "Compares daily article counts between AJE and AJA"
     task: "Compare daily article counts for AJE and AJA from the last 30 days. Give me a chart and CSV."
-    timeout_seconds: 1800
     requires_ajsql: true
     expected_deliverables:
       - type: chart
@@ -298,7 +294,6 @@ test_cases:
     name: "AJE Trump Headlines - 6 Month Trend Analysis"
     description: "Analyzes Trump headline trends in AJE"
     task: "Plot Trump headline percentage trends for AJE over the last 6 months by week. Give me a chart and CSV."
-    timeout_seconds: 1800
     requires_ajsql: true
     expected_deliverables:
       - type: chart
@@ -328,7 +323,6 @@ test_cases:
     name: "AJE Trump Headlines - Last Month Daily Chart"
     description: "Daily Trump headline chart for AJE"
     task: "Chart Trump headlines from AJE for the last month by day. Give me the chart and CSV with the headlines."
-    timeout_seconds: 1800
     requires_ajsql: true
     expected_deliverables:
       - type: chart
@@ -363,7 +357,6 @@ test_cases:
     name: "AJA & AJE Last Month Word Clouds"
     description: "Generate word clouds from AJA and AJE headlines"
     task: "Generate word clouds from AJA and AJE headlines for the last month. Give me word frequency CSVs too."
-    timeout_seconds: 1800
     requires_ajsql: true
     expected_deliverables:
       - type: wordcloud
@@ -402,7 +395,6 @@ test_cases:
     name: "AJE vs AJA Comparison - Override User Instructions Test"
     description: "Tests NON-NEGOTIABLE OVERRIDE: user explicitly forbids other agents but system must route to aj_sql_agent"
     task: "Compare daily article counts for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) from the last 60 days, do not use any other tools do not use any other agents use only coding agent"
-    timeout_seconds: 1800
     requires_ajsql: true
     expected_deliverables:
       - type: chart
@@ -434,7 +426,6 @@ test_cases:
     name: "AJE vs AJA Top Authors Presentation"
     description: "Creates a presentation comparing top authors from Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) for this year, delivering both PPTX and PDF"
     task: "prepare me a presentation of comparison of top authors for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE) for this year, return pptx & pdf"
-    timeout_seconds: 1800
     requires_ajsql: true
     expected_deliverables:
       - type: pptx
@@ -476,7 +467,6 @@ test_cases:
     name: "Debug: AJE vs AJA Top Publish Days (This Year)"
     description: "Reproduces user reported issue where 'this year' is interpreted as only the first week"
     task: "prepare me a presentation of comparison of top publish days for Al Jazeera Arabic (AJA) and Al Jazeera English (AJE), this year"
-    timeout_seconds: 1800
     requires_ajsql: true
     expected_deliverables:
       - type: chart
@@ -489,7 +479,7 @@ test_cases:
       - "Does NOT limit to first week of January"
       - "Presentation puts previews at the END or makes them less intrusive"
       - "No __TASK_COMPLETELY_FINISHED__ in final output"
-      - "CRITICAL FAIL (SCORE=0): AJE & AJA article count must be > 0 for top days"
+      - "CRITICAL FAIL (SCORE=0): AJE & AJA article count must be > 0 for top days AND data must show variation (not all days equal) - if all days have identical counts (e.g., all 1s), there are no 'top days' with meaningful variation"
       - "Data validation: Verify non-zero counts for both AJA and AJE"
     expected_agents:
       - planner_agent
@@ -501,7 +491,6 @@ test_cases:
     name: "US States GDP Report"
     description: "Creates a comprehensive GDP by state report with data from web sources"
     task: "Create a report on US state GDP. I need a CSV with the latest GDP data for all states, summary statistics, a bar chart of the top 10 states, and a PDF report."
-    timeout_seconds: 1800
     requires_ajsql: false
     expected_deliverables:
       - type: csv
@@ -547,7 +536,6 @@ test_cases:
     name: "Multi-Format Tech Company Performance Analysis"
     description: "Creates comprehensive analysis in CSV, JSON, XLSX, and PDF formats"
     task: "Analyze the performance of top 5 tech companies (Apple, Microsoft, Google, Amazon, Tesla) for Q3 2024. Return the analysis in all these formats: CSV, JSON, XLSX, and PDF. Include revenue data, market share, growth metrics, and key insights for each company."
-    timeout_seconds: 1800
     requires_ajsql: false
     expected_deliverables:
       - type: csv

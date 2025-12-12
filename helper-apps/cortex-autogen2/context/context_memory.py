@@ -98,6 +98,17 @@ class ContextMemory:
         """Generate comprehensive context for presenter agent (up to 50k tokens)."""
         return await self.context_generator.get_presenter_context(task, upload_results, execution_plan, max_tokens)
     
+    # Delegate worklog and learning logging methods
+    def log_worklog(self, agent_name: str, work_type: str, description: str,
+                   status: str = "in_progress", metadata: dict = None, details: dict = None):
+        """Log worklog entry with optional structured details."""
+        self.event_recorder.log_worklog(agent_name, work_type, description, status, metadata, details)
+    
+    def log_learning(self, learning_type: str, content: str, source: str = "system",
+                    success_score: float = None, metadata: dict = None, details: dict = None):
+        """Log learning entry with optional structured details."""
+        self.event_recorder.log_learning(learning_type, content, source, success_score, metadata, details)
+    
     async def get_focused_agent_context(self, agent_name: str, current_step: str = "", 
                                        max_tokens: int = None) -> str:
         """Generate focused context summary for execution agents."""

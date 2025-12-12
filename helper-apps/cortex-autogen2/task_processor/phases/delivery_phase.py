@@ -5,8 +5,35 @@ import json
 import logging
 
 from dynamic_agent_loader import helpers
-run_agent_with_timeout = helpers.run_agent_with_timeout
-extract_json_from_response = helpers.extract_json_from_response
+import asyncio
+from autogen_core import CancellationToken
+
+# run_agent_with_timeout may not exist in all helpers versions - provide fallback
+try:
+    run_agent_with_timeout = helpers.run_agent_with_timeout
+except AttributeError:
+    # Fallback: create standalone function if not in helpers
+    async def run_agent_with_timeout(agent, task: str, timeout_seconds: int, logger):
+        """Run an agent with timeout and consistent error handling."""
+        try:
+            result = await asyncio.wait_for(
+                agent.run(task=task, cancellation_token=CancellationToken()),
+                timeout=timeout_seconds
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.error(f"Agent {agent.name if hasattr(agent, 'name') else 'unknown'} timed out after {timeout_seconds}s")
+            raise RuntimeError(f"Agent timed out after {timeout_seconds}s")
+
+# extract_json_from_response may not exist in all helpers versions - use centralized utility
+try:
+    extract_json_from_response = helpers.extract_json_from_response
+except AttributeError:
+    # Fallback: use centralized JSON extractor
+    from util.json_extractor import extract_json_from_llm_response
+    def extract_json_from_response(response_text: str) -> dict:
+        result = extract_json_from_llm_response(response_text, expected_type=dict, log_errors=False)
+        return result if result else {"message": response_text}
 from context.logging_utils import log_phase_start
 from .presenter_phase import PresenterPhase
 
@@ -163,7 +190,7 @@ Select the minimum necessary files that fully satisfy the user's request.
                 if os.path.exists(full_path) and os.path.isfile(full_path):
                     file_size = os.path.getsize(full_path)
                     if file_size > 0:
-                files.append(rel_path)
+                        files.append(rel_path)
                     else:
                         self.logger.warning(f"⚠️ Skipping empty file: {rel_path}")
                 else:

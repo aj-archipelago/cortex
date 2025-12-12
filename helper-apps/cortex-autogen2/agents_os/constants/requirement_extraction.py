@@ -21,6 +21,8 @@ UNIVERSAL_REQUIREMENT_EXTRACTION_FRAMEWORK = """
 - List patterns: "X, Y, Z", "create X, Y, Z"
 - Explicit lists: "I need X, Y, and Z"
 - Multiple mentions: Any format mentioned multiple times in task
+- Pattern-based requirements: "*summary*.json" means JSON format is required, "*summary*.csv" means CSV format is required
+- Format-specific requests: "summary statistics JSON" explicitly requires JSON, "summary statistics CSV" explicitly requires CSV
 
 **VALIDATION PRINCIPLES**:
 - **ALL-OR-NOTHING**: If task requests multiple formats, ALL must be delivered
@@ -33,6 +35,7 @@ UNIVERSAL_REQUIREMENT_EXTRACTION_FRAMEWORK = """
 - Handle common variations (Excel/XLSX, JPG/JPEG, etc.)
 - Support any format type mentioned in task
 - Case-insensitive matching
+- **PATTERN-BASED FORMAT DETECTION**: If pattern like "*summary*.json" appears, extract format from pattern (JSON in this case). Patterns explicitly indicate required format.
 """
 
 

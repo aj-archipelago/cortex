@@ -112,6 +112,8 @@ async def get_coder_system_message(request_id: str, work_dir: str, task_content:
         DELIVERABLE_FILE_QUALITY_REQUIREMENTS,
         WORKFLOW_CONTINUATION_SIGNALING,
         CODE_GENERATION_ERROR_RECOVERY,
+        GENERIC_PRESENTATION_REQUIREMENTS,
+        ALL_ENTITIES_MANDATORY,
     )
     from .constants.visual_processing import (
         IMAGE_AND_PDF_PROCESSING_CAPABILITIES,
@@ -172,7 +174,7 @@ async def get_coder_system_message(request_id: str, work_dir: str, task_content:
   **MANDATORY REQUIREMENT VALIDATION**:
   1. **EXTRACT FIRST**: Before generating code, extract ALL requested formats using UNIVERSAL_REQUIREMENT_EXTRACTION_FRAMEWORK
   2. **ROBUST DATA HANDLING**: Standardize column names before any merge/join operations: `df.columns = df.columns.str.lower()` and handle pandas deprecation warnings gracefully
-  3. **REAL-DATA GUARANTEE**: Do NOT create placeholder/synthetic files. If real numeric/tabular data is unavailable after allowed attempts, emit `DATA_GAP_[metric]` and stop; do not fabricate content to satisfy file existence.
+  3. **REAL-DATA GUARANTEE**: Do NOT create placeholder/synthetic files. If real numeric/tabular data is unavailable after exhausting all sources and alternative methods, raise ValueError("❌ DATA MISMATCH: [specific issue]. Wrong data downloaded - needs replanning.") to trigger replanning. NEVER emit DATA_GAP placeholders or create files with placeholder/synthetic data - it violates core principles and results in automatic score 0. You MUST: (1) Try alternative data sources (different URLs, different APIs, different websites), (2) Try alternative extraction methods (regex parsing, manual HTML extraction, different libraries, BeautifulSoup for HTML, different JSON parsing approaches), (3) Use partial data if available, (4) Only raise ValueError if absolutely no real data exists after trying all alternatives.
   4. **CREATE CHECKLIST**: In code comments, list ALL required formats: `# Required formats: [list] - verify all created`
   5. **VERIFY AFTER CREATION**: After creating files, verify EACH format exists:
     - Check file extensions match requested formats
@@ -296,6 +298,10 @@ async def get_coder_system_message(request_id: str, work_dir: str, task_content:
 {SELF_CORRECTION_FRAMEWORK}
 
 {CODE_GENERATION_ERROR_RECOVERY}
+
+{GENERIC_PRESENTATION_REQUIREMENTS}
+
+{ALL_ENTITIES_MANDATORY}
 """.strip()
 
 

@@ -40,10 +40,68 @@ class MessageProcessor:
                                 content=content_str,
                                 metadata={"task_id": task_id, "phase": "execution"}
                             )
+                            
+                            # Detect file creation markers ("📁 Ready for upload: path")
+                            import re
+                            import os
+                            upload_markers = re.findall(r'📁\s*Ready for upload:\s*(.+)', content_str)
+                            # Track already processed files to avoid duplicates
+                            processed_files = set()
+                            
+                            for file_path in upload_markers:
+                                file_path = file_path.strip()
+                                if not file_path:
+                                    continue
+                                
+                                # Normalize path: handle relative paths by making absolute
+                                if not os.path.isabs(file_path):
+                                    # Try relative to work_dir if available
+                                    if hasattr(self.context_memory, 'work_dir'):
+                                        file_path = os.path.join(self.context_memory.work_dir, file_path)
+                                    else:
+                                        # Try current working directory
+                                        file_path = os.path.abspath(file_path)
+                                
+                                # Normalize path (resolve symlinks, etc.)
+                                try:
+                                    file_path = os.path.normpath(file_path)
+                                except Exception:
+                                    pass
+                                
+                                # Skip if already processed
+                                if file_path in processed_files:
+                                    continue
+                                
+                                if os.path.exists(file_path):
+                                    try:
+                                        processed_files.add(file_path)
+                                        
+                                        # Determine file type from extension
+                                        _, ext = os.path.splitext(file_path)
+                                        file_type = ext[1:] if ext.startswith('.') else ext
+                                        
+                                        # Simple content summary
+                                        file_size = os.path.getsize(file_path)
+                                        content_summary = f"File size: {file_size} bytes"
+                                        
+                                        # Record file creation (this will auto-log to worklog)
+                                        self.context_memory.record_file_creation(
+                                            file_path,
+                                            file_type,
+                                            content_summary,
+                                            {"file_size": file_size},
+                                            source
+                                        )
+                                        self.logger.info(f"📁 Recorded file creation: {os.path.basename(file_path)} by {source}")
+                                    except Exception as e:
+                                        self.logger.warning(f"Failed to record file creation for {file_path}: {e}")
+                                else:
+                                    self.logger.debug(f"File path from marker doesn't exist: {file_path}")
 
-                            # Log comprehensive agent message details
-                            self.context_memory.record_comprehensive_log(
-                                event_type="agent_message",
+                            # Log agent action for tracking
+                            self.context_memory.record_agent_action(
+                                agent_name=source,
+                                action_type="message_response",
                                 details={
                                     "message_type": "response",
                                     "content_length": len(content_str),
@@ -52,7 +110,6 @@ class MessageProcessor:
                                     "has_tool_result": "[FunctionExecutionResult(" in content_str,
                                     "turn_number": len(result.messages)
                                 },
-                                agent_name=source,
                                 metadata={"task_id": task_id, "phase": "execution", "message_index": len(result.messages)}
                             )
 
@@ -119,16 +176,23 @@ class MessageProcessor:
                 }
 
                 try:
-                    self.context_memory.record_walkthrough(
+                    # Log as decision with cognitive insights
+                    self.context_memory.record_decision(
                         agent_name=source,
-                        reasoning=content_str[:1000],
                         decision=f"Agent {source} demonstrated {cognitive_analysis.get('cognitive_type', 'cognitive_activity')}",
-                        context=f"Execution phase for task {task_id}",
+                        reasoning=content_str[:1000],
+                        alternatives=cognitive_analysis.get('solutions_attempted', [])
+                    )
+                    # Also log to worklog for cognitive work
+                    self.context_memory.log_worklog(
+                        source, "cognitive_analysis",
+                        f"Cognitive activity: {cognitive_analysis.get('cognitive_type', 'unknown')}",
+                        status="completed",
                         metadata=metadata
                     )
-                    self.logger.info(f"✅ LOGGING: Cognitive walkthrough recorded for {source} with {len(cognitive_analysis.get('key_insights', []))} insights")
+                    self.logger.info(f"✅ LOGGING: Cognitive analysis recorded for {source} with {len(cognitive_analysis.get('key_insights', []))} insights")
                 except Exception as e:
-                    self.logger.error(f"❌ WALKTHROUGH RECORDING FAILED for {source}: {e}")
+                    self.logger.error(f"❌ COGNITIVE RECORDING FAILED for {source}: {e}")
 
         except Exception as e:
             self.logger.warning(f"⚠️ COGNITIVE ANALYSIS SKIPPED for {source}: {str(e)}")

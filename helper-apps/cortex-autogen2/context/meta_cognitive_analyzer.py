@@ -98,18 +98,13 @@ class MetaCognitiveAnalyzer:
         """Parse meta-cognitive analysis response."""
 
         try:
-            import json
-            import re
-
-            # Extract JSON
-            json_match = re.search(r'```json\s*(.*?)\s*```', response_content, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                json_match = re.search(r'\{.*\}', response_content, re.DOTALL)
-                json_str = json_match.group(0) if json_match else response_content
-
-            return json.loads(json_str)
+            from util.json_extractor import extract_json_from_llm_response
+            
+            result = extract_json_from_llm_response(response_content, expected_type=dict, log_errors=True)
+            if result:
+                return result
+            # Fallback to empty dict
+            return {}
 
         except Exception as parse_error:
             logger.warning(f"Meta-cognitive JSON parsing failed: {str(parse_error)}")

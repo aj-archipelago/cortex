@@ -11,25 +11,36 @@ ERROR_RECOVERY_FRAMEWORK = """
     - **Early Failures**: Structure code so that even if early steps fail, later file creation steps still execute IF they have valid data
     - **CRITICAL**: Never let ANY error prevent file creation IF you have valid data - but NEVER create files with fake/fallback data
 
-    **FINANCIAL DATA API FAILURES** (financial data APIs, economic data sources, etc.):
+    **DATA SOURCE FAILURES** (APIs, web scraping, file downloads, etc.):
     - **NEVER use sys.exit()** - This aborts execution
-    - **CRITICAL: NO FALLBACK DATA** - Never generate synthetic, fake, or hallucinated data
-    - **API Download Failures**: If data download APIs fail, FAIL CLEANLY with clear error message explaining what failed and why
+    - **CRITICAL: NO SYNTHETIC DATA** - Never generate synthetic, fake, or hallucinated data
+    - **MANDATORY MULTI-SOURCE EXHAUSTION**: Before declaring data unavailable, exhaust ALL real data sources:
+      * Try primary source with multiple methods (direct download, API call, HTML extraction)
+      * Try alternative authoritative sources (different sites, data portals, APIs)
+      * Try multiple extraction methods per source (pandas.read_html, BeautifulSoup, manual parsing)
+      * Only declare failure after trying at least 3-5 different real sources with multiple methods each
+    - **API Download Failures**: 
+      * Try primary API endpoint first
+      * If fails, try alternative endpoints or API versions
+      * If API fails, try web scraping the same data from official websites
+      * If web scraping fails, try alternative authoritative websites
+      * Only fail after exhausting all real sources
     - **API Parameter Errors**:
-      * **CRITICAL**: Pay attention to API parameter requirements - some APIs use singular forms (e.g., 'country'), others use plural (e.g., 'countries')
+      * **CRITICAL**: Pay attention to API parameter requirements - some APIs use singular forms, others use plural
       * Always check API documentation for correct parameter names and types
       * Some APIs require specific parameter formats (strings vs lists, required vs optional)
       * Wrap all API calls in try/except blocks and report failures clearly
-    - **Retry Logic**: Try 3 times with exponential backoff, then FAIL CLEANLY with error message
-    - **FORBIDDEN**: Never generate synthetic, fake, placeholder, or hallucinated data - fail cleanly instead
-    - **Error Handling**: Use try/except blocks around ALL API calls, catch specific exceptions, log errors clearly, then FAIL
-    - **FAIL FAST**: If primary data source fails, stop execution and report clear error - do NOT continue with fake data
+      * If parameter error, try alternative parameter formats before giving up
+    - **Retry Logic**: Try 3 times with exponential backoff per source, then try next source
+    - **FORBIDDEN**: Never generate synthetic, fake, placeholder, or hallucinated data - exhaust real sources instead
+    - **Error Handling**: Use try/except blocks around ALL API calls, catch specific exceptions, log errors clearly, then try next source
     - **KEY PRINCIPLES**:
-      * Wrap API calls in try/except blocks that catch exceptions and report failures clearly
-      * If data fetch fails, raise exception with clear error message explaining what failed
-      * NEVER generate synthetic, fake, or placeholder data - fail cleanly instead
+      * Wrap API calls in try/except blocks that catch exceptions and try next source
+      * If data fetch fails, try alternative real sources before declaring failure
+      * NEVER generate synthetic, fake, or placeholder data - exhaust real sources instead
       * Always verify file creation with os.path.exists() and print confirmation message
-      * If required data cannot be fetched, fail with clear error - do NOT create files with fake data
+      * Only declare data unavailable after trying all real sources with all available methods
+    - **PARTIAL DATA HANDLING**: If data acquisition partially succeeds (some data available but incomplete), create deliverables with available data and document what's missing. Check workspace for any existing data files before declaring complete failure. Creating partial deliverables with available data is better than creating nothing. Only declare complete failure if workspace is empty after all source attempts.
 
     **IMAGE DOWNLOAD FAILURES** (CRITICAL):
     - **Primary Source Fails**: If any image fails from primary source, try alternative REAL image sources (other URLs, different domains)

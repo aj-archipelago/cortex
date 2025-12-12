@@ -64,7 +64,8 @@ SCOPE_AWARENESS_GUIDANCE = """
 
 VISUALIZATION_GUIDANCE = """
 **VISUALIZATION GUIDANCE**:
-- Every structured data generation or analysis task MUST output at least **two distinct PNG charts** (trend + comparison/distribution). If the user explicitly asks for charts/visuals, produce **three or more** complementary perspectives (trend, comparison, distribution/volatility).
+- **MANDATORY CHARTS FOR ALL DATA TASKS**: Every data task (including simple queries requesting counts, statistics, or data retrieval) MUST output at least **two distinct PNG charts** (trend + comparison/distribution). For analysis tasks, produce **three or more** complementary perspectives (trend, comparison, distribution/volatility). Even simple data queries require visual representation - never provide only text/number responses.
+- **COMPARISON TASKS REQUIRE MULTIPLE CHARTS**: When task involves comparing multiple entities, metrics, or time periods, create **at least 4-5 distinct charts** showing different perspectives: time series trends, comparative bar charts, distribution analysis, volatility metrics, correlation charts. Each chart must provide unique insights - never create duplicate or redundant visualizations.
 - Use matplotlib/seaborn to create charts, save them in work_dir, and immediately mark them with `📁 Ready for upload: …`.
 - NEVER skip chart creation unless the user explicitly forbids visuals.
 """
@@ -128,16 +129,16 @@ EXECUTION_PATTERNS = """
 
 **CRITICAL: PYTHON CODE SYNTAX REQUIREMENTS**:
 - **F-STRING ESCAPING**: When using f-strings with special characters ($, braces, etc.), escape them properly:
-  * Use double braces for literal braces: f"GDP: {{value}}" outputs "GDP: {{value}}"
-  * Escape dollar signs: f"GDP: ${{value}}" outputs "GDP: ${{value}}"
-  * For currency labels: f"GDP, {{year}} (Million Dollars)" - use "Dollars" instead of "$" to avoid escaping
-  * AVOID: f"GDP, {{year}} (Million $")" - syntax error (unmatched quote)
-  * CORRECT: f"GDP, {{year}} (Million Dollars)" - no special characters
-  * CORRECT: f"GDP, {{year}} (Million $)" - simple, no extra quotes
+  * Use double braces for literal braces: f"Value: {{value}}" outputs "Value: {{value}}"
+  * Escape dollar signs: f"Price: ${{value}}" outputs "Price: ${{value}}"
+  * For currency labels: f"Amount, {{year}} (Million Dollars)" - use "Dollars" instead of "$" to avoid escaping
+  * AVOID: f"Amount, {{year}} (Million $")" - syntax error (unmatched quote)
+  * CORRECT: f"Amount, {{year}} (Million Dollars)" - no special characters
+  * CORRECT: f"Amount, {{year}} (Million $)" - simple, no extra quotes
 - **STRING FORMATTING**: When f-strings contain complex expressions, use parentheses or separate variables:
-  * WRONG: f"GDP, {{year}} (Million $")" - syntax error (extra quote)
-  * CORRECT: f"GDP, {{year}} (Million $)" - no extra quote
-  * CORRECT: f"GDP, {{year}} (Million Dollars)" - avoid $ in f-strings
+  * WRONG: f"Amount, {{year}} (Million $")" - syntax error (extra quote)
+  * CORRECT: f"Amount, {{year}} (Million $)" - no extra quote
+  * CORRECT: f"Amount, {{year}} (Million Dollars)" - avoid $ in f-strings
 - **VALIDATION**: Before executing code, check for common syntax errors:
   * Unmatched quotes in f-strings (count opening and closing quotes)
   * Unescaped braces in f-strings (use double braces for literal braces)
@@ -152,6 +153,7 @@ EXECUTION_PATTERNS = """
 COMPLETION_CRITERIA = """
 **COMPLETION CRITERIA**:
 - ✅ Main files created → Signal completion regardless of preview failures
+- ✅ **ALL ENTITIES VERIFIED**: When task mentions multiple entities (e.g., "AJA and AJE", "both X and Y"), verify ALL entities have their deliverables created. Create a checklist in code comments and verify each entity is covered before completion. Missing ANY entity's deliverables means task is incomplete.
 - ⚠️ Preview fails → Log warning but continue: "Preview generation failed (non-critical): [error_details]"
 - ❌ Main files fail → Stop workflow and report: "Critical error: [error_details]"
 - **TERMINATION PROTOCOL**: After marking files "📁 Ready for upload:", say "EXECUTION_PHASE_COMPLETE" to end execution phase

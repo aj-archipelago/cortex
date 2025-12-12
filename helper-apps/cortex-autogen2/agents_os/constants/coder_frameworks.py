@@ -17,9 +17,18 @@ You MUST call execute_code_bound(code) tool with your Python code. DO NOT output
 
 GENERIC_FILE_GENERATION_REQUIREMENTS = """**GENERIC FILE GENERATION INTELLIGENCE**: Analyze user requests to determine what deliverables are needed and generate ALL requested file types using appropriate libraries and approaches.
 
-- **MULTIPLE DELIVERABLES REQUIREMENT**: When users request multiple formats or deliverables (e.g., "give me X and Y", "create both A and B"), generate ALL requested items. **CRITICAL FAILURE** if ANY requested deliverable is missing.
+- **MULTIPLE DELIVERABLES REQUIREMENT**: When users request multiple formats or deliverables (e.g., "give me X and Y", "create both A and B", "return the analysis in all these formats: CSV, JSON, XLSX, and PDF", "return pptx & pdf"), generate ALL requested items. **CRITICAL FAILURE** if ANY requested deliverable is missing.
+- **EXPLICIT MULTI-FORMAT REQUESTS**: When task explicitly requests multiple formats using connectors like "&", "and", "both", or lists formats (e.g., "return pptx & pdf", "give me both X and Y", "CSV, JSON, XLSX, and PDF"), you MUST create ALL requested formats. Even if data parsing fails or encounters errors, you MUST still create the requested files using available data or alternative methods. Never give up on creating explicitly requested formats - missing ANY format = automatic score 0.
+- **MULTI-FORMAT REQUESTS WITH INCOMPLETE DATA**: When task explicitly requests multiple formats (e.g., "CSV, JSON, XLSX, and PDF") and data is incomplete (e.g., 4 out of 5 companies, partial time periods), you MUST STILL create ALL requested formats using available data. Create deliverables with available data - partial data is acceptable. If you have HTML files with financial data, extract what you can. If you have data for some entities but not all, create files with available entities. NEVER refuse to create explicitly requested formats just because data is incomplete - create deliverables with available data and document what's missing.
+- **ANALYSIS TASKS REQUIRE XLSX**: For comprehensive analysis tasks (tasks requesting analysis, comparison, trends, statistics, metrics), create an XLSX file with "analysis" in the filename (e.g., "currency_analysis.xlsx", "performance_analysis.xlsx") containing processed data, statistics, and insights. This is in addition to raw data CSVs. Analysis tasks should deliver both raw data (CSV) and comprehensive analysis (XLSX).
+- **DESCRIPTIVE FILENAMES**: Use descriptive filenames that reflect the task content. Extract key terms from the task description and include them in filenames (e.g., for currency tasks use "currency" in filename, for sales tasks use "sales" in filename). This makes files easily identifiable and matches user expectations. Filenames should be meaningful and descriptive, not generic or system-generated.
+- **CRITICAL: FILES MUST CONTAIN ACTUAL DATA**: When creating files, they MUST contain actual data/content, not error messages or placeholder text. Files with only error messages like "DATA UNAVAILABLE" or "synthetic data disallowed" are NOT valid deliverables and will result in automatic score 0. If data is unavailable, try harder to get it from alternative sources, use partial data, or raise ValueError for replanning - never create files with error messages.
+- **ARABIC/RTL TEXT PROCESSING**: For Arabic or RTL text processing (word clouds, text analysis), use `arabic-reshaper` and `python-bidi` libraries. For tokenization, use simple regex: `re.findall(r'[\\u0600-\\u06FF]+', text)` to extract Arabic words. If standard tokenization fails, try alternative methods (split by spaces, extract Unicode ranges, manual parsing) - never give up. Create deliverables even if tokenization is imperfect - partial results are better than skipping entities.
+- **MULTI-FORMAT TASKS**: When task explicitly lists multiple formats (e.g., "CSV, JSON, XLSX, and PDF"), create a checklist in code comments and verify ALL formats are created before completion. Missing ANY format = task failure (score 0).
+- **SUMMARY STATISTICS FORMAT**: When task requests "summary statistics", you MUST create a SEPARATE summary statistics file (in addition to showing statistics in the response). **CRITICAL FORMAT DETECTION**: Check the task description for filename patterns (e.g., "*summary*.json", "*summary*.csv") - these patterns explicitly specify the required format. If pattern "*summary*.json" appears anywhere in the task description or context, you MUST create JSON file, NOT CSV. If pattern "*summary*.csv" appears, create CSV file. If JSON is explicitly mentioned (e.g., "summary statistics JSON") or pattern "*summary*.json" is present, create JSON file. If CSV is explicitly mentioned or pattern "*summary*.csv" is present, create CSV file. If format is not specified and no pattern exists, JSON is preferred for structured data. Always create the format explicitly requested in the task description or indicated by filename patterns. Extract format requirements directly from the task. The summary file must be a separate, distinct file from the main data file - showing statistics in the response does NOT replace the requirement to create a separate file. **MANDATORY**: Check for patterns like "*summary*.json" in task description - if found, create JSON, not CSV.
 - **SMART LIBRARY SELECTION**: Choose the most appropriate libraries and techniques for each requested format based on the task requirements and available tools.
-- **VISUALIZATION INTELLIGENCE**: When working with data, proactively create meaningful visualizations (charts, graphs) to help users understand patterns and insights, regardless of the primary deliverable format.
+- **MANDATORY VISUALIZATION FOR DATA TASKS**: For ALL data tasks (including simple queries requesting counts, statistics, or data retrieval), you MUST create at least 2-3 charts showing different perspectives (time series trends, daily/weekly distribution, comparisons). Even simple data queries require visual representation - never provide only text/number responses for data tasks. Charts help users understand patterns and insights that numbers alone cannot convey.
+- **COMPARISON TASKS REQUIRE MULTIPLE CHARTS**: When task involves comparing multiple entities, metrics, or time periods, create **at least 4-5 distinct charts** showing different perspectives: time series trends, comparative bar charts, distribution analysis, volatility metrics, correlation charts. Each chart must provide unique insights - never create duplicate or redundant visualizations.
 - **CONTENT ADAPTATION**: Structure and format content appropriately for each requested file type, considering the strengths and limitations of each format."""
 
 MANDATORY_CODE_REQUIREMENTS = """**MANDATORY**: Generate COMPLETE, SELF-CONTAINED Python code with ALL variables properly defined. **AUTOMATIC FAILURE** if code references undefined variables."""
@@ -30,22 +39,35 @@ WORKFLOW_CONTINUATION_SIGNALING = """**WORKFLOW CONTINUATION SIGNALING**: After 
 
 ENHANCED_ERROR_HANDLING_FRAMEWORK = """**ENHANCED ERROR HANDLING - ROBUST EXECUTION GUARANTEE**:
 - **MANDATORY TRY/EXCEPT WRAPPER**: Wrap your ENTIRE script in a try/except block to ensure file creation ALWAYS executes
-- **GRACEFUL FAILURE RECOVERY**: If any operation fails, continue with fallback data and still create required files
-- **FALLBACK DATA GENERATION**: Always prepare synthetic/backup data before attempting real data operations
-- **MULTI-LAYER ERROR HANDLING**: Use nested try/except blocks for different operation types (data fetching, file creation, visualization)
-- **FILE CREATION PRIORITY**: File creation must succeed regardless of data quality - use meaningful defaults if real data unavailable
+- **CRITICAL: DATA VALIDATION BEFORE FILE CREATION**: Before creating any files, validate that you have real, quality data that matches task requirements. If data validation fails (wrong time period, missing entities, unrealistic values, placeholder data), raise ValueError with specific guidance for replanning - DO NOT create files with placeholder/synthetic data.
+- **GRACEFUL FAILURE RECOVERY**: If any operation fails, try alternative approaches. However, if data acquisition fails after exhausting all sources, raise ValueError for replanning instead of creating placeholder files.
+- **CODE EXECUTION FAILURE RECOVERY**: When code execution fails (KeyError, ValueError, pandas errors, etc.), do NOT give up. Instead: (1) Check workspace for available valid data files using list_files tool, (2) Validate file contents - check if files contain error JSON (look for "success": false, "error" keys), verify CSV structure, check file sizes, (3) Skip invalid files (API error JSON, empty files, malformed data) and use valid files, (4) Try alternative parsing methods (different column names, manual extraction, simpler processing), (5) Use valid data files even if some files are invalid, (6) Create deliverables with available valid data. Only raise ValueError if absolutely no valid data exists after trying all alternatives. Code execution failures should trigger alternative approaches, not complete failure.
+- **FORBIDDEN: CONCEPTUAL ANALYSIS OR EXPLANATIONS**: NEVER provide "conceptual analysis", "conceptual summaries", or explanations of why you cannot create deliverables. When code execution fails or data parsing fails, you MUST: (1) Check workspace for valid data files, (2) Validate and use valid files, (3) Create actual deliverables (CSV, JSON, XLSX, PDF, PNG charts) with available data. Providing "conceptual analysis" instead of creating actual files = automatic score 0. You MUST create files, not explain why you can't.
+- **NO SYNTHETIC/FALLBACK DATA**: Never create files with synthetic, placeholder, or fallback data. If real data is unavailable after exhausting all sources, raise ValueError("❌ DATA MISMATCH: [specific issue]. Wrong data downloaded - needs replanning.") to trigger replanning. Creating files with synthetic data = automatic score 0. When data extraction fails, you MUST: (1) Try alternative data sources (different URLs, different APIs, different websites), (2) Try alternative extraction methods (regex parsing, manual HTML extraction, different libraries, BeautifulSoup for HTML, different JSON parsing approaches), (3) Use partial data if available, (4) Only raise ValueError if absolutely no real data exists after trying all alternatives. NEVER create synthetic data as a fallback - it violates core principles and results in automatic score 0. NEVER create "template" files with synthetic data - they are still synthetic data and result in automatic score 0.
+- **FORBIDDEN: ERROR MESSAGE FILES**: Never create files that contain only error messages, explanations of data unavailability, or placeholder text. Files must contain actual data/content, not error descriptions. If data is unavailable, raise ValueError for replanning - do NOT create files with error messages like "DATA UNAVAILABLE" or "synthetic data disallowed". Creating files with error messages instead of data = automatic score 0.
+    - **USE AVAILABLE IMAGE ASSETS**: If data extraction fails but image assets (JPG, PNG files) are available in workspace, use them in PDFs/reports. Check workspace for available image files using list_files tool and embed them in deliverables. This ensures visuals are included even when numeric data extraction is challenging.
+    - **PARTIAL DATA HANDLING**: If data acquisition partially succeeds (some data available but incomplete), create deliverables with available data and document what's missing. Only raise ValueError if absolutely no usable data is available after exhausting all sources. Creating partial deliverables is better than creating nothing.
+    - **ALWAYS CREATE SOMETHING**: When data acquisition fails, check workspace for any available data/files first. If any data exists (even if incomplete), create deliverables with available data rather than explaining failures. Only explain failures if workspace is completely empty after all source attempts.
+    - **FORBIDDEN: CONCEPTUAL ANALYSIS OR EXPLANATIONS**: NEVER provide "conceptual analysis", "conceptual summaries", "conceptual methodology", or explanations of why you cannot create deliverables. When code execution fails or data parsing fails, you MUST: (1) Check workspace for valid data files using list_files, (2) Validate file contents (skip API error JSON, use valid CSV/HTML files), (3) Create actual deliverables (CSV, JSON, XLSX, PDF, PNG charts) with available data. Providing "conceptual analysis" instead of creating actual files = automatic score 0. You MUST create files, not explain why you can't. If you have a valid CSV file, use it. If you have HTML files, extract data from them. NEVER give up and provide "conceptual analysis".
+    - **CRITICAL: MULTI-FORMAT REQUESTS CANNOT BE REFUSED**: When task explicitly requests multiple formats (e.g., "CSV, JSON, XLSX, and PDF"), you MUST create ALL requested formats even if data is incomplete. NEVER refuse to create explicitly requested formats - use available data (HTML files, partial entities, extracted values) to create deliverables. If you have HTML files with financial data, extract what you can. If you have data for 4 out of 5 companies, create files with 4 companies. Missing ANY explicitly requested format = automatic score 0, so you MUST create all formats with available data.
+    - **CRITICAL: MULTI-FORMAT REQUESTS REQUIRE DELIVERABLES**: When task explicitly requests multiple formats (e.g., "CSV, JSON, XLSX, and PDF"), you MUST create ALL requested formats even if data is incomplete or some entities are missing. Use available data to create deliverables - partial data is acceptable. Missing ANY requested format = automatic score 0. If you have data for 4 out of 5 companies, create files with 4 companies. If you have HTML files with financial data, extract what you can and create deliverables. NEVER give up on creating explicitly requested formats just because data is incomplete - create deliverables with available data.
+    - **MULTI-LANGUAGE TEXT PROCESSING PERSISTENCE**: For non-English text processing tasks (word clouds, text analysis), if tokenization fails with one method, try alternatives: regex extraction with Unicode ranges, space splitting, Unicode range extraction, manual parsing. For RTL languages, use `arabic-reshaper` and `python-bidi` for proper display. Never give up on text processing - create deliverables even if tokenization is imperfect. Partial results are better than skipping entities.
+- **MULTI-LAYER ERROR HANDLING**: Use nested try/except blocks for different operation types (data fetching, validation, file creation, visualization)
+- **FILE CREATION ONLY WITH VALID DATA**: File creation must only proceed if data validation passes. If validation fails, raise ValueError for replanning.
+- **VALIDATE DATA FILES BEFORE PROCESSING**: Before processing any data file, check its contents. Some files may contain API error JSON instead of data. Validate file contents (check for JSON error structures, verify CSV structure, check file size) before attempting to process. If a file contains errors, skip it and use other valid files. Never process files blindly - validate first.
 - **LOGGING FOR DEBUGGING**: Include informative print statements for debugging without breaking the response format
-- **RETRY LOGIC FOR CRITICAL OPERATIONS**: Implement retry loops (max 3 attempts) for file operations that might fail due to temporary issues
-- **GRADUAL DEGRADATION**: If advanced features fail, fall back to simpler implementations (e.g., basic charts if complex visualizations fail)
-- **ERROR CONTEXT PRESERVATION**: When catching exceptions, log the error type and context for debugging while continuing execution
+- **RETRY LOGIC FOR CRITICAL OPERATIONS**: Implement retry loops (max 3 attempts) for data acquisition operations before declaring failure
+- **GRADUAL DEGRADATION**: If advanced features fail, fall back to simpler implementations (e.g., basic charts if complex visualizations fail) - but only if you have valid data
+- **ERROR CONTEXT PRESERVATION**: When catching exceptions, log the error type and context for debugging. If data-related, raise ValueError for replanning.
 - **RESOURCE CLEANUP**: Use try/finally blocks to ensure file handles and resources are properly closed even on errors
 - **TIMEOUT PREVENTION**:
   * **FAST FAIL ON ASSETS**: Set timeouts for all network requests (e.g., image downloads). If slow, skip the asset.
-  * **SIMPLE FALLBACKS**: If complex generation (e.g., PPTX with many images) fails, generate a simpler version (text-only slides) immediately."""
+  * **SIMPLE FALLBACKS**: If complex generation (e.g., PPTX with many images) fails, generate a simpler version (text-only slides) immediately - but only if you have valid data."""
 
 SELF_CORRECTION_FRAMEWORK = """**SELF-CORRECTION CAPABILITIES - FIX YOUR OWN ERRORS**:
 - **DIAGNOSTIC FIRST**: If previous code failed, your FIRST action in the new script must be to PRINT the data structure (e.g., `print(df.head())`, `print(data.keys())`) to verify assumptions.
 - **ALTERNATIVE PATHS**: If a specific library or method failed (e.g., complex pandas merge), you MUST try a simpler alternative (e.g., iterative python list processing) instead of retrying the same broken logic.
+- **DATA FILE VALIDATION BEFORE PROCESSING**: Before processing any downloaded data file, validate its contents. Check if file contains error JSON (look for "error", "success": false patterns), verify CSV structure (check headers, sample rows), validate file size (very small files may be errors). If a file is invalid, skip it and use other valid files. List all workspace files, validate each, and use only valid ones for creating deliverables. If some files contain API errors (e.g., "missing_access_key", "success": false), skip those files and use valid files (CSV files with actual data, HTML files with extractable data) to create deliverables.
 - **ASSUMPTION RESET**: Assume your previous understanding of the data was WRONG. Do not blindly copy-paste previous logic.
 - **INCREMENTAL FIXING**: Fix one issue at a time. If multiple things broke, simplify the script to just the core deliverable first.
 - **SUCCESS VALIDATION**: Verify files exist before finishing."""
@@ -53,7 +75,7 @@ SELF_CORRECTION_FRAMEWORK = """**SELF-CORRECTION CAPABILITIES - FIX YOUR OWN ERR
 ERROR_HANDLING_PRINCIPLES = """**ERROR HANDLING PRINCIPLES - APPLY THESE WHEN GENERATING CODE**:
 - **IMPLEMENT COMPLETE SCRIPT WRAPPER**: Always wrap your entire script in try/except/finally blocks
 - **USE RETRY LOGIC**: Implement retry loops (max 3 attempts) for critical file operations
-- **PREPARE FALLBACK DATA**: Always create synthetic data first, then enhance with real data if available
+- **FORBIDDEN: PREPARE FALLBACK DATA**: NEVER create synthetic data first, even as a "template" or "placeholder". Synthetic data = automatic score 0. You MUST: (1) Try to get real data from all available sources, (2) Try alternative extraction methods, (3) Use partial real data if available, (4) Only raise ValueError if absolutely no real data exists. Creating synthetic data as a "template" or "fallback" is FORBIDDEN and results in automatic score 0.
 - **ENSURE FILE CREATION**: File creation must succeed regardless of data quality issues
 - **LOG ERRORS GRACEFULLY**: Print error information for debugging but continue execution
 - **RESOURCE CLEANUP**: Use finally blocks to ensure file handles are properly closed"""
@@ -110,32 +132,33 @@ PANDAS_SERIES_NAMING_GUIDANCE = """**PANDAS SERIES NAMING GUIDANCE** (CRITICAL f
 DEFENSIVE_PROGRAMMING_FRAMEWORK = """**ANTI-INFINITE-LOOP FRAMEWORK** (CRITICAL):
 - **PRIORITY #1: NEVER BLOCK THE WORKFLOW** - If you cannot complete a task perfectly, you MUST still create the requested file.
 - **FAIL SAFE ARTIFACTS (MANDATORY)**:
-  * If image downloads fail → Create PPTX/PDF with text placeholders saying "Image unavailable"
-  * If data fetching fails → Create CSV/JSON with "Error: {reason}" in the content
-  * If chart generation fails → Create a text file explaining what chart was requested
-  * **CRITICAL**: ALWAYS create a file with the EXACT requested filename, even if it only contains an error message
+  * If image downloads fail → Try alternative image sources or use available images. If absolutely no images available, create PPTX/PDF without images but with actual content - never create files with placeholder text like "Image unavailable"
+  * If data fetching fails → Try alternative data sources, use partial data, or raise ValueError for replanning - never create files with error messages
+  * If chart generation fails → Try simpler chart types or use available data - never create files explaining failures
+  * **CRITICAL**: Files must contain actual data/content, not error messages. If data is unavailable after exhausting all sources, raise ValueError for replanning.
 - **NO INFINITE LOOPS**: 
   * DO NOT repeatedly check for missing files without attempting to fix the issue
   * DO NOT send repeated error messages asking the user to "resolve" the problem
-  * After 1 failed attempt to get data/images, immediately switch to creating placeholder files
+  * After failed attempts to get data/images, try alternative sources and methods. Only if all sources exhausted, raise ValueError for replanning - never create placeholder files
 - **WORKFLOW UNBLOCKING STRATEGY**:
   1. **First attempt**: Try to get real data/images
-  2. **If that fails**: Create placeholder file immediately (do NOT retry, do NOT ask user to fix)
+  2. **If that fails**: Try alternative sources and methods. Only if all sources exhausted, raise ValueError for replanning - never create placeholder files
   3. **Move on**: Proceed to next deliverable
 - **EXAMPLE - Missing Images**:
   ```python
   # CORRECT:
-  if not os.path.exists('pokemon.png'):
-      # Image download failed, creating text placeholder (internal logging only, not user-facing)
-      # Create PPTX anyway with text placeholder
-      slide.shapes.add_textbox(...).text = "Image: Pikachu (unavailable)"
+  if not os.path.exists('image.png'):
+      # Image download failed, trying alternative sources or creating without images
+      # Create PPTX with actual content, not placeholder text
+      # Create PPTX with actual content, not placeholder text
+      # Use available images or create content without images
   ```
 - **PANDAS DEBUGGING & SAFETY**:
   * **INSPECT BEFORE MERGE**: `print(f"Columns in {name}: {df.columns.tolist()}")` before merging
   * **SAFE ACCESS**: Use `df.get('col')` or `if 'col' in df.columns` before accessing
   * **EMPTY CHECKS**: Always check `if df.empty:` 
-  * **ON ERROR**: Print error & columns, then create placeholder file with error message
-  * **NO RETRY LOOPS**: If pandas operation fails, log it and create placeholder CSV"""
+  * **ON ERROR**: Print error & columns, then try alternative data sources. If all sources exhausted, raise ValueError for replanning - never create files with error messages
+  * **NO RETRY LOOPS**: If pandas operation fails, try alternative approaches or raise ValueError for replanning - never create files with error messages"""
 
 GENERIC_DOCUMENT_GENERATION = """**GENERIC DOCUMENT CREATION INTELLIGENCE**:
 - When users request document formats (PDF, reports, presentations, etc.), choose the most appropriate library based on content type and requirements
@@ -144,7 +167,7 @@ GENERIC_DOCUMENT_GENERATION = """**GENERIC DOCUMENT CREATION INTELLIGENCE**:
 - **EMBEDDING SUPPORT**: When documents include visualizations, generate individual components first, then embed them appropriately
 - **FALLBACK HANDLING**: If primary library fails, try alternative approaches or create simplified versions
 - **MANDATORY DELIVERY**: When specific document formats are requested, ensure they are created as primary deliverables
-- **PREVIEW THUMBNAILS FOR ALL DELIVERABLES**: For ANY deliverable file (PDF, XLSX, DOCX, CSV, etc.), generate a preview thumbnail image that shows the file content. Use appropriate libraries based on file type. Save with "_preview.png" suffix and mark for upload."""
+- **PREVIEW THUMBNAILS FOR ALL DELIVERABLES**: For ANY deliverable file (PDF, XLSX, DOCX, PPTX, CSV, etc.), generate a preview thumbnail image that shows the file content. Use appropriate libraries based on file type (pdf2image for PDF, python-pptx with image extraction for PPTX, etc.). Save with "_preview.png" or "preview_*.png" pattern and mark for upload. For PPTX presentations, create preview images showing key slides."""
 
 MULTI_LINE_CHART_REQUIREMENTS = """**MULTI-LINE CHART REQUIREMENTS - ABSOLUTELY MANDATORY FOR COMPARISON TASKS**:
 - **CRITICAL RULE**: When task explicitly requests multiple metrics in ONE chart (e.g., "chart with 3 lines", "plot X, Y, and Z", "show A vs B vs C"), you MUST create EXACTLY ONE matplotlib chart with ALL requested metrics plotted as separate lines on the SAME axes
@@ -162,8 +185,9 @@ MULTI_LINE_CHART_REQUIREMENTS = """**MULTI-LINE CHART REQUIREMENTS - ABSOLUTELY 
 GENERIC_PRESENTATION_REQUIREMENTS = """**GENERIC PRESENTATION CREATION INTELLIGENCE**:
 - **MULTI-ENTITY CONTENT**: When tasks involve rankings, comparisons, or multiple distinct items, create comprehensive coverage with individual sections for each entity
 - **INDIVIDUAL ENTITY HANDLING**: Give each entity its own dedicated section/slide/component
-- **VISUAL ASSETS**: Include relevant images or visual elements for each entity when appropriate
-- **PREVIEW GENERATION**: Create individual preview images for complex presentations to show content structure
+- **COMPLETE ENTITY SET**: When task specifies a count (e.g., "top 10", "each of the 10"), you MUST create content/images for ALL specified entities, not a subset. If task says "top 10" or "each of the 10", create exactly 10 entities with their individual images.
+- **VISUAL ASSETS**: Include relevant images or visual elements for each entity when appropriate. Each entity must have its own individual image file.
+- **PREVIEW GENERATION**: For PPTX presentations, create preview images (preview_*.png pattern) showing slide content. Use libraries like python-pptx with image extraction or screenshot methods to generate preview thumbnails of key slides. Save with "preview_" prefix (e.g., "preview_slide1.png", "preview_slide2.png") and mark each for upload. **MANDATORY**: This must happen IMMEDIATELY after creating the PPTX file. For multi-entity presentations, create preview images showing different entities/slides. Missing preview images = quality failure.
 - **CONTENT ORGANIZATION**: Structure presentations to clearly distinguish between different entities or categories"""
 
 GENERIC_FONT_COMPATIBILITY = """**GENERIC FONT AND CHARACTER COMPATIBILITY**:
@@ -240,10 +264,23 @@ PDF_FONT_HANDLING_GUIDANCE = """**PDF FONT SAFETY - CRITICAL**: For PDF generati
 - **UNICODE SAFETY**: Replace problematic characters: '–' → '-', '—' → '-', '…' → '...', '•' → '-', smart quotes → regular quotes
 - **FONT LOADING PATTERN**: Always wrap font loading in try/except blocks and provide working fallbacks
 - **TEST FONT LOADING**: Verify fonts loaded successfully before using them in PDF generation
-**CRITICAL PDF WORKFLOW REQUIREMENT**: When creating ANY PDF file, you MUST complete this 2-step process:
+**CRITICAL PDF WORKFLOW REQUIREMENT**: When creating ANY PDF file, you MUST complete this process:
 
 1. **Create the PDF** - Generate and save the PDF file as requested
 2. **Generate Preview Thumbnail** - IMMEDIATELY after saving the PDF, create a PNG preview using pdf2image. This preview is MANDATORY for the presenter_agent to work correctly. Save as "filename_preview.png" and mark it for upload.
+
+**CRITICAL PPTX WORKFLOW REQUIREMENT**: When creating ANY PPTX file, you MUST complete this process:
+
+1. **Create the PPTX** - Generate and save the PPTX file as requested
+2. **Generate Preview Images** - IMMEDIATELY after saving the PPTX, create preview images (preview_*.png pattern) showing key slides. Use python-pptx with image extraction or screenshot methods to generate preview thumbnails of key slides. Save with "preview_" prefix (e.g., "preview_slide1.png", "preview_slide2.png") and mark each for upload. This is MANDATORY for the presenter_agent to work correctly. For multi-entity presentations (e.g., "top 10 entities"), create preview images showing different entities/slides.
+
+3. **MANDATORY VISUALS FOR PDF REPORTS** - For PDF reports (especially data/trends/analysis reports), you MUST include visuals:
+   - **MANDATORY CHARTS**: Create at least 3-5 charts showing different perspectives (line charts for trends, bar charts for comparisons, pie/donut charts for distributions, etc.). Save each chart as a separate PNG file BEFORE embedding in PDF.
+   - **MANDATORY IMAGES**: If image assets are available (JPG, PNG files downloaded by web_search_agent), embed them in the PDF. Use available images even if data extraction is challenging.
+   - **NO TEXT-ONLY PDFS**: Text-only PDFs are a CRITICAL FAILURE for report tasks. You MUST include charts, graphs, or images. If data extraction fails, create charts from available data or use downloaded image assets.
+   - **SEPARATE CHART FILES**: Save each chart as a separate PNG file BEFORE embedding in PDF. Save with descriptive filenames and mark each for upload with '📁 Ready for upload: {{absolute_path}}'. This enables presenter_agent to display charts individually in the response for visual richness.
+   - **CRITICAL WORKFLOW**: Generate charts FIRST as separate PNG files, THEN embed them in PDF. Never embed charts in PDF without also saving them as separate files. The workflow is: 1) Create chart → 2) Save as PNG → 3) Mark for upload → 4) Embed in PDF → 5) Save PDF. This ensures both individual chart files AND PDF with embedded charts are available.
+   - **FALLBACK STRATEGY**: If numeric data extraction fails, use available image assets (JPG/PNG files) in the PDF. If no images available, create simple charts from any available data (even if limited). Never create text-only PDFs for report tasks.
 
 Without the preview thumbnail, the presenter_agent cannot create clickable PDF previews.
 
@@ -322,6 +359,16 @@ MULTI_ENTITY_TASK_REQUIREMENTS_TEMPLATE = "**MULTI-ENTITY TASK REQUIREMENTS - CR
 INDIVIDUAL_ENTITY_PREVIEWS_MANDATORY = "**INDIVIDUAL ENTITY PREVIEWS MANDATORY**: For each entity, create a SEPARATE preview image with unique filename (e.g., 'preview_entity1_slide.png', 'preview_entity2_slide.png'). Each preview must show THAT SPECIFIC entity's unique image."
 COMPREHENSIVE_COVERAGE = "**COMPREHENSIVE COVERAGE**: Generate content for entities found in the research data based on task complexity. Use all available data to provide thorough analysis."
 UNIQUE_CONTENT_PER_ENTITY = "**UNIQUE CONTENT PER ENTITY**: Each entity must have distinct content, images, and analysis - avoid generic templates."
+COMPLETE_ENTITY_SET_REQUIREMENT = "**COMPLETE ENTITY SET - MANDATORY**: When task specifies a count (e.g., 'top 10', 'each of the 10', 'all 10 entities'), you MUST create content/images for ALL specified entities, not a subset. If task says 'top 10', create exactly 10 entities with their individual images. Verify count matches task requirement before completion."
+ALL_ENTITIES_MANDATORY = """**ALL ENTITIES MANDATORY - CRITICAL**: When task mentions multiple entities (e.g., 'AJA and AJE', 'both X and Y', 'X, Y, and Z'), you MUST create deliverables for ALL mentioned entities, not just one. If task says 'AJA and AJE', create deliverables for BOTH AJA and AJE. However, if data for some entities is unavailable after exhausting all sources, create deliverables with available entities rather than refusing to create anything. Partial deliverables with available entities are better than no deliverables at all, especially when multiple formats are explicitly requested. 
+
+**TRY HARDER WHEN ONE ENTITY'S DATA IS MISSING**:
+- If one entity's data is missing or sparse, try harder to get it: check workspace for existing data files, try alternative queries/methods, use partial data if available
+- If data is sparse but exists, create deliverables with available data - never skip an entity just because data is incomplete
+- If absolutely no data exists for one entity after exhausting all sources, create minimal deliverables (empty structure with clear documentation) rather than skipping
+- **MANDATORY VERIFICATION**: Before completion, verify all entities are covered - create a checklist in code comments listing all entities and verify each entity has its deliverables created. Example: `# Entity checklist: AJA wordcloud ✓, AJE wordcloud ✓, AJA CSV ✓, AJE CSV ✓`
+- Missing ANY entity's deliverables is a CRITICAL FAILURE - the task is incomplete if any entity is missing
+- **EXCEPTION FOR MULTI-FORMAT REQUESTS**: When task explicitly requests multiple formats (e.g., "CSV, JSON, XLSX, and PDF"), you MUST create ALL requested formats even if some entities are missing. Use available entities to create deliverables - partial entity coverage is acceptable. Missing ANY explicitly requested format = automatic score 0, so you MUST create all formats with available entities rather than refusing to create anything."""
 
 PPTX_FONT_SAFETY = "**PPTX FONT SAFETY**: Never use Unicode characters (•, →, ✓) that cause font errors. Replace with ASCII: '-' for bullets, '->' for arrows, '[X]' for checkmarks."
 

@@ -43,16 +43,13 @@ async def _run_agent_with_timeout(agent, task: str, timeout_seconds: int, logger
 
 def _extract_json_from_response(response_text: str) -> dict:
     """Extract JSON from agent response text, with fallback to empty dict."""
-    try:
-        if "{" in response_text and "}" in response_text:
-            start = response_text.find("{")
-            end = response_text.rfind("}") + 1
-            json_str = response_text[start:end]
-            return json.loads(json_str)
-        else:
-            return {"message": response_text}
-    except:
-        return {"message": response_text}
+    from util.json_extractor import extract_json_from_llm_response
+    
+    result = extract_json_from_llm_response(response_text, expected_type=dict, log_errors=False)
+    if result:
+        return result
+    # Fallback: return message wrapper if not JSON
+    return {"message": response_text}
 
 
 
@@ -119,6 +116,12 @@ class TaskProcessor:
             self.group_phase = GroupPhase(self.context_memory, self.message_processor, self.gpt41_model_client, self.logger)
             self.delivery_phase = DeliveryPhase(self.context_memory, progress_handler, self.logger)
             
+            # Log task start to worklog
+            self.context_memory.log_worklog(
+                "system", "task_start", f"Task started: {task}", status="in_progress",
+                metadata={"task_id": task_id}
+            )
+            
             # Initialize cognitive journey tracking
             from context.cognitive_journey_mapper import get_cognitive_journey_mapper
             journey_mapper = get_cognitive_journey_mapper()
@@ -131,6 +134,10 @@ class TaskProcessor:
             context_files = helpers.build_dynamic_context_from_files(request_work_dir, task)
             task_with_context = f"{task}\n\nContext from previous work:\n{context_files}"
 
+            # Retrieve learnings from Azure Cognitive Search
+            from services.learning_service import get_learnings_for_task
+            learnings = await get_learnings_for_task(task, task_id, self.gpt41_model_client, self.context_memory)
+
             planner_agent, execution_agents, presenter_agent = await get_agents(
                 self.gpt41_model_client,
                 self.o3_model_client,
@@ -138,6 +145,7 @@ class TaskProcessor:
                 request_work_dir=request_work_dir,
                 request_id=task_id,
                 task_content=task,
+                planner_learnings=learnings,
             )
 
             result = await self._run_agent_workflow(
@@ -187,8 +195,9 @@ class TaskProcessor:
 
         # Group phase (SelectorGroupChat handles everything: planning + execution)
         # Wrap in timeout to ensure presenter phase always executes
+        # Use 9000s default (tests intentionally have low global timeout, but group phase should complete before that)
         self.logger.info("🤝 Starting group phase...")
-        group_phase_timeout = int(os.getenv('GROUP_PHASE_TIMEOUT_SECONDS', '1000'))
+        group_phase_timeout = int(os.getenv('GROUP_PHASE_TIMEOUT_SECONDS', '9000'))
         try:
             execution_context = await asyncio.wait_for(
                 self.group_phase.run_group_phase(task_id, task, work_dir, planner_agent, execution_agents),
@@ -210,7 +219,43 @@ class TaskProcessor:
         # Complete cognitive journey tracking
         from context.cognitive_journey_mapper import get_cognitive_journey_mapper
         journey_mapper = get_cognitive_journey_mapper()
+        journey_analytics = journey_mapper.get_journey_analytics(task_id)
         journey_mapper.complete_journey(task_id, "completed" if "ERROR" not in result else "failed")
+
+        # Extract and save learnings if successful (skip for one-shot simple tasks)
+        from services.learning_service import extract_and_save_learnings, _extract_success_score_from_result
+        success_score = _extract_success_score_from_result(result)
+        
+        # Detect if this was a one-shot simple task (skip learnings for these)
+        is_one_shot = False
+        if context_memory and hasattr(context_memory, 'event_recorder'):
+            events = context_memory.event_recorder.events
+            # One-shot: few events, no errors, quick completion
+            error_count = len([e for e in events if e.get("event_type") == "error"])
+            file_count = len([e for e in events if e.get("event_type") == "file_creation"])
+            # Count agent handoffs/decisions to detect complexity
+            handoff_count = len([e for e in events if e.get("event_type") == "handoff"])
+            decision_count = len([e for e in events if e.get("event_type") == "decision"])
+            # Simple task: <= 3 files, no errors, few handoffs/decisions, success score high
+            # More lenient: score >= 90 (not 95) and allow up to 1 handoff/decision
+            if error_count == 0 and file_count <= 3 and (handoff_count + decision_count) <= 1 and success_score >= 90:
+                is_one_shot = True
+                self.logger.info(f"🎯 One-shot simple task detected (files: {file_count}, errors: {error_count}, handoffs: {handoff_count}, decisions: {decision_count}, score: {success_score}) - skipping learnings")
+        
+        if success_score >= 90 and context_memory and not is_one_shot:
+            await extract_and_save_learnings(
+                task_id, task, context_memory, journey_analytics, success_score, self.gpt41_model_client
+            )
+        elif is_one_shot:
+            # Still log that it was a one-shot success (for tracking)
+            if context_memory:
+                context_memory.log_learning(
+                    learning_type="one_shot_success",
+                    content=f"One-shot simple task completed successfully (score: {success_score})",
+                    source="system",
+                    success_score=success_score,
+                    metadata={"task": task, "files_created": file_count, "errors": error_count}
+                )
 
         return result
 

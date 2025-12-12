@@ -67,7 +67,7 @@ class TestOrchestrator:
             raise ValueError("AZURE_STORAGE_CONNECTION_STRING environment variable must be set")
 
         # Load test cases and global expectations
-        self.test_cases = self.load_test_cases()
+        self.test_cases, self.global_timeout = self.load_test_cases()
         # Import global expectations from shared source of truth
         # This is the same GLOBAL_QUALITY_EXPECTATIONS used by execution_completion_verifier_agent
         # Source: agents/constants/global_quality_standards.py
@@ -196,7 +196,7 @@ class TestOrchestrator:
             'scores': {'overall': 0, 'progress': 0, 'output': 0}
         }
 
-    def load_test_cases(self, test_cases_path: Optional[str] = None) -> List[Dict]:
+    def load_test_cases(self, test_cases_path: Optional[str] = None) -> Tuple[List[Dict], int]:
         """
         Load test cases from YAML file.
 
@@ -204,7 +204,7 @@ class TestOrchestrator:
             test_cases_path: Path to test_cases.yaml (defaults to tests/test_cases.yaml)
 
         Returns:
-            List of test cases
+            Tuple of (list of test cases, global timeout in seconds)
         """
         if test_cases_path is None:
             test_cases_path = Path(__file__).parent / "test_cases.yaml"
@@ -213,10 +213,12 @@ class TestOrchestrator:
             data = yaml.safe_load(f)
 
         test_cases = data.get('test_cases', [])
+        global_timeout = data.get('timeout_seconds', 300)  # Default to 300 if not specified
 
         self.logger.info(f"📋 Loaded {len(test_cases)} test cases")
+        self.logger.info(f"   Global timeout: {global_timeout}s")
 
-        return test_cases
+        return test_cases, global_timeout
 
     def run_test_sync(self, test_case: Dict) -> Dict:
         """Synchronous wrapper for run_test to run in thread pool."""
@@ -239,7 +241,8 @@ class TestOrchestrator:
         """
         test_case_id = test_case['id']
         task_description = test_case['task']
-        timeout = test_case.get('timeout_seconds', 300)
+        # Use test case override if present, otherwise use global timeout
+        timeout = test_case.get('timeout_seconds', self.global_timeout)
         requires_ajsql = test_case.get('requires_ajsql', False)
 
         # Set runner info for logging
@@ -416,13 +419,16 @@ class TestOrchestrator:
 
         # Fallback: if no final_result captured (e.g., timeout) try to recover last presenter message from logs
         if not final_result:
+            self.logger.warning("⚠️ No final_result captured - attempting recovery from logs...")
             recovered = self._recover_final_result_from_logs(azure_message_id)
             if recovered:
-                self.logger.warning("⚠️ final_result missing; recovered presenter output from logs")
+                self.logger.info("✅ Successfully recovered final_result from logs")
                 final_result = recovered
                 final_response_text = recovered if isinstance(recovered, str) else str(recovered)
                 self.db.save_final_response(test_run_id, final_response_text)
                 files_created = self._extract_files_from_final_result(final_result, test_run_id)
+            else:
+                self.logger.warning("⚠️ Could not recover final_result from logs - task may have timed out before completion")
 
         # Calculate metrics
         self.logger.info("\n📊 Calculating metrics...")
@@ -814,7 +820,10 @@ class TestOrchestrator:
         Returns:
             List of test results
         """
-        test_cases, _ = self.load_test_cases(test_cases_path)
+        test_cases, global_timeout = self.load_test_cases(test_cases_path)
+        # Update global timeout if loading from different path
+        if test_cases_path is not None:
+            self.global_timeout = global_timeout
         results = []
 
         self.logger.info(f"\n🚀 Running {len(test_cases)} test cases...\n")
@@ -1178,6 +1187,7 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """
         Recover the last presenter_agent message from request logs if final_result is missing.
         Looks in ./logs/req_{id}/logs/messages.jsonl and logs.jsonl.
+        Enhanced to also check for execution_completion_verifier_agent messages that might contain final results.
         """
         candidate_paths = [
             os.path.join("logs", f"req_{azure_message_id}", "logs", "messages.jsonl"),
@@ -1185,20 +1195,48 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         ]
         for path in candidate_paths:
             if not os.path.exists(path):
+                self.logger.debug(f"Recover final_result: path does not exist: {path}")
                 continue
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-                # Scan from bottom to find latest presenter_agent message
+                # Scan from bottom to find latest messages (most recent first)
+                presenter_messages = []
+                verifier_messages = []
                 for line in reversed(lines):
                     try:
                         obj = json.loads(line)
-                        if obj.get("agent_name") == "presenter_agent" or obj.get("source") == "presenter_agent":
-                            content = obj.get("content")
-                            if content:
-                                return content
-                    except Exception:
+                        agent_name = obj.get("agent_name") or obj.get("source", "")
+                        message_type = obj.get("message_type", "")
+                        
+                        # Look for execution_completion_verifier_agent TextMessage with JSON score (most authoritative)
+                        if agent_name == "execution_completion_verifier_agent" and message_type == "TextMessage":
+                            content = obj.get("content", "")
+                            # If verifier has JSON score, prioritize it as final result
+                            if content and "score" in content.lower() and ("{" in content or len(content) > 100):
+                                verifier_messages.append(content)
+                                self.logger.debug(f"Found execution_completion_verifier_agent message with score, {len(content)} chars")
+                        
+                        # Look for presenter_agent TextMessage (final presentation)
+                        if agent_name == "presenter_agent" and message_type == "TextMessage":
+                            content = obj.get("content", "")
+                            if content and len(content) > 50:  # Must have substantial content
+                                presenter_messages.append(content)
+                                self.logger.debug(f"Found presenter_agent message with {len(content)} chars")
+                    except json.JSONDecodeError:
                         continue
+                    except Exception as e:
+                        self.logger.debug(f"Error parsing line in {path}: {e}")
+                        continue
+                
+                # Return verifier message with score if available (most authoritative), otherwise presenter message
+                if verifier_messages:
+                    self.logger.info(f"✅ Recovered {len(verifier_messages)} execution_completion_verifier_agent message(s) with scores from {path}")
+                    return verifier_messages[0]  # Most recent verifier message
+                elif presenter_messages:
+                    self.logger.info(f"✅ Recovered {len(presenter_messages)} presenter_agent message(s) from {path}")
+                    return presenter_messages[0]  # Most recent presenter message
+                    
             except Exception as e:
                 self.logger.debug(f"Recover final_result: failed to read {path}: {e}")
         return None

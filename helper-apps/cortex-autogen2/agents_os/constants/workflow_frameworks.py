@@ -99,11 +99,16 @@ DATA_QUALITY_GUIDANCE = """
     - Check for missing columns or zero rows.
     - If data is invalid: STOP and report "INVALID_DATA: [Reason]". Do NOT generate empty charts.
 
-## 2. ALTERNATIVE SOURCE STRATEGIES (NO FALLBACK DATA)
+## 2. ALTERNATIVE SOURCE STRATEGIES (NO SYNTHETIC DATA)
 - **Planner Agent**: Always include alternative data sources, but NEVER plan for synthetic/fallback data.
-    - "If SQL query fails or returns 0 results, use Web Search Agent to find alternative sources."
-- **Web Search Agent**: If direct URL fails, search for alternative sources (other government sites, data portals, APIs).
-- **CRITICAL**: Try alternative REAL data sources - never generate fake, synthetic, or placeholder data.
+- **MANDATORY MULTI-SOURCE EXHAUSTION**: Plan to try ALL available REAL authoritative sources before declaring failure:
+  * **Source Hierarchy**: Primary source → Alternative source 1 → Alternative source 2 → Alternative source 3 → etc.
+  * **Per-Source Methods**: For each source, try multiple methods (direct download, API call, HTML extraction, web scraping)
+  * **Extraction Methods**: For HTML sources, try: pandas.read_html() → BeautifulSoup → fetch_webpage(render=True) → manual parsing
+  * **Minimum Attempts**: Try at least 3-5 different real data sources with multiple extraction methods each
+- **Web Search Agent**: If direct URL fails, search for alternative sources (other authoritative sites, data portals, APIs).
+- **CRITICAL**: Exhaust ALL real data sources before declaring data unavailable. Each source should be tried with multiple extraction methods.
+- **NEVER GIVE UP EARLY**: Only declare failure after trying multiple different real data sources with multiple extraction methods each.
 
 ## 3. OUTPUT INTEGRITY
 - **No Placeholders**: Never output "TBD" or "Placeholder" in final files.
@@ -202,6 +207,7 @@ TOOL_FAILURE_DETECTION_GUIDANCE = """
   * Acknowledge the loop explicitly: "I notice I've been repeating the same message. I'm stuck in a loop."
   * **ROUTE TO planner_agent FOR REPLANNING**: DO NOT continue the loop - route to planner_agent immediately for replanning with FORCED alternative approaches
   * Provide specific failure analysis to planner_agent: "Primary approach [X] failed. Need replanning with alternative strategies."
+  * **BEFORE REPLANNING**: Check workspace for any available data/files. If partial data exists, create deliverables with available data first, then replan for missing parts. Only replan if workspace is completely empty.
 - **GENERIC LOOP PREVENTION**: 
   * After 2 failed attempts with the same approach, you MUST route to planner_agent for replanning
   * DO NOT continue trying the same approach - we must never loop

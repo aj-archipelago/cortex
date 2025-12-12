@@ -119,10 +119,10 @@ class ProgressCollector:
                         self.logger.error(f"Error processing message: {e}")
                         continue
 
-                # Check timeout
+                # Check timeout - if timed out, stop immediately
                 elapsed = (datetime.now() - start_time).total_seconds()
                 if elapsed > timeout:
-                    self.logger.warning(f"⏱️  Progress collection timeout after {timeout}s")
+                    self.logger.warning(f"⏱️  Progress collection timeout after {elapsed:.1f}s")
                     break
 
             # Cleanup
