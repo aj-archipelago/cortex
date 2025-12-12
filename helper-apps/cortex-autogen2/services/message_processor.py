@@ -76,7 +76,17 @@ async def process_message(
             and message_source != "user"  # Skip user messages
         )
         
+        if not model_client_for_processing:
+            logger.debug(f"⚠️  No model_client_for_processing for {message_source} ({message_type}) - skipping extraction")
+        elif len(content_str) < 20:
+            logger.debug(f"⚠️  Content too short ({len(content_str)} chars) for {message_source} ({message_type}) - skipping extraction")
+        elif message_type == "ToolCallRequestEvent":
+            logger.debug(f"⚠️  Skipping ToolCallRequestEvent for {message_source} - will process ToolCallExecutionEvent instead")
+        elif message_source in ["system", "user"]:
+            logger.debug(f"⚠️  Skipping {message_source} message - handled separately")
+        
         if should_extract:
+            logger.debug(f"🔍 Extracting worklog/learnings for {message_source} ({message_type}, {len(content_str)} chars)")
             try:
                 from services.worklog_learnings_extractor import extract_worklog_and_learnings
                 extraction_result = await extract_worklog_and_learnings(
@@ -90,12 +100,15 @@ async def process_message(
                 # Log worklog if extracted (LLM always works!)
                 worklog = extraction_result.get("worklog")
                 if worklog:
+                    # Extract structured details for brain learning generation
+                    details = worklog.get("details", {})
                     context_memory.log_worklog(
                         message_source,
                         worklog.get("work_type", "agent_action"),
                         worklog.get("description", "Agent performed work"),
                         status=worklog.get("status", "completed"),
-                        metadata={"task_id": task_id, "message_type": message_type}
+                        metadata={"task_id": task_id, "message_type": message_type},
+                        details=details if details else None  # Pass structured details
                     )
                     result["worklog_added"] = True
                     logger.debug(f"✅ Worklog extracted for {message_source}: {worklog.get('description', '')[:50]}...")
@@ -105,11 +118,14 @@ async def process_message(
                 # Log learnings if extracted
                 learnings_count = 0
                 for learning in extraction_result.get("learnings", []):
+                    # Extract structured details for brain learning generation
+                    learning_details = learning.get("details", {})
                     context_memory.log_learning(
                         learning_type=learning.get("learning_type", "insight"),
                         content=learning.get("content", ""),
                         source=message_source,
-                        metadata={"task_id": task_id}
+                        metadata={"task_id": task_id},
+                        details=learning_details if learning_details else None  # Pass structured details
                     )
                     learnings_count += 1
                 result["learnings_added"] = learnings_count

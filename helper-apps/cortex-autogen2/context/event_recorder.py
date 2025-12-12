@@ -324,7 +324,7 @@ class EventRecorder:
         self._log_message(agent_name, message_type, content, metadata)
     
     def log_worklog(self, agent_name: str, work_type: str, description: str,
-                   status: str = "in_progress", metadata: dict = None):
+                   status: str = "in_progress", metadata: dict = None, details: dict = None):
         """
         Log worklog entry - tracks work done, accomplishments, progress.
         
@@ -334,6 +334,7 @@ class EventRecorder:
             description: Description of work done
             status: Status of work ("in_progress", "completed", "failed")
             metadata: Additional metadata (files created, data processed, etc.)
+            details: Structured details (SQL queries, code patterns, errors, data sources, tools used) for brain learning
         """
         try:
             worklog_entry = {
@@ -348,13 +349,17 @@ class EventRecorder:
                     **(metadata or {})
                 }
             }
+            # Add structured details if provided (for brain learning generation)
+            if details:
+                worklog_entry["details"] = details
+            
             with open(self.worklog_file, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(worklog_entry, ensure_ascii=False) + '\n')
         except Exception as e:
             logger.error(f"Failed to log worklog: {e}")
     
     def log_learning(self, learning_type: str, content: str, source: str = "system",
-                    success_score: float = None, metadata: dict = None):
+                    success_score: float = None, metadata: dict = None, details: dict = None):
         """
         Log learning entry - tracks extracted learnings, best practices, insights.
         
@@ -364,6 +369,7 @@ class EventRecorder:
             source: Source of learning (e.g., "system", "azure_search", "task_execution")
             success_score: Success score of the task that generated this learning (if applicable)
             metadata: Additional metadata (task_id, similar_tasks, etc.)
+            details: Structured details (what_worked, what_failed, breakthrough) for brain learning
         """
         try:
             learning_entry = {
@@ -377,6 +383,10 @@ class EventRecorder:
                     **(metadata or {})
                 }
             }
+            # Add structured details if provided (for brain learning generation)
+            if details:
+                learning_entry["details"] = details
+            
             if success_score is not None:
                 learning_entry["success_score"] = success_score
             
