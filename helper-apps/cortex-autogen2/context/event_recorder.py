@@ -37,10 +37,26 @@ class EventRecorder:
         self.messages_file = os.path.join(self.logs_dir, "messages.jsonl")
         self.context_summary_file = os.path.join(self.logs_dir, "context_summary.jsonl")
         self.presenter_context_file = os.path.join(self.logs_dir, "presenter_context.jsonl")
+        self.worklog_file = os.path.join(self.logs_dir, "worklog.jsonl")
+        self.learnings_file = os.path.join(self.logs_dir, "learnings.jsonl")
+        
+        # Initialize learnings.jsonl file (create empty file if doesn't exist)
+        # This ensures the file always exists even if no learnings are logged
+        if not os.path.exists(self.learnings_file):
+            try:
+                with open(self.learnings_file, 'w', encoding='utf-8') as f:
+                    pass  # Create empty file
+            except Exception as e:
+                logger.warning(f"Failed to initialize learnings.jsonl: {e}")
         
         # In-memory event storage for quick access
         self.events = []
         self._load_events()
+        
+        # Track files that have already been logged to prevent duplicates
+        # Key: normalized file path, Value: timestamp of first logging
+        self._logged_files = {}
+        self._load_logged_files()
     
     def _load_events(self):
         """Load existing events from JSONL file."""
@@ -57,6 +73,20 @@ class EventRecorder:
                                 logger.warning(f"Failed to parse event line: {e}")
             except Exception as e:
                 logger.warning(f"Failed to load events: {e}")
+    
+    def _load_logged_files(self):
+        """Load already-logged files from existing events to prevent duplicates."""
+        for event in self.events:
+            if event.get("event_type") == "file_creation":
+                file_path = event.get("details", {}).get("file_path")
+                if file_path:
+                    # Normalize path for consistent tracking
+                    try:
+                        normalized_path = os.path.normpath(file_path)
+                        if normalized_path not in self._logged_files:
+                            self._logged_files[normalized_path] = event.get("timestamp")
+                    except Exception:
+                        pass
     
     def _save_event(self, event: dict):
         """Append event to JSONL file."""
@@ -138,9 +168,24 @@ class EventRecorder:
     def record_file_creation(self, file_path: str, file_type: str,
                            content_summary: str, metadata: dict,
                            agent_name: str):
-        """Record file creation with content preview."""
+        """Record file creation with content preview. Skips if file was already logged."""
+        # Normalize path for consistent tracking
+        try:
+            normalized_path = os.path.normpath(file_path)
+        except Exception:
+            normalized_path = file_path
+        
+        # Check if this file was already logged
+        if normalized_path in self._logged_files:
+            logger.debug(f"⏭️  Skipping duplicate file creation log for {os.path.basename(file_path)} (already logged at {self._logged_files[normalized_path]})")
+            return
+        
+        # Record the file as logged
+        timestamp = datetime.now().isoformat()
+        self._logged_files[normalized_path] = timestamp
+        
         event = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": timestamp,
             "event_type": "file_creation",
             "agent_name": agent_name,
             "action": "file_created",
@@ -157,6 +202,9 @@ class EventRecorder:
             }
         }
         self._save_event(event)
+        # Note: File creation is tracked in events.jsonl, but NOT logged to worklog.jsonl
+        # Worklog entries are created by LLM extraction from agent messages (one per agent turn)
+        # This prevents duplicate worklog entries and ensures one sentence per agent turn
     
     def record_tool_execution(self, agent_name: str, tool_name: str,
                              input_params: dict, output_result: dict,
@@ -221,6 +269,12 @@ class EventRecorder:
             }
         }
         self._save_event(event)
+        # Also log to worklog
+        self.log_worklog(
+            agent_name, "accomplishment", accomplishment,
+            status="completed",
+            metadata={"evidence": evidence, "context": context}
+        )
     
     def record_decision(self, agent_name: str, decision: str,
                        reasoning: str, alternatives: list):
@@ -268,4 +322,66 @@ class EventRecorder:
                       content: str, metadata: dict = None):
         """Record message (input/output/tool_call)."""
         self._log_message(agent_name, message_type, content, metadata)
+    
+    def log_worklog(self, agent_name: str, work_type: str, description: str,
+                   status: str = "in_progress", metadata: dict = None):
+        """
+        Log worklog entry - tracks work done, accomplishments, progress.
+        
+        Args:
+            agent_name: Agent performing the work
+            work_type: Type of work (e.g., "accomplishment", "file_creation", "data_processing", "tool_execution")
+            description: Description of work done
+            status: Status of work ("in_progress", "completed", "failed")
+            metadata: Additional metadata (files created, data processed, etc.)
+        """
+        try:
+            worklog_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "agent_name": agent_name,
+                "work_type": work_type,
+                "description": description,
+                "status": status,
+                "metadata": {
+                    "request_id": self.request_id,
+                    "work_dir": self.work_dir,
+                    **(metadata or {})
+                }
+            }
+            with open(self.worklog_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(worklog_entry, ensure_ascii=False) + '\n')
+        except Exception as e:
+            logger.error(f"Failed to log worklog: {e}")
+    
+    def log_learning(self, learning_type: str, content: str, source: str = "system",
+                    success_score: float = None, metadata: dict = None):
+        """
+        Log learning entry - tracks extracted learnings, best practices, insights.
+        
+        Args:
+            learning_type: Type of learning (e.g., "best_practice", "antipattern", "insight", "recovery_strategy")
+            content: Learning content/text
+            source: Source of learning (e.g., "system", "azure_search", "task_execution")
+            success_score: Success score of the task that generated this learning (if applicable)
+            metadata: Additional metadata (task_id, similar_tasks, etc.)
+        """
+        try:
+            learning_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "learning_type": learning_type,
+                "content": content,
+                "source": source,
+                "metadata": {
+                    "request_id": self.request_id,
+                    "work_dir": self.work_dir,
+                    **(metadata or {})
+                }
+            }
+            if success_score is not None:
+                learning_entry["success_score"] = success_score
+            
+            with open(self.learnings_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(learning_entry, ensure_ascii=False) + '\n')
+        except Exception as e:
+            logger.error(f"Failed to log learning: {e}")
 

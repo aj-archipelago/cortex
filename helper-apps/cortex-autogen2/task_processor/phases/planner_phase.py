@@ -4,7 +4,24 @@ Planner phase handler for task execution planning.
 import logging
 
 from dynamic_agent_loader import helpers
-run_agent_with_timeout = helpers.run_agent_with_timeout
+import asyncio
+from autogen_core import CancellationToken
+
+# run_agent_with_timeout may not exist in all helpers versions - provide fallback
+try:
+    run_agent_with_timeout = helpers.run_agent_with_timeout
+except AttributeError:
+    async def run_agent_with_timeout(agent, task: str, timeout_seconds: int, logger):
+        """Run an agent with timeout and consistent error handling."""
+        try:
+            result = await asyncio.wait_for(
+                agent.run(task=task, cancellation_token=CancellationToken()),
+                timeout=timeout_seconds
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.error(f"Agent {agent.name if hasattr(agent, 'name') else 'unknown'} timed out after {timeout_seconds}s")
+            raise RuntimeError(f"Agent timed out after {timeout_seconds}s")
 
 logger = logging.getLogger(__name__)
 

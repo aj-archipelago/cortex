@@ -251,47 +251,22 @@ Return one word: function_call, function_result, error_message, success_message,
 
     def _parse_llm_json_response(self, response_content: str) -> Dict[str, Any]:
         """Parse JSON response from LLM, with fallback handling."""
-        try:
-            # Extract JSON from response
-            import json
-            import re
-
-            # Clean the response content first
-            response_content = response_content.strip()
-
-            # Look for JSON block
-            json_match = re.search(r'```json\s*(.*?)\s*```', response_content, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1).strip()
-            else:
-                # Try to find JSON without code blocks - look for complete JSON objects
-                json_match = re.search(r'\{.*\}', response_content, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0).strip()
-                    # Ensure it's a complete JSON object by checking braces
-                    if json_str.count('{') == json_str.count('}'):
-                        pass  # Valid structure
-                    else:
-                        # Try to extract just the JSON part
-                        start = response_content.find('{')
-                        end = response_content.rfind('}') + 1
-                        if start >= 0 and end > start:
-                            json_str = response_content[start:end]
-                else:
-                    json_str = response_content
-
-            return json.loads(json_str)
-
-        except Exception as parse_error:
-            print(f"⚠️ JSON PARSING FAILED: {str(parse_error)}, content: {response_content[:200]}")
-            # Return a structured fallback
-            return {
-                "cognitive_depth": "unknown",
-                "reasoning_quality": "unknown",
-                "decision_model": "unknown",
-                "confidence_level": "unknown",
-                "emotional_tone": "neutral",
-                "cognitive_load": "unknown",
+        from util.json_extractor import extract_json_from_llm_response
+        
+        result = extract_json_from_llm_response(response_content, expected_type=dict, log_errors=True)
+        if result:
+            return result
+        
+        # Fallback: return empty dict if extraction fails
+        print(f"⚠️ JSON PARSING FAILED, content: {response_content[:200]}")
+        # Return a structured fallback
+        return {
+            "cognitive_depth": "unknown",
+            "reasoning_quality": "unknown",
+            "decision_model": "unknown",
+            "confidence_level": "unknown",
+            "emotional_tone": "neutral",
+            "cognitive_load": "unknown",
                 "journey_stage": "execution",
                 "progress_direction": "unknown",
                 "learning_evidence": "unknown",

@@ -47,33 +47,47 @@ URL_VALIDATION_GUIDANCE = """
 
 LLM_DATA_VALIDATION_FRAMEWORK = """
 - **SEMANTIC VALIDATION**: Before processing ANY data, validate if downloaded data matches task requirements using LLM reasoning:
-  * Extract task requirements from conversation context (e.g., "US state GDP data", "sales data for headphones")
+  * Extract task requirements from conversation context
   * Analyze actual data structure and sample content using pandas
   * Use LLM to determine semantic correctness: `print(f"🔍 VALIDATING DATA: Task requires [requirement], data contains [actual_content] - Match: [YES/NO]")`
   * If mismatch detected: `raise ValueError(f"❌ DATA MISMATCH: Task requires [requirement] but data contains [actual_content]. Wrong data downloaded - needs replanning.")`
 - **CONTENT ANALYSIS**: Use LLM to analyze data quality and relevance:
-  * Check geographic scope (US states vs global countries)
-  * Verify data contains expected metrics (GDP vs unrelated indicators)
-  * Validate temporal scope matches requirements (latest year vs historical)
+  * Check geographic scope matches requirements
+  * Verify data contains expected metrics matching task requirements
+  * Validate temporal scope matches requirements (if task specifies a time period, data must match that exact period, not adjacent periods)
+  * Validate data completeness (if task specifies a count or set of entities, verify all are present - not fewer or more)
+  * Verify data realism (financial metrics should be in appropriate units and ranges - not zeros, negative, or impossible values for the domain)
   * Detect placeholder/synthetic vs real data
+  * For time-specific tasks, verify data actually covers the specified period, not different time periods
+  * For financial/performance tasks, verify metrics are realistic for the domain (appropriate units, reasonable ranges, not placeholder values)
 - **REPLANNING TRIGGERS**: If validation fails, provide specific guidance:
-  * Wrong geographic scope: "Task requires US data but downloaded global data - replan with US-specific sources"
-  * Wrong data type: "Task requires GDP data but downloaded population data - replan with economic indicators"
-  * Outdated data: "Task requires latest data but downloaded 2020 data - replan with current sources"
+  * Wrong geographic scope: "Task requires specific geographic data but downloaded different scope - replan with correct geographic sources"
+  * Wrong data type: "Task requires specific data type but downloaded unrelated data - replan with correct data type"
+  * Outdated data: "Task requires latest data but downloaded outdated data - replan with current sources"
+  * Wrong time period: "Task requires specific time period data but downloaded different period - replan with correct time period sources (official filings, reports, authoritative data sources for that period)"
+  * Incomplete data: "Task requires specific entities/items but data missing some - replan to collect missing items from authoritative sources"
+  * Unrealistic data: "Task requires realistic domain metrics but data contains unrealistic values (zeros, negative, or impossible numbers) - replan with authoritative sources (official filings, reports, domain-specific data APIs)"
+  * Missing key metrics: "Task requires specific metrics but data missing these - replan to collect complete metrics from authoritative sources"
 - **ATTEMPT TRACKING**: Track replanning attempts (max 3) with escalating strategies:
   * Attempt 1: Try alternative sources within same data provider
   * Attempt 2: Switch to different data providers entirely
   * Attempt 3: Use web scraping of official websites as fallback
+- **MANDATORY VALIDATION BEFORE FILE CREATION**: Data validation MUST occur BEFORE creating any files. If validation fails, raise ValueError to trigger replanning - DO NOT create files with invalid/placeholder data.
 - **VALIDATION CODE PATTERN**:
 ```python
 import pandas as pd
+# Validate data BEFORE creating files
 df_sample = df.head(10)
 data_preview = df_sample.to_string()
 task_requirements = "[extract from context]"
+# Use LLM or logic to validate
 validation_prompt = f"Task requires: {{task_requirements}}. Data preview: {{data_preview}}. Does this data match? Answer YES/NO and explain why."
 if not data_matches_requirements:
-    raise ValueError(f"DATA VALIDATION FAILED: {{validation_explanation}}")
+    raise ValueError(f"❌ DATA MISMATCH: Task requires {{task_requirements}} but data contains {{actual_content}}. Wrong data downloaded - needs replanning.")
+# Only create files if validation passes
 ```
+    - **CRITICAL: NO PLACEHOLDER FILES**: If data validation fails or data is unavailable, raise ValueError for replanning. Never create files with placeholder, synthetic, or invalid data.
+    - **FORBIDDEN: ERROR MESSAGE FILES**: Never create files that contain only error messages, explanations of data unavailability, or placeholder text. Files must contain actual data/content, not error descriptions. If data is unavailable, raise ValueError for replanning - do NOT create files with error messages. Creating files with error messages instead of data = automatic score 0.
 """
 
 FACTUAL_ACCURACY_VALIDATION = """

@@ -3,21 +3,18 @@ Simplified Workflow Implementation
 
 Uses SelectorGroupChat for intelligent agent routing - no need for picker agent or graph structure.
 SelectorGroupChat automatically selects the right agent based on descriptions.
+
+Minimal code - all processing logic moved to services.
 """
 
-import json
 import logging
 import os
 import time
 import asyncio
-from datetime import datetime
 from typing import List, Optional, Dict
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.teams import SelectorGroupChat
-from autogen_agentchat.base._task import TaskResult
-from autogen_agentchat.messages import StopMessage
 from .score_termination import create_score_based_termination
-from autogen_core.model_context import BufferedChatCompletionContext
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +40,9 @@ class SimplifiedWorkflow:
         execution_completion_verifier_agent: AssistantAgent,
         task_id: Optional[str] = None,
         work_dir: Optional[str] = None,
-        progress_handler: Optional[object] = None
+        progress_handler: Optional[object] = None,
+        context_memory: Optional[object] = None,
+        model_client_for_processing: Optional[object] = None
     ) -> str:
         """
         Run simplified workflow using SelectorGroupChat:
@@ -60,21 +59,22 @@ class SimplifiedWorkflow:
             execution_completion_verifier_agent
         ]
 
-        all_messages = []
-        
-        # Track message history for progress updates (up to 10k chars)
-        message_history = []
-        message_history_chars = 0
-        MAX_HISTORY_CHARS = 10000
-
         # Initialize messages.jsonl file if work_dir is provided
         messages_file_path = None
         if work_dir and task_id:
             logs_dir = os.path.join(work_dir, "logs")
             os.makedirs(logs_dir, exist_ok=True)
             messages_file_path = os.path.join(logs_dir, "messages.jsonl")
+            
+            # Log task start to worklog (full description, no truncation)
+            if context_memory:
+                context_memory.log_worklog(
+                    "system", "task_start", f"Task started: {task}", status="in_progress",
+                    metadata={"task_id": task_id}
+                )
 
-        score_based_termination = create_score_based_termination(all_messages,threshold=90)
+        all_messages = []  # Mutable list for tracking messages
+        score_based_termination = create_score_based_termination(all_messages, threshold=90)
 
         # Create SelectorGroupChat team with score-based termination
         team = SelectorGroupChat(
@@ -101,10 +101,11 @@ class SimplifiedWorkflow:
         async for message in stream:
             all_messages.append(message)
 
-            # Extract message content and source
-            message_content = getattr(message, "content", "")
+            # Extract message metadata
             message_source = getattr(message, "source", "unknown")
             message_type = type(message).__name__
+            message_content = getattr(message, "content", "")
+            content_str = str(message_content) if message_content else ""
 
             # Update last presenter message tracking
             if message_source == 'presenter_agent' and message_type == 'TextMessage':
@@ -112,55 +113,34 @@ class SimplifiedWorkflow:
 
             logger.debug(f"🔍 From agent {message_source}, Message: {message}")
             
-            # Convert content to string if needed
-            if message_content:
-                content_str = str(message_content)
-            else:
-                content_str = ""
+            # LLM-powered early termination detection
+            if model_client_for_processing:
+                from services.termination_detector import should_terminate_early
+                should_terminate, score = await should_terminate_early(
+                    message_source, message_type, content_str, model_client_for_processing
+                )
+                if should_terminate:
+                    logger.info(f"✅ Early stop: verifier score {score} > 90. Ending workflow stream.")
+                    break
             
-            # Save to logs/messages.jsonl under the req_XXX request id folder
-            if messages_file_path:
-                try:
-                    message_entry = {
-                        "timestamp": datetime.now().isoformat(),
-                        "agent_name": message_source,
-                        "message_type": message_type,
-                        "content": content_str,
-                        "metadata": {
-                            "request_id": task_id,
-                            "message_index": len(all_messages) - 1
-                        }
-                    }
-                    with open(messages_file_path, 'a', encoding='utf-8') as f:
-                        f.write(json.dumps(message_entry, ensure_ascii=False) + '\n')
-                except Exception as e:
-                    logger.warning(f"Failed to save message to JSONL: {e}")
+            # Process message through service (LLM-powered worklog/learnings/file detection)
+            from services.message_processor import process_message
+            await process_message(
+                message, context_memory, model_client_for_processing,
+                task_id, work_dir, messages_file_path
+            )
             
-            # Build message history for progress updates (up to 10k chars)
-            if content_str:
-                # Add new message to history
-                message_history.append(f"{message_source}: {content_str}")
-                message_history_chars += len(content_str) + len(message_source) + 2  # +2 for ": "
-                
-                # Trim history if it exceeds MAX_HISTORY_CHARS
-                while message_history_chars > MAX_HISTORY_CHARS and len(message_history) > 1:
-                    removed = message_history.pop(0)
-                    message_history_chars -= len(removed)
-            
-            # Increment progress for every message, send LLM update every 15 seconds
+            # Progress tracking
             if progress_handler and task_id:
-                # Always increment progress locally for every message
                 current_progress = self._task_progress.get(task_id, 0.05)
                 next_progress = min(current_progress + 0.01, 0.94)
                 self._task_progress[task_id] = next_progress
 
-                # Send LLM-summarized progress update every 15 seconds
+                # Send progress update every 30 seconds
                 try:
                     current_time = time.time()
                     last_report_time = self._last_report_time.get(task_id, 0)
-
                     if current_time - last_report_time >= 30.0:
-                        # Fire-and-forget - send with percentage=None to trigger auto-increment (+1%)
                         asyncio.create_task(progress_handler.report_user_progress(
                             task_id, content_str, percentage=None, source=message_source
                         ))
@@ -170,10 +150,13 @@ class SimplifiedWorkflow:
 
         result = all_messages[-1] if len(all_messages) > 0 else None
 
+        # Get final result from presenter_agent
+        final_result = self.last_presenter_msg.content if self.last_presenter_msg else None
+
         # Send 95% progress - task execution complete, processing final results
         if progress_handler and task_id:
             try:
-                result_preview = self.last_presenter_msg.content[:150] + "..." if self.last_presenter_msg and len(self.last_presenter_msg.content) > 150 else (self.last_presenter_msg.content if self.last_presenter_msg else "Processing results")
+                result_preview = final_result[:150] + "..." if final_result and len(final_result) > 150 else (final_result if final_result else "Processing results")
                 # Fire-and-forget - don't block final result return
                 asyncio.create_task(progress_handler.report_user_progress(
                     task_id, f"✨ Task execution complete - finalizing results: {result_preview}",
@@ -187,7 +170,38 @@ class SimplifiedWorkflow:
         logger.info(f"🤝 AGENT FLOW: {agent_flow}")
 
         
-        logger.info(f"🤝 SIMPLE WORKFLOW COMPLETED: {len(all_messages)} messages processed, stop_reason: {result.stop_reason or 'Workflow completed'}, result: {result}")
+        stop_reason = getattr(result, "stop_reason", None) if result else None
+        logger.info(f"🤝 SIMPLE WORKFLOW COMPLETED: {len(all_messages)} messages processed, stop_reason: {stop_reason or 'Workflow completed'}, result: {result}")
+        
+        # CRITICAL: Send final result as progress update with data field (100% progress)
+        # This ensures test runner can capture the final result
+        if progress_handler and task_id and final_result:
+            try:
+                await progress_handler.handle_progress_update(
+                    task_id, 1.0, "🎉 Your task is complete!", data=final_result
+                )
+                logger.info(f"✅ Final result sent as progress update (100%) with data field")
+            except Exception as e:
+                logger.error(f"❌ Failed to send final result as progress update: {e}")
+        
+        # Process learnings via service (LLM-powered)
+        if context_memory and task_id and final_result:
+            from services.learning_processor import process_task_completion_learnings
+            await process_task_completion_learnings(
+                context_memory, task_id, task, final_result, model_client_for_processing
+            )
+        
+        # Log task completion to worklog
+        if context_memory and task_id:
+            try:
+                context_memory.log_worklog(
+                    "system", "task_completion",
+                    f"Task completed successfully with {len(all_messages)} messages processed",
+                    status="completed",
+                    metadata={"task_id": task_id, "message_count": len(all_messages), "agent_flow": agent_flow}
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log task completion: {e}")
         
         # Return last presenter_agent TextMessage content
-        return self.last_presenter_msg.content if self.last_presenter_msg else None
+        return final_result

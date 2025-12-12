@@ -491,7 +491,7 @@ FLOW ANALYSIS REQUIREMENTS:
 
 **DATA VALIDATION FAILURE DETECTION**:
 - **SEMANTIC MISMATCH**: Detect when coder_agent raises DATA VALIDATION FAILED errors indicating downloaded data doesn't match task requirements
-- **GEOGRAPHIC SCOPE ERRORS**: Task requires US state data but downloaded global/country data (e.g., UN data for BEA requirement)
+- **GEOGRAPHIC SCOPE ERRORS**: Task requires specific geographic scope data but downloaded different geographic scope data (e.g., country-level data when state-level is required)
 - **DATA TYPE MISMATCH**: Task requires specific metrics (GDP, population) but downloaded unrelated indicators
 - **TEMPORAL SCOPE ERRORS**: Task requires latest/current data but downloaded historical/outdated data
 - **REPLANNING TRIGGER**: When data validation fails, count replanning attempts and escalate strategy:

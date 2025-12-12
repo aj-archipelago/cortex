@@ -112,6 +112,8 @@ async def get_coder_system_message(request_id: str, work_dir: str, task_content:
         DELIVERABLE_FILE_QUALITY_REQUIREMENTS,
         WORKFLOW_CONTINUATION_SIGNALING,
         CODE_GENERATION_ERROR_RECOVERY,
+        GENERIC_PRESENTATION_REQUIREMENTS,
+        ALL_ENTITIES_MANDATORY,
     )
     from .constants.visual_processing import (
         IMAGE_AND_PDF_PROCESSING_CAPABILITIES,
@@ -296,6 +298,10 @@ async def get_coder_system_message(request_id: str, work_dir: str, task_content:
 {SELF_CORRECTION_FRAMEWORK}
 
 {CODE_GENERATION_ERROR_RECOVERY}
+
+{GENERIC_PRESENTATION_REQUIREMENTS}
+
+{ALL_ENTITIES_MANDATORY}
 """.strip()
 
 

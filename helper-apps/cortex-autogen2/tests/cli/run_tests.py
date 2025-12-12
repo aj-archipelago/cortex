@@ -226,7 +226,7 @@ async def run_all_tests_parallel(max_concurrent: int = 2):
     print(f"🚀 Running all test cases with max {max_concurrent} concurrent executions...\n")
 
     orchestrator = TestOrchestrator()
-    test_cases = orchestrator.load_test_cases()
+    test_cases, _ = orchestrator.load_test_cases()
 
     results = []
     pending_tests = test_cases.copy()
@@ -466,7 +466,7 @@ async def run_single_test(test_case_id: str):
     set_current_runner_logger(runner_logger)
 
     orchestrator = TestOrchestrator(logger=runner_logger)
-    test_cases = orchestrator.load_test_cases()
+    test_cases, _ = orchestrator.load_test_cases()
 
     # Find the test case
     test_case = next((tc for tc in test_cases if tc['id'] == test_case_id), None)
@@ -551,7 +551,7 @@ def main():
             
             # Filter test cases
             orchestrator = TestOrchestrator()
-            all_test_cases = orchestrator.load_test_cases()
+            all_test_cases, _ = orchestrator.load_test_cases()
             selected_test_cases = [tc for tc in all_test_cases if tc['id'] in args.test]
             
             # Verify all requested tests were found

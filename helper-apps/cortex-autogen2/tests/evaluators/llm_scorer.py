@@ -100,6 +100,15 @@ class LLMEvaluator:
             logger.error(f"Failed to parse LLM response as JSON: {e}")
             logger.debug(f"Raw response: {result}")
 
+            # One retry to handle transient/formatting issues
+            try:
+                retry_result = await self._call_llm(prompt)
+                evaluation = self._parse_llm_json_response(retry_result)
+                logger.warning("Recovered progress evaluation after retry due to initial parse failure")
+                return evaluation
+            except Exception as retry_e:
+                logger.error(f"Retry also failed to parse LLM response: {retry_e}")
+
             return {
                 'score': 50,
                 'reasoning': "LLM response could not be parsed. Manual review required.",
@@ -423,6 +432,15 @@ CRITICAL: For tests requiring AJ SQL (requires_ajsql=true), verify that aj_sql_a
             logger.error(f"Failed to parse LLM response as JSON: {e}")
             logger.debug(f"Raw response: {result}")
 
+            # One retry to handle transient/formatting issues
+            try:
+                retry_result = await self._call_llm(prompt)
+                evaluation = self._parse_llm_json_response(retry_result)
+                logger.warning("Recovered output evaluation after retry due to initial parse failure")
+                return evaluation
+            except Exception as retry_e:
+                logger.error(f"Retry also failed to parse LLM response: {retry_e}")
+
             return {
                 'score': 50,
                 'reasoning': "LLM response could not be parsed. Manual review required.",
@@ -521,50 +539,24 @@ CRITICAL: For tests requiring AJ SQL (requires_ajsql=true), verify that aj_sql_a
         Raises:
             json.JSONDecodeError: If response cannot be parsed as JSON
         """
-        import re
-        import ast
-
+        from util.json_extractor import extract_json_from_llm_response
+        
+        # Handle empty or None response
+        if not response or not isinstance(response, str) or len(response.strip()) == 0:
+            logger.warning("Empty or invalid LLM response received")
+            import json
+            raise json.JSONDecodeError("Empty LLM response", response or "", 0)
+        
         # Debug logging for failed parses
         logger.debug(f"🤖 Raw LLM response: {response[:500]}...")
-
-        # Clean the response
-        response = response.strip()
-
-        # Remove markdown code blocks
-        if response.startswith('```json'):
-            response = response[7:]
-        elif response.startswith('```'):
-            response = response[3:]
-        if response.endswith('```'):
-            response = response[:-3]
-
-        response = response.strip()
-
-        # Try to find JSON object in the response using regex
-        def _attempt_parse(candidate: str):
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
-                try:
-                    parsed = ast.literal_eval(candidate)
-                    if isinstance(parsed, dict):
-                        return parsed
-                except Exception:
-                    pass
-                return None
-
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            json_str = json_match.group()
-            parsed = _attempt_parse(json_str)
-            if parsed is not None:
-                return parsed
-
-        # If regex didn't work, try parsing the entire cleaned response
-        parsed = _attempt_parse(response)
-        if parsed is not None:
-            return parsed
-        return json.loads(response)
+        
+        result = extract_json_from_llm_response(response, expected_type=dict, log_errors=True)
+        if result:
+            return result
+        
+        # If extraction fails, raise JSONDecodeError (as per original contract)
+        import json
+        raise json.JSONDecodeError("Failed to extract JSON from LLM response", response, 0)
 
     def _validate_file_content(self, files_created: List[str], work_dir: str) -> Tuple[bool, str]:
         """Validate file content to ensure it doesn't contain error messages or font issues."""
@@ -708,7 +700,21 @@ CRITICAL: For tests requiring AJ SQL (requires_ajsql=true), verify that aj_sql_a
                     data = response.json()
 
                     # Extract content from OpenAI-format response
-                    content = data['choices'][0]['message']['content']
+                    if 'choices' not in data or len(data['choices']) == 0:
+                        logger.warning("LLM response has no choices")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(base_delay * (2 ** attempt))
+                            continue
+                        return ""
+                    
+                    content = data['choices'][0].get('message', {}).get('content', '')
+                    
+                    if not content:
+                        logger.warning("LLM response content is empty")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(base_delay * (2 ** attempt))
+                            continue
+                        return ""
 
                     # Remove markdown code fences if present
                     content = content.strip()
@@ -719,7 +725,17 @@ CRITICAL: For tests requiring AJ SQL (requires_ajsql=true), verify that aj_sql_a
                     if content.endswith('```'):
                         content = content[:-3]
 
-                    return content.strip()
+                    content = content.strip()
+                    
+                    # Validate content is not empty after cleaning
+                    if not content:
+                        logger.warning("LLM response content is empty after cleaning")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(base_delay * (2 ** attempt))
+                            continue
+                        return ""
+                    
+                    return content
 
             except (httpx.TimeoutException, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
                 if attempt < max_retries - 1:

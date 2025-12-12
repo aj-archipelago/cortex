@@ -3,14 +3,51 @@ Execution phase handler for unified agent execution.
 """
 import os
 import logging
+import asyncio
+from datetime import datetime
 
 from autogen_agentchat.teams import SelectorGroupChat
-from autogen_agentchat.conditions import TextMentionTermination, MaxMessagesTermination
+from autogen_agentchat.conditions import FunctionalTermination
+
+# Handle MaxMessagesTermination import with fallback for different autogen versions
+try:
+    from autogen_agentchat.conditions import MaxMessagesTermination
+except ImportError:
+    # Fallback: create a simple MaxMessagesTermination-like class if not available
+    class MaxMessagesTermination:
+        def __init__(self, max_messages: int):
+            self.max_messages = max_messages
 
 from context.logging_utils import log_phase_start, log_phase_complete
-from task_processor.loop_termination import create_loop_detection_termination
+from task_processor.score_termination import create_score_based_termination
 
 logger = logging.getLogger(__name__)
+
+
+def create_timeout_termination(timeout_seconds: int):
+    """
+    Create a termination condition that stops execution after a timeout.
+
+    Args:
+        timeout_seconds: Maximum time to run before terminating
+
+    Returns:
+        FunctionalTermination that terminates after timeout
+    """
+    import time
+    start_time = time.time()
+
+    def check_timeout(messages):
+        elapsed = time.time() - start_time
+        if elapsed > timeout_seconds:
+            logger.warning(f"⏱️ Timeout termination: {elapsed:.1f}s > {timeout_seconds}s limit")
+            return True
+        # Log progress every 60 seconds
+        if int(elapsed) % 60 == 0 and elapsed > 0:
+            logger.info(f"⏱️ Group phase running for {elapsed:.1f}s (timeout: {timeout_seconds}s)")
+        return False
+
+    return FunctionalTermination(check_timeout)
 
 
 class GroupPhase:
@@ -27,38 +64,21 @@ class GroupPhase:
         print(f"🔥 DEBUG: _run_unified_execution_phase called for task {task_id}")
         self.logger.info(f"🔥 DEBUG: _run_unified_execution_phase called for task {task_id}")
 
-        # Track messages for loop detection
         all_messages = []
-        
-        # Create termination conditions
-        normal_termination = TextMentionTermination("EXECUTION_PHASE_COMPLETE")
-        loop_termination = create_loop_detection_termination(all_messages, max_repetitions=3)
+        # Create termination conditions - score-based (terminates on score > 90), timeout, with max messages fallback
         max_messages = int(os.getenv('SELECTOR_MAX_TURNS', '250'))
-        max_messages_termination = MaxMessagesTermination(max_messages)
-        
-        # Combine termination conditions (terminate if any condition is met)
-        def combined_termination(messages):
-            # Check normal termination first
-            if normal_termination(messages):
-                self.logger.info("✅ Normal termination: EXECUTION_PHASE_COMPLETE detected")
-                return True
-            # Check loop termination
-            if loop_termination(messages):
-                self.logger.warning("🛑 Loop termination: Infinite loop detected, terminating execution phase")
-                return True
-            # Check max messages termination
-            if max_messages_termination(messages):
-                self.logger.warning(f"⏱️ Max messages termination: Reached {max_messages} messages, terminating execution phase")
-                return True
-            return False
-        
-        from autogen_agentchat.conditions import FunctionalTermination
-        combined_termination_condition = FunctionalTermination(combined_termination)
+        group_phase_timeout = int(os.getenv('GROUP_PHASE_TIMEOUT_SECONDS', '9000')) 
+
+        termination_condition = (
+            create_score_based_termination(all_messages, threshold=90) |
+            create_timeout_termination(group_phase_timeout) |
+            MaxMessagesTermination(max_messages)
+        )
 
         execution_team = SelectorGroupChat(
             participants=[planner_agent] + execution_agents,  # Planner first, then execution agents
             model_client=self.gpt41_model_client,
-            termination_condition=combined_termination_condition,
+            termination_condition=termination_condition,
             max_turns=int(os.getenv('SELECTOR_MAX_TURNS', '250')),
             allow_repeated_speaker=True
         )

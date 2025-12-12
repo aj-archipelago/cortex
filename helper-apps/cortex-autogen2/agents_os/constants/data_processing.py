@@ -23,9 +23,10 @@ DATA_PROCESSING_GUIDANCE = """
 **ABSOLUTELY FORBIDDEN - NEVER GENERATE SYNTHETIC DATA**:
 - **NO SYNTHETIC DATA**: NEVER generate fake, random, or simulated data using np.random, faker, or any other generation method
 - **NO RANDOM VALUES**: NEVER create data with random numbers, normal distributions, or artificial patterns
-- **FAIL CLEANLY**: If real data sources are unavailable, declare clear failure: "FAILED: No real data sources found for this task"
+- **FAIL CLEANLY**: If real data sources are unavailable after exhausting all sources, declare clear failure: "FAILED: No real data sources found for this task"
 - **REAL DATA ONLY**: Only collect and process data from actual web sources - NEVER create artificial datasets
 - **NO FALLBACK GENERATION**: Do not create "fallback" data generation code - fail with clear error message instead
+- **PARTIAL DATA PROCESSING**: If data acquisition partially succeeds (some data available but incomplete), process and create deliverables with available data. Check workspace for any existing data files before declaring complete failure. Only declare failure if workspace is completely empty after all source attempts.
 
 **CONSISTENT DATA PROCESSING PRINCIPLES**:
 - **VALIDATION FIRST**: Always validate data completeness, numeric validity, and scope coverage before processing
@@ -199,7 +200,18 @@ HTML_DATA_EXTRACTION = """
   * **CRITICAL**: pandas.read_html() works on FILE PATHS, not URLs when custom headers are needed. Always read from saved HTML files that web_search_agent created.
   * **CHECK HTML FIRST**: Before waiting for CSV files or other data formats, check if HTML files exist in the working directory - HTML often contains the data you need
 
-**GENERIC HTML TABLE EXTRACTION**: Many data sources provide data in HTML tables. Try pandas.read_html(url) first - it automatically extracts all tables from HTML pages. This works for most government sites, data portals, and official sources.
+**GENERIC HTML TABLE EXTRACTION**: Many data sources provide data in HTML tables. 
+  * **MANDATORY MULTI-METHOD APPROACH**: When HTML contains data tables, try ALL methods in sequence:
+    1. **pandas.read_html(file_path)** - First try on saved HTML file (works for most static tables)
+    2. **pandas.read_html(url)** - If file doesn't exist, try direct URL (may need headers)
+    3. **BeautifulSoup manual extraction** - If pandas fails, parse HTML manually with BeautifulSoup
+    4. **fetch_webpage(render=True)** - If tables are JavaScript-rendered, fetch with rendering enabled
+    5. **Multiple table selection** - HTML pages often have multiple tables - extract ALL and find the correct one by checking row counts, column names, and data patterns
+  * **CRITICAL**: Never give up after first extraction method fails - try ALL methods before declaring data unavailable
+  * **TABLE IDENTIFICATION**: After extracting all tables, use reasoning to identify the correct table by:
+    - Checking row counts match expected data
+    - Matching column names to task requirements
+    - Verifying data types and ranges are realistic
 
 **EXTRACT FROM FETCHED HTML**: When `fetch_webpage` tool results show a "saved_html" field:
   * **CRITICAL**: The JSON response does NOT contain HTML content (kept minimal to save context) - use the "saved_html" file path instead
@@ -220,7 +232,7 @@ HTML_DATA_EXTRACTION = """
   * Extract rows and cells manually
   * Convert to pandas DataFrame or save directly as CSV
 
-**JAVASCRIPT-RENDERED PAGES**: For FRED, World Bank, and other modern sites with JavaScript-rendered tables:
+**JAVASCRIPT-RENDERED PAGES**: For modern sites with JavaScript-rendered tables:
   * **MANDATORY**: Use `fetch_webpage(url, render=True)` to get fully rendered HTML with tables
   * **CRITICAL**: If pandas.read_html() on saved HTML returns empty list, the page likely needs JavaScript rendering
   * **WORKFLOW**: fetch_webpage(render=True) → save HTML → pandas.read_html(saved_file) → if empty, use BeautifulSoup fallback
@@ -299,7 +311,7 @@ WORKSPACE_STATE_AWARENESS = """
 1. **CHECK WORKSPACE FILES FIRST**:
    - Use `bound_list_files` tool to list all files in work_dir
    - Look for files matching task requirements (extensions: .csv, .xlsx, .json, .html, .zip, etc.)
-   - Check file names for keywords related to task (e.g., "gdp", "state", "data", etc.)
+   - Check file names for keywords related to task requirements
    - If files exist, process them immediately - DO NOT wait for "user upload"
    - **GENERIC**: Applies to ANY task - always check workspace before declaring resources unavailable
 

@@ -98,14 +98,22 @@ OUTPUT_EVALUATION_PROMPT = """You are an expert evaluator assessing the quality 
 {agent_activity_info}
 
 **CRITICAL FAILURE CHECK**: If ANY of the test case specific quality criteria above are violated, return score=0 immediately. These are mandatory requirements that cannot be overridden by other scoring factors. Examples of critical failures include:
-- Incorrect data analysis (e.g., claiming AJE > AJA when data shows AJA > AJE)
+- Incorrect data analysis (e.g., claiming Entity A > Entity B when data shows Entity B > Entity A) - **IMPORTANT: Check the ACTUAL response text carefully. Do not assume or hallucinate what the response says. Quote the exact text from the response when making this determination.**
 - Missing required deliverables
 - Hallucinated or incorrect information
 - Violation of specific test constraints
 - PDF/Report files containing error messages like "generation failed" or "contact admin" instead of actual content
 - Files that exist but contain failure/error content rather than the requested deliverables
 
-If you detect any critical quality criteria violations, set score=0 and clearly explain the violation in the reasoning.
+**CRITICAL: When checking data analysis claims, you MUST quote the exact text from the response. Do not make assumptions about what the response says. Read the actual response text carefully and quote it in your reasoning.**
+
+**CRITICAL: DATA ANALYSIS ACCURACY CHECK** - When test case requires specific data relationships (e.g., "AJA > AJE"), you MUST:
+1. **First**: Check what the ACTUAL data shows by examining CSV previews, chart descriptions, or data tables in the response
+2. **Second**: Check what the agent's analysis claims (quote exact text from response)
+3. **Third**: Verify if the agent's analysis matches the ACTUAL data shown in the response
+4. **DO NOT** assume test expectations match actual data - verify what data is actually presented in the response
+5. If actual data shows Entity A > Entity B, but test expects Entity B > Entity A, this is a TEST DATA ISSUE, not an agent error - do not penalize the agent for correctly reading the data
+6. Only penalize if agent's analysis contradicts the ACTUAL data shown in the response itself
 
 **Generic Quality Expectations (VISUALISTIC, ENGAGING, PROFESSIONAL, FUN):**
 
