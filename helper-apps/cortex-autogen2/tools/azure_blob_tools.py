@@ -278,6 +278,19 @@ class AzureBlobUploader:
         preserve = (os.getenv("PRESERVE_BLOB_FILENAME", "false").lower() in ("1", "true", "yes"))
         prefix = (os.getenv("AZURE_BLOB_PREFIX") or "").strip().strip("/")
 
+        request_prefix = None
+        try:
+            for part in os.path.abspath(file_path).split(os.sep):
+                if part.startswith("req_") and len(part) > 4:
+                    request_prefix = part
+                    break
+        except Exception:
+            request_prefix = None
+
+        if request_prefix:
+            prefix = f"{prefix}/{request_prefix}" if prefix else request_prefix
+            preserve = True
+
         if blob_name is None:
             # Use original filename from file_path
             original_base = os.path.basename(file_path)
@@ -351,7 +364,7 @@ class AzureBlobUploader:
                 for chunk in iter(lambda: fh.read(1024 * 1024), b""):
                     hasher.update(chunk)
             sha256_hex = hasher.hexdigest()
-            if sha256_hex in self._sha256_to_blob:
+            if (not preserve) and sha256_hex in self._sha256_to_blob:
                 # Return prior URL for identical content
                 prior_blob = self._sha256_to_blob[sha256_hex]
                 try:
@@ -448,14 +461,14 @@ class AzureBlobUploader:
                     logger.error(f"❌ CRITICAL: 403 detected in upload_file retry loop for blob '{normalized_blob_name}'")
                     logger.error(f"   This should have been caught by generate_sas_url - indicates a bug")
                     raise ValueError(f"CRITICAL: SAS URL verification failed with 403 Forbidden for blob '{normalized_blob_name}'. This should have been caught earlier. Error: {verify_error}")
-                else:
-                    # Other errors (404, timeout) - might be transient, retry
-                    last_error = verify_error
-                    if attempt == max_retries - 1:
-                        # Last attempt failed - log warning but proceed (might be propagation delay)
-                        logger.warning(f"⚠️ SAS URL verification failed after {max_retries} attempts: {verify_error}")
-                        logger.warning(f"   URL will be returned anyway - may be valid but not immediately accessible")
-                    continue
+                
+                # Other errors (404, timeout) - might be transient, retry
+                last_error = verify_error
+                if attempt == max_retries - 1:
+                    # Last attempt failed - log warning but proceed (might be propagation delay)
+                    logger.warning(f"⚠️ SAS URL verification failed after {max_retries} attempts: {verify_error}")
+                    logger.warning(f"   URL will be returned anyway - may be valid but not immediately accessible")
+                continue
                     
             except ValueError as e:
                 # 403 errors should not be retried - re-raise immediately
@@ -472,7 +485,7 @@ class AzureBlobUploader:
         if not sas_url:
             raise Exception(f"Failed to generate SAS URL after {max_retries} attempts: {last_error}")
 
-        if sha256_hex:
+        if sha256_hex and (not preserve):
             try:
                 self._sha256_to_blob[sha256_hex] = normalized_blob_name
             except Exception:
