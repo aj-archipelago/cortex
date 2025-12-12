@@ -19,12 +19,9 @@ import { publicFolder, port, ipAddress } from "./start.js";
 import { 
   CONVERTED_EXTENSIONS, 
   AZURITE_ACCOUNT_NAME,
-  parseContainerNames,
-  getCurrentContainerNames,
-  AZURE_STORAGE_CONTAINER_NAMES,
   getDefaultContainerName,
   GCS_BUCKETNAME,
-  isValidContainerName
+  AZURE_STORAGE_CONTAINER_NAME
 } from "./constants.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageFactory } from "./services/storage/StorageFactory.js";
@@ -179,16 +176,10 @@ async function downloadFromGCS(gcsUrl, destinationPath) {
   }
 }
 
-export const getBlobClient = async (containerName = null) => {
+export const getBlobClient = async () => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  const finalContainerName = containerName || getDefaultContainerName();
-
-  // Validate container name is in whitelist
-  if (!isValidContainerName(finalContainerName)) {
-    throw new Error(
-      `Invalid container name '${finalContainerName}'. Allowed containers: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`,
-    );
-  }
+  // Always use default container from env var
+  const finalContainerName = getDefaultContainerName();
 
   if (!connectionString || !finalContainerName) {
     throw new Error(
@@ -210,17 +201,19 @@ export const getBlobClient = async (containerName = null) => {
   return { blobServiceClient, containerClient };
 };
 
-async function saveFileToBlob(chunkPath, requestId, filename = null, containerName = null) {
+async function saveFileToBlob(chunkPath, requestId, filename = null) {
   // Use provider for consistency with cache control headers
+  // Container parameter is ignored - always uses default container from env var
   const storageFactory = StorageFactory.getInstance();
-  const provider = await storageFactory.getAzureProvider(containerName);
+  const provider = await storageFactory.getAzureProvider();
   return await provider.uploadFile({}, chunkPath, requestId, null, filename);
 }
 
 //deletes blob that has the requestId
-async function deleteBlob(requestId, containerName = null) {
+async function deleteBlob(requestId) {
   if (!requestId) throw new Error("Missing requestId parameter");
-  const { containerClient } = await getBlobClient(containerName);
+  // Container parameter is ignored - always uses default container from env var
+  const { containerClient } = await getBlobClient();
   // List all blobs in the container
   const blobs = containerClient.listBlobsFlat();
 
@@ -250,13 +243,12 @@ function uploadBlob(
   saveToLocal = false,
   filePath = null,
   hash = null,
-  containerParam = null,
 ) {
   return new Promise((resolve, reject) => {
     (async () => {
       try {
         let requestId = uuidv4();
-        let containerName = containerParam;
+        // Container parameter is ignored - always uses default container from env var
         const body = {};
         const fields = {}; // Buffer for all fields
 
@@ -281,7 +273,6 @@ function uploadBlob(
               uploadName, // Use the LLM-friendly filename
               resolve,
               hash,
-              containerName,
             );
             resolve(result);
           } catch (error) {
@@ -302,16 +293,8 @@ function uploadBlob(
             } else if (fieldname === "hash") {
               hash = value;
             } else if (fieldname === "container") {
-              if (value && !isValidContainerName(value)) {
-                // Read current containers from env for error message
-                const currentContainerNames = getCurrentContainerNames();
-                errorOccurred = true;
-                const err = new Error(`Invalid container name '${value}'. Allowed containers: ${currentContainerNames.join(', ')}`);
-                err.status = 400;
-                reject(err);
-                return;
-              }
-              containerName = value;
+              // Container parameter is ignored - always uses default container from env var
+              // No validation or error needed, just ignore it
             }
             fields[fieldname] = value; // Store all fields
           });
@@ -333,16 +316,15 @@ function uploadBlob(
             // Simple approach: small delay to allow container field to be processed
             console.log("File received, giving fields time to process...");
             await new Promise(resolve => setTimeout(resolve, 20));
-            console.log("Processing file with containerName:", containerName);
+            // Container parameter is ignored - always uses default container from env var
             
             if (errorOccurred) return; // Check again after waiting
 
-            // Capture containerName value to avoid closure issues
-            const capturedContainerName = containerName;
-            await processFile(fieldname, file, info, capturedContainerName);
+            // Container parameter is ignored - always uses default container from env var
+            await processFile(fieldname, file, info);
           });
 
-          const processFile = async (fieldname, file, info, capturedContainerName) => {
+          const processFile = async (fieldname, file, info) => {
             if (errorOccurred) return;
 
             // Validate file
@@ -440,7 +422,7 @@ function uploadBlob(
                 context,
                 uploadName,
                 azureStream,
-                capturedContainerName,
+                null, // containerName ignored
                 contentType,
               ).catch(async (err) => {
                 cloudUploadError = err;
@@ -451,7 +433,7 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToAzureStorage(context, uploadName, diskStream, capturedContainerName, contentType);
+                  return saveToAzureStorage(context, uploadName, diskStream, null, contentType);
                 }
                 throw err;
               });
@@ -482,10 +464,10 @@ function uploadBlob(
               const results = await Promise.all(
                 [
                   azurePromise
-                    ? azurePromise.then((url) => ({ url, type: "primary" }))
+                    ? azurePromise.then((result) => ({ result, type: "primary" }))
                     : null,
                   !azurePromise && saveToLocal
-                    ? Promise.resolve({ url: null, type: "primary-local" }) // placeholder for local, url handled later
+                    ? Promise.resolve({ result: { url: null }, type: "primary-local" }) // placeholder for local, url handled later
                     : null,
                   gcsPromise
                     ? gcsPromise.then((gcs) => ({ gcs, type: "gcs" }))
@@ -496,15 +478,23 @@ function uploadBlob(
               const result = {
                 message: `File '${uploadName}' uploaded successfully.`,
                 filename: uploadName,
-                ...results.reduce((acc, result) => {
-                  if (result.type === "primary") acc.url = result.url;
-                  if (result.type === "gcs")
-                    acc.gcs = ensureUnencodedGcsUrl(result.gcs);
+                ...results.reduce((acc, item) => {
+                  if (item.type === "primary") {
+                    acc.url = item.result.url || item.result;
+                    acc.shortLivedUrl = item.result.shortLivedUrl || item.result.url || item.result;
+                  }
+                  if (item.type === "gcs")
+                    acc.gcs = ensureUnencodedGcsUrl(item.gcs);
                   return acc;
                 }, {}),
               };
               if (hash) result.hash = hash;
-              if (capturedContainerName) result.container = capturedContainerName;
+              // Container parameter is ignored - always uses default container from env var
+              
+              // Ensure shortLivedUrl is always present
+              if (!result.shortLivedUrl && result.url) {
+                result.shortLivedUrl = result.url;
+              }
 
               // If saving locally, wait for disk write to finish and then move to public folder
               if (saveToLocal) {
@@ -512,7 +502,7 @@ function uploadBlob(
                   if (diskWritePromise) {
                     await diskWritePromise; // ensure file fully written
                   }
-                  const localUrl = await saveToLocalStorage(
+                  const localResult = await saveToLocalStorage(
                     context,
                     requestId,
                     uploadName,
@@ -521,7 +511,9 @@ function uploadBlob(
                       autoClose: true,
                     }),
                   );
-                  result.url = localUrl;
+                  // Handle both old format (string) and new format (object)
+                  result.url = typeof localResult === 'string' ? localResult : localResult.url;
+                  result.shortLivedUrl = localResult.shortLivedUrl || result.url;
                 } catch (err) {
                   console.error("Error saving to local storage:", err);
                   throw err;
@@ -576,7 +568,7 @@ function uploadBlob(
                         conversion.convertedPath,
                         requestId,
                         null,
-                        capturedContainerName,
+                        null, // containerName ignored
                       );
 
                     // Optionally save to GCS
@@ -718,7 +710,6 @@ async function uploadFile(
   filename,
   resolve,
   hash = null,
-  containerName = null,
 ) {
   try {
     if (!file) {
@@ -779,12 +770,15 @@ async function uploadFile(
         context,
         uploadName,
         createOptimizedReadStream(uploadPath),
-        containerName,
+        null, // containerName ignored
       );
     storagePromises.push(
-      primaryPromise.then((url) => {
+      primaryPromise.then((result) => {
         context.log("Primary storage upload completed");
-        return { url, type: "primary" };
+        // Handle both old format (string URL) and new format (object with url and shortLivedUrl)
+        const url = typeof result === 'string' ? result : (result.url || result);
+        const shortLivedUrl = result.shortLivedUrl || url;
+        return { url, shortLivedUrl, type: "primary" };
       }),
     );
 
@@ -811,9 +805,12 @@ async function uploadFile(
     const result = {
       message: `File '${uploadName}' ${saveToLocal ? "saved to folder" : "uploaded"} successfully.`,
       filename: uploadName,
-      ...results.reduce((acc, result) => {
-        if (result.type === "primary") acc.url = result.url;
-        if (result.type === "gcs") acc.gcs = ensureUnencodedGcsUrl(result.gcs);
+      ...results.reduce((acc, item) => {
+        if (item.type === "primary") {
+          acc.url = item.url;
+          acc.shortLivedUrl = item.shortLivedUrl || item.url;
+        }
+        if (item.type === "gcs") acc.gcs = ensureUnencodedGcsUrl(item.gcs);
         return acc;
       }, {}),
     };
@@ -822,8 +819,11 @@ async function uploadFile(
       result.hash = hash;
     }
     
-    if (containerName) {
-      result.container = containerName;
+    // Container parameter is ignored - always uses default container from env var
+    
+    // Ensure shortLivedUrl is always present
+    if (!result.shortLivedUrl && result.url) {
+      result.shortLivedUrl = result.url;
     }
 
     // Initialize conversion service
@@ -895,7 +895,8 @@ async function uploadFile(
     context.log("Error in upload process:", error);
     if (body.url) {
       try {
-        await cleanup(context, [body.url], containerName);
+        // Container parameter is ignored - always uses default container from env var
+        await cleanup(context, [body.url]);
       } catch (cleanupError) {
         context.log("Error during cleanup after failure:", cleanupError);
       }
@@ -915,8 +916,9 @@ async function streamToBuffer(stream) {
 }
 
 // Function to delete files that haven't been used in more than a month
-async function cleanup(context, urls = null, containerName = null) {
-  const { containerClient } = await getBlobClient(containerName);
+// Container parameter is ignored - always uses default container from env var
+async function cleanup(context, urls = null) {
+  const { containerClient } = await getBlobClient();
   const cleanedURLs = [];
 
   if (!urls) {
@@ -1154,10 +1156,8 @@ export {
   gcs,
   uploadChunkToGCS,
   downloadFromGCS,
-  // Re-export container constants for backward compatibility
-  getCurrentContainerNames,
-  AZURE_STORAGE_CONTAINER_NAMES,
+  // Re-export container constants
   getDefaultContainerName,
   GCS_BUCKETNAME,
-  isValidContainerName,
+  AZURE_STORAGE_CONTAINER_NAME,
 };

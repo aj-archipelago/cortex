@@ -52,6 +52,7 @@ export class LocalStorageProvider extends StorageProvider {
 
     return {
       url,
+      shortLivedUrl: url, // For local storage, shortLivedUrl is the same as url
       blobName: path.join(requestId, uniqueFileName),
     };
   }
@@ -76,7 +77,11 @@ export class LocalStorageProvider extends StorageProvider {
     // Generate full URL
     const url = `http://${ipAddress}:${port}/files/${requestId}/${sanitizedFilename}`;
 
-    return url;
+    // Return object with url and shortLivedUrl for consistency
+    return {
+      url,
+      shortLivedUrl: url // For local storage, shortLivedUrl is the same as url
+    };
   }
 
   async deleteFiles(requestId) {

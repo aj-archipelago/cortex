@@ -1,32 +1,23 @@
 import Redis from "ioredis";
-import { getDefaultContainerName } from "./constants.js";
 
 const connectionString = process.env["REDIS_CONNECTION_STRING"];
 
 /**
- * Generate a scoped hash key for Redis storage
- * Always includes the container name in the format hash:container
+ * Get hash key for Redis storage
+ * No scoping needed - single container only
  * @param {string} hash - The file hash
- * @param {string} containerName - The container name (optional, defaults to default container)
- * @returns {string} The scoped hash key
+ * @returns {string} The hash key (just the hash itself)
  */
-export const getScopedHashKey = (hash, containerName = null) => {
-  if (!hash) return hash;
-  
-  // Get the default container name at runtime to support dynamic env changes in tests
-  const defaultContainerName = getDefaultContainerName();
-  
-  // Use default container if not provided
-  const container = containerName || defaultContainerName;
-  
-  // Always scope by container
-  return `${hash}:${container}`;
+export const getScopedHashKey = (hash) => {
+  // No scoping - just return the hash directly
+  return hash;
 };
 
 // Create a mock client for test environment when Redis is not configured
 const createMockClient = () => {
   const store = new Map();
   const hashMap = new Map();
+  const locks = new Map(); // For lock simulation
   
   return {
     connected: false,
@@ -54,6 +45,28 @@ const createMockClient = () => {
         return 1;
       }
       return 0;
+    },
+    async set(key, value, ...options) {
+      // Handle SET with NX (only set if not exists) and EX (expiration)
+      if (options.includes('NX')) {
+        if (locks.has(key)) {
+          return null; // Lock already exists
+        }
+        locks.set(key, Date.now());
+        // Handle expiration if EX is provided
+        const exIndex = options.indexOf('EX');
+        if (exIndex !== -1 && options[exIndex + 1]) {
+          const ttl = options[exIndex + 1] * 1000; // Convert to milliseconds
+          setTimeout(() => locks.delete(key), ttl);
+        }
+        return 'OK';
+      }
+      locks.set(key, Date.now());
+      return 'OK';
+    },
+    async del(key) {
+      locks.delete(key);
+      return 1;
     },
     async eval(script, numKeys, ...args) {
       // Mock implementation for atomic get-and-delete operation
@@ -377,6 +390,43 @@ const cleanupRedisFileStoreMapAge = async (
   return cleaned;
 };
 
+/**
+ * Acquire a distributed lock for a given key
+ * Uses Redis SETNX with expiration to ensure atomic lock acquisition
+ * @param {string} lockKey - The key to lock
+ * @param {number} ttlSeconds - Time to live in seconds (default: 300 = 5 minutes)
+ * @returns {Promise<boolean>} True if lock was acquired, false if already locked
+ */
+const acquireLock = async (lockKey, ttlSeconds = 300) => {
+  try {
+    const lockName = `lock:${lockKey}`;
+    // Use SET with NX (only set if not exists) and EX (expiration)
+    // Returns 'OK' if lock was acquired, null if already locked
+    const result = await client.set(lockName, "1", "EX", ttlSeconds, "NX");
+    return result === "OK";
+  } catch (error) {
+    console.error(`Error acquiring lock for ${lockKey}:`, error);
+    // In case of error, allow operation to proceed (fail open)
+    // This prevents Redis issues from blocking operations
+    return true;
+  }
+};
+
+/**
+ * Release a distributed lock for a given key
+ * @param {string} lockKey - The key to unlock
+ * @returns {Promise<void>}
+ */
+const releaseLock = async (lockKey) => {
+  try {
+    const lockName = `lock:${lockKey}`;
+    await client.del(lockName);
+  } catch (error) {
+    console.error(`Error releasing lock for ${lockKey}:`, error);
+    // Ignore errors - lock will expire naturally
+  }
+};
+
 export {
   publishRequestProgress,
   connectClient,
@@ -385,5 +435,7 @@ export {
   removeFromFileStoreMap,
   cleanupRedisFileStoreMap,
   cleanupRedisFileStoreMapAge,
+  acquireLock,
+  releaseLock,
   client,
 };
