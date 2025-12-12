@@ -35,6 +35,27 @@ async function generateErrorResponse(error, args, pathwayResolver) {
     }
 }
 
+// Helper function to insert a system message, removing any existing ones first
+function insertSystemMessage(messages, text, requestId = null) {
+    // Create a unique marker to avoid collisions with legitimate content
+    const marker = requestId ? `[system message: ${requestId}]` : '[system message]';
+    
+    // Remove any existing challenge messages with this specific requestId to avoid spamming the model
+    const filteredMessages = messages.filter(msg => {
+        if (msg.role !== 'user') return true;
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        return !content.startsWith(marker);
+    });
+    
+    // Insert the new system message
+    filteredMessages.push({
+        role: "user",
+        content: `${marker} ${text}`
+    });
+    
+    return filteredMessages;
+}
+
 export default {
     emulateOpenAIChatModel: 'cortex-agent',
     useInputChunking: false,
@@ -84,7 +105,7 @@ export default {
         pathwayResolver.toolCallCount = (pathwayResolver.toolCallCount || 0);
         
         const preToolCallMessages = JSON.parse(JSON.stringify(args.chatHistory || []));
-        const finalMessages = JSON.parse(JSON.stringify(preToolCallMessages));
+        let finalMessages = JSON.parse(JSON.stringify(preToolCallMessages));
 
         if (tool_calls && tool_calls.length > 0) {
             if (pathwayResolver.toolCallCount < MAX_TOOL_CALLS) {
@@ -161,7 +182,7 @@ export default {
                             content: toolResultContent
                         });
 
-                        // Add the screenshots using OpenAI image format
+                        // Add the screenshots/images using OpenAI image format
                         if (toolResult?.toolImages && toolResult.toolImages.length > 0) {
                             toolMessages.push({
                                 role: "user",
@@ -170,12 +191,35 @@ export default {
                                         type: "text",
                                         text: "The tool with id " + toolCall.id + " has also supplied you with these images."
                                     },
-                                    ...toolResult.toolImages.map(toolImage => ({
-                                        type: "image_url",
-                                        image_url: {
-                                            url: `data:image/png;base64,${toolImage}`
+                                    ...toolResult.toolImages.map(toolImage => {
+                                        // Handle both base64 strings (screenshots) and image_url objects (file collection images)
+                                        if (typeof toolImage === 'string') {
+                                            // Base64 string format (screenshots)
+                                            return {
+                                                type: "image_url",
+                                                image_url: {
+                                                    url: `data:image/png;base64,${toolImage}`
+                                                }
+                                            };
+                                        } else if (typeof toolImage === 'object' && toolImage.image_url) {
+                                            // Image URL object format (file collection images)
+                                            return {
+                                                type: "image_url",
+                                                url: toolImage.url,
+                                                gcs: toolImage.gcs,
+                                                image_url: toolImage.image_url,
+                                                originalFilename: toolImage.originalFilename
+                                            };
+                                        } else {
+                                            // Fallback for any other format
+                                            return {
+                                                type: "image_url",
+                                                image_url: {
+                                                    url: toolImage.url || toolImage
+                                                }
+                                            };
                                         }
-                                    }))
+                                    })
                                 ]
                             });
                         }
@@ -306,26 +350,22 @@ export default {
                     return toolDefinition?.handoff === true;
                 });
 
-                // Inject oversight message after tools are executed to encourage task completion
+                // Inject challenge message after tools are executed to encourage task completion
                 // Skip this check if a hand-off tool was used (async agents handle their own completion)
                 if (!hasHandoffTool) {
-                    finalMessages.push({
-                        role: "user",
-                        content: "[System: Task Completion Check] Please evaluate whether you have completed your task based on the tool results you just received. If the task is not yet complete, you should call additional tools as needed to finish the work. Only respond to the user when the task is fully complete or you have gathered all necessary information. If you need to read more of a file, search for more information, or perform additional operations, do so now before responding."
-                    });
+                    const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+                    finalMessages = insertSystemMessage(finalMessages, 
+                        "Review the tool results above. If your task is incomplete or requires additional steps or information, call the necessary tools now. Adapt your approach and re-plan if needed. Only respond to the user once the task is complete and all required information has been gathered.",
+                        requestId
+                    );
                 }
 
             } else {
-                finalMessages.push({
-                    role: "user",
-                    content: [
-                        {
-                            type: "text",
-                            text: "[System: Tool Limit Reached] This agent has reached the maximum number of tool calls - no more tool calls will be executed."
-                        }
-                    ]
-                });
-                
+                const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+                finalMessages = insertSystemMessage(finalMessages,
+                    "Maximum tool call limit reached - no more tool calls will be executed. Provide your response based on the information gathered so far.",
+                    requestId
+                );
             }
 
             args.chatHistory = finalMessages;
@@ -464,7 +504,7 @@ export default {
         const styleConfig = styleModelMap[aiStyle] || styleModelMap["OpenAI"]; // Default to OpenAI
         const styleModel = researchMode ? styleConfig.research : styleConfig.normal;
         // Use 'high' reasoning effort in research mode for thorough analysis, 'none' in normal mode for faster responses
-        const reasoningEffort = researchMode ? 'high' : 'none';
+        const reasoningEffort = researchMode ? 'high' : 'low';
 
         // Limit the chat history to 20 messages to speed up processing
         if (args.messages && args.messages.length > 0) {

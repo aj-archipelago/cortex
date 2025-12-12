@@ -427,10 +427,144 @@ Each pathway can define the following properties (with defaults from basePathway
 - `json`: Require valid JSON response from model. Default: false
 - `manageTokenLength`: Manage input token length for model. Default: true
   
-#### Dynamic model override
+#### Model Overrides
 
-- `model`: In many cases, specifying the model as an input parameter will tell the pathway which model to use when setting up the pathway for execution.
-- `modelOverride`: In some cases, you need even more dynamic model selection. At runtime, a pathway can optionally specify `modelOverride` in request args to switch the model used for execution without restarting the server. Cortex will attempt a hot swap and continue execution; errors are logged gracefully if the model is invalid.
+Cortex provides two mechanisms for specifying which model to use: static model selection (via `model`) and dynamic runtime model override (via `modelOverride`).
+
+##### Static Model Selection (`model`)
+
+The `model` parameter can be specified in multiple ways, and Cortex follows this order of precedence when selecting a model at pathway initialization:
+
+1. `pathway.model` - The model specified directly in the pathway definition
+2. `args.model` - The model passed in the request arguments
+3. `pathway.inputParameters.model` - The model specified in the pathway's input parameters
+4. `config.get('defaultModelName')` - The default model specified in the configuration
+
+The first valid model found in this order will be used. If none of these models are found in the configured endpoints, Cortex will log a warning and use the default model defined in the configuration.
+
+**Example:**
+```js
+export default {
+    model: 'oai-gpt4o',  // Static model for this pathway
+    prompt: '{{text}}',
+    // ...
+};
+```
+
+##### Runtime Model Override (`modelOverride`)
+
+The `modelOverride` parameter enables dynamic model switching at runtime, after the pathway has been initialized. This is useful when:
+
+- You need to switch models based on runtime conditions
+- Different parts of a pathway should use different models
+- You want to implement model fallback strategies
+- You need to test different models without restarting the server
+
+**How it works:**
+
+1. The pathway is initialized with a model using the static selection precedence above
+2. During execution, if `modelOverride` is specified in the request args and differs from the current model, Cortex performs a "hot swap"
+3. The `swapModel()` method updates the model reference, creates a new `ModelExecutor` instance, and recalculates token limits
+4. Execution continues with the new model
+5. If the override model is invalid, an error is logged gracefully and execution continues with the original model
+
+**Implementation details:**
+
+The model swap occurs in the `promptAndParse()` method of `PathwayResolver`:
+
+```649:666:server/pathwayResolver.js
+    swapModel(newModelName) {
+        // Validate that the new model exists in endpoints
+        if (!this.endpoints[newModelName]) {
+            throw new Error(`Model ${newModelName} not found in config`);
+        }
+
+        // Update model references
+        this.modelName = newModelName;
+        this.model = this.endpoints[newModelName];
+
+        // Create new ModelExecutor with the new model
+        this.modelExecutor = new ModelExecutor(this.pathway, this.model);
+
+        // Recalculate chunk max token length as it depends on the model
+        this.chunkMaxTokenLength = this.getChunkMaxTokenLength();
+
+        this.logWarning(`Model swapped to ${newModelName}`);
+    }
+```
+
+**Usage examples:**
+
+1. **In a pathway's `executePathway` function:**
+```js
+export default {
+    model: 'oai-gpt4o',
+    executePathway: async ({args, runAllPrompts}) => {
+        // Switch to a different model based on input length
+        if (args.text && args.text.length > 10000) {
+            args.modelOverride = 'oai-gpt4-turbo';  // Use faster model for long text
+        }
+        return await runAllPrompts();
+    }
+};
+```
+
+2. **In a pathway that calls other pathways:**
+```js
+export default {
+    executePathway: async ({args, runAllPrompts}) => {
+        // First pass with one model
+        const initialResult = await runAllPrompts();
+        
+        // Second pass with a different model
+        args.modelOverride = 'oai-gpt4o';
+        args.text = initialResult;
+        return await runAllPrompts();
+    }
+};
+```
+
+3. **Conditional model selection:**
+```js
+export default {
+    executePathway: async ({args, runAllPrompts}) => {
+        // Select model based on language or complexity
+        if (args.language === 'ja' || args.complexity === 'high') {
+            args.modelOverride = 'oai-gpt4o';
+        } else {
+            args.modelOverride = 'oai-gpt4-turbo';
+        }
+        return await runAllPrompts();
+    }
+};
+```
+
+**Error handling:**
+
+If `modelOverride` specifies a model that doesn't exist in the configured endpoints, Cortex will:
+- Log an error message: `Failed to swap model to {modelName}: {error message}`
+- Continue execution with the originally selected model
+- Not throw an exception that would stop pathway execution
+
+**When to use `model` vs `modelOverride`:**
+
+- Use `model` when:
+  - The model selection is known at pathway definition time
+  - The pathway always uses the same model
+  - You want the model to be part of the pathway's configuration
+
+- Use `modelOverride` when:
+  - The model needs to change based on runtime conditions
+  - Different parts of execution need different models
+  - You're implementing model fallback or A/B testing
+  - The model selection depends on input characteristics (length, language, complexity, etc.)
+
+**Important notes:**
+
+- `modelOverride` only takes effect if it differs from the currently selected model
+- The swap happens before prompt execution, so all subsequent prompts in the pathway will use the new model
+- Token limits are automatically recalculated after a model swap to account for different model capabilities
+- Model swaps are logged as warnings for debugging purposes
 
 ## Core (Default) Pathways
 

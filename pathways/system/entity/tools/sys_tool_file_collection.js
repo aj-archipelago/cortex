@@ -46,6 +46,10 @@ export default {
                             type: "string",
                             description: "Optional: File hash for deduplication and identification (usually computed automatically during upload)"
                         },
+                        permanent: {
+                            type: "boolean",
+                            description: "Optional: If true, the file will be stored indefinitely instead of being subject to the default 30 day storage limit. Default: false"
+                        },
                         userMessage: {
                             type: "string",
                             description: "A user-friendly message that describes what you're doing with this tool"
@@ -158,7 +162,7 @@ export default {
 
             if (isAdd) {
                 // Add file to collection
-                const { fileUrl, url, gcs, filename, tags = [], notes = '', hash = null } = args;
+                const { fileUrl, url, gcs, filename, tags = [], notes = '', hash = null, permanent = false } = args;
                 
                 if (!filename) {
                     throw new Error("filename is required");
@@ -179,7 +183,8 @@ export default {
                     notes,
                     hash,
                     fileUrl,
-                    resolver
+                    resolver,
+                    permanent
                 );
 
                 resolver.tool = JSON.stringify({ toolUsed: "AddFileToCollection" });
@@ -339,12 +344,13 @@ export default {
                 const fileIdsToRemove = new Set(filesToRemove.map(f => f.id));
                 const hashesToDelete = [];
                 const finalCollection = await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
-                    // Capture hashes of files that will be removed (at current lock time)
+                    // Capture hashes and container info of files that will be removed (at current lock time)
                     collection.forEach(file => {
                         if (fileIdsToRemove.has(file.id) && file.hash) {
                             hashesToDelete.push({
                                 hash: file.hash,
-                                filename: file.filename || 'unknown'
+                                filename: file.filename || 'unknown',
+                                permanent: file.permanent || false
                             });
                         }
                     });
@@ -357,10 +363,15 @@ export default {
                 // We do this after updating collection so user gets fast response and files are "gone" from UI immediately
                 // Use hashes captured inside the lock to ensure we delete the correct files
                 (async () => {
+                    const { config } = await import('../../../../config.js');
+                    const permanentContainerName = process.env.CORTEX_MEDIA_PERMANENT_STORE_NAME;
+                    
                     for (const fileInfo of hashesToDelete) {
                         try {
-                            logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash})`);
-                            await deleteFileByHash(fileInfo.hash, resolver);
+                            // Determine container based on permanent flag
+                            const container = fileInfo.permanent && permanentContainerName ? permanentContainerName : null;
+                            logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash}${container ? `, container: ${container}` : ''})`);
+                            await deleteFileByHash(fileInfo.hash, resolver, container);
                         } catch (error) {
                             logger.warn(`Failed to delete file ${fileInfo.filename} (hash: ${fileInfo.hash}) from cloud storage: ${error?.message || String(error)}`);
                         }

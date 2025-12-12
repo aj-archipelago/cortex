@@ -493,6 +493,8 @@ test('Memory system: memoryFiles ignored in memoryAll save', async t => {
 });
 
 // Test generateFileMessageContent function (integration tests)
+// Note: These tests verify basic functionality. If WHISPER_MEDIA_API_URL is configured,
+// generateFileMessageContent will automatically use short-lived URLs when file hashes are available.
 test('generateFileMessageContent should find file by ID', async t => {
     const contextId = createTestContext();
     
