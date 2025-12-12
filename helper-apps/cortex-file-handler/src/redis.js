@@ -1,4 +1,4 @@
-import redis from "ioredis";
+import Redis from "ioredis";
 import { getDefaultContainerName } from "./constants.js";
 
 const connectionString = process.env["REDIS_CONNECTION_STRING"];
@@ -76,7 +76,55 @@ const createMockClient = () => {
 // Only create real Redis client if connection string is provided
 let client;
 if (connectionString && process.env.NODE_ENV !== 'test') {
-  client = redis.createClient(connectionString);
+  // ioredis client with explicit error handling to avoid:
+  //   [ioredis] Unhandled error event: Error: read ETIMEDOUT
+  //
+  // This Redis usage is a cache / coordination layer for the file-handler.
+  // It should degrade gracefully when Redis is unavailable.
+  const retryStrategy = (times) => {
+    // Exponential backoff: 100ms, 200ms, 400ms... up to 30s
+    const delay = Math.min(100 * Math.pow(2, times), 30000);
+    // After ~10 attempts, stop retrying (prevents tight reconnect loops forever).
+    if (times > 10) {
+      console.error(
+        `[redis] Connection failed after ${times} attempts. Stopping retries.`,
+      );
+      return null;
+    }
+    console.warn(
+      `[redis] Connection retry attempt ${times}, waiting ${delay}ms`,
+    );
+    return delay;
+  };
+
+  client = new Redis(connectionString, {
+    retryStrategy,
+    enableReadyCheck: true,
+    connectTimeout: 10000,
+    // If Redis is down, don't indefinitely queue cache operations in memory.
+    // We'll catch and log failures at call sites instead.
+    enableOfflineQueue: false,
+    // Fail fast on commands during connection issues.
+    maxRetriesPerRequest: 1,
+  });
+
+  // IMPORTANT: prevent process crashes on connection errors
+  client.on("error", (error) => {
+    const code = error?.code ? ` (${error.code})` : "";
+    console.error(`[redis] Client error${code}: ${error?.message || error}`);
+  });
+  client.on("connect", () => {
+    console.log("[redis] Connected");
+  });
+  client.on("ready", () => {
+    console.log("[redis] Ready");
+  });
+  client.on("close", () => {
+    console.warn("[redis] Connection closed");
+  });
+  client.on("reconnecting", (delay) => {
+    console.warn(`[redis] Reconnecting in ${delay}ms`);
+  });
 } else {
   console.log('Using mock Redis client for tests or missing connection string');
   client = createMockClient();
@@ -85,13 +133,27 @@ if (connectionString && process.env.NODE_ENV !== 'test') {
 const channel = "requestProgress";
 
 const connectClient = async () => {
-  if (!client.connected) {
-    try {
-      await client.connect();
-    } catch (error) {
-      console.error(`Error reconnecting to Redis: ${error}`);
+  // ioredis connects automatically; this function is kept for backwards
+  // compatibility and for the mock client.
+  try {
+    // Mock client uses `connected`; ioredis uses `status`.
+    if (typeof client?.connected === "boolean") {
+      if (!client.connected && typeof client.connect === "function") {
+        await client.connect();
+      }
       return;
     }
+
+    // ioredis states: "wait" | "connecting" | "connect" | "ready" | "close" | "end"
+    if (client?.status && client.status !== "ready") {
+      // If the caller explicitly wants to ensure connectivity, we can ping.
+      // If Redis is down, ping will throw and we handle it.
+      await client.ping();
+    }
+  } catch (error) {
+    console.error(
+      `[redis] Not ready (status=${client?.status || "unknown"}): ${error?.message || error}`,
+    );
   }
 };
 
