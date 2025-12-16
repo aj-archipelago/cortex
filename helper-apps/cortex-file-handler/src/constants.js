@@ -136,7 +136,24 @@ export const AZURITE_ACCOUNT_NAME = "devstoreaccount1";
 // Get single container name from environment variable
 // CFH operates on a single Azure container and single GCS bucket
 export const getContainerName = () => {
-  return process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
+  const envValue = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
+  
+  // Handle legacy comma-separated values (take the last one)
+  if (envValue.includes(",")) {
+    const containers = envValue.split(",").map(c => c.trim()).filter(c => c.length > 0);
+    if (containers.length > 0) {
+      const containerName = containers[containers.length - 1];
+      console.warn(
+        `[WARNING] AZURE_STORAGE_CONTAINER_NAME contains comma-separated values (legacy format). ` +
+        `Using last container: "${containerName}". ` +
+        `Full value: "${envValue}". ` +
+        `Please update to use a single container name.`
+      );
+      return containerName;
+    }
+  }
+  
+  return envValue;
 };
 
 // Helper function to get current container name at runtime

@@ -10,6 +10,7 @@ import { ensureEncoded, ensureFileExtension, urlExists } from "./helper.js";
 import {
   cleanupRedisFileStoreMap,
   getFileStoreMap,
+  getScopedHashKey,
   publishRequestProgress,
   removeFromFileStoreMap,
   setFileStoreMap,
@@ -80,8 +81,10 @@ async function CortexFileHandler(context, req) {
     restore,
     setRetention,
     retention,
+    contextId,
   } = source;
   // Container parameter is ignored - always uses default container from env var
+  const resolvedContextId = contextId || null;
 
   // Normalize boolean parameters
   const shouldSave = save === true || save === "true";
@@ -115,7 +118,7 @@ async function CortexFileHandler(context, req) {
                 : "upload";
 
   context.log(
-    `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ""}${uri ? `uri: ${uri}, ` : ""}${hash ? `hash: ${hash}, ` : ""}operation: ${operation}`,
+    `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ""}${uri ? `uri: ${uri}, ` : ""}${hash ? `hash: ${hash}, ` : ""}${resolvedContextId ? `contextId: ${resolvedContextId}, ` : ""}operation: ${operation}`,
   );
 
   // Trigger lightweight age-based cleanup (runs every 100 requests)
@@ -202,10 +205,11 @@ async function CortexFileHandler(context, req) {
 
     // First, get the hash from the map if it exists
     if (deleteHash) {
-      const hashResult = await getFileStoreMap(deleteHash);
+      const deleteKey = getScopedHashKey(deleteHash, resolvedContextId);
+      const hashResult = await getFileStoreMap(deleteKey);
       if (hashResult) {
-        context.log(`Found hash in map for deletion: ${deleteHash}`);
-        await removeFromFileStoreMap(deleteHash);
+        context.log(`Found hash in map for deletion: ${deleteHash}${resolvedContextId ? ` (contextId: ${resolvedContextId})` : ""}`);
+        await removeFromFileStoreMap(deleteKey);
       }
     }
 
@@ -280,7 +284,7 @@ async function CortexFileHandler(context, req) {
       }
 
       // Check if file already exists (using hash or URL as the key)
-      const cacheKey = hash || remoteUrl;
+      const cacheKey = hash ? getScopedHashKey(hash, resolvedContextId) : remoteUrl;
       const exists = await getFileStoreMap(cacheKey);
       if (exists) {
         context.res = {
@@ -336,9 +340,10 @@ async function CortexFileHandler(context, req) {
 
   if (hash && clearHash) {
     try {
-      const hashValue = await getFileStoreMap(hash);
+      const hashKey = getScopedHashKey(hash, resolvedContextId);
+      const hashValue = await getFileStoreMap(hashKey);
       if (hashValue) {
-        await removeFromFileStoreMap(hash);
+        await removeFromFileStoreMap(hashKey);
         context.res = {
           status: 200,
           body: `Hash ${hash} removed`,
@@ -360,10 +365,11 @@ async function CortexFileHandler(context, req) {
   }
 
   if (hash && checkHash) {
-    let hashResult = await getFileStoreMap(hash, true); // Skip lazy cleanup to handle it ourselves
+    const hashKey = getScopedHashKey(hash, resolvedContextId);
+    let hashResult = await getFileStoreMap(hashKey, true); // Skip lazy cleanup to handle it ourselves
 
     if (hashResult) {
-      context.log(`File exists in map: ${hash}`);
+      context.log(`File exists in map: ${hash}${resolvedContextId ? ` (contextId: ${resolvedContextId})` : ""}`);
 
       // Log the URL retrieved from Redis before checking existence
       context.log(`Checking existence of URL from Redis: ${hashResult?.url}`);
@@ -382,7 +388,7 @@ async function CortexFileHandler(context, req) {
           context.log(
             `File not found in any storage. Removing from map: ${hash}`,
           );
-          await removeFromFileStoreMap(hash);
+          await removeFromFileStoreMap(hashKey);
           context.res = {
             status: 404,
             body: `Hash ${hash} not found in storage`,
@@ -401,7 +407,7 @@ async function CortexFileHandler(context, req) {
           } catch (error) {
             context.log(`Error restoring to GCS: ${error}`);
             // If restoration fails, remove the hash from the map
-            await removeFromFileStoreMap(hash);
+            await removeFromFileStoreMap(hashKey);
             context.res = {
               status: 404,
               body: `Hash ${hash} not found`,
@@ -459,7 +465,7 @@ async function CortexFileHandler(context, req) {
           } catch (error) {
             console.error("Error restoring from GCS:", error);
             // If restoration fails, remove the hash from the map
-            await removeFromFileStoreMap(hash);
+            await removeFromFileStoreMap(hashKey);
             context.res = {
               status: 404,
               body: `Hash ${hash} not found`,
@@ -477,7 +483,7 @@ async function CortexFileHandler(context, req) {
           : false;
         if (!finalPrimaryCheck && !finalGCSCheck) {
           context.log(`Failed to restore file. Removing from map: ${hash}`);
-          await removeFromFileStoreMap(hash);
+          await removeFromFileStoreMap(hashKey);
           context.res = {
             status: 404,
             body: `Hash ${hash} not found`,
@@ -593,7 +599,7 @@ async function CortexFileHandler(context, req) {
         }
 
         //update redis timestamp with current time
-        await setFileStoreMap(hash, hashResult);
+        await setFileStoreMap(hashKey, hashResult);
 
         context.res = {
           status: 200,
@@ -603,7 +609,7 @@ async function CortexFileHandler(context, req) {
       } catch (error) {
         context.log(`Error checking file existence: ${error}`);
         // If there's an error checking file existence, remove the hash from the map
-        await removeFromFileStoreMap(scopedHash);
+        await removeFromFileStoreMap(hashKey);
         context.res = {
           status: 404,
           body: `Hash ${hash} not found`,
@@ -628,7 +634,12 @@ async function CortexFileHandler(context, req) {
     // Container parameter is ignored - always uses default container from env var
     const result = await uploadBlob(context, req, saveToLocal, null, hash);
     if (result?.hash && context?.res?.body) {
-      await setFileStoreMap(result.hash, context.res.body);
+      const hashKey = getScopedHashKey(result.hash, resolvedContextId);
+      // Store contextId alongside the entry for debugging/traceability
+      if (resolvedContextId && typeof context.res.body === "object" && context.res.body) {
+        context.res.body.contextId = resolvedContextId;
+      }
+      await setFileStoreMap(hashKey, context.res.body);
     }
     return;
   }

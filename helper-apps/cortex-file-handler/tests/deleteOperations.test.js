@@ -534,9 +534,7 @@ test.serial("should handle backwards compatibility key removal correctly", async
 
     // Manually create a legacy unscoped key to test backwards compatibility
     const { setFileStoreMap, getFileStoreMap, getScopedHashKey } = await import("../src/redis.js");
-    const { getDefaultContainerName } = await import("../src/constants.js");
-    const defaultContainer = getDefaultContainerName();
-    const scopedHash = getScopedHashKey(testHash, defaultContainer);
+    const scopedHash = getScopedHashKey(testHash);
     const hashResult = await getFileStoreMap(scopedHash);
     
     if (hashResult) {

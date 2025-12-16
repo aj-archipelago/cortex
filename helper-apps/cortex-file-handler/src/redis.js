@@ -1,16 +1,44 @@
 import Redis from "ioredis";
+import { getDefaultContainerName } from "./constants.js";
 
 const connectionString = process.env["REDIS_CONNECTION_STRING"];
 
 /**
- * Get hash key for Redis storage
- * No scoping needed - single container only
+ * Get key for Redis storage.
+ *
+ * IMPORTANT:
+ * - We **never** write hash+container scoped keys anymore (legacy only).
+ * - We *do* support (optional) hash+contextId scoping for per-user/per-context storage.
+ * - For reads, we can fall back to legacy hash+container keys if they still exist in Redis.
+ *
+ * Key format:
+ * - No context:        "<hash>"
+ * - With contextId:     "<hash>:ctx:<contextId>"
+ *
  * @param {string} hash - The file hash
- * @returns {string} The hash key (just the hash itself)
+ * @param {string|null} contextId - Optional context id
+ * @returns {string} The redis key for this hash/context
  */
-export const getScopedHashKey = (hash) => {
-  // No scoping - just return the hash directly
-  return hash;
+export const getScopedHashKey = (hash, contextId = null) => {
+  if (!hash) return hash;
+  if (!contextId) return hash;
+  return `${hash}:ctx:${contextId}`;
+};
+
+const tryParseCtxKey = (key) => {
+  if (!key || typeof key !== "string") return null;
+  const marker = ":ctx:";
+  const idx = key.indexOf(marker);
+  if (idx === -1) return null;
+  const hash = key.slice(0, idx);
+  const contextId = key.slice(idx + marker.length);
+  if (!hash || !contextId) return null;
+  return { hash, contextId };
+};
+
+const legacyContainerKey = (hash, containerName) => {
+  if (!hash || !containerName) return null;
+  return `${hash}:${containerName}`;
 };
 
 // Create a mock client for test environment when Redis is not configured
@@ -220,23 +248,31 @@ const setFileStoreMap = async (key, value) => {
 const getFileStoreMap = async (key, skipLazyCleanup = false) => {
   try {
     let value = await client.hget("FileStoreMap", key);
-    
-    // Backwards compatibility: if not found and key is for default container, try legacy key
-    if (!value && key && key.includes(':')) {
-      const [hash, containerName] = key.split(':', 2);
-      const defaultContainerName = getDefaultContainerName();
-      
-      // If this is the default container, try the legacy key (hash without container)
-      if (containerName === defaultContainerName) {
-        console.log(`Key ${key} not found, trying legacy key ${hash} for backwards compatibility`);
-        value = await client.hget("FileStoreMap", hash);
-        
-        // If found with legacy key, migrate it to the new scoped key
-        if (value) {
-          console.log(`Found value with legacy key ${hash}, migrating to new key ${key}`);
-          await client.hset("FileStoreMap", key, value);
-          // Optionally remove the old key after migration
-          // await client.hdel("FileStoreMap", hash);
+
+    // Backwards compatibility for unscoped keys only:
+    // If unscoped hash doesn't exist, fall back to legacy hash+container key (if still present).
+    // SECURITY: Context-scoped keys (hash:ctx:contextId) NEVER fall back - they must match exactly.
+    if (!value && key) {
+      const ctx = tryParseCtxKey(key);
+      const baseHash = ctx?.hash || key;
+
+      // Only allow fallback for unscoped keys (not context-scoped)
+      // Context-scoped keys are security-isolated and must match exactly
+      if (!ctx && baseHash && !String(baseHash).includes(":")) {
+        const defaultContainerName = getDefaultContainerName();
+        const legacyKey = legacyContainerKey(baseHash, defaultContainerName);
+        if (legacyKey) {
+          value = await client.hget("FileStoreMap", legacyKey);
+          if (value) {
+            console.log(
+              `Found legacy container-scoped key ${legacyKey} for hash ${baseHash}; migrating to unscoped key`,
+            );
+            // Migrate to unscoped key (we do NOT write legacy container-scoped keys)
+            await client.hset("FileStoreMap", baseHash, value);
+            // Delete the legacy key after migration
+            await client.hdel("FileStoreMap", legacyKey);
+            console.log(`Deleted legacy key ${legacyKey} after migration`);
+          }
         }
       }
     }
@@ -319,10 +355,28 @@ const removeFromFileStoreMap = async (key) => {
     // hdel returns the number of keys that were removed.
     // If the key does not exist, 0 is returned.
     const result = await client.hdel("FileStoreMap", key);
-    if (result === 0) {
-      console.log(`The key ${key} does not exist`);
-    } else {
+    if (result > 0) {
       console.log(`The key ${key} was removed successfully`);
+    }
+
+    // Always try to clean up legacy container-scoped entry as well.
+    // This ensures we don't leave orphaned legacy keys behind.
+    const ctx = tryParseCtxKey(key);
+    const baseHash = ctx?.hash || key;
+    // Only attempt legacy cleanup if baseHash doesn't contain a colon (not already scoped)
+    if (!String(baseHash).includes(":")) {
+      const defaultContainerName = getDefaultContainerName();
+      const legacyKey = legacyContainerKey(baseHash, defaultContainerName);
+      if (legacyKey) {
+        const legacyResult = await client.hdel("FileStoreMap", legacyKey);
+        if (legacyResult > 0) {
+          console.log(`Removed legacy key ${legacyKey} successfully`);
+        }
+      }
+    }
+
+    if (result === 0) {
+      console.log(`The key ${key} does not exist (may have been migrated or already deleted)`);
     }
   } catch (error) {
     console.error(`Error removing key from FileStoreMap: ${error}`);

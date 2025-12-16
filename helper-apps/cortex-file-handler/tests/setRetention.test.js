@@ -18,7 +18,6 @@ import {
   removeFromFileStoreMap,
   getScopedHashKey
 } from "../src/redis.js";
-import { getDefaultContainerName } from "../src/constants.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -136,8 +135,7 @@ test.serial("should set file retention to permanent", async (t) => {
     // Cleanup
     try {
       const { getScopedHashKey } = await import("../src/redis.js");
-      const container = getDefaultContainerName();
-      await removeFromFileStoreMap(getScopedHashKey(testHash, container));
+      await removeFromFileStoreMap(getScopedHashKey(testHash));
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -180,8 +178,7 @@ test.serial("should set file retention to temporary", async (t) => {
     // Cleanup
     try {
       const { getScopedHashKey } = await import("../src/redis.js");
-      const container = getDefaultContainerName();
-      await removeFromFileStoreMap(getScopedHashKey(testHash, container));
+      await removeFromFileStoreMap(getScopedHashKey(testHash));
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -217,8 +214,7 @@ test.serial("should set retention using request body parameters", async (t) => {
     // Cleanup
     try {
       const { getScopedHashKey } = await import("../src/redis.js");
-      const container = getDefaultContainerName();
-      await removeFromFileStoreMap(getScopedHashKey(testHash, container));
+      await removeFromFileStoreMap(getScopedHashKey(testHash));
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -299,8 +295,7 @@ test.serial("should update Redis map with retention information", async (t) => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // Verify Redis entry exists
-    const container = getDefaultContainerName();
-    const scopedHash = getScopedHashKey(testHash, container);
+    const scopedHash = getScopedHashKey(testHash);
     const oldEntry = await getFileStoreMap(scopedHash);
     t.truthy(oldEntry, "Redis entry should exist before setting retention");
 
@@ -322,8 +317,7 @@ test.serial("should update Redis map with retention information", async (t) => {
     // Cleanup
     try {
       const { getScopedHashKey } = await import("../src/redis.js");
-      const container = getDefaultContainerName();
-      await removeFromFileStoreMap(getScopedHashKey(testHash, container));
+      await removeFromFileStoreMap(getScopedHashKey(testHash));
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -372,8 +366,7 @@ test.serial("should preserve file metadata after setting retention", async (t) =
     // Cleanup
     try {
       const { getScopedHashKey } = await import("../src/redis.js");
-      const container = getDefaultContainerName();
-      await removeFromFileStoreMap(getScopedHashKey(testHash, container));
+      await removeFromFileStoreMap(getScopedHashKey(testHash));
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -424,8 +417,7 @@ test.serial("should support operation=setRetention query parameter", async (t) =
     // Cleanup
     try {
       const { getScopedHashKey } = await import("../src/redis.js");
-      const container = getDefaultContainerName();
-      await removeFromFileStoreMap(getScopedHashKey(testHash, container));
+      await removeFromFileStoreMap(getScopedHashKey(testHash));
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -485,8 +477,7 @@ test.serial("should preserve GCS URL when setting retention", async (t) => {
     // Cleanup
     try {
       const { getScopedHashKey } = await import("../src/redis.js");
-      const container = getDefaultContainerName();
-      await removeFromFileStoreMap(getScopedHashKey(testHash, container));
+      await removeFromFileStoreMap(getScopedHashKey(testHash));
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -524,8 +515,7 @@ test.serial("should always include shortLivedUrl in response", async (t) => {
     // Cleanup
     try {
       const { getScopedHashKey } = await import("../src/redis.js");
-      const container = getDefaultContainerName();
-      await removeFromFileStoreMap(getScopedHashKey(testHash, container));
+      await removeFromFileStoreMap(getScopedHashKey(testHash));
     } catch (e) {
       // Ignore cleanup errors
     }

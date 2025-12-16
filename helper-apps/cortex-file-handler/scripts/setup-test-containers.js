@@ -7,8 +7,9 @@ async function createAzureContainers() {
       "UseDevelopmentStorage=true",
     );
     
-    // Always create all possible test containers to support dynamic test environments
-    const allTestContainers = ["default", "test-container", "test1", "test2", "test3", "container1", "container2", "container3"];
+    // Create test containers that are actually used in test configurations
+    // Note: We only use a single container now (no container scoping)
+    const allTestContainers = ["default", "test-container"];
     
     console.log(`Creating Azure containers: ${allTestContainers.join(', ')}`);
     
