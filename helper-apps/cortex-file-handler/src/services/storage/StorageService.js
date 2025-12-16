@@ -266,9 +266,10 @@ export class StorageService {
    * @param {string} hash - The hash of the file
    * @param {string} retention - The retention value ('temporary' or 'permanent')
    * @param {Object} context - Context object for logging
+   * @param {string|null} contextId - Optional context ID for scoped file storage
    * @returns {Promise<Object>} Object containing updated file info
    */
-  async setRetention(hash, retention, context = {}) {
+  async setRetention(hash, retention, context = {}, contextId = null) {
     await this._initialize();
     
     if (!hash) {
@@ -280,12 +281,12 @@ export class StorageService {
     }
 
     // Get Redis functions
-    const { getFileStoreMap, setFileStoreMap } = await import("../../redis.js");
-    const { getDefaultContainerName } = await import("../../constants.js");
+    const { getFileStoreMap, setFileStoreMap, getScopedHashKey } = await import("../../redis.js");
     
-    // Look up file by hash
-    const container = getDefaultContainerName();
-    const hashResult = await getFileStoreMap(hash);
+    // Look up file by hash using context-scoped key if contextId provided
+    // getFileStoreMap already handles fallback to unscoped keys
+    const scopedKey = getScopedHashKey(hash, contextId);
+    const hashResult = await getFileStoreMap(scopedKey);
     
     if (!hashResult) {
       throw new Error(`File with hash ${hash} not found`);
@@ -298,8 +299,8 @@ export class StorageService {
       throw new Error(`File with hash ${hash} has no valid URL`);
     }
 
-    // Get the Azure provider
-    const provider = await this.factory.getAzureProvider(container);
+    // Always use primary provider - single container only
+    const provider = this.primaryProvider;
     
     // Extract blob name from URL
     const blobName = provider.extractBlobNameFromUrl(hashResult.url);
@@ -344,12 +345,15 @@ export class StorageService {
       }
     }
 
-    // Update Redis with new information (including shortLivedUrl)
+    // Update Redis with new information (including shortLivedUrl and permanent flag)
+    // Use the same scoped key that was used for lookup
+    // Store as permanent boolean to match file collection logic
     const newFileInfo = {
       ...hashResult,
       url: hashResult.url, // URL stays the same - same blob, just different tag
       shortLivedUrl: shortLivedUrl,
       gcs: hashResult.gcs,
+      permanent: retention === 'permanent', // Store as boolean to match file collection logic
       timestamp: new Date().toISOString()
     };
     
@@ -357,8 +361,8 @@ export class StorageService {
       newFileInfo.converted = convertedResult;
     }
 
-    await setFileStoreMap(hash, newFileInfo);
-    context.log?.(`Updated Redis map for hash: ${hash}`);
+    await setFileStoreMap(scopedKey, newFileInfo);
+    context.log?.(`Updated Redis map for hash: ${hash}${contextId ? ` (contextId: ${contextId})` : ""}`);
 
     return {
       hash,

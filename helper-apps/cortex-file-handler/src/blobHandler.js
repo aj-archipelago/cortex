@@ -273,6 +273,7 @@ function uploadBlob(
               uploadName, // Use the LLM-friendly filename
               resolve,
               hash,
+              fields, // Pass fields for contextId extraction
             );
             resolve(result);
           } catch (error) {
@@ -489,6 +490,15 @@ function uploadBlob(
                 }, {}),
               };
               if (hash) result.hash = hash;
+              
+              // Extract contextId from form fields if present
+              if (fields && fields.contextId) {
+                result.contextId = fields.contextId;
+              }
+              
+              // All uploads default to temporary (permanent: false) to match file collection logic
+              result.permanent = false;
+              
               // Container parameter is ignored - always uses default container from env var
               
               // Ensure shortLivedUrl is always present
@@ -710,6 +720,7 @@ async function uploadFile(
   filename,
   resolve,
   hash = null,
+  fields = null, // Optional fields from form data (for contextId)
 ) {
   try {
     if (!file) {
@@ -818,6 +829,14 @@ async function uploadFile(
     if (hash) {
       result.hash = hash;
     }
+    
+    // Extract contextId from form fields if present (only available for multipart uploads)
+    if (fields && fields.contextId) {
+      result.contextId = fields.contextId;
+    }
+    
+    // All uploads default to temporary (permanent: false) to match file collection logic
+    result.permanent = false;
     
     // Container parameter is ignored - always uses default container from env var
     

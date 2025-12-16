@@ -418,8 +418,12 @@ const cleanupRedisFileStoreMapAge = async (
     const maxAgeAgo = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
 
     // Convert to array and sort by timestamp (oldest first)
+    // Skip permanent files - they should never be cleaned up by age
     const entries = Object.entries(map)
-      .filter(([_, value]) => value?.timestamp) // Only entries with timestamps
+      .filter(([_, value]) => {
+        // Only entries with timestamps and not permanent (matches file collection logic)
+        return value?.timestamp && value?.permanent !== true;
+      })
       .sort(([_, a], [__, b]) => {
         const timeA = new Date(a.timestamp).getTime();
         const timeB = new Date(b.timestamp).getTime();

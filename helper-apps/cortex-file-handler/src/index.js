@@ -253,7 +253,7 @@ async function CortexFileHandler(context, req) {
     }
 
     try {
-      const result = await storageService.setRetention(fileHash, retention, context);
+      const result = await storageService.setRetention(fileHash, retention, context, resolvedContextId);
       context.res = {
         status: 200,
         body: result,
@@ -309,6 +309,9 @@ async function CortexFileHandler(context, req) {
       // Pass empty string to store the file directly in the root
       // Container parameter is ignored - always uses default container from env var
       const res = await storageService.uploadFile(context, filename, '', null, null);
+
+      // All uploads default to temporary (permanent: false) to match file collection logic
+      res.permanent = false;
 
       //Update Redis (using hash or URL as the key)
       // Container parameter is ignored - always uses default container from env var
@@ -634,10 +637,12 @@ async function CortexFileHandler(context, req) {
     // Container parameter is ignored - always uses default container from env var
     const result = await uploadBlob(context, req, saveToLocal, null, hash);
     if (result?.hash && context?.res?.body) {
-      const hashKey = getScopedHashKey(result.hash, resolvedContextId);
+      // Use contextId from result (extracted from form fields) or from resolvedContextId (query/body)
+      const uploadContextId = result.contextId || resolvedContextId;
+      const hashKey = getScopedHashKey(result.hash, uploadContextId);
       // Store contextId alongside the entry for debugging/traceability
-      if (resolvedContextId && typeof context.res.body === "object" && context.res.body) {
-        context.res.body.contextId = resolvedContextId;
+      if (uploadContextId && typeof context.res.body === "object" && context.res.body) {
+        context.res.body.contextId = uploadContextId;
       }
       await setFileStoreMap(hashKey, context.res.body);
     }

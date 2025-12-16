@@ -38,11 +38,12 @@ async function createTestFile(content, extension) {
 }
 
 // Helper function to upload file with hash and container
-async function uploadFile(filePath, hash = null, containerName = null) {
+async function uploadFile(filePath, hash = null, containerName = null, contextId = null) {
   const form = new FormData();
   form.append("file", fs.createReadStream(filePath));
   if (hash) form.append("hash", hash);
   if (containerName) form.append("container", containerName);
+  if (contextId) form.append("contextId", contextId);
 
   return await axios.post(baseUrl, form, {
     headers: form.getHeaders(),
@@ -52,10 +53,13 @@ async function uploadFile(filePath, hash = null, containerName = null) {
 }
 
 // Helper function to check if hash exists
-async function checkHashExists(hash, containerName = null) {
+async function checkHashExists(hash, containerName = null, contextId = null) {
   const params = { hash, checkHash: true };
   if (containerName) {
     params.container = containerName;
+  }
+  if (contextId) {
+    params.contextId = contextId;
   }
   return await axios.get(baseUrl, {
     params,
@@ -65,17 +69,20 @@ async function checkHashExists(hash, containerName = null) {
 }
 
 // Helper function to set retention
-async function setRetention(hash, retention, useBody = false) {
+async function setRetention(hash, retention, useBody = false, contextId = null) {
+  const bodyOrParams = { hash, retention, setRetention: true };
+  if (contextId) {
+    bodyOrParams.contextId = contextId;
+  }
+  
   if (useBody) {
-    const body = { hash, retention, setRetention: true };
-    return await axios.post(baseUrl, body, {
+    return await axios.post(baseUrl, bodyOrParams, {
       validateStatus: (status) => true,
       timeout: 30000,
     });
   } else {
-    const params = { hash, retention, setRetention: true };
     return await axios.post(baseUrl, null, {
-      params,
+      params: bodyOrParams,
       validateStatus: (status) => true,
       timeout: 30000,
     });
@@ -298,6 +305,7 @@ test.serial("should update Redis map with retention information", async (t) => {
     const scopedHash = getScopedHashKey(testHash);
     const oldEntry = await getFileStoreMap(scopedHash);
     t.truthy(oldEntry, "Redis entry should exist before setting retention");
+    t.is(oldEntry.permanent, false, "New uploads should have permanent=false by default");
 
     // Set retention
     const retentionResponse = await setRetention(testHash, "permanent");
@@ -311,6 +319,7 @@ test.serial("should update Redis map with retention information", async (t) => {
     t.truthy(newEntry, "Redis entry should still exist after setting retention");
     t.is(newEntry.url, retentionResponse.data.url, "Entry should have correct URL");
     t.truthy(newEntry.shortLivedUrl, "Entry should have shortLivedUrl");
+    t.is(newEntry.permanent, true, "Entry should have permanent=true in Redis (matches file collection logic)");
 
   } finally {
     fs.unlinkSync(filePath);
@@ -516,6 +525,100 @@ test.serial("should always include shortLivedUrl in response", async (t) => {
     try {
       const { getScopedHashKey } = await import("../src/redis.js");
       await removeFromFileStoreMap(getScopedHashKey(testHash));
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+});
+
+test.serial("should set retention for context-scoped file", async (t) => {
+  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
+    t.pass("Skipping test - Azure not configured");
+    return;
+  }
+
+  const testContent = "test content for context-scoped retention";
+  const testHash = `test-retention-context-${uuidv4()}`;
+  const contextId = `test-context-${uuidv4()}`;
+  const filePath = await createTestFile(testContent, "txt");
+  let uploadResponse;
+
+  try {
+    // Upload file with contextId
+    uploadResponse = await uploadFile(filePath, testHash, null, contextId);
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+    t.is(uploadResponse.data.contextId, contextId, "Should have contextId in response");
+
+    // Wait for Redis to update
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Set retention with the same contextId
+    const retentionResponse = await setRetention(testHash, "permanent", false, contextId);
+    t.is(retentionResponse.status, 200, "Set retention should succeed");
+    t.is(retentionResponse.data.retention, "permanent", "Should have retention set to permanent");
+    t.truthy(retentionResponse.data.shortLivedUrl, "Should have shortLivedUrl");
+
+    // Verify Redis entry was updated with context-scoped key
+    const { getScopedHashKey } = await import("../src/redis.js");
+    const scopedKey = getScopedHashKey(testHash, contextId);
+    const updatedEntry = await getFileStoreMap(scopedKey);
+    t.truthy(updatedEntry, "Should have updated entry in Redis");
+    t.truthy(updatedEntry.shortLivedUrl, "Should have shortLivedUrl in Redis entry");
+    t.is(updatedEntry.permanent, true, "Entry should have permanent=true in Redis (matches file collection logic)");
+
+    // Wait for operations to complete
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Verify file still exists with contextId
+    const checkResponse = await checkHashExists(testHash, null, contextId);
+    t.is(checkResponse.status, 200, "File should still exist after setting retention");
+
+  } finally {
+    fs.unlinkSync(filePath);
+    // Cleanup
+    try {
+      const { getScopedHashKey } = await import("../src/redis.js");
+      const scopedKey = getScopedHashKey(testHash, contextId);
+      await removeFromFileStoreMap(scopedKey);
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+  }
+});
+
+test.serial("should return 404 when contextId doesn't match for setRetention", async (t) => {
+  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
+    t.pass("Skipping test - Azure not configured");
+    return;
+  }
+
+  const testContent = "test content for context mismatch";
+  const testHash = `test-retention-mismatch-${uuidv4()}`;
+  const contextId1 = `test-context-1-${uuidv4()}`;
+  const contextId2 = `test-context-2-${uuidv4()}`;
+  const filePath = await createTestFile(testContent, "txt");
+  let uploadResponse;
+
+  try {
+    // Upload file with contextId1
+    uploadResponse = await uploadFile(filePath, testHash, null, contextId1);
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+
+    // Wait for Redis to update
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Try to set retention with different contextId - should fail
+    const retentionResponse = await setRetention(testHash, "permanent", false, contextId2);
+    t.is(retentionResponse.status, 404, "Should return 404 when contextId doesn't match");
+    t.truthy(retentionResponse.data.includes("not found"), "Error message should indicate file not found");
+
+  } finally {
+    fs.unlinkSync(filePath);
+    // Cleanup
+    try {
+      const { getScopedHashKey } = await import("../src/redis.js");
+      const scopedKey = getScopedHashKey(testHash, contextId1);
+      await removeFromFileStoreMap(scopedKey);
     } catch (e) {
       // Ignore cleanup errors
     }
