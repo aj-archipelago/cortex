@@ -48,7 +48,7 @@ export default {
                         },
                         permanent: {
                             type: "boolean",
-                            description: "Optional: If true, the file will be stored indefinitely instead of being subject to the default 30 day storage limit. Default: false"
+                            description: "Optional: If true, the file will be stored indefinitely (retention=permanent). Default: false."
                         },
                         userMessage: {
                             type: "string",
@@ -342,7 +342,7 @@ export default {
                 // Use optimistic locking to remove files from collection FIRST
                 // Capture hashes INSIDE the lock to avoid race conditions with concurrent edits
                 const fileIdsToRemove = new Set(filesToRemove.map(f => f.id));
-                const hashesToDelete = [];
+                    const hashesToDelete = [];
                 const finalCollection = await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
                     // Capture hashes and container info of files that will be removed (at current lock time)
                     collection.forEach(file => {
@@ -350,7 +350,7 @@ export default {
                             hashesToDelete.push({
                                 hash: file.hash,
                                 filename: file.filename || 'unknown',
-                                permanent: file.permanent || false
+                                permanent: file.permanent ?? false
                             });
                         }
                     });
@@ -362,16 +362,18 @@ export default {
                 // Delete files from cloud storage ASYNC (fire and forget, but log errors)
                 // We do this after updating collection so user gets fast response and files are "gone" from UI immediately
                 // Use hashes captured inside the lock to ensure we delete the correct files
+                // IMPORTANT: Don't delete permanent files from cloud storage - they should persist
                 (async () => {
-                    const { config } = await import('../../../../config.js');
-                    const permanentContainerName = process.env.CORTEX_MEDIA_PERMANENT_STORE_NAME;
-                    
                     for (const fileInfo of hashesToDelete) {
+                        // Skip deletion if file is marked as permanent
+                        if (fileInfo.permanent) {
+                            logger.info(`Skipping cloud deletion for permanent file: ${fileInfo.filename} (hash: ${fileInfo.hash})`);
+                            continue;
+                        }
+                        
                         try {
-                            // Determine container based on permanent flag
-                            const container = fileInfo.permanent && permanentContainerName ? permanentContainerName : null;
-                            logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash}${container ? `, container: ${container}` : ''})`);
-                            await deleteFileByHash(fileInfo.hash, resolver, container);
+                            logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash})`);
+                            await deleteFileByHash(fileInfo.hash, resolver, contextId);
                         } catch (error) {
                             logger.warn(`Failed to delete file ${fileInfo.filename} (hash: ${fileInfo.hash}) from cloud storage: ${error?.message || String(error)}`);
                         }

@@ -140,7 +140,7 @@ export default {
                         if (artifact.type === 'image' && artifact.data && artifact.mimeType) {
                             try {
                                 // Upload image to cloud storage (returns {url, gcs, hash})
-                                const uploadResult = await uploadImageToCloud(artifact.data, artifact.mimeType, pathwayResolver);
+                                const uploadResult = await uploadImageToCloud(artifact.data, artifact.mimeType, pathwayResolver, args.contextId);
                                 
                                 const imageUrl = uploadResult.url || uploadResult;
                                 const imageGcs = uploadResult.gcs || null;
@@ -188,7 +188,10 @@ export default {
                                             isModification 
                                                 ? `Modified image from prompt: ${args.detailedInstructions || 'image modification'}`
                                                 : `Generated image from prompt: ${args.detailedInstructions || 'image generation'}`,
-                                            imageHash
+                                            imageHash,
+                                            null,
+                                            pathwayResolver,
+                                            true // permanent => retention=permanent
                                         );
                                     } catch (collectionError) {
                                         // Log but don't fail - file collection is optional

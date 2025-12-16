@@ -138,7 +138,8 @@ export default {
                 fileBuffer,
                 mimeType,
                 filename,
-                resolver
+                resolver,
+                contextId
             );
 
             if (!uploadResult || !uploadResult.url) {
@@ -159,7 +160,8 @@ export default {
                         notes,
                         uploadResult.hash || null,
                         null, // fileUrl - not needed since we already uploaded
-                        resolver
+                        resolver,
+                        true // permanent => retention=permanent
                     );
                 } catch (collectionError) {
                     // Log but don't fail - file collection is optional

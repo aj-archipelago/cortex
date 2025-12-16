@@ -249,7 +249,7 @@ test('ensureShortLivedUrl should respect shortLivedMinutes parameter', async t =
 
     const axiosGetStub = t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
 
-    await ensureShortLivedUrl(fileObject, fileHandlerUrl, shortLivedMinutes);
+    await ensureShortLivedUrl(fileObject, fileHandlerUrl, null, shortLivedMinutes);
 
     // Verify axios was called with correct shortLivedMinutes
     const callArgs = axiosGetStub.getCall(0).args;

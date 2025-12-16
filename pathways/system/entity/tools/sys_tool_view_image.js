@@ -70,7 +70,7 @@ export default {
 
                 // Resolve to short-lived URL if possible
                 const fileHandlerUrl = config.get('whisperMediaApiUrl');
-                const fileWithShortLivedUrl = await ensureShortLivedUrl(foundFile, fileHandlerUrl);
+                const fileWithShortLivedUrl = await ensureShortLivedUrl(foundFile, fileHandlerUrl, contextId);
 
                 // Add to imageUrls array
                 imageUrls.push({

@@ -307,7 +307,8 @@ export default {
                 fileBuffer,
                 mimeType,
                 filename,
-                resolver
+                resolver,
+                contextId
             );
 
             if (!uploadResult || !uploadResult.url) {
@@ -346,7 +347,7 @@ export default {
                 (async () => {
                     try {
                         logger.info(`Deleting old file version with hash ${oldHashToDelete} (background task)`);
-                        await deleteFileByHash(oldHashToDelete, resolver);
+                        await deleteFileByHash(oldHashToDelete, resolver, contextId);
                     } catch (cleanupError) {
                         logger.warn(`Failed to cleanup old file version (hash: ${oldHashToDelete}): ${cleanupError.message}`);
                     }

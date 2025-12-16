@@ -2,6 +2,7 @@
 import ModelPlugin from "./modelPlugin.js";
 import logger from "../../lib/logger.js";
 import { publishRequestProgress } from "../../lib/redisSubscription.js";
+import { fetchFileFromUrl } from "../../lib/fileUtils.js";
 import crypto from 'crypto';
 import axios from 'axios';
 import {config} from "../../config.js";
@@ -48,7 +49,7 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
         }
     }
 
-    async uploadToFileHandler(videoUrl) {
+    async uploadToFileHandler(videoUrl, contextId = null) {
         try {
             // Get the file handler URL from config
             const fileHandlerUrl = config.get("whisperMediaApiUrl");
@@ -66,19 +67,17 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
             }, 5000);
 
             try {
-                // Start the fetch request
-                const response = await axios.get(fileHandlerUrl, {
-                    params: {
-                        requestId: this.requestId,
-                        fetch: videoUrl
-                    }
-                });
-
-                if (!response.data?.url) {
+                // Use encapsulated file handler function
+                const response = await fetchFileFromUrl(videoUrl, this.requestId, contextId, false);
+                
+                // Response can be an array (for chunked files) or an object with url
+                const resultUrl = Array.isArray(response) ? response[0] : response.url;
+                
+                if (!resultUrl) {
                     throw new Error("File handler did not return a valid URL");
                 }
 
-                return response.data.url;
+                return resultUrl;
             } finally {
                 // Always clear the heartbeat interval
                 clearInterval(heartbeat);
@@ -308,7 +307,9 @@ class AzureVideoTranslatePlugin extends ModelPlugin {
             // If the video is not from Azure storage, upload it to file handler
             if (!videoInfo.isAzureUrl) {
                 logger.debug('Video is not from Azure storage, uploading to file handler...');
-                videoUrl = await this.uploadToFileHandler(videoUrl);
+                // Use savedContextId as contextId for scoped file storage (fallback to requestId if not available)
+                const contextId = cortexRequest.pathwayResolver?.savedContextId || this.requestId;
+                videoUrl = await this.uploadToFileHandler(videoUrl, contextId);
                 logger.debug(`Video uploaded to file handler: ${videoUrl}`);
             }
 
