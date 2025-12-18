@@ -4,7 +4,7 @@
 import test from 'ava';
 import serverFactory from '../../../../index.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { generateFileMessageContent, resolveFileParameter } from '../../../../lib/fileUtils.js';
+import { generateFileMessageContent, resolveFileParameter, loadFileCollection } from '../../../../lib/fileUtils.js';
 
 let testServer;
 
@@ -28,27 +28,15 @@ const createTestContext = () => {
     return contextId;
 };
 
-// Helper to extract files array from stored format (handles both old array format and new {version, files} format)
-const extractFilesFromStored = (stored) => {
-    if (!stored) return [];
-    const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored;
-    // Handle new format: { version, files }
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.files) {
-        return Array.isArray(parsed.files) ? parsed.files : [];
-    }
-    // Handle old format: just an array
-    if (Array.isArray(parsed)) {
-        return parsed;
-    }
-    return [];
-};
-
 // Helper to clean up test data
 const cleanup = async (contextId, contextKey = null) => {
     try {
-        const { keyValueStorageClient } = await import('../../../../lib/keyValueStorageClient.js');
-        // Delete the key entirely instead of setting to empty array
-        await keyValueStorageClient.delete(`${contextId}-memoryFiles`);
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        if (redisClient) {
+            const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+            await redisClient.del(contextMapKey);
+        }
     } catch (e) {
         // Ignore cleanup errors
     }
@@ -73,14 +61,10 @@ test('File collection: Add file to collection', async t => {
         t.truthy(parsed.fileId);
         t.true(parsed.message.includes('test.jpg'));
         
-        // Verify it was saved
-        const saved = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        const collection = extractFilesFromStored(saved);
+        // Verify it was saved to Redis hash map
+        const collection = await loadFileCollection(contextId, null, false);
         t.is(collection.length, 1);
-        t.is(collection[0].filename, 'test.jpg');
+        t.is(collection[0].displayFilename, 'test.jpg');
         t.is(collection[0].url, 'https://example.com/test.jpg');
         t.is(collection[0].gcs, 'gs://bucket/test.jpg');
         t.deepEqual(collection[0].tags, ['photo', 'test']);
@@ -121,8 +105,8 @@ test('File collection: List files', async t => {
         t.is(parsed.count, 2);
         t.is(parsed.totalFiles, 2);
         t.is(parsed.files.length, 2);
-        t.true(parsed.files.some(f => f.filename === 'file1.jpg'));
-        t.true(parsed.files.some(f => f.filename === 'file2.pdf'));
+        t.true(parsed.files.some(f => f.displayFilename === 'file1.jpg'));
+        t.true(parsed.files.some(f => f.displayFilename === 'file2.pdf'));
     } finally {
         await cleanup(contextId);
     }
@@ -161,7 +145,7 @@ test('File collection: Search files', async t => {
         const parsed1 = JSON.parse(result1);
         t.is(parsed1.success, true);
         t.is(parsed1.count, 1);
-        t.is(parsed1.files[0].filename, 'report.pdf');
+        t.is(parsed1.files[0].displayFilename, 'report.pdf');
         
         // Search by tag
         const result2 = await callPathway('sys_tool_file_collection', {
@@ -173,7 +157,7 @@ test('File collection: Search files', async t => {
         const parsed2 = JSON.parse(result2);
         t.is(parsed2.success, true);
         t.is(parsed2.count, 1);
-        t.is(parsed2.files[0].filename, 'image.jpg');
+        t.is(parsed2.files[0].displayFilename, 'image.jpg');
         
         // Search by notes
         const result3 = await callPathway('sys_tool_file_collection', {
@@ -185,7 +169,7 @@ test('File collection: Search files', async t => {
         const parsed3 = JSON.parse(result3);
         t.is(parsed3.success, true);
         t.is(parsed3.count, 1);
-        t.is(parsed3.files[0].filename, 'image.jpg');
+        t.is(parsed3.files[0].displayFilename, 'image.jpg');
     } finally {
         await cleanup(contextId);
     }
@@ -223,7 +207,7 @@ test('File collection: Remove single file', async t => {
         t.is(parsed.removedCount, 1);
         t.is(parsed.remainingFiles, 1);
         t.is(parsed.removedFiles.length, 1);
-        t.is(parsed.removedFiles[0].filename, 'file1.jpg');
+        t.is(parsed.removedFiles[0].displayFilename, 'file1.jpg');
         t.true(parsed.message.includes('Cloud storage cleanup started in background'));
         
         // Verify it was removed
@@ -349,8 +333,8 @@ test('File collection: List with filters and sorting', async t => {
         });
         
         const parsed1 = JSON.parse(result1);
-        t.is(parsed1.files[0].filename, 'a_file.jpg');
-        t.is(parsed1.files[1].filename, 'z_file.pdf');
+        t.is(parsed1.files[0].displayFilename, 'a_file.jpg');
+        t.is(parsed1.files[1].displayFilename, 'z_file.pdf');
         
         // List filtered by tag
         const result2 = await callPathway('sys_tool_file_collection', {
@@ -361,26 +345,23 @@ test('File collection: List with filters and sorting', async t => {
         
         const parsed2 = JSON.parse(result2);
         t.is(parsed2.count, 1);
-        t.is(parsed2.files[0].filename, 'a_file.jpg');
+        t.is(parsed2.files[0].displayFilename, 'a_file.jpg');
     } finally {
         await cleanup(contextId);
     }
 });
 
-test('Memory system: memoryFiles excluded from memoryAll', async t => {
+test('Memory system: file collections excluded from memoryAll', async t => {
     const contextId = createTestContext();
     
     try {
-        // Save a file collection
-        await callPathway('sys_save_memory', {
-            contextId,
-            section: 'memoryFiles',
-            aiMemory: JSON.stringify([{
-                id: 'test-1',
-                url: 'https://example.com/test.jpg',
-                filename: 'test.jpg'
-            }])
-        });
+        // Save a file collection directly to Redis
+        const { saveFileCollection } = await import('../../../../lib/fileUtils.js');
+        await saveFileCollection(contextId, null, [{
+            id: 'test-1',
+            url: 'https://example.com/test.jpg',
+            displayFilename: 'test.jpg'
+        }]);
         
         // Save other memory
         await callPathway('sys_save_memory', {
@@ -389,7 +370,7 @@ test('Memory system: memoryFiles excluded from memoryAll', async t => {
             aiMemory: 'Test memory content'
         });
         
-        // Read all memory - should not include memoryFiles
+        // Read all memory - should not include file collections
         const allMemory = await callPathway('sys_read_memory', {
             contextId,
             section: 'memoryAll'
@@ -399,34 +380,26 @@ test('Memory system: memoryFiles excluded from memoryAll', async t => {
         t.truthy(parsed.memorySelf);
         t.falsy(parsed.memoryFiles);
         
-        // But should be accessible explicitly
-        const files = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        
-        const filesParsed = JSON.parse(files);
-        t.is(filesParsed.length, 1);
-        t.is(filesParsed[0].filename, 'test.jpg');
+        // But should be accessible via loadFileCollection
+        const files = await loadFileCollection(contextId, null, false);
+        t.is(files.length, 1);
+        t.is(files[0].displayFilename, 'test.jpg');
     } finally {
         await cleanup(contextId);
     }
 });
 
-test('Memory system: memoryFiles not cleared by memoryAll clear', async t => {
+test('Memory system: file collections not cleared by memoryAll clear', async t => {
     const contextId = createTestContext();
     
     try {
-        // Save file collection
-        await callPathway('sys_save_memory', {
-            contextId,
-            section: 'memoryFiles',
-            aiMemory: JSON.stringify([{
-                id: 'test-1',
-                url: 'https://example.com/test.jpg',
-                filename: 'test.jpg'
-            }])
-        });
+        // Save file collection directly to Redis
+        const { saveFileCollection } = await import('../../../../lib/fileUtils.js');
+        await saveFileCollection(contextId, null, [{
+            id: 'test-1',
+            url: 'https://example.com/test.jpg',
+            displayFilename: 'test.jpg'
+        }]);
         
         // Clear all memory
         await callPathway('sys_save_memory', {
@@ -435,36 +408,28 @@ test('Memory system: memoryFiles not cleared by memoryAll clear', async t => {
             aiMemory: ''
         });
         
-        // Verify files are still there
-        const files = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        
-        const filesParsed = JSON.parse(files);
-        t.is(filesParsed.length, 1);
-        t.is(filesParsed[0].filename, 'test.jpg');
+        // Verify files are still there (file collections are separate from memory system)
+        const files = await loadFileCollection(contextId, null, false);
+        t.is(files.length, 1);
+        t.is(files[0].displayFilename, 'test.jpg');
     } finally {
         await cleanup(contextId);
     }
 });
 
-test('Memory system: memoryFiles ignored in memoryAll save', async t => {
+test('Memory system: file collections ignored in memoryAll save', async t => {
     const contextId = createTestContext();
     
     try {
-        // Save file collection first
-        await callPathway('sys_save_memory', {
-            contextId,
-            section: 'memoryFiles',
-            aiMemory: JSON.stringify([{
-                id: 'original',
-                cloudUrl: 'https://example.com/original.jpg',
-                filename: 'original.jpg'
-            }])
-        });
+        // Save file collection first directly to Redis
+        const { saveFileCollection } = await import('../../../../lib/fileUtils.js');
+        await saveFileCollection(contextId, null, [{
+            id: 'original',
+            url: 'https://example.com/original.jpg',
+            displayFilename: 'original.jpg'
+        }]);
         
-        // Try to save all memory with memoryFiles included
+        // Try to save all memory with memoryFiles included (should be ignored)
         await callPathway('sys_save_memory', {
             contextId,
             section: 'memoryAll',
@@ -473,20 +438,15 @@ test('Memory system: memoryFiles ignored in memoryAll save', async t => {
                 memoryFiles: JSON.stringify([{
                     id: 'new',
                     url: 'https://example.com/new.jpg',
-                    filename: 'new.jpg'
+                    displayFilename: 'new.jpg'
                 }])
             })
         });
         
-        // Verify original files are still there (not overwritten)
-        const files = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        
-        const filesParsed = JSON.parse(files);
-        t.is(filesParsed.length, 1);
-        t.is(filesParsed[0].filename, 'original.jpg');
+        // Verify original files are still there (not overwritten - memoryFiles is ignored)
+        const files = await loadFileCollection(contextId, null, false);
+        t.is(files.length, 1);
+        t.is(files[0].displayFilename, 'original.jpg');
     } finally {
         await cleanup(contextId);
     }
@@ -509,11 +469,7 @@ test('generateFileMessageContent should find file by ID', async t => {
         });
         
         // Get the file ID from the collection
-        const saved = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        const collection = extractFilesFromStored(saved);
+        const collection = await loadFileCollection(contextId, null, false);
         const fileId = collection[0].id;
         
         // Normalize by ID
@@ -522,8 +478,10 @@ test('generateFileMessageContent should find file by ID', async t => {
         t.truthy(result);
         t.is(result.type, 'image_url');
         t.is(result.url, 'https://example.com/test.pdf');
-        t.is(result.gcs, 'gs://bucket/test.pdf');
-        t.is(result.originalFilename, 'test.pdf');
+        t.is(result.gcs, 'gs://bucket/test.pdf'); 
+        // originalFilename is no longer returned in message content objects
+        t.truthy(result.url);
+        t.truthy(result.hash);
     } finally {
         await cleanup(contextId);
     }
@@ -575,12 +533,16 @@ test('generateFileMessageContent should find file by fuzzy filename match', asyn
         // Normalize by partial filename
         const result1 = await generateFileMessageContent('document', contextId);
         t.truthy(result1);
-        t.is(result1.originalFilename, 'document.pdf');
+        // originalFilename is no longer returned in message content objects
+        t.truthy(result1.url);
+        t.truthy(result1.hash);
         
         // Normalize by full filename
         const result2 = await generateFileMessageContent('image.jpg', contextId);
         t.truthy(result2);
-        t.is(result2.originalFilename, 'image.jpg');
+        // originalFilename is no longer returned in message content objects
+        t.truthy(result2.url);
+        t.truthy(result2.hash);
     } finally {
         await cleanup(contextId);
     }
@@ -598,11 +560,7 @@ test('generateFileMessageContent should detect image type', async t => {
             userMessage: 'Add image'
         });
         
-        const saved = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        const collection = extractFilesFromStored(saved);
+        const collection = await loadFileCollection(contextId, null, false);
         const fileId = collection[0].id;
         
         const result = await generateFileMessageContent(fileId, contextId);

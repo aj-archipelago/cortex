@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, modifyFileCollectionWithLock, isTextMimeType } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, isTextMimeType, updateFileMetadata } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -315,29 +315,70 @@ export default {
                 throw new Error('Failed to upload modified file to cloud storage');
             }
 
-            // Update the file collection entry with new URL and hash using optimistic locking
-            // Capture the old hash INSIDE the lock to avoid race conditions with concurrent edits
-            let oldHashToDelete = null;
-            const updatedCollection = await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
-                const fileToUpdate = collection.find(f => f.id === fileIdToUpdate);
-                if (!fileToUpdate) {
-                    throw new Error(`File with ID "${fileIdToUpdate}" not found in collection during update`);
+            // Update the file collection entry directly (atomic operation)
+            // First find the file to get its current hash
+            const currentCollection = await loadFileCollection(contextId, contextKey, false);
+            const fileToUpdate = currentCollection.find(f => f.id === fileIdToUpdate);
+            if (!fileToUpdate) {
+                throw new Error(`File with ID "${fileIdToUpdate}" not found in collection`);
+            }
+            
+            const oldHashToDelete = fileToUpdate.hash || null;
+            
+            // Write new entry with CFH data (url, gcs, hash) + Cortex metadata
+            // If hash changed, this creates a new entry; if same hash, it updates the existing one
+            if (uploadResult.hash) {
+                const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+                const redisClient = await getRedisClient();
+                if (redisClient) {
+                    const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+                    
+                    // Get existing CFH data for the new hash (if any)
+                    const existingDataStr = await redisClient.hget(contextMapKey, uploadResult.hash);
+                    let existingData = {};
+                    if (existingDataStr) {
+                        try {
+                            existingData = JSON.parse(existingDataStr);
+                        } catch (e) {
+                            existingData = {};
+                        }
+                    }
+                    
+                    // Merge CFH data (url, gcs, hash) with Cortex metadata
+                    const fileData = {
+                        ...existingData, // Preserve any existing CFH data
+                        // CFH-managed fields (from upload result)
+                        url: uploadResult.url,
+                        gcs: uploadResult.gcs || null,
+                        hash: uploadResult.hash,
+                        filename: uploadResult.filename || filename, // Use CFH filename if available, otherwise preserve
+                        // Cortex-managed metadata
+                        id: fileToUpdate.id, // Keep same ID
+                        tags: fileToUpdate.tags || [],
+                        notes: fileToUpdate.notes || '',
+                        mimeType: fileToUpdate.mimeType || mimeType || null,
+                        addedDate: fileToUpdate.addedDate, // Keep original added date
+                        lastAccessed: new Date().toISOString(),
+                        permanent: fileToUpdate.permanent || false
+                    };
+                    
+                    // Write new entry (atomic operation)
+                    await redisClient.hset(contextMapKey, uploadResult.hash, JSON.stringify(fileData));
+                    
+                    // If hash changed, remove old entry
+                    if (oldHashToDelete && oldHashToDelete !== uploadResult.hash) {
+                        await redisClient.hdel(contextMapKey, oldHashToDelete);
+                    }
+                    
+                    // Cache will expire naturally (5 second TTL) or can be invalidated by reloading collection
                 }
-                
-                // Capture the old hash BEFORE updating (this is the current hash at lock time)
-                oldHashToDelete = fileToUpdate.hash || null;
-                
-                fileToUpdate.url = uploadResult.url;
-                if (uploadResult.gcs) {
-                    fileToUpdate.gcs = uploadResult.gcs;
-                }
-                if (uploadResult.hash) {
-                    fileToUpdate.hash = uploadResult.hash;
-                }
-                fileToUpdate.lastAccessed = new Date().toISOString();
-                
-                return collection;
-            });
+            } else if (fileToUpdate.hash) {
+                // Same hash, just update Cortex metadata (filename, lastAccessed)
+                await updateFileMetadata(contextId, fileToUpdate.hash, {
+                    filename: filename,
+                    lastAccessed: new Date().toISOString()
+                });
+            }
 
             // Now it is safe to delete the old file version (after lock succeeds)
             // This ensures we're deleting the correct hash even if concurrent edits occurred
@@ -357,6 +398,7 @@ export default {
             }
             
             // Get the updated file info for the result
+            const updatedCollection = await loadFileCollection(contextId, contextKey, false);
             const updatedFile = updatedCollection.find(f => f.id === fileIdToUpdate);
 
             // Build result message

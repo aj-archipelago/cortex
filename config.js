@@ -9,6 +9,7 @@ import logger from './lib/logger.js';
 import PathwayManager from './lib/pathwayManager.js';
 import { readdir } from 'fs/promises';
 import { entityConstants } from './lib/entityConstants.js';
+import { Prompt } from './server/prompt.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -140,6 +141,7 @@ var config = convict({
         default: {
             "oai-gpturbo": {
                 "type": "OPENAI-CHAT",
+                "emulateOpenAICompletionModel": "*",
                 "url": "https://api.openai.com/v1/chat/completions",
                 "headers": {
                     "Authorization": "Bearer {{OPENAI_API_KEY}}",
@@ -207,6 +209,7 @@ var config = convict({
             },
             "oai-gpt5": {
                 "type": "OPENAI-REASONING-VISION",
+                "emulateOpenAIChatModel": "gpt-5",
                 "url": "https://api.openai.com/v1/chat/completions",
                 "headers": {
                     "Authorization": "Bearer {{OPENAI_API_KEY}}",
@@ -237,6 +240,7 @@ var config = convict({
             },
             "oai-gpt4o": {
                 "type": "OPENAI-VISION",
+                "emulateOpenAIChatModel": "gpt-4o",
                 "url": "https://api.openai.com/v1/chat/completions",
                 "headers": {
                     "Authorization": "Bearer {{OPENAI_API_KEY}}",
@@ -267,6 +271,7 @@ var config = convict({
             },
             "oai-gpt41": {
                 "type": "OPENAI-VISION",
+                "emulateOpenAIChatModel": "gpt-4.1",
                 "url": "https://api.openai.com/v1/chat/completions",
                 "headers": {
                     "Authorization": "Bearer {{OPENAI_API_KEY}}",
@@ -327,6 +332,10 @@ var config = convict({
             },
             "oai-o3-mini": {
                 "type": "OPENAI-REASONING",
+                "emulateOpenAIChatModel": "o3-mini",
+                "restStreaming": {
+                    "enableDuplicateRequests": false
+                },
                 "url": "https://api.openai.com/v1/chat/completions",
                 "headers": {
                     "Authorization": "Bearer {{OPENAI_API_KEY}}",
@@ -464,6 +473,10 @@ var config = convict({
             },
             "ollama-chat": {
                 "type": "OLLAMA-CHAT",
+                "emulateOpenAIChatModel": "ollama-chat",
+                "restStreaming": {
+                    "timeout": 300
+                },
                 "url": "{{ollamaUrl}}/api/chat",
                 "headers": {
                   "Content-Type": "application/json"
@@ -474,6 +487,10 @@ var config = convict({
             },
             "ollama-completion": {
                 "type": "OLLAMA-COMPLETION",
+                "emulateOpenAICompletionModel": "ollama-completion",
+                "restStreaming": {
+                    "timeout": 300
+                },
                 "url": "{{ollamaUrl}}/api/generate",
                 "headers": {
                   "Content-Type": "application/json"
@@ -507,6 +524,7 @@ var config = convict({
             },
             "claude-37-sonnet-vertex": {
                 "type": "CLAUDE-3-VERTEX",
+                "emulateOpenAIChatModel": "claude-3.7-sonnet",
                 "url": "{{claudeVertexUrl}}",
                 "headers": {
                     "Content-Type": "application/json"
@@ -519,6 +537,7 @@ var config = convict({
             },
             "claude-4-sonnet-vertex": {
                 "type": "CLAUDE-4-VERTEX",
+                "emulateOpenAIChatModel": "claude-4-sonnet",
                 "url": "{{claudeVertexUrl}}",
                 "headers": {
                     "Content-Type": "application/json"
@@ -531,6 +550,15 @@ var config = convict({
             },
             "gemini-flash-25-vision": {
                 "type": "GEMINI-1.5-VISION",
+                "emulateOpenAIChatModel": "gemini-flash-25",
+                "restStreaming": {
+                    "geminiSafetySettings": [
+                        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
+                        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"}
+                    ]
+                },
                 "url": "{{geminiFlashUrl}}",
                 "headers": {
                     "Content-Type": "application/json"
@@ -557,6 +585,13 @@ var config = convict({
             },
             "xai-grok-4": {
                 "type": "GROK-VISION",
+                "emulateOpenAIChatModel": "grok-4",
+                "restStreaming": {
+                    "inputParameters": {
+                        "stream": false,
+                        "search_parameters": ""
+                    }
+                },
                 "url": "https://api.x.ai/v1/chat/completions",
                 "headers": {
                     "Authorization": "Bearer {{XAI_API_KEY}}",
@@ -587,6 +622,13 @@ var config = convict({
             },
             "xai-grok-4-fast-reasoning": {
                 "type": "GROK-VISION",
+                "emulateOpenAIChatModel": "grok-4-fast-reasoning",
+                "restStreaming": {
+                    "inputParameters": {
+                        "stream": false,
+                        "search_parameters": ""
+                    }
+                },
                 "url": "https://api.x.ai/v1/chat/completions",
                 "headers": {
                     "Authorization": "Bearer {{XAI_API_KEY}}",
@@ -602,6 +644,13 @@ var config = convict({
             },
             "xai-grok-4-fast-non-reasoning": {
                 "type": "GROK-VISION",
+                "emulateOpenAIChatModel": "grok-4-fast-non-reasoning",
+                "restStreaming": {
+                    "inputParameters": {
+                        "stream": false,
+                        "search_parameters": ""
+                    }
+                },
                 "url": "https://api.x.ai/v1/chat/completions",
                 "headers": {
                     "Authorization": "Bearer {{XAI_API_KEY}}",
@@ -942,6 +991,90 @@ const buildPathways = async (config) => {
         process.exit(1);
     }
 
+    // Generate REST streaming pathways from model configs
+    const generateRestStreamingPathways = (models) => {
+        const restPathways = {};
+        
+        for (const [modelName, modelConfig] of Object.entries(models || {})) {
+            if (!modelConfig) continue;
+            
+            // Check for chat model emulation
+            if (modelConfig.emulateOpenAIChatModel) {
+                const pathwayName = `sys_rest_streaming_${modelName.replace(/-/g, '_')}`;
+                const restConfig = modelConfig.restStreaming || {};
+                
+                // Default input parameters for chat models
+                // Special case: oai-gpt4o (default) uses empty array, others use object array
+                const defaultInputParams = modelName === 'oai-gpt4o' 
+                    ? {
+                        messages: [],
+                        tools: '',
+                        tool_choice: 'auto',
+                        functions: ''
+                    }
+                    : {
+                        messages: [{role: '', content: []}],
+                        tools: '',
+                        tool_choice: 'auto'
+                    };
+                
+                // Merge with any custom input parameters
+                const inputParameters = restConfig.inputParameters 
+                    ? { ...defaultInputParams, ...restConfig.inputParameters }
+                    : defaultInputParams;
+                
+                // Special handling for certain models
+                if (modelName.startsWith('oai-') && !modelName.includes('gpturbo') && modelName !== 'oai-gpt4o') {
+                    inputParameters.functions = '';
+                }
+                
+                restPathways[pathwayName] = {
+                    prompt: [
+                        new Prompt({ messages: ["{{messages}}"] })
+                    ],
+                    inputParameters,
+                    model: modelName,
+                    useInputChunking: false,
+                    emulateOpenAIChatModel: modelConfig.emulateOpenAIChatModel,
+                    ...(restConfig.geminiSafetySettings && { geminiSafetySettings: restConfig.geminiSafetySettings }),
+                    ...(restConfig.enableDuplicateRequests !== undefined && { enableDuplicateRequests: restConfig.enableDuplicateRequests }),
+                    ...(restConfig.timeout && { timeout: restConfig.timeout })
+                };
+            }
+            
+            // Check for completion model emulation
+            if (modelConfig.emulateOpenAICompletionModel) {
+                const pathwayName = `sys_rest_streaming_${modelName.replace(/-/g, '_')}_completion`;
+                const restConfig = modelConfig.restStreaming || {};
+                
+                restPathways[pathwayName] = {
+                    prompt: `{{text}}`,
+                    inputParameters: restConfig.inputParameters || {
+                        text: '',
+                        ...(modelName.includes('ollama') && { ollamaModel: '' })
+                    },
+                    model: modelName,
+                    useInputChunking: false,
+                    emulateOpenAICompletionModel: modelConfig.emulateOpenAICompletionModel,
+                    ...(restConfig.timeout && { timeout: restConfig.timeout })
+                };
+            }
+        }
+        
+        return restPathways;
+    };
+    
+    // Generate REST streaming pathways from models
+    const models = config.get('models');
+    const generatedRestPathways = models ? generateRestStreamingPathways(models) : {};
+    
+    if (Object.keys(generatedRestPathways).length > 0) {
+        logger.info(`Generated ${Object.keys(generatedRestPathways).length} REST streaming pathways from model configs`);
+    }
+    
+    // Merge generated pathways into loaded pathways (they can be overridden by file-based pathways)
+    Object.assign(loadedPathways, generatedRestPathways);
+    
     // This is where we integrate pathway overrides from the config
     // file. This can run into a partial definition issue if the
     // config file contains pathways that no longer exist.

@@ -233,32 +233,95 @@ const getAllFileStoreMap = async () => {
 };
 
 // Function to set key value in "FileStoreMap" hash map
-const setFileStoreMap = async (key, value) => {
+// If contextId is provided, writes to context-scoped map: FileStoreMap:ctx:<contextId>
+// Otherwise writes to unscoped map: FileStoreMap
+// Key is always the raw hash (no scoping in the key itself)
+const setFileStoreMap = async (hash, value, contextId = null) => {
   try {
-    // Only set timestamp if one doesn't already exist
-    if (!value.timestamp) {
-      value.timestamp = new Date().toISOString();
+    if (!hash) {
+      console.error("setFileStoreMap: hash is required");
+      return;
     }
-    await client.hset("FileStoreMap", key, JSON.stringify(value));
+    
+    // Create a copy of value to avoid mutating the original
+    const valueToStore = { ...value };
+    
+    // Remove 'message' field - it's only for the upload response, not for persistence
+    delete valueToStore.message;
+    
+    // Only set timestamp if one doesn't already exist
+    if (!valueToStore.timestamp) {
+      valueToStore.timestamp = new Date().toISOString();
+    }
+    
+    // Determine which map to write to
+    if (contextId) {
+      // Write to context-scoped map with raw hash as key
+      const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+      await client.hset(contextMapKey, hash, JSON.stringify(valueToStore));
+    } else {
+      // Write to unscoped map (backward compatibility)
+      await client.hset("FileStoreMap", hash, JSON.stringify(valueToStore));
+    }
   } catch (error) {
     console.error(`Error setting key in FileStoreMap: ${error}`);
   }
 };
 
-const getFileStoreMap = async (key, skipLazyCleanup = false) => {
+// Function to get all files for a context from context-scoped hash map
+const getAllFilesForContext = async (contextId) => {
   try {
-    let value = await client.hget("FileStoreMap", key);
+    if (!contextId) {
+      return {};
+    }
+    const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+    const allKeyValuePairs = await client.hgetall(contextMapKey);
+    // Parse each JSON value in the returned object
+    for (const key in allKeyValuePairs) {
+      try {
+        allKeyValuePairs[key] = JSON.parse(allKeyValuePairs[key]);
+      } catch (error) {
+        console.error(`Error parsing JSON for key ${key}: ${error}`);
+        // keep original value if parsing failed
+      }
+    }
+    return allKeyValuePairs;
+  } catch (error) {
+    // Redact contextId in error logs for security
+    const { redactContextId } = await import("./utils/logSecurity.js");
+    const redactedContextId = redactContextId(contextId);
+    console.error(`Error getting all files for context ${redactedContextId}: ${error}`);
+    return {};
+  }
+};
 
+const getFileStoreMap = async (hash, skipLazyCleanup = false, contextId = null) => {
+  try {
+    if (!hash) {
+      return null;
+    }
+    
+    // Try context-scoped map first if contextId is provided
+    let value = null;
+    if (contextId) {
+      const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+      value = await client.hget(contextMapKey, hash);
+    }
+    
+    // Fall back to unscoped map if not found
+    if (!value) {
+      value = await client.hget("FileStoreMap", hash);
+    }
+    
     // Backwards compatibility for unscoped keys only:
     // If unscoped hash doesn't exist, fall back to legacy hash+container key (if still present).
-    // SECURITY: Context-scoped keys (hash:ctx:contextId) NEVER fall back - they must match exactly.
-    if (!value && key) {
-      const ctx = tryParseCtxKey(key);
-      const baseHash = ctx?.hash || key;
+    // SECURITY: Context-scoped lookups NEVER fall back - they must match exactly.
+    if (!value && hash && !contextId) {
+      const baseHash = hash;
 
       // Only allow fallback for unscoped keys (not context-scoped)
       // Context-scoped keys are security-isolated and must match exactly
-      if (!ctx && baseHash && !String(baseHash).includes(":")) {
+      if (baseHash && !String(baseHash).includes(":")) {
         const defaultContainerName = getDefaultContainerName();
         const legacyKey = legacyContainerKey(baseHash, defaultContainerName);
         if (legacyKey) {
@@ -323,10 +386,14 @@ const getFileStoreMap = async (key, skipLazyCleanup = false) => {
             }
 
             // Remove stale entry if both primary and backup are missing
+            // Need to extract contextId from the key if it was scoped
             if (shouldRemove) {
-              await removeFromFileStoreMap(key);
+              // For lazy cleanup, we don't have contextId, so try unscoped first
+              // If the key was scoped, we'd need contextId, but lazy cleanup doesn't have it
+              // So we'll just try to remove from unscoped map
+              await removeFromFileStoreMap(hash, null);
               console.log(
-                `Lazy cleanup: Removed stale cache entry for key ${key}`,
+                `Lazy cleanup: Removed stale cache entry for hash ${hash}`,
               );
               return null; // Return null since file no longer exists
             }
@@ -350,19 +417,31 @@ const getFileStoreMap = async (key, skipLazyCleanup = false) => {
 };
 
 // Function to remove key from "FileStoreMap" hash map
-const removeFromFileStoreMap = async (key) => {
+// If contextId is provided, removes from context-scoped map
+// Otherwise removes from unscoped map
+// Hash is always the raw hash (no scoping in the key itself)
+const removeFromFileStoreMap = async (hash, contextId = null) => {
   try {
-    // hdel returns the number of keys that were removed.
-    // If the key does not exist, 0 is returned.
-    const result = await client.hdel("FileStoreMap", key);
+    if (!hash) {
+      return;
+    }
+    
+    let result = 0;
+    if (contextId) {
+      // Remove from context-scoped map
+      const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+      result = await client.hdel(contextMapKey, hash);
+    } else {
+      // Remove from unscoped map
+      result = await client.hdel("FileStoreMap", hash);
+    }
     if (result > 0) {
-      console.log(`The key ${key} was removed successfully`);
+      console.log(`The hash ${hash} was removed successfully`);
     }
 
     // Always try to clean up legacy container-scoped entry as well.
     // This ensures we don't leave orphaned legacy keys behind.
-    const ctx = tryParseCtxKey(key);
-    const baseHash = ctx?.hash || key;
+    const baseHash = hash;
     // Only attempt legacy cleanup if baseHash doesn't contain a colon (not already scoped)
     if (!String(baseHash).includes(":")) {
       const defaultContainerName = getDefaultContainerName();
@@ -491,6 +570,7 @@ export {
   setFileStoreMap,
   getFileStoreMap,
   removeFromFileStoreMap,
+  getAllFilesForContext,
   cleanupRedisFileStoreMap,
   cleanupRedisFileStoreMapAge,
   acquireLock,

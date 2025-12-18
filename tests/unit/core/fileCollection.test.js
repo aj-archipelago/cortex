@@ -26,10 +26,9 @@ test('extractFilesFromChatHistory should extract files from array content', t =>
     t.is(files.length, 2);
     t.is(files[0].url, 'https://example.com/image.jpg');
     t.is(files[0].gcs, 'gs://bucket/image.jpg');
-    t.is(files[0].filename, 'image.jpg');
+    // filename is no longer extracted from messages (displayFilename is set by CFH on upload)
     t.is(files[1].url, 'https://example.com/doc.pdf');
     t.is(files[1].gcs, 'gs://bucket/doc.pdf');
-    t.is(files[1].filename, 'doc.pdf');
 });
 
 test('extractFilesFromChatHistory should extract files from string JSON content', t => {
@@ -109,7 +108,7 @@ test('formatFilesForTemplate should format files correctly', t => {
             id: 'file-1',
             url: 'https://example.com/image.jpg',
             gcs: 'gs://bucket/image.jpg',
-            filename: 'image.jpg',
+            displayFilename: 'image.jpg',
             hash: 'abc123',
             addedDate: '2024-01-01T00:00:00Z',
             lastAccessed: '2024-01-02T00:00:00Z',
@@ -119,7 +118,7 @@ test('formatFilesForTemplate should format files correctly', t => {
         {
             id: 'file-2',
             url: 'https://example.com/doc.pdf',
-            filename: 'doc.pdf',
+            displayFilename: 'doc.pdf',
             hash: 'def456',
             addedDate: '2024-01-02T00:00:00Z',
             lastAccessed: '2024-01-03T00:00:00Z'
@@ -130,7 +129,7 @@ test('formatFilesForTemplate should format files correctly', t => {
     // Should not include header or notes
     t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
     t.false(result.includes('Test image'));
-    // Should include hash, filename, url, date, and tags
+    // Should include hash, displayFilename, url, date, and tags
     t.true(result.includes('def456 | doc.pdf | https://example.com/doc.pdf'));
     t.true(result.includes('abc123 | image.jpg | https://example.com/image.jpg'));
     t.true(result.includes('photo')); // tags should be included
@@ -151,7 +150,7 @@ test('formatFilesForTemplate should handle files without optional fields', t => 
         {
             id: 'file-1',
             url: 'https://example.com/image.jpg',
-            filename: 'image.jpg',
+            displayFilename: 'image.jpg',
             addedDate: '2024-01-01T00:00:00Z'
         }
     ];
@@ -159,7 +158,7 @@ test('formatFilesForTemplate should handle files without optional fields', t => 
     const result = formatFilesForTemplate(collection);
     // Should not include header
     t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
-    // Should include filename, url, and date even without hash or tags
+    // Should include displayFilename, url, and date even without hash or tags
     t.true(result.includes('image.jpg'));
     t.true(result.includes('https://example.com/image.jpg'));
     // Date should be included (may be 2023 or 2024 due to timezone conversion)
@@ -171,7 +170,7 @@ test('formatFilesForTemplate should handle files without optional fields', t => 
 test('formatFilesForTemplate should limit to 10 files and show note', t => {
     const collection = Array.from({ length: 15 }, (_, i) => ({
         id: `file-${i}`,
-        filename: `file${i}.txt`,
+        displayFilename: `file${i}.txt`,
         hash: `hash${i}`,
         url: `https://example.com/file${i}.txt`,
         addedDate: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
@@ -243,12 +242,12 @@ test('extractFilesFromChatHistory should handle files without gcsUrl', t => {
     t.is(files[0].gcs, null);
 });
 
-test('extractFilesFromChatHistory should extract filename from various fields', t => {
+test('extractFilesFromChatHistory should extract files without filename (filename no longer extracted from messages)', t => {
     const testCases = [
-        { originalFilename: 'file1.jpg', expected: 'file1.jpg' },
-        { name: 'file2.jpg', expected: 'file2.jpg' },
-        { filename: 'file3.jpg', expected: 'file3.jpg' },
-        { url: 'https://example.com/file4.jpg', expected: null } // Will extract from URL
+        { originalFilename: 'file1.jpg' },
+        { name: 'file2.jpg' },
+        { filename: 'file3.jpg' },
+        { url: 'https://example.com/file4.jpg' }
     ];
     
     testCases.forEach((testCase, index) => {
@@ -262,9 +261,9 @@ test('extractFilesFromChatHistory should extract filename from various fields', 
         }];
         
         const files = extractFilesFromChatHistory(chatHistory);
-        if (testCase.expected) {
-            t.is(files[0].filename, testCase.expected, `Test case ${index} failed`);
-        }
+        // Files should be extracted but without filename (displayFilename is set by CFH on upload)
+        t.is(files.length, 1, `Test case ${index} should extract file`);
+        t.is(files[0].url, testCase.url || 'https://example.com/test.jpg');
     });
 });
 

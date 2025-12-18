@@ -338,8 +338,8 @@ function uploadBlob(
             }
 
             // Prepare for streaming to cloud destinations
-            const filename = info.filename;
-            const fileExtension = path.extname(filename);
+            const displayFilename = info.filename; // Preserve original filename for metadata
+            const fileExtension = path.extname(displayFilename);
             const shortId = generateShortId();
             const uploadName = `${shortId}${fileExtension}`;
             // Extract content-type from busboy info (preserves charset if provided)
@@ -479,6 +479,7 @@ function uploadBlob(
               const result = {
                 message: `File '${uploadName}' uploaded successfully.`,
                 filename: uploadName,
+                displayFilename: displayFilename, // Store original filename in metadata
                 ...results.reduce((acc, item) => {
                   if (item.type === "primary") {
                     acc.url = item.result.url || item.result;
@@ -813,6 +814,8 @@ async function uploadFile(
     // Wait for original uploads to complete
     context.log("Waiting for all storage uploads to complete...");
     const results = await Promise.all(storagePromises);
+    // Note: filename parameter here is the uploadName (generated short ID), not the original
+    // For local file path uploads, we don't have the original filename, so originalFilename will be undefined
     const result = {
       message: `File '${uploadName}' ${saveToLocal ? "saved to folder" : "uploaded"} successfully.`,
       filename: uploadName,

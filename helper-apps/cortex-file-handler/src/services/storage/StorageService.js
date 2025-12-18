@@ -177,9 +177,10 @@ export class StorageService {
   /**
    * Delete a single file by its hash from both primary and backup storage
    * @param {string} hash - The hash of the file to delete
+   * @param {string|null} contextId - Optional context ID for context-scoped files
    * @returns {Promise<Object>} Object containing deletion results and file info
    */
-  async deleteFileByHash(hash) {
+  async deleteFileByHash(hash, contextId = null) {
     await this._initialize();
     
     if (!hash) {
@@ -190,11 +191,11 @@ export class StorageService {
 
     // Get and remove file information from Redis map
     const { getFileStoreMap, removeFromFileStoreMap } = await import("../../redis.js");
-    const hashResult = await getFileStoreMap(hash);
+    const hashResult = await getFileStoreMap(hash, false, contextId);
     
     if (hashResult) {
       // Remove from Redis
-      await removeFromFileStoreMap(hash);
+      await removeFromFileStoreMap(hash, contextId);
     }
     
     if (!hashResult) {
@@ -256,7 +257,8 @@ export class StorageService {
     return {
       hash,
       deleted: results,
-      filename: hashResult.filename
+      filename: hashResult.filename,
+      ...(hashResult.displayFilename && { displayFilename: hashResult.displayFilename })
     };
   }
 
@@ -281,12 +283,10 @@ export class StorageService {
     }
 
     // Get Redis functions
-    const { getFileStoreMap, setFileStoreMap, getScopedHashKey } = await import("../../redis.js");
+    const { getFileStoreMap, setFileStoreMap } = await import("../../redis.js");
     
-    // Look up file by hash using context-scoped key if contextId provided
-    // getFileStoreMap already handles fallback to unscoped keys
-    const scopedKey = getScopedHashKey(hash, contextId);
-    const hashResult = await getFileStoreMap(scopedKey);
+    // Look up file by hash - getFileStoreMap handles context-scoped maps automatically
+    const hashResult = await getFileStoreMap(hash, false, contextId);
     
     if (!hashResult) {
       throw new Error(`File with hash ${hash} not found`);
@@ -346,7 +346,6 @@ export class StorageService {
     }
 
     // Update Redis with new information (including shortLivedUrl and permanent flag)
-    // Use the same scoped key that was used for lookup
     // Store as permanent boolean to match file collection logic
     const newFileInfo = {
       ...hashResult,
@@ -361,12 +360,14 @@ export class StorageService {
       newFileInfo.converted = convertedResult;
     }
 
-    await setFileStoreMap(scopedKey, newFileInfo);
-    context.log?.(`Updated Redis map for hash: ${hash}${contextId ? ` (contextId: ${contextId})` : ""}`);
+    await setFileStoreMap(hash, newFileInfo, contextId);
+    const { redactContextId } = await import("../../utils/logSecurity.js");
+    context.log?.(`Updated Redis map for hash: ${hash}${contextId ? ` (contextId: ${redactContextId(contextId)})` : ""}`);
 
     return {
       hash,
       filename: hashResult.filename,
+      ...(hashResult.displayFilename && { displayFilename: hashResult.displayFilename }),
       retention: retention,
       url: hashResult.url,
       shortLivedUrl: shortLivedUrl,

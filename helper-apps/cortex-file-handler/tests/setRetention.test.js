@@ -141,8 +141,7 @@ test.serial("should set file retention to permanent", async (t) => {
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      await removeFromFileStoreMap(getScopedHashKey(testHash));
+      await removeFromFileStoreMap(testHash);
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -184,8 +183,7 @@ test.serial("should set file retention to temporary", async (t) => {
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      await removeFromFileStoreMap(getScopedHashKey(testHash));
+      await removeFromFileStoreMap(testHash);
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -220,8 +218,7 @@ test.serial("should set retention using request body parameters", async (t) => {
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      await removeFromFileStoreMap(getScopedHashKey(testHash));
+      await removeFromFileStoreMap(testHash);
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -302,8 +299,7 @@ test.serial("should update Redis map with retention information", async (t) => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // Verify Redis entry exists
-    const scopedHash = getScopedHashKey(testHash);
-    const oldEntry = await getFileStoreMap(scopedHash);
+    const oldEntry = await getFileStoreMap(testHash);
     t.truthy(oldEntry, "Redis entry should exist before setting retention");
     t.is(oldEntry.permanent, false, "New uploads should have permanent=false by default");
 
@@ -315,7 +311,7 @@ test.serial("should update Redis map with retention information", async (t) => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // Verify Redis entry is updated
-    const newEntry = await getFileStoreMap(scopedHash);
+    const newEntry = await getFileStoreMap(testHash);
     t.truthy(newEntry, "Redis entry should still exist after setting retention");
     t.is(newEntry.url, retentionResponse.data.url, "Entry should have correct URL");
     t.truthy(newEntry.shortLivedUrl, "Entry should have shortLivedUrl");
@@ -325,8 +321,7 @@ test.serial("should update Redis map with retention information", async (t) => {
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      await removeFromFileStoreMap(getScopedHashKey(testHash));
+      await removeFromFileStoreMap(testHash);
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -374,8 +369,7 @@ test.serial("should preserve file metadata after setting retention", async (t) =
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      await removeFromFileStoreMap(getScopedHashKey(testHash));
+      await removeFromFileStoreMap(testHash);
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -425,8 +419,7 @@ test.serial("should support operation=setRetention query parameter", async (t) =
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      await removeFromFileStoreMap(getScopedHashKey(testHash));
+      await removeFromFileStoreMap(testHash);
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -485,8 +478,7 @@ test.serial("should preserve GCS URL when setting retention", async (t) => {
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      await removeFromFileStoreMap(getScopedHashKey(testHash));
+      await removeFromFileStoreMap(testHash);
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -523,8 +515,7 @@ test.serial("should always include shortLivedUrl in response", async (t) => {
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      await removeFromFileStoreMap(getScopedHashKey(testHash));
+      await removeFromFileStoreMap(testHash);
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -559,9 +550,7 @@ test.serial("should set retention for context-scoped file", async (t) => {
     t.truthy(retentionResponse.data.shortLivedUrl, "Should have shortLivedUrl");
 
     // Verify Redis entry was updated with context-scoped key
-    const { getScopedHashKey } = await import("../src/redis.js");
-    const scopedKey = getScopedHashKey(testHash, contextId);
-    const updatedEntry = await getFileStoreMap(scopedKey);
+    const updatedEntry = await getFileStoreMap(testHash, false, contextId);
     t.truthy(updatedEntry, "Should have updated entry in Redis");
     t.truthy(updatedEntry.shortLivedUrl, "Should have shortLivedUrl in Redis entry");
     t.is(updatedEntry.permanent, true, "Entry should have permanent=true in Redis (matches file collection logic)");
@@ -577,9 +566,7 @@ test.serial("should set retention for context-scoped file", async (t) => {
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      const scopedKey = getScopedHashKey(testHash, contextId);
-      await removeFromFileStoreMap(scopedKey);
+      await removeFromFileStoreMap(testHash, contextId);
     } catch (e) {
       // Ignore cleanup errors
     }
@@ -616,9 +603,7 @@ test.serial("should return 404 when contextId doesn't match for setRetention", a
     fs.unlinkSync(filePath);
     // Cleanup
     try {
-      const { getScopedHashKey } = await import("../src/redis.js");
-      const scopedKey = getScopedHashKey(testHash, contextId1);
-      await removeFromFileStoreMap(scopedKey);
+      await removeFromFileStoreMap(testHash, contextId1);
     } catch (e) {
       // Ignore cleanup errors
     }

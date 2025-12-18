@@ -99,31 +99,18 @@ export default {
             return savedContext.memoryContext || "";
         }
 
-        const validSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser', 'memoryContext', 'memoryVersion', 'memoryFiles'];
-        // memoryFiles can only be accessed explicitly, not as part of memoryAll
+        const validSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser', 'memoryContext', 'memoryVersion'];
         const allSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser', 'memoryContext', 'memoryVersion'];
 
         if (section !== 'memoryAll') {
             if (validSections.includes(section)) {
                 const content = (getvWithDoubleDecryption && (await getvWithDoubleDecryption(`${contextId}-${section}`, contextKey))) || "";
-                // memoryFiles is JSON, skip processing but ensure it's a string
-                if (section === 'memoryFiles') {
-                    if (!content) {
-                        return "[]";
-                    }
-                    // If content is already an object (from getvWithDoubleDecryption parsing), stringify it
-                    if (typeof content === 'object') {
-                        return JSON.stringify(content);
-                    }
-                    // Otherwise it's already a string, return as-is
-                    return content;
-                }
                 return processMemoryContent(content, options);
             }
             return "";
         }
 
-        // otherwise, read all sections (excluding memoryFiles) and return them as a JSON object
+        // otherwise, read all sections and return them as a JSON object
         const memoryContents = {};
         for (const section of allSections) {
             if (section === 'memoryContext') continue;

@@ -78,7 +78,6 @@ export default {
                     url: fileWithShortLivedUrl.url,
                     gcs: fileWithShortLivedUrl.gcs,
                     image_url: { url: fileWithShortLivedUrl.url },
-                    originalFilename: fileWithShortLivedUrl.filename,
                     hash: fileWithShortLivedUrl.hash
                 });
 
