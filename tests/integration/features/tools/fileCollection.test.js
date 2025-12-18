@@ -894,6 +894,80 @@ test('File collection: Update file metadata', async t => {
     }
 });
 
+test('updateFileMetadata should allow updating inCollection', async (t) => {
+    const contextId = `test-${Date.now()}`;
+    
+    try {
+        // Add a file to collection
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test-incollection.pdf',
+            filename: 'test-incollection.pdf',
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        const fileId = addParsed.fileId;
+        
+        // Get the hash from the collection
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === fileId);
+        t.truthy(file);
+        const hash = file.hash;
+        
+        // Verify file is in collection (should be global by default)
+        t.truthy(file);
+        
+        // Update inCollection to a specific chat
+        const { updateFileMetadata } = await import('../../../../lib/fileUtils.js');
+        const success1 = await updateFileMetadata(contextId, hash, {
+            inCollection: ['chat-123']
+        });
+        t.is(success1, true);
+        
+        // Verify file is now only in chat-123 (not global)
+        const collection1 = await loadFileCollection(contextId, null, false);
+        const file1 = collection1.find(f => f.id === fileId);
+        // Should not appear in global collection
+        t.falsy(file1);
+        
+        // Should appear when filtering by chat-123
+        const collection2 = await loadFileCollection(contextId, null, false, 'chat-123');
+        const file2 = collection2.find(f => f.id === fileId);
+        t.truthy(file2);
+        
+        // Update inCollection back to global
+        const success2 = await updateFileMetadata(contextId, hash, {
+            inCollection: ['*']
+        });
+        t.is(success2, true);
+        
+        // Verify file is back in global collection
+        const collection3 = await loadFileCollection(contextId, null, false);
+        const file3 = collection3.find(f => f.id === fileId);
+        t.truthy(file3);
+        
+        // Update inCollection to false (remove from collection)
+        const success3 = await updateFileMetadata(contextId, hash, {
+            inCollection: false
+        });
+        t.is(success3, true);
+        
+        // Verify file is no longer in collection
+        const collection4 = await loadFileCollection(contextId, null, false);
+        const file4 = collection4.find(f => f.id === fileId);
+        t.falsy(file4);
+        
+        // Also not in chat-specific collection
+        const collection5 = await loadFileCollection(contextId, null, false, 'chat-123');
+        const file5 = collection5.find(f => f.id === fileId);
+        t.falsy(file5);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
 test('File collection: Permanent files not deleted on remove', async t => {
     const contextId = createTestContext();
     

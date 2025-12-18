@@ -282,10 +282,10 @@ async function CortexFileHandler(context, req) {
       }
 
       // Check if file already exists (using hash or URL as the key)
-      // For hash lookups, use raw hash; for URL lookups, use URL as key (unscoped only)
+      // Always respect contextId if provided, even for URL-based lookups
       const exists = hash 
         ? await getFileStoreMap(hash, false, resolvedContextId)
-        : await getFileStoreMap(remoteUrl, false, null); // URL lookups are unscoped
+        : await getFileStoreMap(remoteUrl, false, resolvedContextId);
       if (exists) {
         context.res = {
           status: 200,
@@ -295,7 +295,7 @@ async function CortexFileHandler(context, req) {
         if (hash) {
           await setFileStoreMap(hash, exists, resolvedContextId);
         } else {
-          await setFileStoreMap(remoteUrl, exists, null); // URL lookups are unscoped
+          await setFileStoreMap(remoteUrl, exists, resolvedContextId);
         }
         return;
       }
@@ -318,11 +318,11 @@ async function CortexFileHandler(context, req) {
       res.permanent = false;
 
       //Update Redis (using hash or URL as the key)
-      // Container parameter is ignored - always uses default container from env var
+      // Always respect contextId if provided, even for URL-based lookups
       if (hash) {
         await setFileStoreMap(hash, res, resolvedContextId);
       } else {
-        await setFileStoreMap(remoteUrl, res, null); // URL lookups are unscoped
+        await setFileStoreMap(remoteUrl, res, resolvedContextId);
       }
 
       // Return the file URL

@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, isTextMimeType, updateFileMetadata } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, isTextMimeType, updateFileMetadata, getCollectionCacheKey } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -293,7 +293,8 @@ export default {
             }
 
             // Determine MIME type from filename using utility function
-            const filename = foundFile.filename || 'modified.txt';
+            // Use displayFilename (user-friendly) if available, otherwise fall back to filename (CFH-managed)
+            const filename = foundFile.displayFilename || foundFile.filename || 'modified.txt';
             let mimeType = getMimeTypeFromFilename(filename, 'text/plain');
             
             // Add charset=utf-8 for text-based MIME types
@@ -351,12 +352,14 @@ export default {
                         url: uploadResult.url,
                         gcs: uploadResult.gcs || null,
                         hash: uploadResult.hash,
-                        filename: uploadResult.filename || filename, // Use CFH filename if available, otherwise preserve
+                        filename: uploadResult.filename || fileToUpdate.filename || filename, // Use CFH filename if available, otherwise preserve
                         // Cortex-managed metadata
                         id: fileToUpdate.id, // Keep same ID
+                        displayFilename: fileToUpdate.displayFilename || filename, // Preserve user-friendly filename
                         tags: fileToUpdate.tags || [],
                         notes: fileToUpdate.notes || '',
                         mimeType: fileToUpdate.mimeType || mimeType || null,
+                        inCollection: ['*'], // Mark as global chat file (available to all chats)
                         addedDate: fileToUpdate.addedDate, // Keep original added date
                         lastAccessed: new Date().toISOString(),
                         permanent: fileToUpdate.permanent || false
@@ -369,8 +372,6 @@ export default {
                     if (oldHashToDelete && oldHashToDelete !== uploadResult.hash) {
                         await redisClient.hdel(contextMapKey, oldHashToDelete);
                     }
-                    
-                    // Cache will expire naturally (5 second TTL) or can be invalidated by reloading collection
                 }
             } else if (fileToUpdate.hash) {
                 // Same hash, just update Cortex metadata (filename, lastAccessed)
@@ -398,8 +399,20 @@ export default {
             }
             
             // Get the updated file info for the result
+            // Use useCache: false to ensure we get fresh data after Redis write
             const updatedCollection = await loadFileCollection(contextId, contextKey, false);
             const updatedFile = updatedCollection.find(f => f.id === fileIdToUpdate);
+            
+            if (!updatedFile) {
+                logger.warn(`File with ID "${fileIdToUpdate}" not found in updated collection. This may indicate a timing issue.`);
+                // Fall back to using uploadResult data directly
+                const fallbackFile = {
+                    id: fileIdToUpdate,
+                    url: uploadResult.url,
+                    hash: uploadResult.hash
+                };
+                logger.info(`Using fallback file data: ${JSON.stringify(fallbackFile)}`);
+            }
 
             // Build result message
             let message;
@@ -416,13 +429,20 @@ export default {
             const result = {
                 success: true,
                 filename: filename,
-                fileId: updatedFile.id,
-                url: uploadResult.url,
+                fileId: updatedFile?.id || fileIdToUpdate,
+                url: uploadResult.url, // Always use the new URL from upload
                 gcs: uploadResult.gcs || null,
                 hash: uploadResult.hash || null,
                 ...modificationInfo,
                 message: message
             };
+            
+            // Log for debugging
+            if (!updatedFile) {
+                logger.warn(`EditFile: Could not find updated file in collection, but upload succeeded. Using uploadResult URL: ${uploadResult.url}`);
+            } else {
+                logger.info(`EditFile: Successfully updated file. New URL: ${uploadResult.url}, New hash: ${uploadResult.hash}`);
+            }
 
             resolver.tool = JSON.stringify({ toolUsed: toolName });
             return JSON.stringify(result);

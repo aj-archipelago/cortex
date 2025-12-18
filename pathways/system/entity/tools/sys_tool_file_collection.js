@@ -416,7 +416,8 @@ export default {
                 // List collection (read-only, no locking needed)
                 const { tags: filterTags = [], sortBy = 'date', limit = 50 } = args;
                 
-                const collection = await loadFileCollection(contextId, contextKey, true);
+                // Use useCache: false to ensure we get the latest file data (important after edits)
+                const collection = await loadFileCollection(contextId, contextKey, false);
                 let results = collection;
 
                 // Filter by tags if provided

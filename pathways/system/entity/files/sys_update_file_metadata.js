@@ -12,13 +12,14 @@ export default {
         tags: { type: 'array', items: { type: 'string' } }, // Optional - no default
         notes: { type: 'string' }, // Optional - no default
         mimeType: { type: 'string' }, // Optional - no default
-        permanent: { type: 'boolean' } // Optional - no default
+        permanent: { type: 'boolean' }, // Optional - no default
+        inCollection: { type: 'array', items: { type: 'string' } } // Optional - array of chat IDs, or can be boolean true/false (normalized to ['*'] or removed)
     },
     model: 'oai-gpt4o',
     isMutation: true, // Declaratively mark this as a Mutation
 
     resolver: async (_parent, args, _contextValue, _info) => {
-        const { contextId, hash, displayFilename, tags, notes, mimeType, permanent } = args;
+        const { contextId, hash, displayFilename, tags, notes, mimeType, permanent, inCollection } = args;
         
         // Validate required parameters
         if (!contextId || !hash) {
@@ -45,6 +46,11 @@ export default {
             }
             if (permanent !== undefined && permanent !== null) {
                 metadata.permanent = Boolean(permanent);
+            }
+            // inCollection can be: boolean true/false, or array of chat IDs (e.g., ['*'] for global, ['chat-123'] for specific chat)
+            // Will be normalized by updateFileMetadata: true -> ['*'], false -> undefined (removed), array -> as-is
+            if (inCollection !== undefined && inCollection !== null) {
+                metadata.inCollection = inCollection;
             }
             
             // Update metadata (only Cortex-managed fields)
