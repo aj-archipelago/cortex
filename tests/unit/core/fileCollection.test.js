@@ -341,3 +341,73 @@ test('ensureFilenameExtension should normalize extensions (jpeg->jpg, markdown->
     t.is(ensureFilenameExtension('doc.markdown', 'text/markdown'), 'doc.md');
 });
 
+// Test MIME type utilities
+test('getMimeTypeFromFilename should detect MIME types from filenames', async t => {
+    const { getMimeTypeFromFilename } = await import('../../../lib/fileUtils.js');
+    
+    t.is(getMimeTypeFromFilename('test.pdf'), 'application/pdf');
+    t.is(getMimeTypeFromFilename('image.jpg'), 'image/jpeg');
+    t.is(getMimeTypeFromFilename('script.js'), 'application/javascript');
+    t.is(getMimeTypeFromFilename('readme.md'), 'text/markdown');
+    t.is(getMimeTypeFromFilename('data.json'), 'application/json');
+    t.is(getMimeTypeFromFilename('page.html'), 'text/html');
+    t.is(getMimeTypeFromFilename('data.csv'), 'text/csv');
+    // .xyz files may have a specific MIME type from the library, so we check it's not empty
+    const xyzMime = getMimeTypeFromFilename('unknown.xyz');
+    t.truthy(xyzMime);
+    t.not(xyzMime, '');
+    t.is(getMimeTypeFromFilename('noextension'), 'application/octet-stream');
+});
+
+test('getMimeTypeFromFilename should handle paths', async t => {
+    const { getMimeTypeFromFilename } = await import('../../../lib/fileUtils.js');
+    
+    t.is(getMimeTypeFromFilename('/path/to/file.pdf'), 'application/pdf');
+    t.is(getMimeTypeFromFilename('folder/subfolder/image.png'), 'image/png');
+    t.is(getMimeTypeFromFilename('C:\\Windows\\file.txt'), 'text/plain');
+});
+
+test('getMimeTypeFromExtension should detect MIME types from extensions', async t => {
+    const { getMimeTypeFromExtension } = await import('../../../lib/fileUtils.js');
+    
+    t.is(getMimeTypeFromExtension('.pdf'), 'application/pdf');
+    t.is(getMimeTypeFromExtension('pdf'), 'application/pdf');
+    t.is(getMimeTypeFromExtension('.jpg'), 'image/jpeg');
+    t.is(getMimeTypeFromExtension('js'), 'application/javascript');
+    t.is(getMimeTypeFromExtension('.md'), 'text/markdown');
+    t.is(getMimeTypeFromExtension('.json'), 'application/json');
+    // .xyz files may have a specific MIME type from the library, so we check it's not empty
+    const xyzMime = getMimeTypeFromExtension('.xyz');
+    t.truthy(xyzMime);
+    t.not(xyzMime, '');
+});
+
+test('isTextMimeType should identify text MIME types', async t => {
+    const { isTextMimeType } = await import('../../../lib/fileUtils.js');
+    
+    // Text types
+    t.true(isTextMimeType('text/plain'));
+    t.true(isTextMimeType('text/html'));
+    t.true(isTextMimeType('text/markdown'));
+    t.true(isTextMimeType('text/csv'));
+    t.true(isTextMimeType('text/javascript'));
+    t.true(isTextMimeType('application/json'));
+    t.true(isTextMimeType('application/javascript'));
+    t.true(isTextMimeType('application/xml'));
+    t.true(isTextMimeType('application/x-sh'));
+    t.true(isTextMimeType('application/x-python'));
+    
+    // Non-text types
+    t.false(isTextMimeType('image/jpeg'));
+    t.false(isTextMimeType('image/png'));
+    t.false(isTextMimeType('application/pdf'));
+    t.false(isTextMimeType('application/octet-stream'));
+    t.false(isTextMimeType('video/mp4'));
+    t.false(isTextMimeType('audio/mpeg'));
+    
+    // Edge cases
+    t.false(isTextMimeType(null));
+    t.false(isTextMimeType(undefined));
+    t.false(isTextMimeType(''));
+});
+

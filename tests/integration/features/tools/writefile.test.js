@@ -75,7 +75,8 @@ test('WriteFile: Write and upload text file', async t => {
         // Verify it was added to file collection
         const collection = await loadFileCollection(contextId, null, false);
         t.is(collection.length, 1);
-        t.is(collection[0].filename, filename);
+        // Use displayFilename (user-friendly name) with fallback to filename (CFH-managed)
+        t.is(collection[0].displayFilename || collection[0].filename, filename);
         t.is(collection[0].url, parsed.url);
         t.truthy(collection[0].hash);
     } finally {
@@ -119,7 +120,8 @@ test('WriteFile: Write JSON file with tags and notes', async t => {
         // Verify it was added to file collection with metadata
         const collection = await loadFileCollection(contextId, null, false);
         t.is(collection.length, 1);
-        t.is(collection[0].filename, filename);
+        // Use displayFilename (user-friendly name) with fallback to filename (CFH-managed)
+        t.is(collection[0].displayFilename || collection[0].filename, filename);
         t.deepEqual(collection[0].tags, tags);
         t.is(collection[0].notes, notes);
     } finally {
@@ -312,12 +314,12 @@ test('WriteFile: Duplicate content (same hash)', async t => {
         t.is(parsed2.hash, firstHash); // Should have same hash
         
         // Both files with same hash should result in one entry (same content, CFH will find it)
-        // The second file will update the existing entry with the new filename
+        // The second file will update the existing entry with the new displayFilename
         const collection = await loadFileCollection(contextId, null, false);
         t.is(collection.length, 1); // Same hash = one entry
         t.is(collection[0].hash, firstHash); // Same hash
-        // The filename should be from the most recent write
-        t.is(collection[0].filename, filename2);
+        // The displayFilename should be from the most recent write
+        t.is(collection[0].displayFilename || collection[0].filename, filename2);
     } finally {
         await cleanup(contextId);
     }

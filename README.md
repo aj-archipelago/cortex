@@ -700,6 +700,16 @@ Each model configuration can include:
     "maxImageSize": 5242880,
     "supportsStreaming": true,
     "supportsVision": true,
+    "emulateOpenAIChatModel": "gpt-4o",
+    "emulateOpenAICompletionModel": "gpt-3.5-turbo",
+    "restStreaming": {
+        "inputParameters": {
+            "stream": false
+        },
+        "timeout": 120,
+        "enableDuplicateRequests": false,
+        "geminiSafetySettings": []
+    },
     "geminiSafetySettings": [
         {
             "category": "HARM_CATEGORY",
@@ -708,6 +718,50 @@ Each model configuration can include:
     ]
 }
 ```
+
+**REST Endpoint Emulation**: To expose a model through OpenAI-compatible REST endpoints (`/v1/chat/completions` or `/v1/completions`), add one of these properties:
+
+- `emulateOpenAIChatModel`: Exposes the model as a chat completion model (e.g., `"gpt-4o"`, `"gpt-5"`, `"claude-4-sonnet"`)
+- `emulateOpenAICompletionModel`: Exposes the model as a text completion model (e.g., `"gpt-3.5-turbo"`, `"ollama-completion"`)
+
+When `enableRestEndpoints` is `true`, Cortex automatically:
+1. Generates REST streaming pathways for models with `emulateOpenAIChatModel` or `emulateOpenAICompletionModel`
+2. Exposes them through `/v1/chat/completions` or `/v1/completions` endpoints
+3. Makes them available via the `/v1/models` endpoint
+
+**Optional `restStreaming` Configuration**: You can customize the generated REST pathways with:
+- `inputParameters`: Additional input parameters for the REST endpoint
+- `timeout`: Request timeout in seconds
+- `enableDuplicateRequests`: Enable duplicate request handling
+- `geminiSafetySettings`: Gemini-specific safety settings (for Gemini models)
+
+**Example**:
+```json
+{
+    "oai-gpt4o": {
+        "type": "OPENAI-VISION",
+        "emulateOpenAIChatModel": "gpt-4o",
+        "restStreaming": {
+            "inputParameters": {
+                "stream": false
+            },
+            "timeout": 120
+        },
+        "url": "https://api.openai.com/v1/chat/completions",
+        "headers": {
+            "Authorization": "Bearer {{OPENAI_API_KEY}}",
+            "Content-Type": "application/json"
+        },
+        "params": {
+            "model": "gpt-4o"
+        },
+        "maxTokenLength": 131072,
+        "supportsStreaming": true
+    }
+}
+```
+
+This configuration will make the model available as `gpt-4o` through the `/v1/chat/completions` endpoint when `enableRestEndpoints` is `true`.
 
 **Rate Limiting**: The `requestsPerSecond` parameter controls the rate limiting for each model endpoint. If not specified, Cortex defaults to **100 requests per second** per endpoint. This rate limiting is implemented using the Bottleneck library with a token bucket algorithm that includes:
 - Minimum time between requests (`minTime`)
@@ -719,9 +773,11 @@ Each model configuration can include:
 
 Cortex provides OpenAI-compatible REST endpoints that allow you to use various models through a standardized interface. When `enableRestEndpoints` is set to `true`, Cortex exposes the following endpoints:
 
-- `/v1/models`: List available models
-- `/v1/chat/completions`: Chat completion endpoint
-- `/v1/completions`: Text completion endpoint
+- `/v1/models`: List available models (includes all models with `emulateOpenAIChatModel` or `emulateOpenAICompletionModel`)
+- `/v1/chat/completions`: Chat completion endpoint (for models with `emulateOpenAIChatModel`)
+- `/v1/completions`: Text completion endpoint (for models with `emulateOpenAICompletionModel`)
+
+**Model Exposure**: To expose a model through these endpoints, add `emulateOpenAIChatModel` or `emulateOpenAICompletionModel` to your model configuration (see [Model Configuration](#model-configuration) above). Cortex automatically generates REST streaming pathways for these models.
 
 This means you can use Cortex with any client library or tool that supports the OpenAI API format. For example:
 
@@ -870,6 +926,8 @@ Extends Cortex with several file processing capabilities:
 - Progress reporting for file operations
 - Cleanup and deletion management
 
+For comprehensive documentation on the Cortex file system architecture, see [FILE_SYSTEM_DOCUMENTATION.md](FILE_SYSTEM_DOCUMENTATION.md).
+
 Each helper app can be deployed independently using Docker:
 ```sh
 # Build the Docker image
@@ -881,6 +939,17 @@ docker tag [app-name] [registry-url]/cortex/[app-name]
 # Push to registry (optional login may be required)
 docker push [registry-url]/cortex/[app-name]
 ```
+
+## Documentation
+
+### File System
+For detailed documentation on Cortex's file system architecture, including file upload, storage, retrieval, and management, see [FILE_SYSTEM_DOCUMENTATION.md](FILE_SYSTEM_DOCUMENTATION.md). This document covers:
+- File handler service integration
+- File collection system
+- Storage layers (Azure Blob Storage, GCS, Redis)
+- System tools that use files
+- Complete function reference
+- Best practices and error handling
 
 ## Troubleshooting
 If you encounter any issues while using Cortex, there are a few things you can do. First, check the Cortex documentation for any common errors and their solutions. If that does not help, you can also open an issue on the Cortex GitHub repository.

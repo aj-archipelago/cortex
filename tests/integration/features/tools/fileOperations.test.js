@@ -30,8 +30,12 @@ const createTestContext = () => {
 // Helper to clean up test data
 const cleanup = async (contextId, contextKey = null) => {
     try {
-        const { keyValueStorageClient } = await import('../../../../lib/keyValueStorageClient.js');
-        await keyValueStorageClient.delete(`${contextId}-memoryFiles`);
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        if (redisClient) {
+            const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+            await redisClient.del(contextMapKey);
+        }
     } catch (e) {
         // Ignore cleanup errors
     }

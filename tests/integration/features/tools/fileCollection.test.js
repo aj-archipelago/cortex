@@ -217,7 +217,8 @@ test('File collection: Remove single file', async t => {
         });
         const listParsed = JSON.parse(listResult);
         t.is(listParsed.totalFiles, 1);
-        t.false(listParsed.files.some(f => f.filename === 'file1.jpg'));
+        // Check displayFilename with fallback to filename
+        t.false(listParsed.files.some(f => (f.displayFilename || f.filename) === 'file1.jpg'));
     } finally {
         await cleanup(contextId);
     }
@@ -836,6 +837,150 @@ test('resolveFileParameter: Handle contextKey for encrypted collections', async 
         // Resolve with contextKey
         const resolved = await resolveFileParameter('encrypted-file.pdf', contextId, contextKey);
         t.is(resolved, 'https://example.com/encrypted-file.pdf');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: Update file metadata', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a file first
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/original.pdf',
+            filename: 'original.pdf',
+            tags: ['initial'],
+            notes: 'Initial notes',
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        const fileId = addParsed.fileId;
+        
+        // Get the hash from the collection
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === fileId);
+        t.truthy(file);
+        const hash = file.hash;
+        
+        // Update metadata using updateFileMetadata
+        const { updateFileMetadata } = await import('../../../../lib/fileUtils.js');
+        const success = await updateFileMetadata(contextId, hash, {
+            displayFilename: 'renamed.pdf',
+            tags: ['updated', 'document'],
+            notes: 'Updated notes',
+            permanent: true
+        });
+        
+        t.is(success, true);
+        
+        // Verify metadata was updated
+        const updatedCollection = await loadFileCollection(contextId, null, false);
+        const updatedFile = updatedCollection.find(f => f.id === fileId);
+        t.truthy(updatedFile);
+        t.is(updatedFile.displayFilename, 'renamed.pdf');
+        t.deepEqual(updatedFile.tags, ['updated', 'document']);
+        t.is(updatedFile.notes, 'Updated notes');
+        t.is(updatedFile.permanent, true);
+        
+        // Verify CFH fields were preserved
+        t.is(updatedFile.url, 'https://example.com/original.pdf');
+        t.is(updatedFile.hash, hash);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: Permanent files not deleted on remove', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a permanent file
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/permanent.pdf',
+            filename: 'permanent.pdf',
+            userMessage: 'Add permanent file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        const fileId = addParsed.fileId;
+        
+        // Mark as permanent
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === fileId);
+        const { updateFileMetadata } = await import('../../../../lib/fileUtils.js');
+        await updateFileMetadata(contextId, file.hash, { permanent: true });
+        
+        // Remove from collection
+        const removeResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            fileIds: [fileId],
+            userMessage: 'Remove permanent file'
+        });
+        
+        const removeParsed = JSON.parse(removeResult);
+        t.is(removeParsed.success, true);
+        t.is(removeParsed.removedCount, 1);
+        // Message should indicate permanent files are not deleted from cloud
+        t.true(removeParsed.message.includes('permanent') || removeParsed.message.includes('Cloud storage cleanup'));
+        
+        // Verify file was removed from collection
+        const listResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            userMessage: 'List files'
+        });
+        const listParsed = JSON.parse(listResult);
+        t.is(listParsed.totalFiles, 0);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: Sync files from chat history', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        const { syncFilesToCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Create chat history with files
+        const chatHistory = [
+            {
+                role: 'user',
+                content: [
+                    {
+                        type: 'image_url',
+                        image_url: { url: 'https://example.com/synced1.jpg' },
+                        gcs: 'gs://bucket/synced1.jpg',
+                        hash: 'hash1'
+                    },
+                    {
+                        type: 'file',
+                        url: 'https://example.com/synced2.pdf',
+                        gcs: 'gs://bucket/synced2.pdf',
+                        hash: 'hash2'
+                    }
+                ]
+            }
+        ];
+        
+        // Sync files to collection
+        await syncFilesToCollection(chatHistory, contextId, null);
+        
+        // Verify files were added
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 2);
+        t.true(collection.some(f => f.url === 'https://example.com/synced1.jpg'));
+        t.true(collection.some(f => f.url === 'https://example.com/synced2.pdf'));
+        
+        // Sync again (should update lastAccessed, not duplicate)
+        await syncFilesToCollection(chatHistory, contextId, null);
+        const collection2 = await loadFileCollection(contextId, null, false);
+        t.is(collection2.length, 2); // Should still be 2, not 4
     } finally {
         await cleanup(contextId);
     }
