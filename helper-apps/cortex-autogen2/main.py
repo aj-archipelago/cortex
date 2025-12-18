@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
@@ -95,10 +95,10 @@ async def main():
                         logger.info(f"✅ Task {task_id} processed successfully.")
                     else:
                         if continuous_mode:
-                            logger.info("⏳ No tasks in queue. Waiting 3 seconds...")
+                            logger.info(f"⏳ No tasks in queue {azure_queue.queue_name}. Waiting 3 seconds...")
                             await asyncio.sleep(3)  # Wait before checking again
                         else:
-                            logger.info("📭 No tasks in queue. Exiting (non-continuous mode).")
+                            logger.info(f"📭 No tasks in queue {azure_queue.queue_name}. Exiting (non-continuous mode).")
                             break
                             
                 except Exception as e:

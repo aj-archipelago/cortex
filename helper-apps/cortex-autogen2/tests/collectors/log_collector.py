@@ -29,6 +29,64 @@ class LogCollector:
         self.is_collecting = False
         self.process: Optional[asyncio.subprocess.Process] = None
 
+    async def collect_logs_since_task(
+        self,
+        request_id: Optional[str] = None,
+        filter_levels: Optional[List[str]] = None
+    ) -> List[Dict]:
+        """
+        Collect Docker logs that were generated during the task execution.
+        This is called after the task completes.
+
+        Args:
+            request_id: Optional request ID to filter logs for
+            filter_levels: Optional list of log levels to collect (e.g., ['ERROR', 'WARNING'])
+
+        Returns:
+            List of parsed log entries
+        """
+        self.logs = []
+
+        try:
+            # Run docker logs command to get all logs from the container
+            process = await asyncio.create_subprocess_exec(
+                'docker', 'logs', self.container_name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            stdout, stderr = await process.communicate()
+
+            # Process stdout logs
+            if stdout:
+                stdout_lines = stdout.decode('utf-8', errors='ignore').split('\n')
+                for line in stdout_lines:
+                    if line.strip():
+                        log_entry = self._parse_log_line(line)
+                        if log_entry:
+                            # Apply filters (request_id filtering disabled for logs since they're collected globally)
+                            if filter_levels and log_entry.get('level') not in filter_levels:
+                                continue
+                            self.logs.append(log_entry)
+
+            # Process stderr logs
+            if stderr:
+                stderr_lines = stderr.decode('utf-8', errors='ignore').split('\n')
+                for line in stderr_lines:
+                    if line.strip():
+                        log_entry = self._parse_log_line(line)
+                        if log_entry:
+                            # Apply filters
+                            if filter_levels and log_entry.get('level') not in filter_levels:
+                                continue
+                            self.logs.append(log_entry)
+
+        except Exception as e:
+            logger.error(f"❌ Error collecting logs: {e}")
+
+        logger.info(f"📊 Log collection completed: {len(self.logs)} log entries collected")
+        return self.logs
+
     async def start_collecting(
         self,
         request_id: Optional[str] = None,
@@ -36,7 +94,7 @@ class LogCollector:
         filter_levels: Optional[List[str]] = None
     ) -> List[Dict]:
         """
-        Start collecting Docker logs.
+        LEGACY: Start collecting Docker logs in real-time (deprecated).
 
         Args:
             request_id: Optional request ID to filter logs for
@@ -46,71 +104,8 @@ class LogCollector:
         Returns:
             List of parsed log entries
         """
-        self.logs = []
-        self.is_collecting = True
-
-        try:
-            # Start docker logs process
-            self.process = await asyncio.create_subprocess_exec(
-                'docker', 'logs', '-f', '--tail=0', self.container_name,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-
-            logger.info(f"📝 Log collector started for container: {self.container_name}")
-            if request_id:
-                logger.info(f"   Filtering for request ID: {request_id}")
-            if filter_levels:
-                logger.info(f"   Filtering levels: {', '.join(filter_levels)}")
-
-            # Read logs from both stdout and stderr
-            async def read_stream(stream, stream_name):
-                while self.is_collecting:
-                    line = await stream.readline()
-                    if not line:
-                        break
-
-                    try:
-                        line_str = line.decode('utf-8').strip()
-                        if not line_str:
-                            continue
-
-                        # Parse the log line
-                        log_entry = self._parse_log_line(line_str)
-
-                        if log_entry:
-                            # Apply filters
-                            if request_id and request_id not in line_str:
-                                continue
-
-                            if filter_levels and log_entry.get('level') not in filter_levels:
-                                continue
-
-                            self.logs.append(log_entry)
-
-                    except Exception as e:
-                        logger.debug(f"Error parsing log line: {e}")
-                        continue
-
-            # Collect logs with timeout
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(
-                        read_stream(self.process.stdout, 'stdout'),
-                        read_stream(self.process.stderr, 'stderr')
-                    ),
-                    timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                logger.info(f"⏱️  Log collection timeout after {timeout}s")
-
-        except Exception as e:
-            logger.error(f"❌ Log collection error: {e}", exc_info=True)
-        finally:
-            await self.stop_collecting()
-
-        logger.info(f"📊 Log collection completed: {len(self.logs)} log entries collected")
-        return self.logs
+        logger.warning("⚠️  start_collecting is deprecated, use collect_logs_since_task instead")
+        return await self.collect_logs_since_task(request_id, filter_levels)
 
     async def stop_collecting(self):
         """Stop collecting logs and cleanup."""

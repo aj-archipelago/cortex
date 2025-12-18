@@ -15,5 +15,19 @@ echo "🚀 Starting AutoGen Worker (CONTINUOUS_MODE=$CONTINUOUS_MODE)"
 echo "📝 Send tasks using: python send_task.py \"your task here\""
 echo ""
 
-CONTINUOUS_MODE=$CONTINUOUS_MODE python main.py
+python3 -c "
+import os
+import sys
+from dotenv import load_dotenv
+
+# Load .env file
+load_dotenv()
+
+# Set CONTINUOUS_MODE from environment or default
+if 'CONTINUOUS_MODE' not in os.environ:
+    os.environ['CONTINUOUS_MODE'] = '$CONTINUOUS_MODE'
+
+# Now run main.py
+os.execvp('python', ['python', 'main.py'] + sys.argv[1:])
+"
 

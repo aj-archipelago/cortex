@@ -15,8 +15,13 @@ redis_client = None
 def connect_redis() -> bool:
     """Check and ensure Redis connection is active - matches working version pattern"""
     global redis_client
-    
+
     redis_conn_string = os.getenv("REDIS_CONNECTION_STRING")
+
+    # If no Redis connection string is configured, disable Redis
+    if not redis_conn_string:
+        logger.warning("REDIS_CONNECTION_STRING not configured, Redis functionality will be disabled")
+        return False
 
     # Initialize client if not exists
     if redis_client is None:
@@ -61,7 +66,7 @@ def publish_request_progress(data: Dict[str, Any]) -> bool:
     if connect_redis():
         try:
             message = json.dumps(data)
-            result = redis_client.publish(os.getenv("REDIS_CHANNEL"), message)
+            result = redis_client.publish(os.getenv("REDIS_CHANNEL", "requestProgress"), message)
             try:
                 rid = data.get('requestId')
                 info = data.get('info')
@@ -95,15 +100,15 @@ class RedisPublisher:
         # Heartbeat + transient caching
         self._heartbeat_task: Optional[asyncio.Task] = None
         try:
-            # Clamp to at most 1.0s to ensure the UI gets updates every second
-            interval = float(os.getenv("PROGRESS_HEARTBEAT_INTERVAL", "1.0"))
-            if interval > 1.0:
-                interval = 1.0
+            # Use 5-second interval for heartbeats (less frequent)
+            interval = float(os.getenv("PROGRESS_HEARTBEAT_INTERVAL", "5.0"))
+            if interval > 5.0:
+                interval = 5.0
             if interval <= 0:
-                interval = 1.0
+                interval = 5.0
             self._interval_seconds = interval
         except Exception:
-            self._interval_seconds = 1.0
+            self._interval_seconds = 2.0
         # We cache only summarized progress strings (emoji sentence) with progress float
         self._transient_latest: Dict[str, Dict[str, Any]] = {}
         self._transient_all: Dict[str, List[Dict[str, Any]]] = {}
@@ -115,16 +120,11 @@ class RedisPublisher:
         self.connected = connect_redis()
         if self.connected:
             logger.info("Connected to Redis successfully")
+            # Heartbeat loop removed - set_transient_update already publishes immediately
+            # No need for redundant re-publishing loop
         else:
             logger.warning("Failed to connect to Redis")
             logger.warning("Redis progress publishing will be disabled")
-        # Start heartbeat loop once per process
-        if self._heartbeat_task is None:
-            try:
-                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
-                logger.info("Started Redis progress heartbeat task")
-            except Exception as e:
-                logger.warning(f"Failed to start heartbeat task: {e}")
     
     def publish_request_progress(self, data: Dict[str, Any]) -> bool:
         """Publish progress data to Redis channel"""
@@ -144,23 +144,38 @@ class RedisPublisher:
             
         return self.publish_request_progress(message_data)
 
-    async def set_transient_update(self, request_id: str, progress: float, info: str) -> None:
+    async def set_transient_update(self, request_id: str, progress: float, info: str, data: str = None) -> None:
         """Cache the latest summarized transient progress (short sentence with emoji).
-        Heartbeat will re-publish this every second until final. No raw chat content here."""
+        Heartbeat will re-publish this every second until final. No raw chat content here.
+        CRITICAL: Also immediately publish the update to ensure it's received even if heartbeat fails."""
         try:
             async with self._lock:
                 # Skip if already finalized
                 if self._finalized.get(request_id):
                     return
-                self._transient_latest[request_id] = {"progress": progress, "info": info, "ts": time.time()}
+                self._transient_latest[request_id] = {"progress": progress, "info": info, "data": data, "ts": time.time()}
                 lst = self._transient_all.get(request_id)
                 if lst is None:
                     lst = []
                     self._transient_all[request_id] = lst
-                lst.append({"progress": progress, "info": info, "ts": time.time()})
+                lst.append({"progress": progress, "info": info, "data": data, "ts": time.time()})
                 # Avoid unbounded growth
                 if len(lst) > 200:
                     del lst[: len(lst) - 200]
+
+            # CRITICAL FIX: Immediately publish the update (not just cache it)
+            # This ensures progress updates are received even if heartbeat fails or isn't running
+            # Use asyncio.to_thread to prevent blocking the event loop
+            try:
+                message_data = {
+                    "requestId": request_id,
+                    "progress": float(progress),
+                    "info": str(info),
+                    "data": data
+                }
+                await asyncio.to_thread(self.publish_request_progress, message_data)
+            except Exception as pub_err:
+                logger.debug(f"Immediate publish error for {request_id}: {pub_err}")
         except Exception as e:
             logger.warning(f"set_transient_update error for {request_id}: {e}")
 
@@ -195,7 +210,7 @@ class RedisPublisher:
                                     "progress": float(payload.get("progress", 0.0)),
                                     "info": str(payload.get("info", ""))
                                 }
-                                self.publish_request_progress(message_data)
+                                await asyncio.to_thread(self.publish_request_progress, message_data)
                             except Exception as pub_err:
                                 logger.debug(f"Heartbeat publish error for {rid}: {pub_err}")
                 except Exception as loop_err:
@@ -235,18 +250,8 @@ class RedisPublisher:
     async def close(self):
         """Close Redis connection gracefully"""
         global redis_client
-        # Stop heartbeat
-        if self._heartbeat_task is not None:
-            try:
-                self._heartbeat_task.cancel()
-                try:
-                    await self._heartbeat_task
-                except asyncio.CancelledError:
-                    pass
-            except Exception as e:
-                logger.debug(f"Error cancelling heartbeat task: {e}")
-            finally:
-                self._heartbeat_task = None
+        # Note: Heartbeat loop removed - set_transient_update publishes immediately
+        # No cleanup needed for heartbeat task
         if redis_client:
             try:
                 # Don't actually close the connection in non-continuous mode
@@ -269,9 +274,9 @@ async def get_redis_publisher() -> RedisPublisher:
         _redis_publisher = RedisPublisher()
         await _redis_publisher.connect()
     else:
-        # Ensure connectivity and heartbeat are active for new tasks
+        # Ensure connectivity is active for new tasks
         try:
-            if (not getattr(_redis_publisher, 'connected', False)) or getattr(_redis_publisher, '_heartbeat_task', None) is None:
+            if not getattr(_redis_publisher, 'connected', False):
                 await _redis_publisher.connect()
         except Exception:
             # Best-effort reconnect

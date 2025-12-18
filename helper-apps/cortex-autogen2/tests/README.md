@@ -7,7 +7,7 @@ Comprehensive automated testing framework for evaluating and improving the AutoG
 - ✅ **Automated Test Execution**: Run predefined test cases with zero manual intervention
 - 📊 **LLM-Based Evaluation**: Scores progress updates (0-100) and final outputs (0-100) using Cortex API
 - 📈 **Performance Metrics**: Track latency, update frequency, error rates, and more
-- 🗄️ **SQLite Storage**: All test results, scores, and metrics stored locally
+- 🗄️ **Log-Based Storage**: Metadata kept in-memory; artifacts and JSONL logs on disk (no database)
 - 💡 **Improvement Suggestions**: LLM analyzes failures and suggests code improvements
 - 📉 **Trend Analysis**: Detect quality regressions over time
 - 🖥️ **CLI Interface**: Easy-to-use command-line tool
@@ -84,9 +84,7 @@ tests/
 ├── orchestrator.py           # Main test execution engine
 ├── test_cases.yaml           # Test case definitions
 ├── database/
-│   ├── schema.sql            # SQLite database schema
-│   ├── repository.py         # Data access layer
-│   └── test_results.db       # SQLite database (gitignored)
+│   └── repository.py         # In-memory data access layer (no SQLite)
 ├── collectors/
 │   ├── progress_collector.py # Redis subscriber for progress updates
 │   └── log_collector.py      # Docker log parser
@@ -109,7 +107,7 @@ tests/
    - Progress collector subscribes to Redis for real-time updates
    - Log collector streams Docker container logs
 3. **Execution Monitoring**: Wait for task completion or timeout
-4. **Data Storage**: Store progress updates, logs, files in SQLite
+4. **Data Storage**: Store progress updates, logs, and files in per-request log folders (no database)
 5. **Metrics Calculation**: Calculate latency, frequency, error counts
 6. **LLM Evaluation**:
    - Score progress updates (frequency, clarity, accuracy)
@@ -130,17 +128,14 @@ tests/
 - **Correctness** (25 pts): Accurate data, no hallucinations
 - **Presentation** (25 pts): SAS URLs, previews, clear results
 
-## Database Schema
+## Run Telemetry (No Database)
 
-Test results are stored in `tests/database/test_results.db`:
-
-- **test_runs**: Test execution records
-- **progress_updates**: Real-time progress data
-- **logs**: Docker log entries
-- **files_created**: Generated files with SAS URLs
-- **evaluations**: LLM scores and reasoning
-- **metrics**: Performance metrics
-- **suggestions**: Improvement recommendations
+- Run metadata is held in-memory via `tests/database/repository.py`.
+- Detailed evidence lives in the per-request log folders (bind-mounted to `/tmp/coding/req_<id>/logs`):
+  - `logs.jsonl`, `messages.jsonl`, `progress_updates.jsonl`
+  - `accomplishments.log`, `agent_journey.log`
+  - Generated files under `files/` with SAS URLs captured in logs
+- History/trend commands rely on the current process data; for long-term records, read the log folders.
 
 ## Example Output
 
@@ -215,10 +210,6 @@ Extend `tests/metrics/collector.py` with additional metrics calculation logic.
 - Check Redis is running: `redis-cli ping`
 - Verify REDIS_CONNECTION_STRING in .env
 - Check Docker container is running: `docker ps`
-
-### Database errors
-- Delete and recreate: `rm tests/database/test_results.db`
-- Schema will auto-recreate on next run
 
 ### LLM evaluation fails
 - Verify CORTEX_API_KEY is set

@@ -9,11 +9,11 @@ const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
 
 if (connectionString) {
-  const queueName = process.env.AUTOGEN_MESSAGE_QUEUE || "autogen-message-queue";
-  const queueClientService = QueueServiceClient.fromConnectionString(connectionString);
-  queueClient = queueClientService.getQueueClient(queueName);
+    const queueName = process.env.AUTOGEN_MESSAGE_QUEUE || "autogen-message-queue";
+    const queueClientService = QueueServiceClient.fromConnectionString(connectionString);
+    queueClient = queueClientService.getQueueClient(queueName);
 } else {
-  logger.warn("Azure Storage connection string is not provided. Queue operations will be unavailable.");
+    logger.warn("Azure Storage connection string is not provided. Queue operations will be unavailable.");
 }
 
 async function sendMessageToQueue(data) {
@@ -78,7 +78,7 @@ export default {
             }
         }
     }],
-    
+
     executePathway: async ({args, resolver}) => {
         try {
             const { codingTask, userMessage, inputFiles, codingTaskKeywords, contextId, contextKey } = args;
@@ -123,14 +123,14 @@ export default {
 
 
             // Send the task to the queue
-            const codeRequestId = await sendMessageToQueue({ 
-                message: `${codingTask}\n\n${taskSuffix}`, 
-                contextId, 
-                keywords: codingTaskKeywords 
+            const codeRequestId = await sendMessageToQueue({
+                message: `${codingTask}\n\n${taskSuffix}`,
+                contextId,
+                keywords: codingTaskKeywords
             });
 
             // Set the tool response
-            resolver.tool = JSON.stringify({ 
+            resolver.tool = JSON.stringify({
                 toolUsed: "coding",
                 codeRequestId,
                 toolCallbackName: "coding",
