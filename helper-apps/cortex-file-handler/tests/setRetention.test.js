@@ -2,7 +2,6 @@ import test from "ava";
 import axios from "axios";
 import FormData from "form-data";
 import fs from "fs";
-import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";

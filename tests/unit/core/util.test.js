@@ -8,7 +8,6 @@ import os from 'os';
 import sinon from 'sinon';
 import { removeOldImageAndFileContent } from '../../../lib/util.js';
 import { computeFileHash, computeBufferHash, generateFileMessageContent, injectFileIntoChatHistory } from '../../../lib/fileUtils.js';
-import { axios } from '../../../lib/requestExecutor.js';
 
 // Test removeOldImageAndFileContent function
 

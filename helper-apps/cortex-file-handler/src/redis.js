@@ -25,17 +25,6 @@ export const getScopedHashKey = (hash, contextId = null) => {
   return `${hash}:ctx:${contextId}`;
 };
 
-const tryParseCtxKey = (key) => {
-  if (!key || typeof key !== "string") return null;
-  const marker = ":ctx:";
-  const idx = key.indexOf(marker);
-  if (idx === -1) return null;
-  const hash = key.slice(0, idx);
-  const contextId = key.slice(idx + marker.length);
-  if (!hash || !contextId) return null;
-  return { hash, contextId };
-};
-
 const legacyContainerKey = (hash, containerName) => {
   if (!hash || !containerName) return null;
   return `${hash}:${containerName}`;
@@ -316,7 +305,7 @@ const getFileStoreMap = async (hash, skipLazyCleanup = false, contextId = null) 
     // Backwards compatibility for unscoped keys only:
     // If unscoped hash doesn't exist, fall back to legacy hash+container key (if still present).
     // SECURITY: Context-scoped lookups NEVER fall back - they must match exactly.
-    if (!value && hash && !contextId) {
+    if (!value && !contextId) {
       const baseHash = hash;
 
       // Only allow fallback for unscoped keys (not context-scoped)

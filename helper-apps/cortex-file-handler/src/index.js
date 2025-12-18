@@ -80,7 +80,6 @@ async function CortexFileHandler(context, req) {
     load,
     restore,
     setRetention,
-    retention,
     contextId,
   } = source;
   // Container parameter is ignored - always uses default container from env var
