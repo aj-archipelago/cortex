@@ -539,6 +539,140 @@ test('EditFileByLine: Error handling - invalid line range', async t => {
     }
 });
 
+test('EditFileByLine: Works after prior SearchAndReplace edit', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Write initial file
+        const initialContent = 'Version: v1\nLine2: alpha\nLine3: bravo\nLine4: charlie';
+        const writeResult = await callPathway('sys_tool_writefile', {
+            contextId,
+            content: initialContent,
+            filename: 'smoketest-tools.txt',
+            userMessage: 'Writing file for sequential edit test'
+        });
+        
+        const writeParsed = JSON.parse(writeResult);
+        
+        if (!writeParsed.success && writeParsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        t.is(writeParsed.success, true);
+        const fileId = writeParsed.fileId || 'smoketest-tools.txt';
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // First edit: SearchAndReplace (changes hash)
+        const searchReplaceResult = await callPathway('sys_tool_editfile', {
+            contextId,
+            file: fileId,
+            oldString: 'Version: v1',
+            newString: 'Version: v2',
+            replaceAll: false,
+            userMessage: 'First edit: SearchAndReplace'
+        });
+        
+        const searchReplaceParsed = JSON.parse(searchReplaceResult);
+        t.is(searchReplaceParsed.success, true);
+        t.truthy(searchReplaceParsed.url);
+        t.truthy(searchReplaceParsed.hash);
+        
+        // Wait a moment for collection to update
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Second edit: EditFileByLine (should work after hash change)
+        const editByLineResult = await callPathway('sys_tool_editfile', {
+            contextId,
+            file: fileId, // Use same fileId - should resolve correctly after hash change
+            startLine: 3,
+            endLine: 3,
+            content: 'Line3: BRAVO_EDITED',
+            userMessage: 'Second edit: EditFileByLine after SearchAndReplace'
+        });
+        
+        const editByLineParsed = JSON.parse(editByLineResult);
+        t.is(editByLineParsed.success, true, 'EditFileByLine should work after prior SearchAndReplace edit');
+        t.is(editByLineParsed.replacedLines, 1);
+        t.is(editByLineParsed.insertedLines, 1);
+        
+        // Verify final content
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const readResult = await callPathway('sys_tool_readfile', {
+            contextId,
+            file: fileId,
+            userMessage: 'Reading final file content'
+        });
+        
+        const readParsed = JSON.parse(readResult);
+        t.is(readParsed.success, true);
+        t.true(readParsed.content.includes('Version: v2'), 'Should have v2 from SearchAndReplace');
+        t.true(readParsed.content.includes('BRAVO_EDITED'), 'Should have edited line from EditFileByLine');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('ReadTextFile: Gets fresh content after EditFileByLine', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Write initial file
+        const initialContent = 'Line1: alpha\nLine2: bravo\nLine3: charlie';
+        const writeResult = await callPathway('sys_tool_writefile', {
+            contextId,
+            content: initialContent,
+            filename: 'read-after-edit.txt',
+            userMessage: 'Writing file for read-after-edit test'
+        });
+        
+        const writeParsed = JSON.parse(writeResult);
+        
+        if (!writeParsed.success && writeParsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        t.is(writeParsed.success, true);
+        const fileId = writeParsed.fileId || 'read-after-edit.txt';
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Edit the file
+        const editResult = await callPathway('sys_tool_editfile', {
+            contextId,
+            file: fileId,
+            startLine: 2,
+            endLine: 2,
+            content: 'Line2: BRAVO_EDITED',
+            userMessage: 'Editing file'
+        });
+        
+        const editParsed = JSON.parse(editResult);
+        t.is(editParsed.success, true);
+        
+        // Wait a moment for collection to update
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Read file - should get fresh content (not cached)
+        const readResult = await callPathway('sys_tool_readfile', {
+            contextId,
+            file: fileId,
+            userMessage: 'Reading file after edit'
+        });
+        
+        const readParsed = JSON.parse(readResult);
+        t.is(readParsed.success, true);
+        t.true(readParsed.content.includes('BRAVO_EDITED'), 'ReadTextFile should return fresh content after edit');
+        t.false(readParsed.content.includes('Line2: bravo'), 'Should not have old content');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
 test('EditFileByLine: Error handling - line out of range', async t => {
     const contextId = createTestContext();
     
@@ -874,6 +1008,198 @@ test('EditFile: Old file preserved if upload fails (data integrity)', async t =>
         // 1. Upload happens first (line 304-315 in sys_tool_editfile.js)
         // 2. If upload fails, error is thrown before deletion code runs
         // 3. Old file deletion only happens after successful upload (line 317+)
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+// ========== Serialization Tests ==========
+
+test('EditFile: Concurrent edits are serialized (no race conditions)', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Write initial file with numbered lines
+        const initialContent = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
+        const writeResult = await callPathway('sys_tool_writefile', {
+            contextId,
+            content: initialContent,
+            filename: 'serialization-test.txt',
+            userMessage: 'Writing file for serialization test'
+        });
+        
+        const writeParsed = JSON.parse(writeResult);
+        
+        if (!writeParsed.success && writeParsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        t.is(writeParsed.success, true);
+        const fileId = writeParsed.fileId || 'serialization-test.txt';
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Trigger multiple concurrent edits on the same file
+        // Each edit modifies a different line to verify they all apply
+        const editPromises = [
+            callPathway('sys_tool_editfile', {
+                contextId,
+                file: fileId,
+                startLine: 1,
+                endLine: 1,
+                content: 'Line 1: EDIT_A',
+                userMessage: 'Concurrent edit A'
+            }),
+            callPathway('sys_tool_editfile', {
+                contextId,
+                file: fileId,
+                startLine: 2,
+                endLine: 2,
+                content: 'Line 2: EDIT_B',
+                userMessage: 'Concurrent edit B'
+            }),
+            callPathway('sys_tool_editfile', {
+                contextId,
+                file: fileId,
+                startLine: 3,
+                endLine: 3,
+                content: 'Line 3: EDIT_C',
+                userMessage: 'Concurrent edit C'
+            }),
+            callPathway('sys_tool_editfile', {
+                contextId,
+                file: fileId,
+                startLine: 4,
+                endLine: 4,
+                content: 'Line 4: EDIT_D',
+                userMessage: 'Concurrent edit D'
+            })
+        ];
+        
+        // Execute all edits concurrently
+        const editResults = await Promise.all(editPromises);
+        
+        // Verify all edits succeeded
+        const editParsed = editResults.map(r => JSON.parse(r));
+        editParsed.forEach((result, index) => {
+            t.is(result.success, true, `Edit ${String.fromCharCode(65 + index)} should succeed`);
+        });
+        
+        // Wait a moment for collection to update
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Read the final file content
+        const readResult = await callPathway('sys_tool_readfile', {
+            contextId,
+            file: fileId,
+            userMessage: 'Reading final file after concurrent edits'
+        });
+        
+        const readParsed = JSON.parse(readResult);
+        t.is(readParsed.success, true);
+        
+        // Verify all edits were applied (serialization ensures no lost updates)
+        const lines = readParsed.content.split('\n');
+        t.is(lines[0], 'Line 1: EDIT_A', 'Line 1 should have edit A');
+        t.is(lines[1], 'Line 2: EDIT_B', 'Line 2 should have edit B');
+        t.is(lines[2], 'Line 3: EDIT_C', 'Line 3 should have edit C');
+        t.is(lines[3], 'Line 4: EDIT_D', 'Line 4 should have edit D');
+        t.is(lines[4], 'Line 5', 'Line 5 should be unchanged');
+        
+        // Verify file has exactly 5 lines (no corruption from concurrent edits)
+        t.is(readParsed.totalLines, 5, 'File should have exactly 5 lines');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('EditFile: Sequential edits maintain order (serialization verification)', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Write initial file
+        const initialContent = 'Version: 0';
+        const writeResult = await callPathway('sys_tool_writefile', {
+            contextId,
+            content: initialContent,
+            filename: 'order-test.txt',
+            userMessage: 'Writing file for order test'
+        });
+        
+        const writeParsed = JSON.parse(writeResult);
+        
+        if (!writeParsed.success && writeParsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        t.is(writeParsed.success, true);
+        const fileId = writeParsed.fileId || 'order-test.txt';
+        
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Trigger multiple concurrent edits that each append to the file
+        // If serialization works, each edit should see the previous one's changes
+        const editPromises = [
+            callPathway('sys_tool_editfile', {
+                contextId,
+                file: fileId,
+                startLine: 1,
+                endLine: 1,
+                content: 'Version: 0\nEdit: 1',
+                userMessage: 'Edit 1'
+            }),
+            callPathway('sys_tool_editfile', {
+                contextId,
+                file: fileId,
+                startLine: 1,
+                endLine: 2,
+                content: 'Version: 0\nEdit: 1\nEdit: 2',
+                userMessage: 'Edit 2'
+            }),
+            callPathway('sys_tool_editfile', {
+                contextId,
+                file: fileId,
+                startLine: 1,
+                endLine: 3,
+                content: 'Version: 0\nEdit: 1\nEdit: 2\nEdit: 3',
+                userMessage: 'Edit 3'
+            })
+        ];
+        
+        // Execute all edits concurrently
+        const editResults = await Promise.all(editPromises);
+        
+        // All should succeed (serialization prevents conflicts)
+        const editParsed = editResults.map(r => JSON.parse(r));
+        editParsed.forEach((result, index) => {
+            t.is(result.success, true, `Edit ${index + 1} should succeed`);
+        });
+        
+        // Wait for collection to update
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Read final content
+        const readResult = await callPathway('sys_tool_readfile', {
+            contextId,
+            file: fileId,
+            userMessage: 'Reading final file'
+        });
+        
+        const readParsed = JSON.parse(readResult);
+        t.is(readParsed.success, true);
+        
+        // Verify final content - should have all edits applied in order
+        // Since edits are serialized, the last one to complete should have the final state
+        const lines = readParsed.content.split('\n');
+        t.true(lines.length >= 3, 'File should have at least 3 lines');
+        t.true(readParsed.content.includes('Version: 0'), 'Should contain original content');
+        t.true(readParsed.content.includes('Edit: 1'), 'Should contain edit 1');
+        t.true(readParsed.content.includes('Edit: 2'), 'Should contain edit 2');
+        t.true(readParsed.content.includes('Edit: 3'), 'Should contain edit 3');
     } finally {
         await cleanup(contextId);
     }

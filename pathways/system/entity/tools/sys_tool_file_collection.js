@@ -2,7 +2,7 @@
 // Tool pathway that manages user file collections (add, search, list files)
 // Uses Redis hash maps (FileStoreMap:ctx:<contextId>) for storage
 import logger from '../../../../lib/logger.js';
-import { addFileToCollection, loadFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata } from '../../../../lib/fileUtils.js';
+import { addFileToCollection, loadFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -239,9 +239,14 @@ export default {
                 
                 // Filter and sort results (for display only, not modifying)
                 let results = updatedFiles.filter(file => {
-                    const displayFilename = file.displayFilename || '';
+                    // Fallback to filename if displayFilename is not set
+                    const displayFilename = file.displayFilename || file.filename || '';
+                    const filename = file.filename || '';
                     
-                    const filenameMatch = displayFilename.toLowerCase().includes(queryLower);
+                    // Check both displayFilename and filename for matches
+                    // (displayFilename may be different from filename, so check both)
+                    const filenameMatch = displayFilename.toLowerCase().includes(queryLower) || 
+                                         (filename && filename !== displayFilename && filename.toLowerCase().includes(queryLower));
                     const notesMatch = file.notes && file.notes.toLowerCase().includes(queryLower);
                     const tagMatch = Array.isArray(file.tags) && file.tags.some(tag => tag.toLowerCase().includes(queryLower));
                     
@@ -358,12 +363,11 @@ export default {
                     for (const fileInfo of hashesToDelete) {
                         await redisClient.hdel(contextMapKey, fileInfo.hash);
                     }
-                    
-                    // Invalidate cache
-                    const { getCollectionCacheKey } = await import('../../../../lib/fileUtils.js');
-                    const cacheKey = getCollectionCacheKey(contextId, contextKey);
-                    // Cache is in fileUtils, we'll let it expire naturally
                 }
+                
+                // Always invalidate cache immediately so list operations reflect removals
+                // (even if Redis operations failed, cache might be stale)
+                invalidateFileCollectionCache(contextId, contextKey);
 
                 // Delete files from cloud storage ASYNC (fire and forget, but log errors)
                 // We do this after updating collection so user gets fast response and files are "gone" from UI immediately

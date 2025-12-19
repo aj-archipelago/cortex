@@ -175,6 +175,49 @@ test('File collection: Search files', async t => {
     }
 });
 
+test('File collection: Search by filename when displayFilename not set', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file with only filename (no displayFilename)
+        // This tests the bug fix where search only checked displayFilename
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/smoketest-tools.txt',
+            filename: 'smoketest-tools.txt',
+            tags: ['smoketest', 'text'],
+            notes: 'Created to test SearchFileCollection',
+            userMessage: 'Add smoketest file'
+        });
+        
+        // Search by filename - should find it even if displayFilename not set
+        const result1 = await callPathway('sys_tool_file_collection', {
+            contextId,
+            query: 'smoketest',
+            userMessage: 'Search for smoketest'
+        });
+        
+        const parsed1 = JSON.parse(result1);
+        t.is(parsed1.success, true);
+        t.is(parsed1.count, 1);
+        t.true(parsed1.files[0].displayFilename === 'smoketest-tools.txt' || 
+               parsed1.files[0].filename === 'smoketest-tools.txt');
+        
+        // Search by full filename
+        const result2 = await callPathway('sys_tool_file_collection', {
+            contextId,
+            query: 'smoketest-tools',
+            userMessage: 'Search for smoketest-tools'
+        });
+        
+        const parsed2 = JSON.parse(result2);
+        t.is(parsed2.success, true);
+        t.is(parsed2.count, 1);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
 test('File collection: Remove single file', async t => {
     const contextId = createTestContext();
     
@@ -210,7 +253,7 @@ test('File collection: Remove single file', async t => {
         t.is(parsed.removedFiles[0].displayFilename, 'file1.jpg');
         t.true(parsed.message.includes('Cloud storage cleanup started in background'));
         
-        // Verify it was removed
+        // Verify it was removed (cache should be invalidated immediately)
         const listResult = await callPathway('sys_tool_file_collection', {
             contextId,
             userMessage: 'List files'
@@ -219,6 +262,60 @@ test('File collection: Remove single file', async t => {
         t.is(listParsed.totalFiles, 1);
         // Check displayFilename with fallback to filename
         t.false(listParsed.files.some(f => (f.displayFilename || f.filename) === 'file1.jpg'));
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: Remove file - cache invalidation', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add files
+        const addResult1 = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/file1.jpg',
+            filename: 'file1.jpg',
+            userMessage: 'Add file 1'
+        });
+        const file1Id = JSON.parse(addResult1).fileId;
+        
+        const addResult2 = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/file2.pdf',
+            filename: 'file2.pdf',
+            userMessage: 'Add file 2'
+        });
+        const file2Id = JSON.parse(addResult2).fileId;
+        
+        // Verify both files are in collection
+        const listBefore = await callPathway('sys_tool_file_collection', {
+            contextId,
+            userMessage: 'List files before removal'
+        });
+        const listBeforeParsed = JSON.parse(listBefore);
+        t.is(listBeforeParsed.totalFiles, 2);
+        
+        // Remove file1
+        const removeResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            fileIds: [file1Id],
+            userMessage: 'Remove file 1'
+        });
+        
+        const removeParsed = JSON.parse(removeResult);
+        t.is(removeParsed.success, true);
+        t.is(removeParsed.removedCount, 1);
+        
+        // Immediately list files - should reflect removal (cache invalidation test)
+        const listAfter = await callPathway('sys_tool_file_collection', {
+            contextId,
+            userMessage: 'List files after removal'
+        });
+        const listAfterParsed = JSON.parse(listAfter);
+        t.is(listAfterParsed.totalFiles, 1, 'List should immediately reflect removal (cache invalidated)');
+        t.false(listAfterParsed.files.some(f => (f.displayFilename || f.filename) === 'file1.jpg'));
+        t.true(listAfterParsed.files.some(f => (f.displayFilename || f.filename) === 'file2.pdf'));
     } finally {
         await cleanup(contextId);
     }
