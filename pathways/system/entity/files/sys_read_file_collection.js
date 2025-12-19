@@ -1,5 +1,6 @@
 // sys_read_file_collection.js
-// GraphQL pathway for reading file collections (replaces sys_read_memory with section: "memoryFiles")
+// GraphQL pathway for reading file collections
+// File collections are stored in Redis hash maps (FileStoreMap:ctx:<contextId>
 // Returns file collection as JSON array string for backward compatibility with Labeeb
 
 import { loadFileCollection } from '../../../../lib/fileUtils.js';
