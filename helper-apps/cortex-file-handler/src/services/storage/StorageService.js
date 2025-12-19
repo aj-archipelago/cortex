@@ -302,54 +302,70 @@ export class StorageService {
     // Always use primary provider - single container only
     const provider = this.primaryProvider;
     
-    // Extract blob name from URL
-    const blobName = provider.extractBlobNameFromUrl(hashResult.url);
-    if (!blobName) {
-      throw new Error(`Could not extract blob name from URL: ${hashResult.url}`);
-    }
+    // Check if provider supports blob tag operations (Azure only)
+    const supportsBlobTags = typeof provider.extractBlobNameFromUrl === 'function' && 
+                             typeof provider.updateBlobTags === 'function' &&
+                             typeof provider.getBlobClient === 'function' &&
+                             typeof provider.generateShortLivedSASToken === 'function';
+    
+    let shortLivedUrl = hashResult.shortLivedUrl || hashResult.url;
+    let convertedResult = hashResult.converted || null;
 
-    // Update blob index tag
-    // Note: This may fail in Azurite (local emulator) which doesn't fully support blob tags
-    // We'll continue with the operation even if tag update fails
-    context.log?.(`Updating blob index tag for ${blobName} to ${retention}`);
-    try {
-      await provider.updateBlobTags(blobName, retention);
-    } catch (error) {
-      // Log warning but continue - blob tags may not be supported in test environments (e.g., Azurite)
-      context.log?.(`Warning: Failed to update blob tags for ${blobName}: ${error.message}. Continuing with operation.`);
-    }
+    if (supportsBlobTags) {
+      // Extract blob name from URL
+      const blobName = provider.extractBlobNameFromUrl(hashResult.url);
+      if (!blobName) {
+        throw new Error(`Could not extract blob name from URL: ${hashResult.url}`);
+      }
 
-    // Generate new short-lived URL
-    const { containerClient } = await provider.getBlobClient();
-    const shortLivedSasToken = provider.generateShortLivedSASToken(containerClient, blobName, 5);
-    const urlObj = new URL(hashResult.url);
-    const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
-    const shortLivedUrl = `${baseUrl}?${shortLivedSasToken}`;
+      // Update blob index tag
+      // Note: This may fail in Azurite (local emulator) which doesn't fully support blob tags
+      // We'll continue with the operation even if tag update fails
+      context.log?.(`Updating blob index tag for ${blobName} to ${retention}`);
+      try {
+        await provider.updateBlobTags(blobName, retention);
+      } catch (error) {
+        // Log warning but continue - blob tags may not be supported in test environments (e.g., Azurite)
+        context.log?.(`Warning: Failed to update blob tags for ${blobName}: ${error.message}. Continuing with operation.`);
+      }
 
-    // Handle converted file if it exists
-    let convertedResult = null;
-    if (hashResult.converted?.url) {
-      context.log?.(`Updating blob index tag for converted file to ${retention}`);
-      const convertedBlobName = provider.extractBlobNameFromUrl(hashResult.converted.url);
-      if (convertedBlobName) {
-        try {
-          await provider.updateBlobTags(convertedBlobName, retention);
-          const convertedUrlObj = new URL(hashResult.converted.url);
-          const convertedBaseUrl = `${convertedUrlObj.protocol}//${convertedUrlObj.host}${convertedUrlObj.pathname}`;
-          const convertedShortLivedSasToken = provider.generateShortLivedSASToken(containerClient, convertedBlobName, 5);
-          const convertedShortLivedUrl = `${convertedBaseUrl}?${convertedShortLivedSasToken}`;
-          convertedResult = {
-            url: hashResult.converted.url,
-            shortLivedUrl: convertedShortLivedUrl,
-            gcs: hashResult.converted.gcs
-          };
-        } catch (error) {
-          context.log?.(`Warning: Failed to update converted file tag: ${error.message}`);
+      // Generate new short-lived URL
+      const { containerClient } = await provider.getBlobClient();
+      const shortLivedSasToken = provider.generateShortLivedSASToken(containerClient, blobName, 5);
+      const urlObj = new URL(hashResult.url);
+      const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
+      shortLivedUrl = `${baseUrl}?${shortLivedSasToken}`;
+
+      // Handle converted file if it exists
+      if (hashResult.converted?.url) {
+        context.log?.(`Updating blob index tag for converted file to ${retention}`);
+        const convertedBlobName = provider.extractBlobNameFromUrl(hashResult.converted.url);
+        if (convertedBlobName) {
+          try {
+            await provider.updateBlobTags(convertedBlobName, retention);
+            const convertedUrlObj = new URL(hashResult.converted.url);
+            const convertedBaseUrl = `${convertedUrlObj.protocol}//${convertedUrlObj.host}${convertedUrlObj.pathname}`;
+            const convertedShortLivedSasToken = provider.generateShortLivedSASToken(containerClient, convertedBlobName, 5);
+            const convertedShortLivedUrl = `${convertedBaseUrl}?${convertedShortLivedSasToken}`;
+            convertedResult = {
+              url: hashResult.converted.url,
+              shortLivedUrl: convertedShortLivedUrl,
+              gcs: hashResult.converted.gcs
+            };
+          } catch (error) {
+            context.log?.(`Warning: Failed to update converted file tag: ${error.message}`);
+            convertedResult = hashResult.converted;
+          }
+        } else {
           convertedResult = hashResult.converted;
         }
-      } else {
-        convertedResult = hashResult.converted;
       }
+    } else {
+      // For providers that don't support blob tags (e.g., LocalStorageProvider),
+      // just use the existing URLs - retention is tracked in Redis only
+      context.log?.(`Provider does not support blob tags, updating Redis only`);
+      shortLivedUrl = hashResult.shortLivedUrl || hashResult.url;
+      convertedResult = hashResult.converted || null;
     }
 
     // Update Redis with new information (including shortLivedUrl and permanent flag)
