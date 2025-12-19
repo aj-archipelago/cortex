@@ -136,7 +136,12 @@ export const AZURITE_ACCOUNT_NAME = "devstoreaccount1";
 // Get single container name from environment variable
 // CFH operates on a single Azure container and single GCS bucket
 export const getContainerName = () => {
-  const envValue = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
+  const envValue = process.env.AZURE_STORAGE_CONTAINER_NAME;
+  
+  // Default to cortextempfiles if not set, empty, or the string "undefined"
+  if (!envValue || (typeof envValue === 'string' && envValue.trim() === "") || envValue === "undefined") {
+    return "cortextempfiles";
+  }
   
   // Handle legacy comma-separated values (take the last one)
   if (envValue.includes(",")) {
@@ -151,6 +156,8 @@ export const getContainerName = () => {
       );
       return containerName;
     }
+    // If all containers were empty after splitting, fall back to default
+    return "cortextempfiles";
   }
   
   return envValue;
@@ -161,5 +168,6 @@ export const getDefaultContainerName = () => {
   return getContainerName();
 };
 
+// Export constant - evaluated at module load time, but getContainerName() handles defaults
 export const AZURE_STORAGE_CONTAINER_NAME = getContainerName();
 export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";

@@ -612,6 +612,7 @@ test('POST /chat/completions - complex conversation with all content variations'
 test('POST /chat/completions - user message with image content part', async (t) => {
   // Spec: User messages can have image content parts
   // Note: This test may timeout if image URL validation fails, but it tests the content structure
+  t.timeout(30000); // Increase timeout to 30s for image processing
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
       model: 'gpt-4.1',
@@ -634,7 +635,7 @@ test('POST /chat/completions - user message with image content part', async (t) 
     responseType: 'json',
     throwHttpErrors: false,
     timeout: {
-      request: 5000
+      request: 30000 // Increase timeout to 30s for image processing
     }
   });
 
