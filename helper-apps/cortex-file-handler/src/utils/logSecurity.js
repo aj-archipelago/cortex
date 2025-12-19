@@ -40,7 +40,7 @@ export function redactSasToken(url) {
 }
 
 /**
- * Recursively sanitizes an object by redacting SAS tokens from URLs
+ * Recursively sanitizes an object by redacting SAS tokens from URLs and contextIds
  * @param {any} obj - The object to sanitize
  * @returns {any} - Sanitized copy of the object
  */
@@ -58,7 +58,12 @@ export function sanitizeForLogging(obj) {
   if (typeof obj === 'object') {
     const sanitized = {};
     for (const [key, value] of Object.entries(obj)) {
-      sanitized[key] = sanitizeForLogging(value);
+      // Redact contextId fields specifically
+      if (key === 'contextId' && typeof value === 'string') {
+        sanitized[key] = redactContextId(value);
+      } else {
+        sanitized[key] = sanitizeForLogging(value);
+      }
     }
     return sanitized;
   }

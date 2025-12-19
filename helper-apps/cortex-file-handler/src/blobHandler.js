@@ -9,6 +9,7 @@ import { PassThrough } from "stream";
 import { Storage } from "@google-cloud/storage";
 import { BlobServiceClient } from "@azure/storage-blob";
 import axios from "axios";
+import mime from "mime-types";
 
 import {
   sanitizeFilename,
@@ -492,6 +493,11 @@ function uploadBlob(
               };
               if (hash) result.hash = hash;
               
+              // Store MIME type from upload (used by Cortex for file type detection)
+              if (contentType) {
+                result.mimeType = contentType;
+              }
+              
               // Extract contextId from form fields if present
               if (fields && fields.contextId) {
                 result.contextId = fields.contextId;
@@ -832,6 +838,10 @@ async function uploadFile(
     if (hash) {
       result.hash = hash;
     }
+    
+    // Store MIME type determined from filename (used by Cortex for file type detection)
+    const mimeType = mime.lookup(uploadName) || 'application/octet-stream';
+    result.mimeType = mimeType;
     
     // Extract contextId from form fields if present (only available for multipart uploads)
     if (fields && fields.contextId) {

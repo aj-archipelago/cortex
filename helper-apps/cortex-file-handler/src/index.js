@@ -19,7 +19,7 @@ import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageService } from "./services/storage/StorageService.js";
 import { uploadBlob } from "./blobHandler.js";
 import { generateShortId } from "./utils/filenameUtils.js";
-import { redactContextId } from "./utils/logSecurity.js";
+import { redactContextId, redactSasToken, sanitizeForLogging } from "./utils/logSecurity.js";
 
 // Hybrid cleanup approach:
 // 1. Lazy cleanup: Check file existence when cache entries are accessed (in getFileStoreMap)
@@ -117,7 +117,7 @@ async function CortexFileHandler(context, req) {
                 : "upload";
 
   context.log(
-    `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ""}${uri ? `uri: ${uri}, ` : ""}${hash ? `hash: ${hash}, ` : ""}${resolvedContextId ? `contextId: ${redactContextId(resolvedContextId)}, ` : ""}operation: ${operation}`,
+    `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ""}${uri ? `uri: ${redactSasToken(uri)}, ` : ""}${hash ? `hash: ${hash}, ` : ""}${resolvedContextId ? `contextId: ${redactContextId(resolvedContextId)}, ` : ""}operation: ${operation}`,
   );
 
   // Trigger lightweight age-based cleanup (runs every 100 requests)
@@ -268,7 +268,7 @@ async function CortexFileHandler(context, req) {
 
   const remoteUrl = shouldFetchRemote;
   if (req.method.toLowerCase() === "get" && remoteUrl) {
-    context.log(`Remote file: ${remoteUrl}`);
+    context.log(`Remote file: ${redactSasToken(remoteUrl)}`);
     let filename;
     try {
       // Validate URL format and accessibility
@@ -381,7 +381,7 @@ async function CortexFileHandler(context, req) {
       context.log(`File exists in map: ${hash}${resolvedContextId ? ` (contextId: ${redactContextId(resolvedContextId)})` : ""}`);
 
       // Log the URL retrieved from Redis before checking existence
-      context.log(`Checking existence of URL from Redis: ${hashResult?.url}`);
+      context.log(`Checking existence of URL from Redis: ${redactSasToken(hashResult?.url || '')}`);
 
       try {
         // Check primary storage first
@@ -858,9 +858,11 @@ async function CortexFileHandler(context, req) {
     return;
   }
 
+  // Sanitize result before logging to redact SAS tokens and contextIds
+  const sanitizedResult = sanitizeForLogging(result);
   console.log(
     "result:",
-    result
+    sanitizedResult
       .map((item) =>
         typeof item === "object" ? JSON.stringify(item, null, 2) : item,
       )
