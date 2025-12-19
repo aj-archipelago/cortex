@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadFileCollection, saveFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, isTextMimeType, updateFileMetadata, getCollectionCacheKey } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -365,8 +365,8 @@ export default {
                         permanent: fileToUpdate.permanent || false
                     };
                     
-                    // Write new entry (atomic operation)
-                    await redisClient.hset(contextMapKey, uploadResult.hash, JSON.stringify(fileData));
+                    // Write new entry (atomic operation) - encryption happens in helper
+                    await writeFileDataToRedis(redisClient, contextMapKey, uploadResult.hash, fileData, contextKey);
                     
                     // If hash changed, remove old entry
                     if (oldHashToDelete && oldHashToDelete !== uploadResult.hash) {
@@ -378,7 +378,7 @@ export default {
                 await updateFileMetadata(contextId, fileToUpdate.hash, {
                     filename: filename,
                     lastAccessed: new Date().toISOString()
-                });
+                }, contextKey);
             }
 
             // Now it is safe to delete the old file version (after lock succeeds)

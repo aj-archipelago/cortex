@@ -2,7 +2,7 @@
 // Tool pathway that manages user file collections (add, search, list files)
 // Uses Redis hash maps (FileStoreMap:ctx:<contextId>) for storage
 import logger from '../../../../lib/logger.js';
-import { addFileToCollection, loadFileCollection, saveFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata } from '../../../../lib/fileUtils.js';
+import { addFileToCollection, loadFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -230,7 +230,7 @@ export default {
                         // Update lastAccessed directly (atomic operation)
                         await updateFileMetadata(contextId, file.hash, {
                             lastAccessed: now
-                        });
+                        }, contextKey);
                     }
                 }
                 

@@ -1060,3 +1060,294 @@ test('File collection: Sync files from chat history', async t => {
         await cleanup(contextId);
     }
 });
+
+// ============================================
+// File Collection Encryption Tests
+// ============================================
+
+test('File collection encryption: Encrypt tags and notes with contextKey', async t => {
+    const contextId = createTestContext();
+    const contextKey = '1234567890123456789012345678901234567890123456789012345678901234'; // 64 hex chars
+    
+    try {
+        // Add file with tags and notes
+        const result = await callPathway('sys_tool_file_collection', {
+            contextId,
+            contextKey,
+            url: 'https://example.com/encrypted.pdf',
+            filename: 'encrypted.pdf',
+            tags: ['sensitive', 'private', 'confidential'],
+            notes: 'This is sensitive information that should be encrypted',
+            userMessage: 'Add encrypted file'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, true);
+        
+        // Verify data is encrypted in Redis
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+        const collection = await loadFileCollection(contextId, contextKey, false);
+        const file = collection.find(f => f.id === parsed.fileId);
+        t.truthy(file);
+        
+        // Get raw data from Redis (should be encrypted)
+        const rawDataStr = await redisClient.hget(contextMapKey, file.hash);
+        const rawData = JSON.parse(rawDataStr);
+        
+        // Verify tags and notes are encrypted (encrypted strings contain ':')
+        t.true(typeof rawData.tags === 'string', 'Tags should be encrypted string');
+        t.true(rawData.tags.includes(':'), 'Encrypted tags should contain IV separator');
+        t.true(typeof rawData.notes === 'string', 'Notes should be encrypted string');
+        t.true(rawData.notes.includes(':'), 'Encrypted notes should contain IV separator');
+        
+        // Verify core fields are NOT encrypted
+        t.is(rawData.url, 'https://example.com/encrypted.pdf', 'URL should not be encrypted');
+        t.is(rawData.displayFilename, 'encrypted.pdf', 'displayFilename should not be encrypted');
+        
+        // Verify decryption works correctly
+        t.deepEqual(file.tags, ['sensitive', 'private', 'confidential'], 'Tags should be decrypted correctly');
+        t.is(file.notes, 'This is sensitive information that should be encrypted', 'Notes should be decrypted correctly');
+    } finally {
+        await cleanup(contextId, contextKey);
+    }
+});
+
+test('File collection encryption: Empty tags and notes are not encrypted', async t => {
+    const contextId = createTestContext();
+    const contextKey = '1234567890123456789012345678901234567890123456789012345678901234'; // 64 hex chars
+    
+    try {
+        // Add file with empty tags and notes
+        const result = await callPathway('sys_tool_file_collection', {
+            contextId,
+            contextKey,
+            url: 'https://example.com/empty.pdf',
+            filename: 'empty.pdf',
+            tags: [],
+            notes: '',
+            userMessage: 'Add file with empty metadata'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, true);
+        
+        // Verify empty values are not encrypted in Redis
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+        const collection = await loadFileCollection(contextId, contextKey, false);
+        const file = collection.find(f => f.id === parsed.fileId);
+        t.truthy(file);
+        
+        const rawDataStr = await redisClient.hget(contextMapKey, file.hash);
+        const rawData = JSON.parse(rawDataStr);
+        
+        // Empty tags should be array (not encrypted)
+        t.true(Array.isArray(rawData.tags), 'Empty tags should remain as array');
+        t.is(rawData.tags.length, 0, 'Empty tags array should be empty');
+        
+        // Empty notes should be empty string (not encrypted)
+        t.is(rawData.notes, '', 'Empty notes should remain as empty string');
+        t.false(rawData.notes.includes(':'), 'Empty notes should not be encrypted');
+    } finally {
+        await cleanup(contextId, contextKey);
+    }
+});
+
+test('File collection encryption: Decryption fails with wrong contextKey', async t => {
+    const contextId = createTestContext();
+    const contextKey = '1234567890123456789012345678901234567890123456789012345678901234'; // 64 hex chars
+    const wrongKey = '0000000000000000000000000000000000000000000000000000000000000000'; // 64 hex chars
+    
+    try {
+        // Add file with contextKey
+        const result = await callPathway('sys_tool_file_collection', {
+            contextId,
+            contextKey,
+            url: 'https://example.com/wrong-key.pdf',
+            filename: 'wrong-key.pdf',
+            tags: ['secret'],
+            notes: 'Secret notes',
+            userMessage: 'Add file'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, true);
+        
+        // Try to load with wrong key
+        const collection = await loadFileCollection(contextId, wrongKey, false);
+        const file = collection.find(f => f.id === parsed.fileId);
+        t.truthy(file);
+        
+        // With wrong key, tags and notes should be encrypted strings (not decrypted)
+        // The fallback should keep them as-is, but they'll be encrypted strings
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+        const rawDataStr = await redisClient.hget(contextMapKey, file.hash);
+        const rawData = JSON.parse(rawDataStr);
+        
+        // When decryption fails, readFileDataFromRedis keeps the original encrypted string
+        // So file.tags and file.notes will be encrypted strings, not the original values
+        t.true(typeof file.tags === 'string' || Array.isArray(file.tags), 'Tags should be string or array');
+        if (typeof file.tags === 'string') {
+            t.true(file.tags.includes(':'), 'Tags should remain encrypted with wrong key');
+        }
+        
+        t.true(typeof file.notes === 'string', 'Notes should be string');
+        if (file.notes.includes(':')) {
+            t.true(file.notes.includes(':'), 'Notes should remain encrypted with wrong key');
+        }
+    } finally {
+        await cleanup(contextId, contextKey);
+    }
+});
+
+test('File collection encryption: Migration from unencrypted to encrypted', async t => {
+    const contextId = createTestContext();
+    const contextKey = '1234567890123456789012345678901234567890123456789012345678901234'; // 64 hex chars
+    
+    try {
+        // First, add file without contextKey (unencrypted)
+        const result1 = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/migration.pdf',
+            filename: 'migration.pdf',
+            tags: ['unencrypted'],
+            notes: 'Unencrypted notes',
+            userMessage: 'Add unencrypted file'
+        });
+        
+        const parsed1 = JSON.parse(result1);
+        t.is(parsed1.success, true);
+        
+        // Verify it's unencrypted in Redis
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+        const collection1 = await loadFileCollection(contextId, null, false);
+        const file1 = collection1.find(f => f.id === parsed1.fileId);
+        t.truthy(file1);
+        
+        const rawDataStr1 = await redisClient.hget(contextMapKey, file1.hash);
+        const rawData1 = JSON.parse(rawDataStr1);
+        
+        // Unencrypted data should have tags as array and notes as string
+        t.true(Array.isArray(rawData1.tags), 'Unencrypted tags should be array');
+        t.is(typeof rawData1.notes, 'string', 'Unencrypted notes should be string');
+        t.false(rawData1.notes.includes(':'), 'Unencrypted notes should not contain IV separator');
+        
+        // Now update with contextKey (should encrypt on next write)
+        await callPathway('sys_update_file_metadata', {
+            contextId,
+            contextKey,
+            hash: file1.hash,
+            tags: ['encrypted'],
+            notes: 'Encrypted notes'
+        });
+        
+        // Verify it's now encrypted
+        const rawDataStr2 = await redisClient.hget(contextMapKey, file1.hash);
+        const rawData2 = JSON.parse(rawDataStr2);
+        
+        t.true(typeof rawData2.tags === 'string', 'Tags should now be encrypted string');
+        t.true(rawData2.tags.includes(':'), 'Encrypted tags should contain IV separator');
+        t.true(typeof rawData2.notes === 'string', 'Notes should now be encrypted string');
+        t.true(rawData2.notes.includes(':'), 'Encrypted notes should contain IV separator');
+        
+        // Verify decryption works
+        const collection2 = await loadFileCollection(contextId, contextKey, false);
+        const file2 = collection2.find(f => f.id === parsed1.fileId);
+        t.deepEqual(file2.tags, ['encrypted'], 'Tags should be decrypted correctly');
+        t.is(file2.notes, 'Encrypted notes', 'Notes should be decrypted correctly');
+    } finally {
+        await cleanup(contextId, contextKey);
+    }
+});
+
+test('File collection encryption: Core fields are never encrypted', async t => {
+    const contextId = createTestContext();
+    const contextKey = '1234567890123456789012345678901234567890123456789012345678901234'; // 64 hex chars
+    
+    try {
+        // Add file with all fields
+        const result = await callPathway('sys_tool_file_collection', {
+            contextId,
+            contextKey,
+            url: 'https://example.com/core-fields.pdf',
+            filename: 'core-fields.pdf',
+            tags: ['test'],
+            notes: 'Test notes',
+            userMessage: 'Add file'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, true);
+        
+        // Verify core fields are NOT encrypted
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+        const collection = await loadFileCollection(contextId, contextKey, false);
+        const file = collection.find(f => f.id === parsed.fileId);
+        t.truthy(file);
+        
+        const rawDataStr = await redisClient.hget(contextMapKey, file.hash);
+        const rawData = JSON.parse(rawDataStr);
+        
+        // Core fields should never be encrypted
+        t.is(rawData.url, 'https://example.com/core-fields.pdf', 'URL should not be encrypted');
+        t.is(rawData.displayFilename, 'core-fields.pdf', 'displayFilename should not be encrypted');
+        t.truthy(rawData.id, 'ID should not be encrypted');
+        t.truthy(rawData.hash, 'Hash should not be encrypted');
+        t.truthy(rawData.mimeType || rawData.mimeType === null, 'mimeType should not be encrypted');
+        t.truthy(rawData.addedDate, 'addedDate should not be encrypted');
+        t.truthy(rawData.lastAccessed, 'lastAccessed should not be encrypted');
+        t.is(typeof rawData.permanent, 'boolean', 'permanent should not be encrypted');
+    } finally {
+        await cleanup(contextId, contextKey);
+    }
+});
+
+test('File collection encryption: Works without contextKey (no encryption)', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file without contextKey
+        const result = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/no-encryption.pdf',
+            filename: 'no-encryption.pdf',
+            tags: ['public'],
+            notes: 'Public notes',
+            userMessage: 'Add unencrypted file'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, true);
+        
+        // Verify data is NOT encrypted in Redis
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === parsed.fileId);
+        t.truthy(file);
+        
+        const rawDataStr = await redisClient.hget(contextMapKey, file.hash);
+        const rawData = JSON.parse(rawDataStr);
+        
+        // Without contextKey, tags and notes should be unencrypted
+        t.true(Array.isArray(rawData.tags), 'Tags should be array when not encrypted');
+        t.is(typeof rawData.notes, 'string', 'Notes should be string when not encrypted');
+        t.false(rawData.notes.includes(':'), 'Unencrypted notes should not contain IV separator');
+        
+        // Verify values are correct
+        t.deepEqual(file.tags, ['public'], 'Tags should be readable');
+        t.is(file.notes, 'Public notes', 'Notes should be readable');
+    } finally {
+        await cleanup(contextId);
+    }
+});

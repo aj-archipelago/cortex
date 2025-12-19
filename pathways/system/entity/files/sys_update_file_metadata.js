@@ -13,13 +13,14 @@ export default {
         notes: { type: 'string' }, // Optional - no default
         mimeType: { type: 'string' }, // Optional - no default
         permanent: { type: 'boolean' }, // Optional - no default
-        inCollection: { type: 'array', items: { type: 'string' } } // Optional - array of chat IDs, or can be boolean true/false (normalized to ['*'] or removed)
+        inCollection: { type: 'array', items: { type: 'string' } }, // Optional - array of chat IDs, or can be boolean true/false (normalized to ['*'] or removed)
+        contextKey: `` // Optional - context key for encryption
     },
     model: 'oai-gpt4o',
     isMutation: true, // Declaratively mark this as a Mutation
 
     resolver: async (_parent, args, _contextValue, _info) => {
-        const { contextId, hash, displayFilename, tags, notes, mimeType, permanent, inCollection } = args;
+        const { contextId, hash, displayFilename, tags, notes, mimeType, permanent, inCollection, contextKey } = args;
         
         // Validate required parameters
         if (!contextId || !hash) {
@@ -54,7 +55,7 @@ export default {
             }
             
             // Update metadata (only Cortex-managed fields)
-            const success = await updateFileMetadata(contextId, hash, metadata);
+            const success = await updateFileMetadata(contextId, hash, metadata, contextKey);
             
             if (success) {
                 return JSON.stringify({ 
