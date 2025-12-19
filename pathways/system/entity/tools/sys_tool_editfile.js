@@ -4,16 +4,32 @@ import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
 import { uploadFileToCloud, findFileInCollection, loadFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
 
+// Maximum file size for editing (50MB) - prevents memory blowup on huge files
+const MAX_EDITABLE_FILE_SIZE = 50 * 1024 * 1024;
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+}
+
 // In-process serialization: prevents concurrent edits to the same file on this instance
 // Uses promise chaining to execute edits sequentially per file
 const editQueues = new Map();
 
+// Local file cache: avoids repeated downloads/uploads for sequential edits
+// Key: lockKey (contextId:fileId), Value: { content, file, dirty }
+const fileContentCache = new Map();
+
 /**
  * Serialize edit operations per file to prevent concurrent edits on the same instance
  * Uses promise chaining to execute edits sequentially. No deadlock risk (single resource lock).
+ * Also manages local file caching: downloads once, uploads once when session ends.
  * @param {string} contextId - Context ID
  * @param {string} fileId - File ID
- * @param {Function} editFn - Async function that performs the edit
+ * @param {Function} editFn - Async function that performs the edit, receives { cachedContent, cachedFile } or null
  * @returns {Promise} Promise that resolves when this edit completes
  */
 async function serializeEdit(contextId, fileId, editFn) {
@@ -24,16 +40,34 @@ async function serializeEdit(contextId, fileId, editFn) {
     
     // Chain this operation after the previous one
     // Timeout protection: pathway timeout (120s) will handle stuck operations
-    const operation = queue.then(editFn).finally(() => {
+    const operation = queue.then(async () => {
+        // Pass cached content to edit function (if available)
+        const cached = fileContentCache.get(lockKey);
+        const result = await editFn(cached);
+        
+        // Check if we're the last operation (no more edits queued)
+        // If yes, we need to flush (upload); if no, skip upload
+        const isLastOperation = (editQueues.get(lockKey) === operation);
+        
+        return { ...result, _isLastOperation: isLastOperation, _lockKey: lockKey };
+    }).finally(() => {
         // Cleanup: remove queue if we're still the current one (no new operations queued)
         // This prevents memory leaks if operations complete
         if (editQueues.get(lockKey) === operation) {
             editQueues.delete(lockKey);
+            fileContentCache.delete(lockKey); // Clear cache when session ends
         }
     });
     
     editQueues.set(lockKey, operation);
     return operation;
+}
+
+/**
+ * Update the local file cache with modified content
+ */
+function updateFileCache(lockKey, content, file) {
+    fileContentCache.set(lockKey, { content, file, dirty: true });
 }
 
 export default {
@@ -224,51 +258,71 @@ export default {
             const fileId = foundFile.id;
             
             // Serialize edits to this file (prevents concurrent edits on same instance)
-            return await serializeEdit(contextId, fileId, async () => {
-                // CRITICAL: Reload collection FIRST to get latest file data (may have changed from previous serialized edit)
-                // This must happen inside serializeEdit to ensure we see the previous edit's changes
-                const currentCollection = await loadFileCollection(contextId, contextKey, false);
-                const currentFile = findFileInCollection(file, currentCollection);
+            // The callback receives cached content if available (from previous edits in this session)
+            const editResult = await serializeEdit(contextId, fileId, async (cached) => {
+                const lockKey = `${contextId}:${fileId}`;
+                let currentFile;
+                let originalContent;
+                
+                if (cached && cached.content !== undefined) {
+                    // Use cached content from previous edit in this session (skip download)
+                    originalContent = cached.content;
+                    currentFile = cached.file;
+                    logger.info(`Using cached content for: ${currentFile.displayFilename || file}`);
+                } else {
+                    // First edit in session: load collection and download file
+                    const currentCollection = await loadFileCollection(contextId, contextKey, false);
+                    currentFile = findFileInCollection(file, currentCollection);
 
-                if (!currentFile) {
-                    const errorResult = {
-                        success: false,
-                        error: `File not found in collection: "${file}"`
-                    };
-                    resolver.tool = JSON.stringify({ toolUsed: toolName });
-                    return JSON.stringify(errorResult);
+                    if (!currentFile) {
+                        const errorResult = {
+                            success: false,
+                            error: `File not found in collection: "${file}"`
+                        };
+                        resolver.tool = JSON.stringify({ toolUsed: toolName });
+                        return { jsonResult: JSON.stringify(errorResult) };
+                    }
+                    
+                    const fileUrl = currentFile.url;
+                
+                    if (!fileUrl) {
+                        const errorResult = {
+                            success: false,
+                            error: `File URL not found for: "${file}". The file may have been modified or removed.`
+                        };
+                        resolver.tool = JSON.stringify({ toolUsed: toolName });
+                        return { jsonResult: JSON.stringify(errorResult) };
+                    }
+
+                    // Download the file content
+                    logger.info(`Downloading file for modification: ${fileUrl}`);
+                    const downloadResponse = await axios.get(fileUrl, {
+                        responseType: 'arraybuffer',
+                        timeout: 60000,
+                        validateStatus: (status) => status >= 200 && status < 400
+                    });
+
+                    if (downloadResponse.status !== 200 || !downloadResponse.data) {
+                        throw new Error(`Failed to download file: ${downloadResponse.status}`);
+                    }
+
+                    // Check file size to prevent memory blowup
+                    const fileSize = downloadResponse.data.length;
+                    if (fileSize > MAX_EDITABLE_FILE_SIZE) {
+                        const errorResult = {
+                            success: false,
+                            error: `File too large for editing (${formatBytes(fileSize)}). Maximum editable file size is ${formatBytes(MAX_EDITABLE_FILE_SIZE)}. Consider splitting the file or using a different approach.`
+                        };
+                        resolver.tool = JSON.stringify({ toolUsed: toolName });
+                        return { jsonResult: JSON.stringify(errorResult) };
+                    }
+
+                    // Explicitly decode as UTF-8 to prevent mojibake (encoding corruption)
+                    originalContent = Buffer.from(downloadResponse.data).toString('utf8');
                 }
                 
                 // Store the file ID for updating
                 let fileIdToUpdate = currentFile.id;
-
-                // Resolve file URL AFTER reloading collection to ensure we get the latest URL
-                // Use the file from the reloaded collection, not the initial resolution
-                const fileUrl = currentFile.url;
-            
-                if (!fileUrl) {
-                    const errorResult = {
-                        success: false,
-                        error: `File URL not found for: "${file}". The file may have been modified or removed.`
-                    };
-                    resolver.tool = JSON.stringify({ toolUsed: toolName });
-                    return JSON.stringify(errorResult);
-                }
-
-                // Download the current file content
-                logger.info(`Downloading file for modification: ${fileUrl}`);
-                const downloadResponse = await axios.get(fileUrl, {
-                    responseType: 'arraybuffer',
-                    timeout: 60000,
-                    validateStatus: (status) => status >= 200 && status < 400
-                });
-
-                if (downloadResponse.status !== 200 || !downloadResponse.data) {
-                    throw new Error(`Failed to download file: ${downloadResponse.status}`);
-                }
-
-                // Explicitly decode as UTF-8 to prevent mojibake (encoding corruption)
-                const originalContent = Buffer.from(downloadResponse.data).toString('utf8');
                 let modifiedContent;
                 let modificationInfo = {};
 
@@ -284,7 +338,7 @@ export default {
                             error: `startLine (${startLine}) exceeds file length (${totalLines} lines)`
                         };
                         resolver.tool = JSON.stringify({ toolUsed: "EditFileByLine" });
-                        return JSON.stringify(errorResult);
+                        return { jsonResult: JSON.stringify(errorResult) };
                     }
 
                     // Perform the line replacement
@@ -292,7 +346,9 @@ export default {
                     const endIndex = Math.min(endLine, totalLines);
                     
                     // Split the replacement content into lines
-                    const replacementLines = content.split(/\r?\n/);
+                    // Strip trailing newlines to prevent extra blank lines being inserted
+                    const trimmedContent = content.replace(/[\r\n]+$/, '');
+                    const replacementLines = trimmedContent.split(/\r?\n/);
                     
                     // Build the modified content
                     const beforeLines = allLines.slice(0, startIndex);
@@ -317,7 +373,7 @@ export default {
                             error: `oldString not found in file. The exact string must match (including whitespace and newlines).`
                         };
                         resolver.tool = JSON.stringify({ toolUsed: "EditFileBySearchAndReplace" });
-                        return JSON.stringify(errorResult);
+                        return { jsonResult: JSON.stringify(errorResult) };
                     }
 
                     // Count occurrences
@@ -352,133 +408,9 @@ export default {
                     mimeType = `${mimeType}; charset=utf-8`;
                 }
 
-                // Upload the modified file FIRST (safer: prevent data loss if upload fails)
-                const fileBuffer = Buffer.from(modifiedContent, 'utf8');
-                const uploadResult = await uploadFileToCloud(
-                    fileBuffer,
-                    mimeType,
-                    filename,
-                    resolver,
-                    contextId
-                );
-
-                if (!uploadResult || !uploadResult.url) {
-                    throw new Error('Failed to upload modified file to cloud storage');
-                }
-
-                // Update the file collection entry directly (atomic operation)
-                // Reload collection to get the latest file data (important after prior edits)
-                const latestCollection = await loadFileCollection(contextId, contextKey, false);
-                let fileToUpdate = latestCollection.find(f => f.id === fileIdToUpdate);
-                
-                // If not found by ID, try to find by the original file parameter (in case lookup by ID failed)
-                if (!fileToUpdate) {
-                    fileToUpdate = findFileInCollection(file, latestCollection);
-                    if (fileToUpdate) {
-                        // Update fileIdToUpdate to use the found file's ID
-                        fileIdToUpdate = fileToUpdate.id;
-                    }
-                }
-                
-                if (!fileToUpdate) {
-                    throw new Error(`File with ID "${fileIdToUpdate}" not found in collection. The file may have been modified or removed.`);
-                }
-                
-                const oldHashToDelete = fileToUpdate.hash || null;
-                
-                // Write new entry with CFH data (url, gcs, hash) + Cortex metadata
-                // If hash changed, this creates a new entry; if same hash, it updates the existing one
-                if (uploadResult.hash) {
-                    const { getRedisClient } = await import('../../../../lib/fileUtils.js');
-                    const redisClient = await getRedisClient();
-                    if (redisClient) {
-                        const contextMapKey = `FileStoreMap:ctx:${contextId}`;
-                        
-                        // Get existing CFH data for the new hash (if any)
-                        const existingDataStr = await redisClient.hget(contextMapKey, uploadResult.hash);
-                        let existingData = {};
-                        if (existingDataStr) {
-                            try {
-                                existingData = JSON.parse(existingDataStr);
-                            } catch (e) {
-                                existingData = {};
-                            }
-                        }
-                        
-                        // Merge CFH data (url, gcs, hash) with Cortex metadata
-                        const fileData = {
-                            ...existingData, // Preserve any existing CFH data
-                            // CFH-managed fields (from upload result)
-                            url: uploadResult.url,
-                            gcs: uploadResult.gcs || null,
-                            hash: uploadResult.hash,
-                            filename: uploadResult.filename || fileToUpdate.filename || filename, // Use CFH filename if available, otherwise preserve
-                            // Cortex-managed metadata
-                            id: fileToUpdate.id, // Keep same ID
-                            displayFilename: fileToUpdate.displayFilename || filename, // Preserve user-friendly filename
-                            tags: fileToUpdate.tags || [],
-                            notes: fileToUpdate.notes || '',
-                            mimeType: fileToUpdate.mimeType || mimeType || null,
-                            inCollection: ['*'], // Mark as global chat file (available to all chats)
-                            addedDate: fileToUpdate.addedDate, // Keep original added date
-                            lastAccessed: new Date().toISOString(),
-                            permanent: fileToUpdate.permanent || false
-                        };
-                        
-                        // Write new entry (atomic operation) - encryption happens in helper
-                        await writeFileDataToRedis(redisClient, contextMapKey, uploadResult.hash, fileData, contextKey);
-                        
-                        // If hash changed, remove old entry
-                        if (oldHashToDelete && oldHashToDelete !== uploadResult.hash) {
-                            await redisClient.hdel(contextMapKey, oldHashToDelete);
-                        }
-                        
-                        // Invalidate cache immediately so subsequent operations get fresh data
-                        invalidateFileCollectionCache(contextId, contextKey);
-                    }
-                } else if (fileToUpdate.hash) {
-                    // Same hash, just update Cortex metadata (filename, lastAccessed)
-                    await updateFileMetadata(contextId, fileToUpdate.hash, {
-                        filename: filename,
-                        lastAccessed: new Date().toISOString()
-                    }, contextKey);
-                    
-                    // Invalidate cache after metadata update
-                    invalidateFileCollectionCache(contextId, contextKey);
-                }
-
-                // Now it is safe to delete the old file version (after lock succeeds)
-                // This ensures we're deleting the correct hash even if concurrent edits occurred
-                if (oldHashToDelete) {
-                    // Fire-and-forget async deletion for better performance, but log errors
-                    // We don't want to fail the whole operation if cleanup fails, since we have the new file
-                    (async () => {
-                        try {
-                            logger.info(`Deleting old file version with hash ${oldHashToDelete} (background task)`);
-                            await deleteFileByHash(oldHashToDelete, resolver, contextId);
-                        } catch (cleanupError) {
-                            logger.warn(`Failed to cleanup old file version (hash: ${oldHashToDelete}): ${cleanupError.message}`);
-                        }
-                    })().catch(err => logger.error(`Async cleanup error: ${err}`));
-                } else {
-                    logger.info(`No hash found for old file, skipping deletion`);
-                }
-                
-                // Get the updated file info for the result
-                // Use useCache: false to ensure we get fresh data after Redis write
-                const updatedCollection = await loadFileCollection(contextId, contextKey, false);
-                const updatedFile = updatedCollection.find(f => f.id === fileIdToUpdate);
-                
-                if (!updatedFile) {
-                    logger.warn(`File with ID "${fileIdToUpdate}" not found in updated collection. This may indicate a timing issue.`);
-                    // Fall back to using uploadResult data directly
-                    const fallbackFile = {
-                        id: fileIdToUpdate,
-                        url: uploadResult.url,
-                        hash: uploadResult.hash
-                    };
-                    logger.info(`Using fallback file data: ${JSON.stringify(fallbackFile)}`);
-                }
+                // Update local cache with modified content
+                // The wrapper will decide whether to upload (only on last operation)
+                updateFileCache(lockKey, modifiedContent, currentFile);
 
                 // Build result message
                 let message;
@@ -492,48 +424,177 @@ export default {
                     }
                 }
 
+                // Return edit result with data needed for upload (wrapper handles upload decision)
+                return {
+                    modifiedContent,
+                    currentFile,
+                    fileIdToUpdate,
+                    filename,
+                    mimeType,
+                    modificationInfo,
+                    message,
+                    // Pass these for upload phase
+                    contextId,
+                    contextKey,
+                    resolver,
+                    file, // original file parameter for fallback lookup
+                    isEditByLine,
+                    isSearchReplace,
+                    replaceAll,
+                    startLine,
+                    endLine
+                };
+            });
+
+            // Handle early return (error cases)
+            if (editResult.jsonResult) {
+                return editResult.jsonResult;
+            }
+
+            // Check if we need to upload (only on last operation in queue)
+            if (editResult._isLastOperation) {
+                // Flush: upload the final content and update metadata
+                const { modifiedContent, currentFile, fileIdToUpdate: initialFileId, filename, mimeType, 
+                        modificationInfo, message, contextId: ctxId, contextKey: ctxKey, resolver: res,
+                        file: fileParam, isEditByLine: isByLine, isSearchReplace: isSR, replaceAll: repAll,
+                        startLine: sLine, endLine: eLine } = editResult;
+                
+                let fileIdToUpdate = initialFileId;
+                
+                logger.info(`Flushing cached edits for: ${filename}`);
+                
+                // Upload the modified file
+                const fileBuffer = Buffer.from(modifiedContent, 'utf8');
+                const uploadResult = await uploadFileToCloud(
+                    fileBuffer,
+                    mimeType,
+                    filename,
+                    res,
+                    ctxId
+                );
+
+                if (!uploadResult || !uploadResult.url) {
+                    throw new Error('Failed to upload modified file to cloud storage');
+                }
+
+                // Update the file collection entry directly (atomic operation)
+                const latestCollection = await loadFileCollection(ctxId, ctxKey, false);
+                let fileToUpdate = latestCollection.find(f => f.id === fileIdToUpdate);
+                
+                // If not found by ID, try to find by the original file parameter
+                if (!fileToUpdate) {
+                    fileToUpdate = findFileInCollection(fileParam, latestCollection);
+                    if (fileToUpdate) {
+                        fileIdToUpdate = fileToUpdate.id;
+                    }
+                }
+                
+                if (!fileToUpdate) {
+                    throw new Error(`File with ID "${fileIdToUpdate}" not found in collection. The file may have been modified or removed.`);
+                }
+                
+                const oldHashToDelete = fileToUpdate.hash || null;
+                
+                // Write new entry with CFH data (url, gcs, hash) + Cortex metadata
+                if (uploadResult.hash) {
+                    const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+                    const redisClient = await getRedisClient();
+                    if (redisClient) {
+                        const contextMapKey = `FileStoreMap:ctx:${ctxId}`;
+                        
+                        const existingDataStr = await redisClient.hget(contextMapKey, uploadResult.hash);
+                        let existingData = {};
+                        if (existingDataStr) {
+                            try {
+                                existingData = JSON.parse(existingDataStr);
+                            } catch (e) {
+                                existingData = {};
+                            }
+                        }
+                        
+                        const fileData = {
+                            ...existingData,
+                            url: uploadResult.url,
+                            gcs: uploadResult.gcs || null,
+                            hash: uploadResult.hash,
+                            filename: uploadResult.filename || fileToUpdate.filename || filename,
+                            id: fileToUpdate.id,
+                            displayFilename: fileToUpdate.displayFilename || filename,
+                            tags: fileToUpdate.tags || [],
+                            notes: fileToUpdate.notes || '',
+                            mimeType: fileToUpdate.mimeType || mimeType || null,
+                            inCollection: ['*'],
+                            addedDate: fileToUpdate.addedDate,
+                            lastAccessed: new Date().toISOString(),
+                            permanent: fileToUpdate.permanent || false
+                        };
+                        
+                        await writeFileDataToRedis(redisClient, contextMapKey, uploadResult.hash, fileData, ctxKey);
+                        
+                        if (oldHashToDelete && oldHashToDelete !== uploadResult.hash) {
+                            await redisClient.hdel(contextMapKey, oldHashToDelete);
+                        }
+                        
+                        invalidateFileCollectionCache(ctxId, ctxKey);
+                    }
+                } else if (fileToUpdate.hash) {
+                    await updateFileMetadata(ctxId, fileToUpdate.hash, {
+                        filename: filename,
+                        lastAccessed: new Date().toISOString()
+                    }, ctxKey);
+                    
+                    invalidateFileCollectionCache(ctxId, ctxKey);
+                }
+
+                // Delete old file version (fire-and-forget)
+                if (oldHashToDelete && oldHashToDelete !== uploadResult.hash) {
+                    (async () => {
+                        try {
+                            logger.info(`Deleting old file version with hash ${oldHashToDelete} (background task)`);
+                            await deleteFileByHash(oldHashToDelete, res, ctxId);
+                        } catch (cleanupError) {
+                            logger.warn(`Failed to cleanup old file version: ${cleanupError.message}`);
+                        }
+                    })().catch(err => logger.error(`Async cleanup error: ${err}`));
+                }
+
                 const result = {
                     success: true,
                     filename: filename,
-                    fileId: updatedFile?.id || fileIdToUpdate,
-                    url: uploadResult.url, // Always use the new URL from upload
+                    fileId: fileIdToUpdate,
+                    url: uploadResult.url,
                     gcs: uploadResult.gcs || null,
                     hash: uploadResult.hash || null,
                     ...modificationInfo,
                     message: message
                 };
                 
-                // Log for debugging
-                if (!updatedFile) {
-                    logger.warn(`EditFile: Could not find updated file in collection, but upload succeeded. Using uploadResult URL: ${uploadResult.url}`);
-                } else {
-                    logger.info(`EditFile: Successfully updated file. New URL: ${uploadResult.url}, New hash: ${uploadResult.hash}`);
-                }
+                logger.info(`EditFile: Flushed and uploaded. New URL: ${uploadResult.url}, New hash: ${uploadResult.hash}`);
 
                 resolver.tool = JSON.stringify({ toolUsed: toolName });
                 return JSON.stringify(result);
-            }).catch(error => {
-                let errorMsg;
-                if (error?.message) {
-                    errorMsg = error.message;
-                } else if (error?.errors && Array.isArray(error.errors)) {
-                    // Handle AggregateError
-                    errorMsg = error.errors.map(e => e?.message || String(e)).join('; ');
-                } else {
-                    errorMsg = String(error);
-                }
-                logger.error(`Error modifying file: ${errorMsg}`);
+            } else {
+                // Intermediate edit: content cached, upload deferred to last operation
+                const { filename, modificationInfo, message, isEditByLine, isSearchReplace, replaceAll,
+                        startLine, endLine, currentFile } = editResult;
                 
-                const errorResult = {
-                    success: false,
-                    error: errorMsg
+                logger.info(`EditFile: Cached edit for: ${filename} (upload deferred)`);
+
+                const result = {
+                    success: true,
+                    filename: filename,
+                    fileId: currentFile.id,
+                    // No URL/hash yet - upload pending
+                    pending: true,
+                    ...modificationInfo,
+                    message: `${message} (upload pending - will be saved with next operation)`
                 };
 
                 resolver.tool = JSON.stringify({ toolUsed: toolName });
-                return JSON.stringify(errorResult);
-            });
+                return JSON.stringify(result);
+            }
         } catch (error) {
-            // Handle errors before serialization (file not found, validation errors, etc.)
+            // Handle errors in file edit operation
             let errorMsg;
             if (error?.message) {
                 errorMsg = error.message;
