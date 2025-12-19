@@ -352,11 +352,11 @@ test('File collection: List with filters and sorting', async t => {
     }
 });
 
-test('Memory system: file collections excluded from memoryAll', async t => {
+test('Memory system: file collections excluded from memoryAll (memoryFiles deprecated)', async t => {
     const contextId = createTestContext();
     
     try {
-        // Save a file collection directly to Redis
+        // Save a file collection directly to Redis (file collections are stored separately, not in memory system)
         const { saveFileCollection } = await import('../../../../lib/fileUtils.js');
         await saveFileCollection(contextId, null, [{
             id: 'test-1',
@@ -371,7 +371,7 @@ test('Memory system: file collections excluded from memoryAll', async t => {
             aiMemory: 'Test memory content'
         });
         
-        // Read all memory - should not include file collections
+        // Read all memory - should not include file collections (memoryFiles section is deprecated and not returned)
         const allMemory = await callPathway('sys_read_memory', {
             contextId,
             section: 'memoryAll'
@@ -379,7 +379,7 @@ test('Memory system: file collections excluded from memoryAll', async t => {
         
         const parsed = JSON.parse(allMemory);
         t.truthy(parsed.memorySelf);
-        t.falsy(parsed.memoryFiles);
+        t.falsy(parsed.memoryFiles); // memoryFiles is deprecated - file collections are stored in Redis hash maps
         
         // But should be accessible via loadFileCollection
         const files = await loadFileCollection(contextId, null, false);
@@ -418,11 +418,11 @@ test('Memory system: file collections not cleared by memoryAll clear', async t =
     }
 });
 
-test('Memory system: file collections ignored in memoryAll save', async t => {
+test('Memory system: file collections ignored in memoryAll save (memoryFiles deprecated)', async t => {
     const contextId = createTestContext();
     
     try {
-        // Save file collection first directly to Redis
+        // Save file collection first directly to Redis (file collections are stored separately, not in memory system)
         const { saveFileCollection } = await import('../../../../lib/fileUtils.js');
         await saveFileCollection(contextId, null, [{
             id: 'original',
@@ -430,7 +430,8 @@ test('Memory system: file collections ignored in memoryAll save', async t => {
             displayFilename: 'original.jpg'
         }]);
         
-        // Try to save all memory with memoryFiles included (should be ignored)
+        // Try to save all memory with memoryFiles included (should be ignored - memoryFiles is deprecated)
+        // File collections are now stored in Redis hash maps (FileStoreMap:ctx:<contextId>), not in memory system
         await callPathway('sys_save_memory', {
             contextId,
             section: 'memoryAll',
@@ -444,7 +445,7 @@ test('Memory system: file collections ignored in memoryAll save', async t => {
             })
         });
         
-        // Verify original files are still there (not overwritten - memoryFiles is ignored)
+        // Verify original files are still there (not overwritten - memoryFiles section is ignored by sys_save_memory)
         const files = await loadFileCollection(contextId, null, false);
         t.is(files.length, 1);
         t.is(files[0].displayFilename, 'original.jpg');

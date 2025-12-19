@@ -344,34 +344,32 @@ const getFileStoreMap = async (hash, skipLazyCleanup = false, contextId = null) 
             const storageService = new StorageService();
 
             let shouldRemove = false;
+            let primaryExists = false;
+            let gcsExists = false;
 
             // Check primary storage
             if (parsedValue?.url) {
-              const exists = await storageService.fileExists(parsedValue.url);
-              if (!exists) {
+              primaryExists = await storageService.fileExists(parsedValue.url);
+              if (!primaryExists) {
                 console.log(
-                  `Lazy cleanup: Primary storage file missing for key ${key}: ${parsedValue.url}`,
+                  `Lazy cleanup: Primary storage file missing for hash ${hash}: ${parsedValue.url}`,
                 );
-                shouldRemove = true;
               }
             }
 
-            // Check GCS backup if primary is missing
-            if (
-              shouldRemove &&
-              parsedValue?.gcs &&
-              storageService.backupProvider
-            ) {
-              const gcsExists = await storageService.fileExists(
-                parsedValue.gcs,
-              );
+            // Check GCS backup if available
+            if (parsedValue?.gcs && storageService.backupProvider) {
+              gcsExists = await storageService.fileExists(parsedValue.gcs);
               if (gcsExists) {
-                // GCS backup exists, so don't remove the entry
-                shouldRemove = false;
                 console.log(
-                  `Lazy cleanup: GCS backup found for key ${key}, keeping entry`,
+                  `Lazy cleanup: GCS backup found for hash ${hash}, keeping entry`,
                 );
               }
+            }
+
+            // Only remove if both primary and backup are missing
+            if (!primaryExists && !gcsExists) {
+              shouldRemove = true;
             }
 
             // Remove stale entry if both primary and backup are missing
@@ -387,7 +385,7 @@ const getFileStoreMap = async (hash, skipLazyCleanup = false, contextId = null) 
               return null; // Return null since file no longer exists
             }
           } catch (error) {
-            console.log(`Lazy cleanup error for key ${key}: ${error.message}`);
+            console.log(`Lazy cleanup error for hash ${hash}: ${error.message}`);
             // If cleanup fails, return the original value to avoid breaking functionality
           }
         }
@@ -408,21 +406,51 @@ const getFileStoreMap = async (hash, skipLazyCleanup = false, contextId = null) 
 // Function to remove key from "FileStoreMap" hash map
 // If contextId is provided, removes from context-scoped map
 // Otherwise removes from unscoped map
-// Hash is always the raw hash (no scoping in the key itself)
+// Hash can be either raw hash or scoped key format (hash:ctx:contextId)
+// If scoped format is provided, extracts base hash and removes both scoped and legacy keys
 const removeFromFileStoreMap = async (hash, contextId = null) => {
   try {
     if (!hash) {
       return;
     }
     
+    // Extract base hash if hash is in scoped format (hash:ctx:contextId)
+    let baseHash = hash;
+    let extractedContextId = contextId;
+    if (String(hash).includes(":ctx:")) {
+      const parts = String(hash).split(":ctx:");
+      baseHash = parts[0];
+      if (parts.length > 1 && !extractedContextId) {
+        extractedContextId = parts[1];
+      }
+    }
+    
     let result = 0;
-    if (contextId) {
-      // Remove from context-scoped map
+    
+    // First, try to delete from unscoped map (in case scoped key was stored there)
+    if (!contextId) {
+      // Remove from unscoped map (including scoped key format if present)
+      result = await client.hdel("FileStoreMap", hash);
+      // Also try removing with base hash if hash was scoped
+      if (hash !== baseHash) {
+        const baseResult = await client.hdel("FileStoreMap", baseHash);
+        if (baseResult > 0) {
+          result = baseResult;
+        }
+      }
+    }
+    
+    // Also try to delete from context-scoped map if we extracted a contextId
+    if (extractedContextId) {
+      const contextMapKey = `FileStoreMap:ctx:${extractedContextId}`;
+      const contextResult = await client.hdel(contextMapKey, baseHash);
+      if (contextResult > 0) {
+        result = contextResult;
+      }
+    } else if (contextId) {
+      // If contextId was provided explicitly, delete from context-scoped map
       const contextMapKey = `FileStoreMap:ctx:${contextId}`;
       result = await client.hdel(contextMapKey, hash);
-    } else {
-      // Remove from unscoped map
-      result = await client.hdel("FileStoreMap", hash);
     }
     if (result > 0) {
       console.log(`The hash ${hash} was removed successfully`);
@@ -430,7 +458,6 @@ const removeFromFileStoreMap = async (hash, contextId = null) => {
 
     // Always try to clean up legacy container-scoped entry as well.
     // This ensures we don't leave orphaned legacy keys behind.
-    const baseHash = hash;
     // Only attempt legacy cleanup if baseHash doesn't contain a colon (not already scoped)
     if (!String(baseHash).includes(":")) {
       const defaultContainerName = getDefaultContainerName();
@@ -444,7 +471,7 @@ const removeFromFileStoreMap = async (hash, contextId = null) => {
     }
 
     if (result === 0) {
-      console.log(`The key ${key} does not exist (may have been migrated or already deleted)`);
+      console.log(`The hash ${hash} does not exist (may have been migrated or already deleted)`);
     }
   } catch (error) {
     console.error(`Error removing key from FileStoreMap: ${error}`);
