@@ -3,6 +3,7 @@
 
 import { Prompt } from '../../../../server/prompt.js';
 import { generateFileMessageContent, injectFileIntoChatHistory } from '../../../../lib/fileUtils.js';
+import logger from '../../../../lib/logger.js';
 
 export default {
     prompt:
@@ -20,7 +21,7 @@ export default {
         language: "English",
     },
     max_tokens: 8192,
-    model: 'gemini-flash-20-vision',
+    model: 'gemini-flash-3-vision',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,
@@ -132,7 +133,7 @@ export default {
         icon: "🎥",
         function: {
             name: "AnalyzeVideo",
-            description: "Use specifically for reading, analyzing, and answering questions about video or audio file content. You MUST use this tool to look at video or audio files.",
+            description: "Use specifically for reading, analyzing, and answering questions about video or audio file content. You MUST use this tool to look at video or audio files. This tool supports YouTube URLs (youtube.com, youtu.be), direct video/audio file URLs, and files from the file collection.",
             parameters: {
                 type: "object",
                 properties: {
@@ -142,7 +143,7 @@ export default {
                     },
                     file: {
                         type: "string",
-                        description: "Optional: The file to analyze (from ListFileCollection or SearchFileCollection): can be the hash, the filename, the URL, or the GCS URL. You can find available files in the availableFiles section."
+                        description: "Optional: The file to analyze. Can be: (1) A YouTube URL (youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., youtube.com/embed/...), (2) A direct video/audio file URL, (3) A file from the collection (hash, filename, URL, or GCS URL from ListFileCollection or SearchFileCollection). You can find available files in the availableFiles section."
                     },
                     userMessage: {
                         type: "string",
@@ -155,20 +156,38 @@ export default {
     }],
     
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        // Generate file message content and inject file if provided
-        if (args.file) {
-            const fileContent = await generateFileMessageContent(args.file, args.contextId, args.contextKey);
-            if (!fileContent) {
-                throw new Error(`File not found: "${args.file}". Use ListFileCollection or SearchFileCollection to find available files.`);
+        try {
+            // Generate file message content and inject file if provided
+            if (args.file) {
+                const fileContent = await generateFileMessageContent(args.file, args.contextId, args.contextKey);
+                if (!fileContent) {
+                    const errorMessage = `File not found: "${args.file}". Use ListFileCollection or SearchFileCollection to find available files.`;
+                    resolver.tool = JSON.stringify({ toolUsed: "vision" });
+                    return JSON.stringify({ 
+                        error: errorMessage,
+                        recoveryMessage: "The file was not found. Please verify the file exists in the collection or provide a valid file reference."
+                    });
+                }
+                args.chatHistory = injectFileIntoChatHistory(args.chatHistory, fileContent);
             }
-            args.chatHistory = injectFileIntoChatHistory(args.chatHistory, fileContent);
-        }
 
-        if (args.detailedInstructions) {
-            args.chatHistory.push({role: "user", content: args.detailedInstructions});
+            if (args.detailedInstructions) {
+                args.chatHistory.push({role: "user", content: args.detailedInstructions});
+            }
+            
+            const result = await runAllPrompts({ ...args });
+            resolver.tool = JSON.stringify({ toolUsed: "vision" });
+            return result;
+        } catch (e) {
+            // Catch any errors from runAllPrompts or other operations
+            const errorMessage = e?.message || e?.toString() || String(e);
+            logger.error(`Error in analyzer tool: ${errorMessage}`);
+            
+            resolver.tool = JSON.stringify({ toolUsed: "vision" });
+            return JSON.stringify({ 
+                error: errorMessage,
+                recoveryMessage: "The file analysis failed. Please verify the file is accessible and in a supported format, or try a different file."
+            });
         }
-        const result = await runAllPrompts({ ...args });
-        resolver.tool = JSON.stringify({ toolUsed: "vision" });
-        return result;
     }
 }

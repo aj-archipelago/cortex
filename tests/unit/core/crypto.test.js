@@ -63,3 +63,44 @@ test('encrypt should handle JSON data', t => {
     const decrypted = decrypt(encrypted, systemKey);
     t.is(decrypted, jsonData);
 });
+
+// Tests for plain text detection (preventing "Invalid initialization vector" errors)
+test('decrypt should return plain text with colons as-is (not encrypted)', t => {
+    const plainText = 'Modified image from prompt: Edit the image by addi';
+    const result = decrypt(plainText, systemKey);
+    t.is(result, plainText);
+});
+
+test('decrypt should return plain text with multiple colons as-is', t => {
+    const plainText = 'test:data:with:multiple:colons';
+    const result = decrypt(plainText, systemKey);
+    t.is(result, plainText);
+});
+
+test('decrypt should return plain text without colons as-is', t => {
+    const plainText = 'simple text without colons';
+    const result = decrypt(plainText, systemKey);
+    t.is(result, plainText);
+});
+
+test('decrypt should still decrypt valid encrypted data', t => {
+    const encrypted = encrypt(testData, systemKey);
+    const decrypted = decrypt(encrypted, systemKey);
+    t.is(decrypted, testData);
+});
+
+test('decrypt should handle plain text that looks like encrypted format (2 parts)', t => {
+    // Plain text with exactly 2 colons that might be misdetected as CBC format
+    const plainText = 'part1:part2:part3';
+    const result = decrypt(plainText, systemKey);
+    // Should return as-is because IV validation will fail
+    t.is(result, plainText);
+});
+
+test('decrypt should handle plain text that looks like encrypted format (3 parts)', t => {
+    // Plain text with exactly 3 colons that might be misdetected as GCM format
+    const plainText = 'part1:part2:part3:part4';
+    const result = decrypt(plainText, systemKey);
+    // Should return as-is because it doesn't match expected format
+    t.is(result, plainText);
+});

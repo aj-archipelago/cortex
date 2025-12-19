@@ -1,46 +1,10 @@
 import logger from "../lib/logger.js";
 import { publishRequestProgress } from "../lib/redisSubscription.js";
 import { alignSubtitles } from "../lib/util.js";
-import { getMediaChunks } from "../lib/fileUtils.js";
+import { getMediaChunks, isYoutubeUrl } from "../lib/fileUtils.js";
 import { Prompt } from "../server/prompt.js";
 
 const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
-
-function isYoutubeUrl(url) {
-    try {
-        const urlObj = new URL(url);
-
-        // Check for standard youtube.com domains
-        if (
-            urlObj.hostname === "youtube.com" ||
-            urlObj.hostname === "www.youtube.com"
-        ) {
-            // For standard watch URLs, verify they have a video ID
-            if (urlObj.pathname === "/watch") {
-                return !!urlObj.searchParams.get("v");
-            }
-            // For embed URLs, verify they have a video ID in the path
-            if (urlObj.pathname.startsWith("/embed/")) {
-                return urlObj.pathname.length > 7; // '/embed/' is 7 chars
-            }
-            // For shorts URLs, verify they have a video ID in the path
-            if (urlObj.pathname.startsWith("/shorts/")) {
-                return urlObj.pathname.length > 8; // '/shorts/' is 8 chars
-            }
-            return false;
-        }
-
-        // Check for shortened youtu.be domain
-        if (urlObj.hostname === "youtu.be") {
-            // Verify there's a video ID in the path
-            return urlObj.pathname.length > 1; // '/' is 1 char
-        }
-
-        return false;
-    } catch (err) {
-        return false;
-    }
-}
 
 export default {
     prompt:

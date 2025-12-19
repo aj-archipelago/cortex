@@ -1351,3 +1351,184 @@ test('File collection encryption: Works without contextKey (no encryption)', asy
         await cleanup(contextId);
     }
 });
+
+test('File collection: YouTube URLs are rejected (cannot be added to collection)', async t => {
+    const contextId = createTestContext();
+    const youtubeUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    
+    try {
+        // Attempt to add YouTube URL - should be rejected
+        const result = await callPathway('sys_tool_file_collection', {
+            contextId,
+            fileUrl: youtubeUrl,
+            filename: 'Test YouTube Video',
+            tags: ['video', 'youtube'],
+            notes: 'Test YouTube video',
+            userMessage: 'Add YouTube video'
+        });
+        
+        // callPathway may catch and return error as JSON string, or throw
+        // Check if it's an error response
+        try {
+            const parsed = JSON.parse(result);
+            t.falsy(parsed.success, 'Should not succeed');
+            t.truthy(parsed.error || parsed.message, 'Should have error message');
+            t.true(
+                (parsed.error || parsed.message || '').includes('YouTube URLs cannot be added'),
+                'Error should mention YouTube URLs cannot be added'
+            );
+        } catch (parseError) {
+            // If not JSON, it should be an error string
+            t.true(
+                result.includes('YouTube URLs cannot be added'),
+                'Error message should mention YouTube URLs cannot be added'
+            );
+        }
+        
+        // Verify it was NOT added to collection
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 0);
+    } catch (error) {
+        // If callPathway throws, verify the error message
+        t.true(
+            error.message.includes('YouTube URLs cannot be added'),
+            'Error should mention YouTube URLs cannot be added'
+        );
+        
+        // Verify it was NOT added to collection
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 0);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: YouTube Shorts URLs are rejected', async t => {
+    const contextId = createTestContext();
+    const shortsUrl = 'https://www.youtube.com/shorts/abc123';
+    
+    try {
+        const result = await callPathway('sys_tool_file_collection', {
+            contextId,
+            fileUrl: shortsUrl,
+            filename: 'YouTube Short',
+            userMessage: 'Add YouTube short'
+        });
+        
+        try {
+            const parsed = JSON.parse(result);
+            t.falsy(parsed.success);
+            t.true((parsed.error || parsed.message || '').includes('YouTube URLs cannot be added'));
+        } catch (parseError) {
+            t.true(result.includes('YouTube URLs cannot be added'));
+        }
+        
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 0);
+    } catch (error) {
+        t.true(error.message.includes('YouTube URLs cannot be added'));
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 0);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: youtu.be URLs are rejected', async t => {
+    const contextId = createTestContext();
+    const youtuBeUrl = 'https://youtu.be/dQw4w9WgXcQ';
+    
+    try {
+        const result = await callPathway('sys_tool_file_collection', {
+            contextId,
+            fileUrl: youtuBeUrl,
+            filename: 'YouTube Video',
+            userMessage: 'Add YouTube video'
+        });
+        
+        try {
+            const parsed = JSON.parse(result);
+            t.falsy(parsed.success);
+            t.true((parsed.error || parsed.message || '').includes('YouTube URLs cannot be added'));
+        } catch (parseError) {
+            t.true(result.includes('YouTube URLs cannot be added'));
+        }
+        
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 0);
+    } catch (error) {
+        t.true(error.message.includes('YouTube URLs cannot be added'));
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 0);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('generateFileMessageContent: Accepts direct YouTube URL without collection', async t => {
+    const contextId = createTestContext();
+    const youtubeUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    
+    try {
+        // Test that generateFileMessageContent accepts YouTube URL directly
+        // even if it's not in the collection
+        const fileContent = await generateFileMessageContent(youtubeUrl, contextId);
+        t.truthy(fileContent);
+        t.is(fileContent.url, youtubeUrl);
+        t.is(fileContent.type, 'image_url');
+        t.falsy(fileContent.gcs);
+        t.falsy(fileContent.hash);
+        
+        // Verify it's not in the collection
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 0);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('generateFileMessageContent: Accepts direct youtu.be URL without collection', async t => {
+    const contextId = createTestContext();
+    const youtuBeUrl = 'https://youtu.be/dQw4w9WgXcQ';
+    
+    try {
+        const fileContent = await generateFileMessageContent(youtuBeUrl, contextId);
+        t.truthy(fileContent);
+        t.is(fileContent.url, youtuBeUrl);
+        t.is(fileContent.type, 'image_url');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('Analyzer tool: Returns error JSON format when file not found', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        const result = await callPathway('sys_tool_analyzefile', {
+            contextId,
+            file: 'non-existent-file.jpg',
+            detailedInstructions: 'Analyze this file',
+            userMessage: 'Testing error handling'
+        });
+        
+        t.truthy(result, 'Should have a result');
+        
+        // Parse the result to check for error format
+        let parsedResult;
+        try {
+            parsedResult = JSON.parse(result);
+        } catch (error) {
+            t.fail(`Failed to parse result: ${error.message}`);
+        }
+        
+        // Should return error JSON format (same as search tools)
+        t.truthy(parsedResult.error, 'Should have error field');
+        t.truthy(parsedResult.recoveryMessage, 'Should have recoveryMessage field');
+        t.true(typeof parsedResult.error === 'string', 'Error should be a string');
+        t.true(typeof parsedResult.recoveryMessage === 'string', 'RecoveryMessage should be a string');
+        t.true(parsedResult.error.includes('File not found'), 'Error should mention file not found');
+    } finally {
+        await cleanup(contextId);
+    }
+});
