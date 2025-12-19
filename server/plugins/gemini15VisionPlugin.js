@@ -267,18 +267,18 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
 
         const baseParameters = super.getRequestParameters(text, parameters, prompt, cortexRequest);
 
+        // Handle tool_choice parameter - convert OpenAI format to Gemini toolConfig
+        let toolChoice = parameters.tool_choice;
+        if (typeof toolChoice === 'string' && toolChoice !== 'auto' && toolChoice !== 'none' && toolChoice !== 'required' && toolChoice !== 'any') {
+            try {
+                toolChoice = JSON.parse(toolChoice);
+            } catch (e) {
+                toolChoice = 'auto';
+            }
+        }
+
         if (convertedTools[0]?.functionDeclarations?.length > 0) {
             baseParameters.tools = convertedTools;
-            
-            // Handle tool_choice parameter - convert OpenAI format to Gemini toolConfig
-            let toolChoice = parameters.tool_choice;
-            if (typeof toolChoice === 'string' && toolChoice !== 'auto' && toolChoice !== 'none' && toolChoice !== 'required' && toolChoice !== 'any') {
-                try {
-                    toolChoice = JSON.parse(toolChoice);
-                } catch (e) {
-                    toolChoice = 'auto';
-                }
-            }
             
             if (toolChoice) {
                 if (typeof toolChoice === 'string') {
@@ -299,6 +299,10 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     };
                 }
             }
+        } else if (toolChoice === 'none') {
+            // Even when no tools are provided, if tool_choice is 'none', explicitly disable function calling
+            // This prevents MALFORMED_FUNCTION_CALL errors when chat history contains function messages
+            baseParameters.toolConfig = { functionCallingConfig: { mode: 'NONE' } };
         }
 
         return baseParameters;

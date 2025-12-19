@@ -157,7 +157,11 @@ export default {
     
     executePathway: async ({args, runAllPrompts, resolver}) => {
         try {
-            // Generate file message content and inject file if provided
+            // Create a clean chat history with just the file and task - don't include previous chat history
+            // This prevents confusion from function results and other context
+            const cleanChatHistory = [];
+            
+            // Generate file message content if provided
             if (args.file) {
                 const fileContent = await generateFileMessageContent(args.file, args.contextId, args.contextKey);
                 if (!fileContent) {
@@ -168,14 +172,53 @@ export default {
                         recoveryMessage: "The file was not found. Please verify the file exists in the collection or provide a valid file reference."
                     });
                 }
-                args.chatHistory = injectFileIntoChatHistory(args.chatHistory, fileContent);
-            }
-
-            if (args.detailedInstructions) {
-                args.chatHistory.push({role: "user", content: args.detailedInstructions});
+                
+                // Combine file and instructions in the same message so Gemini sees both together
+                const messageContent = [fileContent];
+                if (args.detailedInstructions) {
+                    messageContent.push({type: 'text', text: args.detailedInstructions});
+                }
+                
+                cleanChatHistory.push({role: "user", content: messageContent});
+            } else if (args.detailedInstructions) {
+                // No file, just add instructions
+                cleanChatHistory.push({role: "user", content: args.detailedInstructions});
             }
             
-            const result = await runAllPrompts({ ...args });
+            // Use clean chat history instead of the full chat history
+            args.chatHistory = cleanChatHistory;
+            
+            // Explicitly disable function calling - this tool is just for vision analysis, not tool calls
+            // This prevents MALFORMED_FUNCTION_CALL errors
+            const result = await runAllPrompts({ ...args, tool_choice: 'none' });
+            
+            // Check for errors in resolver (ModelExecutor logs errors here when it catches exceptions)
+            if (resolver.errors && resolver.errors.length > 0) {
+                const errorMessages = Array.isArray(resolver.errors) 
+                    ? resolver.errors.map(err => err.message || err)
+                    : [resolver.errors.message || resolver.errors];
+                
+                const errorMessageStr = errorMessages.join('; ');
+                logger.error(`Analyzer tool error: ${errorMessageStr}`);
+                
+                resolver.tool = JSON.stringify({ toolUsed: "vision" });
+                return JSON.stringify({ 
+                    error: errorMessageStr,
+                    recoveryMessage: "The file analysis failed. Please verify the file is accessible and in a supported format, or try a different file."
+                });
+            }
+            
+            // Handle null response (can happen when ModelExecutor catches an error but doesn't log it)
+            if (!result) {
+                const errorMessage = 'Model execution returned null - the model request likely failed';
+                logger.error(`Error in analyzer tool: ${errorMessage}`);
+                resolver.tool = JSON.stringify({ toolUsed: "vision" });
+                return JSON.stringify({ 
+                    error: errorMessage,
+                    recoveryMessage: "The file analysis failed. Please verify the file is accessible and in a supported format, or try a different file."
+                });
+            }
+            
             resolver.tool = JSON.stringify({ toolUsed: "vision" });
             return result;
         } catch (e) {
