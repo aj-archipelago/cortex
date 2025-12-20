@@ -5,8 +5,7 @@ const MAX_TOOL_CALLS = 50;
 import { callPathway, callTool, say, sendToolStart, sendToolFinish } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
-import { chatArgsHasImageUrl, removeOldImageAndFileContent } from '../../../lib/util.js';
-import { getAvailableFiles } from '../../../lib/fileUtils.js';
+import { syncAndStripFilesFromChatHistory } from '../../../lib/fileUtils.js';
 import { Prompt } from '../../../server/prompt.js';
 import { getToolsForEntity, loadEntityConfig } from './tools/shared/sys_entity_tools.js';
 import CortexResponse from '../../../lib/cortexResponse.js';
@@ -513,12 +512,12 @@ export default {
             args.chatHistory = args.chatHistory.slice(-20);
         }
 
-        // Get available files from collection (async, syncs files from chat history)
-        const availableFiles = await getAvailableFiles(args.chatHistory, args.contextId, args.contextKey);
-
-        // remove old image and file content
-        const visionContentPresent = chatArgsHasImageUrl(args);
-        visionContentPresent && (args.chatHistory = removeOldImageAndFileContent(args.chatHistory));
+        // Sync files from chat history to collection and strip file content
+        // Files are accessible via tools (AnalyzeFile, ReadTextFile, etc.)
+        const { chatHistory: strippedHistory, availableFiles } = await syncAndStripFilesFromChatHistory(
+            args.chatHistory, args.contextId, args.contextKey
+        );
+        args.chatHistory = strippedHistory;
 
         // truncate the chat history in case there is really long content
         const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);

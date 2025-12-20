@@ -1159,6 +1159,432 @@ test('File collection: Sync files from chat history', async t => {
 });
 
 // ============================================
+// UpdateFileMetadata Tool Tests
+// ============================================
+
+test('File collection: UpdateFileMetadata tool - Rename file', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a file first
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/old-name.pdf',
+            filename: 'old-name.pdf',
+            tags: ['test'],
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        const originalFileId = addParsed.fileId;
+        
+        // Rename using UpdateFileMetadata tool
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: 'old-name.pdf',
+            newFilename: 'new-name.pdf',
+            userMessage: 'Rename file'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, true);
+        t.is(updateParsed.file, 'old-name.pdf');
+        t.true(updateParsed.message.includes('renamed to "new-name.pdf"'));
+        
+        // Verify rename persisted
+        const collection = await loadFileCollection(contextId, null, false);
+        const updatedFile = collection.find(f => f.id === originalFileId);
+        t.truthy(updatedFile);
+        t.is(updatedFile.displayFilename, 'new-name.pdf');
+        t.is(updatedFile.id, originalFileId); // ID should be preserved
+        t.is(updatedFile.url, 'https://example.com/old-name.pdf'); // URL should be preserved
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: UpdateFileMetadata tool - Replace all tags', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file with initial tags
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test.pdf',
+            filename: 'test.pdf',
+            tags: ['old', 'tags'],
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        
+        // Replace all tags
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: 'test.pdf',
+            tags: ['new', 'replaced', 'tags'],
+            userMessage: 'Replace tags'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, true);
+        
+        // Verify tags were replaced
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === addParsed.fileId);
+        t.deepEqual(file.tags, ['new', 'replaced', 'tags']);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: UpdateFileMetadata tool - Add tags', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file with initial tags
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test.pdf',
+            filename: 'test.pdf',
+            tags: ['existing', 'tag'],
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        
+        // Add more tags
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: 'test.pdf',
+            addTags: ['new', 'added'],
+            userMessage: 'Add tags'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, true);
+        
+        // Verify tags were added (should contain both old and new)
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === addParsed.fileId);
+        t.is(file.tags.length, 4);
+        t.true(file.tags.includes('existing'));
+        t.true(file.tags.includes('tag'));
+        t.true(file.tags.includes('new'));
+        t.true(file.tags.includes('added'));
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: UpdateFileMetadata tool - Remove tags', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file with tags
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test.pdf',
+            filename: 'test.pdf',
+            tags: ['keep', 'remove1', 'remove2', 'also-keep'],
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        
+        // Remove specific tags
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: 'test.pdf',
+            removeTags: ['remove1', 'remove2'],
+            userMessage: 'Remove tags'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, true);
+        
+        // Verify tags were removed
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === addParsed.fileId);
+        t.is(file.tags.length, 2);
+        t.true(file.tags.includes('keep'));
+        t.true(file.tags.includes('also-keep'));
+        t.false(file.tags.includes('remove1'));
+        t.false(file.tags.includes('remove2'));
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: UpdateFileMetadata tool - Add and remove tags together', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file with tags
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test.pdf',
+            filename: 'test.pdf',
+            tags: ['old1', 'old2', 'remove-me'],
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        
+        // Add and remove tags in one operation
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: 'test.pdf',
+            addTags: ['new1', 'new2'],
+            removeTags: ['remove-me'],
+            userMessage: 'Update tags'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, true);
+        
+        // Verify tags were updated correctly
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === addParsed.fileId);
+        t.is(file.tags.length, 4);
+        t.true(file.tags.includes('old1'));
+        t.true(file.tags.includes('old2'));
+        t.true(file.tags.includes('new1'));
+        t.true(file.tags.includes('new2'));
+        t.false(file.tags.includes('remove-me'));
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: UpdateFileMetadata tool - Update notes', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file with initial notes
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test.pdf',
+            filename: 'test.pdf',
+            notes: 'Initial notes',
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        
+        // Update notes
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: 'test.pdf',
+            notes: 'Updated notes with more detail',
+            userMessage: 'Update notes'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, true);
+        
+        // Verify notes were updated
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === addParsed.fileId);
+        t.is(file.notes, 'Updated notes with more detail');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: UpdateFileMetadata tool - Update permanent flag', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file (defaults to temporary)
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test.pdf',
+            filename: 'test.pdf',
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        
+        // Mark as permanent
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: 'test.pdf',
+            permanent: true,
+            userMessage: 'Mark as permanent'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, true);
+        
+        // Verify permanent flag was set
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === addParsed.fileId);
+        t.is(file.permanent, true);
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: UpdateFileMetadata tool - Combined updates', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/original.pdf',
+            filename: 'original.pdf',
+            tags: ['old'],
+            notes: 'Old notes',
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        const originalFileId = addParsed.fileId;
+        
+        // Update everything at once
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: 'original.pdf',
+            newFilename: 'renamed-and-tagged.pdf',
+            tags: ['new', 'tags'],
+            notes: 'New notes',
+            permanent: true,
+            userMessage: 'Full update'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, true);
+        t.true(updateParsed.message.includes('renamed'));
+        t.true(updateParsed.message.includes('tags set'));
+        t.true(updateParsed.message.includes('notes updated'));
+        t.true(updateParsed.message.includes('permanent'));
+        
+        // Verify all updates persisted
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === originalFileId);
+        t.is(file.displayFilename, 'renamed-and-tagged.pdf');
+        t.deepEqual(file.tags, ['new', 'tags']);
+        t.is(file.notes, 'New notes');
+        t.is(file.permanent, true);
+        t.is(file.id, originalFileId); // ID preserved
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: UpdateFileMetadata tool - File not found error', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Try to update a non-existent file
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: 'nonexistent.pdf',
+            newFilename: 'new-name.pdf',
+            userMessage: 'Update missing file'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, false);
+        t.true(updateParsed.error.includes('not found'));
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: UpdateFileMetadata tool - Find file by ID', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/test.pdf',
+            filename: 'test.pdf',
+            userMessage: 'Add file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        const fileId = addParsed.fileId;
+        
+        // Update using file ID instead of filename
+        const updateResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            file: fileId,
+            newFilename: 'renamed-by-id.pdf',
+            userMessage: 'Update by ID'
+        });
+        
+        const updateParsed = JSON.parse(updateResult);
+        t.is(updateParsed.success, true);
+        
+        // Verify update worked
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection.find(f => f.id === fileId);
+        t.is(file.displayFilename, 'renamed-by-id.pdf');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: addFileToCollection returns correct ID for existing files', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add file first time
+        const addResult1 = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/duplicate.pdf',
+            filename: 'first.pdf',
+            tags: ['first'],
+            userMessage: 'Add file first time'
+        });
+        
+        const addParsed1 = JSON.parse(addResult1);
+        t.is(addParsed1.success, true);
+        const firstFileId = addParsed1.fileId;
+        
+        // Add same file again (same URL = same hash)
+        const addResult2 = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/duplicate.pdf',
+            filename: 'second.pdf',
+            tags: ['second'],
+            userMessage: 'Add same file again'
+        });
+        
+        const addParsed2 = JSON.parse(addResult2);
+        t.is(addParsed2.success, true);
+        
+        // The returned ID should match the first one (same hash = same entry)
+        t.is(addParsed2.fileId, firstFileId, 'Second add should return same ID as first');
+        
+        // Verify only one entry exists (not duplicated)
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 1);
+        
+        // Verify metadata was merged (tags from second add, but same ID)
+        const file = collection[0];
+        t.is(file.id, firstFileId);
+        t.deepEqual(file.tags, ['second']); // New tags replaced old ones
+        t.is(file.displayFilename, 'second.pdf'); // New filename
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+// ============================================
 // File Collection Encryption Tests
 // ============================================
 
