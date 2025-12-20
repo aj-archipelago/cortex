@@ -25,7 +25,7 @@ const resolveAndAddFileContent = async (pathways, pathwayArgs, requestId, config
         if (pathway.fileHashes && pathway.fileHashes.length > 0) {
             try {
                 const { resolveFileHashesToContent } = await import('../lib/fileUtils.js');
-                const fileContent = await resolveFileHashesToContent(pathway.fileHashes, config);
+                const fileContent = await resolveFileHashesToContent(pathway.fileHashes, config, pathwayArgs?.contextId || null);
                 
                 // Add file content to chatHistory if not already present (only do this once)
                 if (!fileContentAdded) {

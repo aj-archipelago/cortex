@@ -112,7 +112,8 @@ export default {
                     resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
                     return JSON.stringify(errorResult);
                 }
-                const resolvedUrl = await resolveFileParameter(file, contextId, contextKey);
+                // Use useCache: false to ensure we get the latest file data (important after edits)
+                const resolvedUrl = await resolveFileParameter(file, contextId, contextKey, { useCache: false });
                 if (!resolvedUrl) {
                     const errorResult = {
                         success: false,

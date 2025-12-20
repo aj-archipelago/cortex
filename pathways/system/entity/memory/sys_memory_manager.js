@@ -52,18 +52,23 @@ export default {
                     await callPathway('sys_save_memory', { ...args, aiMemory: AI_MEMORY_DEFAULTS });
                 } else {
                     // Upgrade memory to current version
-                    const normalizePromises = Object.keys(parsedMemory).map(async (section) => {
+                    // Filter out memoryFiles (deprecated - file collections are now stored separately in Redis hash maps)
+                    const validSections = ['memorySelf', 'memoryDirectives', 'memoryTopics', 'memoryUser', 'memoryContext', 'memoryVersion'];
+                    const sectionsToNormalize = Object.keys(parsedMemory).filter(section => validSections.includes(section));
+                    
+                    const normalizePromises = sectionsToNormalize.map(async (section) => {
                         const normalized = await normalizeMemoryFormat(args, parsedMemory[section]);
                         return [section, normalized];
                     });
                     
                     const normalizedResults = await Promise.all(normalizePromises);
+                    const upgradedMemory = {};
                     normalizedResults.forEach(([section, normalized]) => {
-                        parsedMemory[section] = normalized;
+                        upgradedMemory[section] = normalized;
                     });
                     
-                    parsedMemory.memoryVersion = MEMORY_VERSION;
-                    await callPathway('sys_save_memory', { ...args, aiMemory: JSON.stringify(parsedMemory) });
+                    upgradedMemory.memoryVersion = MEMORY_VERSION;
+                    await callPathway('sys_save_memory', { ...args, aiMemory: JSON.stringify(upgradedMemory) });
                 }
             }
 

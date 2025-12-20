@@ -11,9 +11,8 @@ import {
   gcsUrlExists,
   deleteGCS,
   getBlobClient,
-  AZURE_STORAGE_CONTAINER_NAMES,
+  AZURE_STORAGE_CONTAINER_NAME,
   getDefaultContainerName,
-  isValidContainerName,
 } from "../src/blobHandler.js";
 import { urlExists } from "../src/helper.js";
 import CortexFileHandler from "../src/index.js";
@@ -319,40 +318,14 @@ test("test hash check returns 404 when both storages are empty", async (t) => {
 });
 
 // Container name parsing and validation tests
-test("AZURE_STORAGE_CONTAINER_NAMES should be an array with at least one container", (t) => {
-  t.true(Array.isArray(AZURE_STORAGE_CONTAINER_NAMES), "Should be an array");
-  t.true(AZURE_STORAGE_CONTAINER_NAMES.length > 0, "Should have at least one container");
-  
-  // All items should be non-empty strings
-  AZURE_STORAGE_CONTAINER_NAMES.forEach((name, index) => {
-    t.is(typeof name, 'string', `Container at index ${index} should be a string`);
-    t.true(name.length > 0, `Container at index ${index} should not be empty`);
-  });
+test("AZURE_STORAGE_CONTAINER_NAME should be a string", (t) => {
+  t.is(typeof AZURE_STORAGE_CONTAINER_NAME, 'string', "Should be a string");
+  t.true(AZURE_STORAGE_CONTAINER_NAME.length > 0, "Should not be empty");
 });
 
-test("getDefaultContainerName should return the first container", (t) => {
+test("getDefaultContainerName should return the container name", (t) => {
   const defaultContainer = getDefaultContainerName();
-  t.is(defaultContainer, AZURE_STORAGE_CONTAINER_NAMES[0]);
+  t.is(defaultContainer, AZURE_STORAGE_CONTAINER_NAME);
   t.truthy(defaultContainer);
   t.is(typeof defaultContainer, 'string');
-});
-
-test("isValidContainerName should validate container names correctly", (t) => {
-  // All configured containers should be valid (getCurrentContainerNames reads from env at runtime)
-  const currentContainers = AZURE_STORAGE_CONTAINER_NAMES;
-  currentContainers.forEach(containerName => {
-    t.true(isValidContainerName(containerName), `${containerName} should be valid`);
-  });
-  
-  // Invalid containers should return false
-  t.false(isValidContainerName("invalid-container"));
-  t.false(isValidContainerName(""));
-  t.false(isValidContainerName(null));
-  t.false(isValidContainerName(undefined));
-  t.false(isValidContainerName("non-existent"));
-});
-
-test("container names should be unique", (t) => {
-  const uniqueNames = new Set(AZURE_STORAGE_CONTAINER_NAMES);
-  t.is(uniqueNames.size, AZURE_STORAGE_CONTAINER_NAMES.length, "All container names should be unique");
 });

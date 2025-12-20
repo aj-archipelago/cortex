@@ -133,32 +133,41 @@ export const CONVERTED_EXTENSIONS = [
 // Azure Storage constants
 export const AZURITE_ACCOUNT_NAME = "devstoreaccount1";
 
-// Parse comma-separated container names from environment variable
-export const parseContainerNames = () => {
-  const containerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
-  return containerStr.split(',').map(name => name.trim());
+// Get single container name from environment variable
+// CFH operates on a single Azure container and single GCS bucket
+export const getContainerName = () => {
+  const envValue = process.env.AZURE_STORAGE_CONTAINER_NAME;
+  
+  // Default to cortextempfiles if not set, empty, or the string "undefined"
+  if (!envValue || (typeof envValue === 'string' && envValue.trim() === "") || envValue === "undefined") {
+    return "cortextempfiles";
+  }
+  
+  // Handle legacy comma-separated values (take the last one)
+  if (envValue.includes(",")) {
+    const containers = envValue.split(",").map(c => c.trim()).filter(c => c.length > 0);
+    if (containers.length > 0) {
+      const containerName = containers[containers.length - 1];
+      console.warn(
+        `[WARNING] AZURE_STORAGE_CONTAINER_NAME contains comma-separated values (legacy format). ` +
+        `Using last container: "${containerName}". ` +
+        `Full value: "${envValue}". ` +
+        `Please update to use a single container name.`
+      );
+      return containerName;
+    }
+    // If all containers were empty after splitting, fall back to default
+    return "cortextempfiles";
+  }
+  
+  return envValue;
 };
 
-// Helper function to get current container names at runtime
-// Useful for runtime validation when env vars might change (e.g., in tests)
-export const getCurrentContainerNames = () => {
-  return parseContainerNames();
-};
-
-export const AZURE_STORAGE_CONTAINER_NAMES = parseContainerNames();
-
-// Helper function to get the default container name at runtime
-// This allows tests to change the environment variable and have the correct default
+// Helper function to get current container name at runtime
 export const getDefaultContainerName = () => {
-  return process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME || getCurrentContainerNames()[0];
+  return getContainerName();
 };
 
-export const DEFAULT_AZURE_STORAGE_CONTAINER_NAME = process.env.DEFAULT_AZURE_STORAGE_CONTAINER_NAME || AZURE_STORAGE_CONTAINER_NAMES[0];
+// Export constant - evaluated at module load time, but getContainerName() handles defaults
+export const AZURE_STORAGE_CONTAINER_NAME = getContainerName();
 export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
-
-// Validate if a container name is allowed
-export const isValidContainerName = (containerName) => {
-  // Read from environment at runtime to support dynamically changing env in tests
-  const currentContainerNames = getCurrentContainerNames();
-  return currentContainerNames.includes(containerName);
-};

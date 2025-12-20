@@ -6,7 +6,7 @@ import cors from "cors";
 import { readFileSync } from "fs";
 
 import { publicIpv4 } from "public-ip";
-import { AZURE_STORAGE_CONTAINER_NAMES, getDefaultContainerName } from "./blobHandler.js";
+import { AZURE_STORAGE_CONTAINER_NAME } from "./blobHandler.js";
 import { sanitizeForLogging } from "./utils/logSecurity.js";
 
 // When running under tests we want all generated URLs to resolve to the
@@ -102,9 +102,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         `Cortex File Handler v${version} running on port ${port} (includes legacy MediaFileChunker endpoint)`,
       );
       
-      // Debug: Show configured container names
-      console.log(`Configured container names: ${AZURE_STORAGE_CONTAINER_NAMES.join(', ')}`);
-      console.log(`Default container name: ${getDefaultContainerName()}`);
+      // Debug: Show configured container name
+      console.log(`Configured container name: ${AZURE_STORAGE_CONTAINER_NAME}`);
     });
   });
 }

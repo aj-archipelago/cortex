@@ -117,36 +117,7 @@ test("should get azure provider with default container when no container specifi
   t.truthy(provider.containerName);
 });
 
-test("should get azure provider with specific container name", async (t) => {
-  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
-    t.pass("Skipping test - Azure not configured");
-    return;
-  }
-
-  // Save original env value
-  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-  
-  try {
-    // Set test container names in environment
-    process.env.AZURE_STORAGE_CONTAINER_NAME = "container1,container2,container3";
-    
-    const factory = new StorageFactory();
-    
-    // Test with valid container name
-    const provider = await factory.getAzureProvider("container2");
-    t.truthy(provider);
-    t.is(provider.containerName, "container2");
-  } finally {
-    // Restore original env
-    if (originalEnv) {
-      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-    } else {
-      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-    }
-  }
-});
-
-test("should throw error for invalid container name", async (t) => {
+test("should get azure provider (container parameter ignored)", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
@@ -154,44 +125,44 @@ test("should throw error for invalid container name", async (t) => {
 
   const factory = new StorageFactory();
   
-  // Test with invalid container name
-  await t.throwsAsync(
-    () => factory.getAzureProvider("invalid-container"),
-    { message: /Invalid container name/ }
-  );
+  // Container parameter is ignored - always uses default container from env
+  const provider = await factory.getAzureProvider("any-container-name");
+  t.truthy(provider);
+  // Should use the default container from env, not the parameter
+  const { getContainerName } = await import("../../src/constants.js");
+  t.is(provider.containerName, getContainerName());
 });
 
-test("should cache providers by container name", async (t) => {
+test("should ignore container parameter and use default container", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
   }
 
-  // Save original env value
-  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
+  const factory = new StorageFactory();
   
-  try {
-    // Set test container names in environment
-    process.env.AZURE_STORAGE_CONTAINER_NAME = "container1,container2,container3";
-    
-    const factory = new StorageFactory();
-    
-    const provider1 = await factory.getAzureProvider("container1");
-    const provider2 = await factory.getAzureProvider("container1");
-    const provider3 = await factory.getAzureProvider("container2");
-    
-    // Same container should return same instance
-    t.is(provider1, provider2);
-    // Different container should return different instance
-    t.not(provider1, provider3);
-    t.is(provider1.containerName, "container1");
-    t.is(provider3.containerName, "container2");
-  } finally {
-    // Restore original env
-    if (originalEnv) {
-      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-    } else {
-      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-    }
+  // Container parameter is ignored - always uses default container
+  const provider1 = await factory.getAzureProvider("invalid-container");
+  const provider2 = await factory.getAzureProvider();
+  
+  // Both should return the same provider instance (same default container)
+  t.is(provider1, provider2);
+});
+
+test("should cache provider instance (single container)", async (t) => {
+  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
+    t.pass("Skipping test - Azure not configured");
+    return;
   }
+
+  const factory = new StorageFactory();
+  
+  // All calls should return the same provider instance (single container)
+  const provider1 = await factory.getAzureProvider();
+  const provider2 = await factory.getAzureProvider();
+  const provider3 = await factory.getAzureProvider("ignored-container");
+  
+  // All should return the same instance
+  t.is(provider1, provider2);
+  t.is(provider1, provider3);
 });

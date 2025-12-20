@@ -1,8 +1,9 @@
 // sys_tool_file_collection.js
-// Tool pathway that manages user file collections (add, search, list files)
-// Uses memory system endpoints (memoryFiles section) for storage
+// Tool pathway that manages user file collections (add, search, list, update, remove files)
+// Uses Redis hash maps (FileStoreMap:ctx:<contextId>) for storage
+// Supports atomic rename/tag/notes updates via UpdateFileMetadata
 import logger from '../../../../lib/logger.js';
-import { addFileToCollection, loadFileCollection, saveFileCollection, findFileInCollection, deleteFileByHash, modifyFileCollectionWithLock } from '../../../../lib/fileUtils.js';
+import { addFileToCollection, loadFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -45,6 +46,10 @@ export default {
                         hash: {
                             type: "string",
                             description: "Optional: File hash for deduplication and identification (usually computed automatically during upload)"
+                        },
+                        permanent: {
+                            type: "boolean",
+                            description: "Optional: If true, the file will be stored indefinitely (retention=permanent). Default: false."
                         },
                         userMessage: {
                             type: "string",
@@ -140,6 +145,55 @@ export default {
                     required: ["fileIds", "userMessage"]
                 }
             }
+        },
+        {
+            type: "function",
+            icon: "✏️",
+            function: {
+                name: "UpdateFileMetadata",
+                description: "Update metadata for a file in your collection. Use this to rename files, update tags, or add/modify notes. This is an atomic operation - safer than add+delete for renaming.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        file: {
+                            type: "string",
+                            description: "The file to update - can be the current filename, hash, URL, or ID from ListFileCollection"
+                        },
+                        newFilename: {
+                            type: "string",
+                            description: "Optional: New filename/title for the file (renames the file)"
+                        },
+                        tags: {
+                            type: "array",
+                            items: { type: "string" },
+                            description: "Optional: New tags to set for this file (replaces existing tags)"
+                        },
+                        addTags: {
+                            type: "array",
+                            items: { type: "string" },
+                            description: "Optional: Tags to add to the file's existing tags"
+                        },
+                        removeTags: {
+                            type: "array",
+                            items: { type: "string" },
+                            description: "Optional: Tags to remove from the file's existing tags"
+                        },
+                        notes: {
+                            type: "string",
+                            description: "Optional: New notes/description for the file (replaces existing notes)"
+                        },
+                        permanent: {
+                            type: "boolean",
+                            description: "Optional: If true, marks the file as permanent (won't be auto-cleaned). If false, marks as temporary."
+                        },
+                        userMessage: {
+                            type: "string",
+                            description: "A user-friendly message that describes what you're doing with this tool"
+                        }
+                    },
+                    required: ["file", "userMessage"]
+                }
+            }
         }
     ],
 
@@ -147,7 +201,16 @@ export default {
         const { contextId, contextKey } = args;
 
         // Determine which function was called based on which parameters are present
-        const isAdd = args.fileUrl !== undefined || args.url !== undefined;
+        // Order matters: check most specific operations first
+        const isUpdate = args.file !== undefined && (
+            args.newFilename !== undefined || 
+            args.tags !== undefined || 
+            args.addTags !== undefined || 
+            args.removeTags !== undefined || 
+            args.notes !== undefined || 
+            args.permanent !== undefined
+        );
+        const isAdd = !isUpdate && (args.fileUrl !== undefined || args.url !== undefined);
         const isSearch = args.query !== undefined;
         const isRemove = args.fileIds !== undefined || args.fileId !== undefined;
 
@@ -156,9 +219,103 @@ export default {
                 throw new Error("contextId is required for file collection operations");
             }
 
-            if (isAdd) {
+            if (isUpdate) {
+                // Update file metadata (rename, tags, notes, permanent)
+                const { file, newFilename, tags, addTags, removeTags, notes, permanent } = args;
+                
+                if (!file) {
+                    throw new Error("file parameter is required - specify the file by filename, hash, URL, or ID");
+                }
+
+                // Load collection and find the file
+                const collection = await loadFileCollection(contextId, contextKey, false);
+                const foundFile = findFileInCollection(file, collection);
+                
+                if (!foundFile) {
+                    throw new Error(`File not found: "${file}". Use ListFileCollection to see available files.`);
+                }
+
+                if (!foundFile.hash) {
+                    throw new Error(`File "${file}" has no hash - cannot update metadata`);
+                }
+
+                // Build the metadata update object
+                const metadataUpdate = {};
+                
+                // Handle filename rename
+                if (newFilename !== undefined) {
+                    metadataUpdate.displayFilename = newFilename;
+                }
+                
+                // Handle tags - three modes: replace all, add, or remove
+                if (tags !== undefined) {
+                    // Replace all tags
+                    metadataUpdate.tags = Array.isArray(tags) ? tags : [];
+                } else if (addTags !== undefined || removeTags !== undefined) {
+                    // Merge with existing tags
+                    let currentTags = Array.isArray(foundFile.tags) ? [...foundFile.tags] : [];
+                    
+                    // Add new tags (avoid duplicates)
+                    if (addTags && Array.isArray(addTags)) {
+                        for (const tag of addTags) {
+                            const normalizedTag = tag.toLowerCase();
+                            if (!currentTags.some(t => t.toLowerCase() === normalizedTag)) {
+                                currentTags.push(tag);
+                            }
+                        }
+                    }
+                    
+                    // Remove tags
+                    if (removeTags && Array.isArray(removeTags)) {
+                        const removeSet = new Set(removeTags.map(t => t.toLowerCase()));
+                        currentTags = currentTags.filter(t => !removeSet.has(t.toLowerCase()));
+                    }
+                    
+                    metadataUpdate.tags = currentTags;
+                }
+                
+                // Handle notes
+                if (notes !== undefined) {
+                    metadataUpdate.notes = notes;
+                }
+                
+                // Handle permanent flag
+                if (permanent !== undefined) {
+                    metadataUpdate.permanent = permanent;
+                }
+                
+                // Always update lastAccessed
+                metadataUpdate.lastAccessed = new Date().toISOString();
+
+                // Perform the atomic update
+                const success = await updateFileMetadata(contextId, foundFile.hash, metadataUpdate, contextKey);
+                
+                if (!success) {
+                    throw new Error(`Failed to update file metadata for "${file}"`);
+                }
+
+                // Build result with what was updated
+                const updates = [];
+                if (newFilename !== undefined) updates.push(`renamed to "${newFilename}"`);
+                if (tags !== undefined) updates.push(`tags set to [${tags.join(', ')}]`);
+                if (addTags !== undefined) updates.push(`added tags [${addTags.join(', ')}]`);
+                if (removeTags !== undefined) updates.push(`removed tags [${removeTags.join(', ')}]`);
+                if (notes !== undefined) updates.push(`notes updated`);
+                if (permanent !== undefined) updates.push(`marked as ${permanent ? 'permanent' : 'temporary'}`);
+
+                resolver.tool = JSON.stringify({ toolUsed: "UpdateFileMetadata" });
+                return JSON.stringify({
+                    success: true,
+                    file: foundFile.displayFilename || foundFile.filename || file,
+                    fileId: foundFile.id,
+                    hash: foundFile.hash,
+                    updates: updates,
+                    message: `File "${foundFile.displayFilename || foundFile.filename || file}" updated: ${updates.join(', ')}`
+                });
+
+            } else if (isAdd) {
                 // Add file to collection
-                const { fileUrl, url, gcs, filename, tags = [], notes = '', hash = null } = args;
+                const { fileUrl, url, gcs, filename, tags = [], notes = '', hash = null, permanent = false } = args;
                 
                 if (!filename) {
                     throw new Error("filename is required");
@@ -179,7 +336,8 @@ export default {
                     notes,
                     hash,
                     fileUrl,
-                    resolver
+                    resolver,
+                    permanent
                 );
 
                 resolver.tool = JSON.stringify({ toolUsed: "AddFileToCollection" });
@@ -201,51 +359,47 @@ export default {
                 const safeFilterTags = Array.isArray(filterTags) ? filterTags : [];
                 const queryLower = query.toLowerCase();
                 
-                // Use optimistic locking to update lastAccessed
-                await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
-                    // Find matching files and update their lastAccessed
-                    const fileIds = new Set();
-                    collection.forEach(file => {
-                        // Skip files without filename
-                        if (!file.filename) return;
-                        
-                        // Search in filename, tags, and notes
-                        const filenameMatch = file.filename.toLowerCase().includes(queryLower);
-                        const notesMatch = file.notes && file.notes.toLowerCase().includes(queryLower);
-                        const tagMatch = Array.isArray(file.tags) && file.tags.some(tag => tag.toLowerCase().includes(queryLower));
-                        
-                        const matchesQuery = filenameMatch || notesMatch || tagMatch;
-                        
-                        // Filter by tags if provided
-                        const matchesTags = safeFilterTags.length === 0 || 
-                            (Array.isArray(file.tags) && safeFilterTags.every(filterTag => 
-                                file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
-                            ));
-                        
-                        if (matchesQuery && matchesTags) {
-                            fileIds.add(file.id);
-                        }
-                    });
+                // Update lastAccessed for matching files directly (atomic operations)
+                const allFiles = await loadFileCollection(contextId, contextKey, false);
+                const now = new Date().toISOString();
+                
+                // Find matching files and update lastAccessed directly
+                for (const file of allFiles) {
+                    if (!file.hash) continue;
                     
-                    // Update lastAccessed for found files
-                    collection.forEach(file => {
-                        if (fileIds.has(file.id)) {
-                            file.lastAccessed = new Date().toISOString();
-                        }
-                    });
+                    // Fallback to filename if displayFilename is not set (for files uploaded before displayFilename was added)
+                    const displayFilename = file.displayFilename || file.filename || '';
+                    const filenameMatch = displayFilename.toLowerCase().includes(queryLower);
+                    const notesMatch = file.notes && file.notes.toLowerCase().includes(queryLower);
+                    const tagMatch = Array.isArray(file.tags) && file.tags.some(tag => tag.toLowerCase().includes(queryLower));
+                    const matchesQuery = filenameMatch || notesMatch || tagMatch;
                     
-                    return collection;
-                });
+                    const matchesTags = safeFilterTags.length === 0 || 
+                        (Array.isArray(file.tags) && safeFilterTags.every(filterTag => 
+                            file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
+                        ));
+                    
+                    if (matchesQuery && matchesTags) {
+                        // Update lastAccessed directly (atomic operation)
+                        await updateFileMetadata(contextId, file.hash, {
+                            lastAccessed: now
+                        }, contextKey);
+                    }
+                }
                 
                 // Reload collection to get results (after update)
-                const collection = await loadFileCollection(contextId, contextKey, false);
+                const updatedFiles = await loadFileCollection(contextId, contextKey, false);
                 
                 // Filter and sort results (for display only, not modifying)
-                let results = collection.filter(file => {
-                    // Skip files without filename
-                    if (!file.filename) return false;
+                let results = updatedFiles.filter(file => {
+                    // Fallback to filename if displayFilename is not set
+                    const displayFilename = file.displayFilename || file.filename || '';
+                    const filename = file.filename || '';
                     
-                    const filenameMatch = file.filename.toLowerCase().includes(queryLower);
+                    // Check both displayFilename and filename for matches
+                    // (displayFilename may be different from filename, so check both)
+                    const filenameMatch = displayFilename.toLowerCase().includes(queryLower) || 
+                                         (filename && filename !== displayFilename && filename.toLowerCase().includes(queryLower));
                     const notesMatch = file.notes && file.notes.toLowerCase().includes(queryLower);
                     const tagMatch = Array.isArray(file.tags) && file.tags.some(tag => tag.toLowerCase().includes(queryLower));
                     
@@ -259,10 +413,13 @@ export default {
                     return matchesQuery && matchesTags;
                 });
 
-                // Sort by relevance (filename matches first, then by date)
+                // Sort by relevance (displayFilename matches first, then by date)
                 results.sort((a, b) => {
-                    const aFilenameMatch = a.filename && a.filename.toLowerCase().includes(queryLower);
-                    const bFilenameMatch = b.filename && b.filename.toLowerCase().includes(queryLower);
+                    // Fallback to filename if displayFilename is not set
+                    const aDisplayFilename = a.displayFilename || a.filename || '';
+                    const bDisplayFilename = b.displayFilename || b.filename || '';
+                    const aFilenameMatch = aDisplayFilename.toLowerCase().includes(queryLower);
+                    const bFilenameMatch = bDisplayFilename.toLowerCase().includes(queryLower);
                     if (aFilenameMatch && !bFilenameMatch) return -1;
                     if (!aFilenameMatch && bFilenameMatch) return 1;
                     return new Date(b.addedDate) - new Date(a.addedDate);
@@ -277,7 +434,7 @@ export default {
                     count: results.length,
                     files: results.map(f => ({
                         id: f.id,
-                        filename: f.filename,
+                        displayFilename: f.displayFilename || f.filename || null,
                         url: f.url,
                         gcs: f.gcs || null,
                         tags: f.tags,
@@ -302,27 +459,27 @@ export default {
                     throw new Error("fileIds array is required and must not be empty");
                 }
 
-                let removedCount = 0;
-                let removedFiles = [];
                 let notFoundFiles = [];
                 let filesToRemove = [];
 
-                // Load collection once to find all files
+                // Load collection ONCE to find all files and their hashes
+                // Use useCache: false to get fresh data
                 const collection = await loadFileCollection(contextId, contextKey, false);
                 
-                // Resolve all files
+                // Resolve all files and collect their info in a single pass
                 for (const target of targetFiles) {
                     if (target === '*') continue; // Skip wildcard if passed
                     
                     const foundFile = findFileInCollection(target, collection);
                     
                     if (foundFile) {
-                        // Avoid duplicates
-                        if (!filesToRemove.some(f => f.id === foundFile.id)) {
+                        // Avoid duplicates (by hash since that's the unique key in Redis)
+                        if (!filesToRemove.some(f => f.hash === foundFile.hash)) {
                             filesToRemove.push({
                                 id: foundFile.id,
-                                filename: foundFile.filename,
-                                hash: foundFile.hash || null
+                                displayFilename: foundFile.displayFilename || foundFile.filename || null,
+                                hash: foundFile.hash || null,
+                                permanent: foundFile.permanent ?? false
                             });
                         }
                     } else {
@@ -334,41 +491,51 @@ export default {
                     throw new Error(`No files found matching: ${notFoundFiles.join(', ')}`);
                 }
 
-                // Use optimistic locking to remove files from collection FIRST
-                // Capture hashes INSIDE the lock to avoid race conditions with concurrent edits
-                const fileIdsToRemove = new Set(filesToRemove.map(f => f.id));
-                const hashesToDelete = [];
-                const finalCollection = await modifyFileCollectionWithLock(contextId, contextKey, (collection) => {
-                    // Capture hashes of files that will be removed (at current lock time)
-                    collection.forEach(file => {
-                        if (fileIdsToRemove.has(file.id) && file.hash) {
-                            hashesToDelete.push({
-                                hash: file.hash,
-                                filename: file.filename || 'unknown'
-                            });
-                        }
-                    });
-                    
-                    // Remove files by ID
-                    return collection.filter(file => !fileIdsToRemove.has(file.id));
-                });
+                // Use the hashes collected from the single collection load
+                // No need to reload - we already have all the info we need
+                const hashesToDelete = filesToRemove.filter(f => f.hash);
+                
+                // Delete entries directly from hash map (atomic operations)
+                const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+                const redisClient = await getRedisClient();
+                if (redisClient) {
+                    const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+                    for (const fileInfo of hashesToDelete) {
+                        await redisClient.hdel(contextMapKey, fileInfo.hash);
+                    }
+                }
+                
+                // Always invalidate cache immediately so list operations reflect removals
+                // (even if Redis operations failed, cache might be stale)
+                invalidateFileCollectionCache(contextId, contextKey);
 
                 // Delete files from cloud storage ASYNC (fire and forget, but log errors)
                 // We do this after updating collection so user gets fast response and files are "gone" from UI immediately
                 // Use hashes captured inside the lock to ensure we delete the correct files
+                // IMPORTANT: Don't delete permanent files from cloud storage - they should persist
                 (async () => {
                     for (const fileInfo of hashesToDelete) {
+                        // Skip deletion if file is marked as permanent
+                        if (fileInfo.permanent) {
+                            logger.info(`Skipping cloud deletion for permanent file: ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
+                            continue;
+                        }
+                        
                         try {
-                            logger.info(`Deleting file from cloud storage: ${fileInfo.filename} (hash: ${fileInfo.hash})`);
-                            await deleteFileByHash(fileInfo.hash, resolver);
+                            logger.info(`Deleting file from cloud storage: ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
+                            await deleteFileByHash(fileInfo.hash, resolver, contextId);
                         } catch (error) {
-                            logger.warn(`Failed to delete file ${fileInfo.filename} (hash: ${fileInfo.hash}) from cloud storage: ${error?.message || String(error)}`);
+                            logger.warn(`Failed to delete file ${fileInfo.displayFilename} (hash: ${fileInfo.hash}) from cloud storage: ${error?.message || String(error)}`);
                         }
                     }
                 })().catch(err => logger.error(`Async cloud deletion error: ${err}`));
 
-                removedCount = filesToRemove.length;
-                removedFiles = filesToRemove;
+                const removedCount = filesToRemove.length;
+                const removedFiles = filesToRemove;
+
+                // Get remaining files count after deletion
+                const remainingCollection = await loadFileCollection(contextId, contextKey, false);
+                const remainingCount = remainingCollection.length;
 
                 // Build result message
                 let message = `${removedCount} file(s) removed from collection`;
@@ -383,7 +550,7 @@ export default {
                 return JSON.stringify({
                     success: true,
                     removedCount: removedCount,
-                    remainingFiles: finalCollection.length,
+                    remainingFiles: remainingCount,
                     message: message,
                     removedFiles: removedFiles,
                     notFoundFiles: notFoundFiles.length > 0 ? notFoundFiles : undefined
@@ -393,7 +560,8 @@ export default {
                 // List collection (read-only, no locking needed)
                 const { tags: filterTags = [], sortBy = 'date', limit = 50 } = args;
                 
-                const collection = await loadFileCollection(contextId, contextKey, true);
+                // Use useCache: false to ensure we get the latest file data (important after edits)
+                const collection = await loadFileCollection(contextId, contextKey, false);
                 let results = collection;
 
                 // Filter by tags if provided
@@ -409,7 +577,12 @@ export default {
                 if (sortBy === 'date') {
                     results.sort((a, b) => new Date(b.addedDate) - new Date(a.addedDate));
                 } else if (sortBy === 'filename') {
-                    results.sort((a, b) => a.filename.localeCompare(b.filename));
+                    results.sort((a, b) => {
+                        // Fallback to filename if displayFilename is not set
+                        const aDisplayFilename = a.displayFilename || a.filename || '';
+                        const bDisplayFilename = b.displayFilename || b.filename || '';
+                        return aDisplayFilename.localeCompare(bDisplayFilename);
+                    });
                 }
 
                 // Limit results
@@ -422,7 +595,7 @@ export default {
                     totalFiles: collection.length,
                     files: results.map(f => ({
                         id: f.id,
-                        filename: f.filename,
+                        displayFilename: f.displayFilename || f.filename || null,
                         url: f.url,
                         gcs: f.gcs || null,
                         tags: f.tags,

@@ -3,6 +3,9 @@
 import logger from '../../../../lib/logger.js';
 import { uploadFileToCloud, addFileToCollection, getMimeTypeFromFilename, isTextMimeType } from '../../../../lib/fileUtils.js';
 
+// Maximum file size for writing (50MB) - prevents memory issues
+const MAX_WRITABLE_FILE_SIZE = 50 * 1024 * 1024;
+
 // Helper function to format file size
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 B';
@@ -123,6 +126,18 @@ export default {
         try {
             // Convert content to buffer
             const fileBuffer = Buffer.from(content, 'utf8');
+            
+            // Check file size to prevent memory issues
+            if (fileBuffer.length > MAX_WRITABLE_FILE_SIZE) {
+                const errorResult = {
+                    success: false,
+                    filename: filename,
+                    error: `Content too large to write (${formatFileSize(fileBuffer.length)}). Maximum file size is ${formatFileSize(MAX_WRITABLE_FILE_SIZE)}.`
+                };
+                resolver.tool = JSON.stringify({ toolUsed: "WriteFile" });
+                return JSON.stringify(errorResult);
+            }
+            
             logger.info(`Prepared content buffer for file: ${filename} (${fileBuffer.length} bytes)`);
 
             // Determine MIME type from filename using utility function
@@ -138,7 +153,8 @@ export default {
                 fileBuffer,
                 mimeType,
                 filename,
-                resolver
+                resolver,
+                contextId
             );
 
             if (!uploadResult || !uploadResult.url) {
@@ -159,7 +175,8 @@ export default {
                         notes,
                         uploadResult.hash || null,
                         null, // fileUrl - not needed since we already uploaded
-                        resolver
+                        resolver,
+                        true // permanent => retention=permanent
                     );
                 } catch (collectionError) {
                     // Log but don't fail - file collection is optional

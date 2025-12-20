@@ -1,5 +1,5 @@
-// sys_tool_image_gemini.js
-// Entity tool that creates and modifies images for the entity to show to the user
+// sys_tool_slides_gemini.js
+// Entity tool that creates slides, infographics, and presentations using Gemini 3 Pro image generation
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import { uploadImageToCloud, addFileToCollection, resolveFileParameter } from '../../../../lib/fileUtils.js';
 
@@ -16,27 +16,27 @@ export default {
     toolDefinition: [{
         type: "function",
         enabled: true,
-        icon: "🎨",
+        icon: "📊",
         function: {
-            name: "GenerateImage",
-            description: "Use when asked to create, generate, or generate revisions of visual content. Any time the user asks you for a picture, a selfie, artwork, a drawing or if you want to illustrate something for the user, you can use this tool to generate any sort of image from cartoon to photo realistic. After you have generated the image, you must include the image in your response to show it to the user.",
+            name: "GenerateSlides",
+            description: "Use when asked to create, generate, or design slides, infographics, presentations, or visual content optimized for presentations. This tool is specifically designed for creating presentation-ready visuals including slide layouts, infographic designs, charts, diagrams, and other visual content that would be used in presentations. It uses Gemini 3 Pro image generation which excels at creating structured, professional presentation content. After you have generated the content, you must include it in your response to show it to the user.",
             parameters: {
                 type: "object",
                 properties: {
                     detailedInstructions: {
                         type: "string",
-                        description: "A very detailed prompt describing the image you want to create. You should be very specific - explaining subject matter, style, and details about the image including things like camera angle, lens types, lighting, photographic techniques, etc. Any details you can provide to the image creation engine will help it create the most accurate and useful images. The more detailed and descriptive the prompt, the better the result."
+                        description: "A very detailed prompt describing the slide, infographic, or presentation content you want to create. Be specific about the layout, design style, content structure, color scheme, typography preferences, and any specific elements you want included (e.g., 'Create a professional slide with a title at the top, three bullet points in the middle, and a chart on the right side. Use a blue and white color scheme with modern sans-serif fonts.'). For infographics, specify the data visualization needs, layout structure, and visual hierarchy. The more detailed and descriptive the prompt, the better the result."
                     },
                     filenamePrefix: {
                         type: "string",
-                        description: "Optional: A descriptive prefix to use for the generated image filename (e.g., 'portrait', 'landscape', 'logo'). If not provided, defaults to 'generated-image'."
+                        description: "Optional: A descriptive prefix to use for the generated image filename (e.g., 'slide', 'infographic', 'presentation', 'chart'). If not provided, defaults to 'presentation-slide'."
                     },
                     tags: {
                         type: "array",
                         items: {
                             type: "string"
                         },
-                        description: "Optional: Array of tags to categorize the image (e.g., ['portrait', 'art', 'photography']). Will be merged with default tags ['image', 'generated']."
+                        description: "Optional: Array of tags to categorize the content (e.g., ['slide', 'infographic', 'presentation', 'chart']). Will be merged with default tags ['presentation', 'generated']."
                     },
                     userMessage: {
                         type: "string",
@@ -46,53 +46,12 @@ export default {
                 required: ["detailedInstructions", "userMessage"]
             }
         }
-    },
-    {
-        type: "function",
-        enabled: false,
-        icon: "🔄",
-        function: {
-            name: "ModifyImage",
-            description: "Use when asked to modify, transform, or edit an existing image. This tool can apply various transformations like style changes, artistic effects, or specific modifications to an image that has been previously uploaded or generated. It takes up to three input images as a reference and outputs a new image based on the instructions.",
-            parameters: {
-                type: "object",
-                properties: {
-                    inputImages: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        },
-                        description: "An array of images from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as references for the image modification. You can provide up to 3 images. Each image should be the hash or filename."
-                    },
-                    detailedInstructions: {
-                        type: "string",
-                        description: "A very detailed prompt describing how you want to modify the image. Be specific about the changes you want to make, including style changes, artistic effects, or specific modifications. The more detailed and descriptive the prompt, the better the result."
-                    },
-                    filenamePrefix: {
-                        type: "string",
-                        description: "Optional: A prefix to use for the modified image filename (e.g., 'edited', 'stylized', 'enhanced'). If not provided, defaults to 'modified-image'."
-                    },
-                    tags: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        },
-                        description: "Optional: Array of tags to categorize the image (e.g., ['edited', 'art', 'stylized']). Will be merged with default tags ['image', 'modified']."
-                    },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                    }
-                },
-                required: ["inputImages", "detailedInstructions", "userMessage"]
-            }
-        }
     }],
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
 
         try {   
-            let model = "gemini-flash-25-image";
+            let model = "gemini-pro-3-image";
             let prompt = args.detailedInstructions || "";
             
             // Resolve input images to URLs using the common utility
@@ -117,8 +76,8 @@ export default {
                 }
             }
             
-            // Call the image generation pathway
-            let result = await callPathway('image_gemini_25', {
+            // Call the image generation pathway using Gemini 3
+            let result = await callPathway('image_gemini_3', {
                 ...args, 
                 text: prompt,
                 model, 
@@ -129,7 +88,7 @@ export default {
                 optimizePrompt: true,
             }, pathwayResolver);
 
-            pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
+            pathwayResolver.tool = JSON.stringify({ toolUsed: "slides" });
 
             if (pathwayResolver.pathwayResultData) {
                 if (pathwayResolver.pathwayResultData.artifacts && Array.isArray(pathwayResolver.pathwayResultData.artifacts)) {
@@ -162,10 +121,8 @@ export default {
                                         // Use hash for uniqueness if available, otherwise use timestamp and index
                                         const uniqueId = imageHash ? imageHash.substring(0, 8) : `${Date.now()}-${uploadedImages.length}`;
                                         
-                                        // Determine filename prefix based on whether this is a modification or generation
-                                        // If inputImages exists, it's a modification; otherwise it's a generation
-                                        const isModification = args.inputImages && Array.isArray(args.inputImages) && args.inputImages.length > 0;
-                                        const defaultPrefix = isModification ? 'modified-image' : 'generated-image';
+                                        // Determine filename prefix
+                                        const defaultPrefix = 'presentation-slide';
                                         const filenamePrefix = args.filenamePrefix || defaultPrefix;
                                         
                                         // Sanitize the prefix to ensure it's a valid filename component
@@ -173,7 +130,7 @@ export default {
                                         const filename = `${sanitizedPrefix}-${uniqueId}.${extension}`;
                                         
                                         // Merge provided tags with default tags
-                                        const defaultTags = ['image', isModification ? 'modified' : 'generated'];
+                                        const defaultTags = ['presentation', 'generated'];
                                         const providedTags = Array.isArray(args.tags) ? args.tags : [];
                                         const allTags = [...defaultTags, ...providedTags.filter(tag => !defaultTags.includes(tag))];
                                         
@@ -185,9 +142,7 @@ export default {
                                             imageGcs,
                                             filename,
                                             allTags,
-                                            isModification 
-                                                ? `Modified image from prompt: ${args.detailedInstructions || 'image modification'}`
-                                                : `Generated image from prompt: ${args.detailedInstructions || 'image generation'}`,
+                                            `Generated presentation content from prompt: ${args.detailedInstructions || 'presentation generation'}`,
                                             imageHash,
                                             null,
                                             pathwayResolver,
@@ -215,7 +170,7 @@ export default {
             } else {
                 // If result is not a CortexResponse, log a warning but return as-is
                 pathwayResolver.logWarning('No artifacts to upload');
-                result = result + '\n' + 'No images generated';
+                result = result + '\n' + 'No presentation content generated';
             }
 
             return result;
@@ -226,3 +181,4 @@ export default {
         }
     }
 };
+

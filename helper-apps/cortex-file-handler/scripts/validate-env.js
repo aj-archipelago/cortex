@@ -26,7 +26,7 @@ const REQUIRED_ENV_VARS = {
   },
   AZURE_STORAGE_CONTAINER_NAME: {
     required: true,
-    description: 'Must specify container names (comma-separated for multiple)'
+    description: 'Must specify a single container name'
   },
   REDIS_CONNECTION_STRING: {
     required: false,
@@ -68,19 +68,17 @@ function validateEnvironment() {
     }
   }
 
-  // Validate container names format
-  const containerNames = process.env.AZURE_STORAGE_CONTAINER_NAME;
-  if (containerNames) {
-    const containers = containerNames.split(',').map(name => name.trim());
-    console.log(`✅ Container names: ${containers.join(', ')}`);
+  // Validate container name
+  const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME;
+  if (containerName) {
+    // Handle legacy comma-separated values (take the last one)
+    const containers = containerName.split(',').map(name => name.trim()).filter(name => name.length > 0);
+    const actualContainer = containers[containers.length - 1];
+    console.log(`✅ Container name: ${actualContainer}`);
     
-    // Check for common test containers that might be missing
-    const commonTestContainers = ['test1', 'test2', 'test3', 'container1', 'container2', 'container3', 'test-container'];
-    const missingContainers = commonTestContainers.filter(container => !containers.includes(container));
-    
-    if (missingContainers.length > 0) {
-      warnings.push(`⚠️  Some test containers might be missing: ${missingContainers.join(', ')}`);
-      warnings.push(`   Consider adding them to AZURE_STORAGE_CONTAINER_NAME if tests fail`);
+    // Warn if comma-separated (legacy format)
+    if (containers.length > 1) {
+      warnings.push(`⚠️  AZURE_STORAGE_CONTAINER_NAME contains comma-separated values (legacy format). Using: "${actualContainer}"`);
     }
   }
 

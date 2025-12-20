@@ -140,8 +140,8 @@ const getPathwayTypeDef = (name, returnType) => {
   }`
 };
 
-const getPathwayTypeDefAndExtendQuery = (pathway) => {
-  const { name, objName, defaultInputParameters, inputParameters, format } = pathway;
+const buildPathwayTypeDef = (pathway) => {
+  const { name, objName, defaultInputParameters, inputParameters, format, isMutation = false } = pathway;
 
   const fields = format ? format.match(/\b(\w+)\b/g) : null;
   const fieldsStr = !fields ? `` : fields.map((f) => `${f}: String`).join('\n    ');
@@ -160,7 +160,19 @@ const getPathwayTypeDefAndExtendQuery = (pathway) => {
 
   const paramsStr = Object.entries(params)
     .map(([key, value]) => {
+      // Handle undefined values - these become optional parameters without defaults
+      if (value === undefined) {
+        // For undefined, we can't infer type, so default to String
+        // Pathways should use JSON Schema objects for better type inference
+        return `${key}: String`;
+      }
+      
       const { type, defaultValue } = getGraphQlType(value);
+      // For mutations, never include defaults - make all optional parameters truly optional
+      // For queries, only omit defaults if defaultValue is undefined (from JSON Schema without defaults)
+      if (isMutation || defaultValue === undefined) {
+        return `${key}: ${type}`;
+      }
       return `${key}: ${type} = ${defaultValue}`;
     })
     .join('\n');
@@ -172,7 +184,8 @@ const getPathwayTypeDefAndExtendQuery = (pathway) => {
     };
   });
 
-  const gqlDefinition = `${type}\n\n${responseType}\n\nextend type Query {${name}${paramsStr ? `(${paramsStr})` : ''}: ${objName}}`;
+  const extendType = isMutation ? 'Mutation' : 'Query';
+  const gqlDefinition = `${type}\n\n${responseType}\n\nextend type ${extendType} {${name}${paramsStr ? `(${paramsStr})` : ''}: ${objName}}`;
 
   return {
     gqlDefinition,
@@ -181,7 +194,7 @@ const getPathwayTypeDefAndExtendQuery = (pathway) => {
 };
 
 const typeDef = (pathway) => {
-  return getPathwayTypeDefAndExtendQuery(pathway);
+  return buildPathwayTypeDef(pathway);
 };
 
 const userPathwayInputParameters = `text: String, promptNames: [String]`;

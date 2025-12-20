@@ -9,21 +9,24 @@ async function createContainers() {
     if (!connectionString) {
       throw new Error("AZURE_STORAGE_CONNECTION_STRING environment variable is required");
     }
-    
-    if (!containerNames) {
-      throw new Error("AZURE_STORAGE_CONTAINER_NAME environment variable is required");
-    }
 
     const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
     
-    // Parse container names from environment variable
-    const containers = containerNames.split(',').map(name => name.trim());
-    console.log(`Creating containers: ${containers.join(', ')}`);
+    // Always create test containers that are used in tests
+    const testContainers = ["default", "test-container"];
+    
+    // Also create containers from environment variable if provided
+    const envContainers = containerNames 
+      ? containerNames.split(',').map(name => name.trim()).filter(name => name)
+      : [];
+    
+    // Combine and deduplicate container names
+    const allContainers = [...new Set([...testContainers, ...envContainers])];
+    
+    console.log(`Creating containers: ${allContainers.join(', ')}`);
 
     // Create each container
-    for (const containerName of containers) {
-      if (!containerName) continue; // Skip empty names
-      
+    for (const containerName of allContainers) {
       try {
         const containerClient = blobServiceClient.getContainerClient(containerName);
         await containerClient.create();

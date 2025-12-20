@@ -1,7 +1,7 @@
 import { AzureStorageProvider } from "./AzureStorageProvider.js";
 import { GCSStorageProvider } from "./GCSStorageProvider.js";
 import { LocalStorageProvider } from "./LocalStorageProvider.js";
-import { getCurrentContainerNames, GCS_BUCKETNAME } from "../../constants.js";
+import { getContainerName, GCS_BUCKETNAME } from "../../constants.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -32,32 +32,23 @@ export class StorageFactory {
     storageFactoryInstance = null;
   }
 
-  async getPrimaryProvider(containerName = null) {
+  async getPrimaryProvider() {
     if (process.env.AZURE_STORAGE_CONNECTION_STRING) {
-      return await this.getAzureProvider(containerName);
+      return await this.getAzureProvider();
     }
     return this.getLocalProvider();
   }
 
-  async getAzureProvider(containerName = null) {
-    // Read container names from environment directly to get current values
-    const azureStorageContainerNames = getCurrentContainerNames();
-    const defaultAzureStorageContainerName = azureStorageContainerNames[0];
+  async getAzureProvider() {
+    // Always use single container from env var
+    const containerName = getContainerName();
     
-    // Use provided container name or default to first in whitelist
-    const finalContainerName = containerName || defaultAzureStorageContainerName;
-    
-    // Validate container name
-    if (!azureStorageContainerNames.includes(finalContainerName)) {
-      throw new Error(`Invalid container name '${finalContainerName}'. Allowed containers: ${azureStorageContainerNames.join(', ')}`);
-    }
-    
-    // Create unique key for each container
-    const key = `azure-${finalContainerName}`;
+    // Create unique key for caching
+    const key = `azure-${containerName}`;
     if (!this.providers.has(key)) {
       const provider = new AzureStorageProvider(
         process.env.AZURE_STORAGE_CONNECTION_STRING,
-        finalContainerName,
+        containerName,
       );
       this.providers.set(key, provider);
     }

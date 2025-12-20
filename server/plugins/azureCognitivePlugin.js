@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { config } from '../../config.js';
 import { axios } from '../../lib/requestExecutor.js';
+import { fetchFileFromUrl, markCompletedForCleanUp } from '../../lib/fileUtils.js';
 import logger from '../../lib/logger.js';
 import { getSemanticChunks } from '../chunker.js';
 
@@ -199,16 +200,10 @@ class AzureCognitivePlugin extends ModelPlugin {
     }
 
     async markCompletedForCleanUp(requestId) {
-        try {
-            if (API_URL) {
-                //call helper api to mark processing as completed
-                const res = await axios.delete(API_URL, { params: { requestId } });
-                logger.info(`Marked request ${requestId} as completed: ${res.data}`);
-                return res.data;
-            }
-        } catch (err) {
-            logger.error(`Error marking request ${requestId} as completed: ${err}`);
-        }
+        // Use encapsulated function from fileUtils
+        // Note: savedContextId is available in execute() method via cortexRequest.pathwayResolver
+        // For now, pass null as contextId since this is a cleanup operation
+        return await markCompletedForCleanUp(requestId, null);
     }
 
     // Execute the request to the Azure Cognitive API
@@ -228,8 +223,12 @@ class AzureCognitivePlugin extends ModelPlugin {
             const extension = path.extname(file).toLowerCase();
             if (!DIRECT_FILE_EXTENSIONS.includes(extension)) {
                 try {
-                    const { data }  = await axios.get(API_URL, { params: { uri: file, requestId, save: true } });
-                    url = data[0];
+                    // Use encapsulated file handler function with save=true for conversion
+                    // Use savedContextId as contextId if available
+                    const contextId = savedContextId || requestId;
+                    const data = await fetchFileFromUrl(file, requestId, contextId, true);
+                    // Response is an array for converted files
+                    url = Array.isArray(data) ? data[0] : data.url;
                 } catch (error) {
                     logger.error(`Error converting file ${file} to txt: ${error}`);
                     await this.markCompletedForCleanUp(requestId);

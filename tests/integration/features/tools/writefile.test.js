@@ -4,6 +4,7 @@
 import test from 'ava';
 import serverFactory from '../../../../index.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
+import { loadFileCollection } from '../../../../lib/fileUtils.js';
 
 let testServer;
 
@@ -27,27 +28,16 @@ const createTestContext = () => {
     return contextId;
 };
 
-// Helper to extract files array from stored format (handles both old array format and new {version, files} format)
-const extractFilesFromStored = (stored) => {
-    if (!stored) return [];
-    const parsed = typeof stored === 'string' ? JSON.parse(stored) : stored;
-    // Handle new format: { version, files }
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.files) {
-        return Array.isArray(parsed.files) ? parsed.files : [];
-    }
-    // Handle old format: just an array
-    if (Array.isArray(parsed)) {
-        return parsed;
-    }
-    return [];
-};
 
 // Helper to clean up test data
 const cleanup = async (contextId, contextKey = null) => {
     try {
-        const { keyValueStorageClient } = await import('../../../../lib/keyValueStorageClient.js');
-        // Delete the key entirely instead of setting to empty array
-        await keyValueStorageClient.delete(`${contextId}-memoryFiles`);
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        if (redisClient) {
+            const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+            await redisClient.del(contextMapKey);
+        }
     } catch (e) {
         // Ignore cleanup errors
     }
@@ -83,13 +73,10 @@ test('WriteFile: Write and upload text file', async t => {
         t.true(parsed.message.includes('written and uploaded successfully'));
         
         // Verify it was added to file collection
-        const saved = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        const collection = extractFilesFromStored(saved);
+        const collection = await loadFileCollection(contextId, null, false);
         t.is(collection.length, 1);
-        t.is(collection[0].filename, filename);
+        // Use displayFilename (user-friendly name) with fallback to filename (CFH-managed)
+        t.is(collection[0].displayFilename || collection[0].filename, filename);
         t.is(collection[0].url, parsed.url);
         t.truthy(collection[0].hash);
     } finally {
@@ -131,13 +118,10 @@ test('WriteFile: Write JSON file with tags and notes', async t => {
         t.is(parsed.size, Buffer.byteLength(content, 'utf8'));
         
         // Verify it was added to file collection with metadata
-        const saved = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        const collection = extractFilesFromStored(saved);
+        const collection = await loadFileCollection(contextId, null, false);
         t.is(collection.length, 1);
-        t.is(collection[0].filename, filename);
+        // Use displayFilename (user-friendly name) with fallback to filename (CFH-managed)
+        t.is(collection[0].displayFilename || collection[0].filename, filename);
         t.deepEqual(collection[0].tags, tags);
         t.is(collection[0].notes, notes);
     } finally {
@@ -247,11 +231,7 @@ test('WriteFile: Different file types and MIME types', async t => {
         }
         
         // Verify all files were added
-        const saved = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        const collection = extractFilesFromStored(saved);
+        const collection = await loadFileCollection(contextId, null, false);
         t.is(collection.length, successCount);
     } finally {
         await cleanup(contextId);
@@ -333,16 +313,13 @@ test('WriteFile: Duplicate content (same hash)', async t => {
         t.is(parsed2.success, true);
         t.is(parsed2.hash, firstHash); // Should have same hash
         
-        // Both files should be in collection with different filenames but same hash
-        const saved = await callPathway('sys_read_memory', {
-            contextId,
-            section: 'memoryFiles'
-        });
-        const collection = extractFilesFromStored(saved);
-        t.is(collection.length, 2);
-        t.true(collection.some(f => f.filename === filename1));
-        t.true(collection.some(f => f.filename === filename2));
-        t.is(collection[0].hash, collection[1].hash); // Same hash
+        // Both files with same hash should result in one entry (same content, CFH will find it)
+        // The second file will update the existing entry with the new displayFilename
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 1); // Same hash = one entry
+        t.is(collection[0].hash, firstHash); // Same hash
+        // The displayFilename should be from the most recent write
+        t.is(collection[0].displayFilename || collection[0].filename, filename2);
     } finally {
         await cleanup(contextId);
     }

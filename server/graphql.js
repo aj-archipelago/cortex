@@ -109,14 +109,24 @@ const getTypedefs = (pathways, pathwayManager) => {
 
 // Resolvers for GraphQL
 const getResolvers = (config, pathways, pathwayManager) => {
-    const resolverFunctions = {};
+    const queryResolvers = {};
+    const mutationResolvers = {};
+    
     for (const [name, pathway] of Object.entries(pathways)) {
         if (pathway.disabled) continue;
-        resolverFunctions[name] = (parent, args, contextValue, info) => {
+        
+        const resolver = (parent, args, contextValue, info) => {
             // add shared state to contextValue
             contextValue.pathway = pathway;
             contextValue.config = config;
             return pathway.rootResolver(parent, args, contextValue, info);
+        };
+        
+        // Check if pathway is a mutation using the isMutation property
+        if (pathway.isMutation) {
+            mutationResolvers[name] = resolver;
+        } else {
+            queryResolvers[name] = resolver;
         }
     }
 
@@ -124,12 +134,13 @@ const getResolvers = (config, pathways, pathwayManager) => {
 
     const resolvers = {
         Query: {
-            ...resolverFunctions,
+            ...queryResolvers,
             executeWorkspace: (parent, args, contextValue, info) => 
                 executeWorkspaceResolver(parent, args, contextValue, info, config, pathwayManager)
         },
         Mutation: {
             'cancelRequest': cancelRequestResolver,
+            ...mutationResolvers,
             ...pathwayManagerResolvers.Mutation
         },
         Subscription: subscriptions,

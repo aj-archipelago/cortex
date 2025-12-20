@@ -46,14 +46,8 @@ jobs:
     - name: Setup GCS test environment
       run: cp .env.test.gcs.ci .env.test.gcs
     
-    - name: Setup Azure test environment
-      run: cp .env.test.azure.ci .env.test.azure
-    
-    - name: Run GCS tests
+    - name: Run GCS tests (includes Azure tests)
       run: npm run test:gcs
-    
-    - name: Run Azure tests
-      run: npm run test:azure
     
     - name: Run tests
       run: npm test

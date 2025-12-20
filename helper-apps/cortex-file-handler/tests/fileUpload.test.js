@@ -627,3 +627,104 @@ The emdash should be preserved correctly when the file is downloaded.`;
     }
   }
 });
+
+// DisplayFilename persistence and retrieval tests
+test.serial("should persist and return displayFilename in all responses", async (t) => {
+  const originalFilename = "my-original-file-name-with-special-chars-123.txt";
+  const fileContent = "test content for displayFilename";
+  const hash = "test-displayfilename-" + uuidv4();
+  
+  // Create a temporary file
+  const filePath = await createTestFile(fileContent, "txt");
+  let uploadResponse;
+  let checkHashResponse;
+  let deleteResponse;
+  
+  try {
+    // Upload file with original filename specified
+    const form = new FormData();
+    form.append("file", fs.createReadStream(filePath), originalFilename);
+    form.append("hash", hash);
+    
+    uploadResponse = await axios.post(baseUrl, form, {
+      headers: {
+        ...form.getHeaders(),
+        "Content-Type": "multipart/form-data",
+      },
+      validateStatus: (status) => true,
+      timeout: 30000,
+    });
+    
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+    t.truthy(uploadResponse.data.filename, "Response should contain filename");
+    t.is(
+      uploadResponse.data.displayFilename,
+      originalFilename,
+      "Upload response should contain displayFilename matching original filename"
+    );
+    
+    // Wait for Redis operations to complete
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    
+    // Check hash - should return displayFilename
+    checkHashResponse = await axios.get(baseUrl, {
+      params: {
+        hash,
+        checkHash: true,
+      },
+      validateStatus: (status) => true,
+    });
+    
+    t.is(checkHashResponse.status, 200, "Hash check should succeed");
+    t.is(
+      checkHashResponse.data.displayFilename,
+      originalFilename,
+      "checkHash response should contain displayFilename matching original filename"
+    );
+    t.is(
+      checkHashResponse.data.filename,
+      uploadResponse.data.filename,
+      "checkHash response should contain same filename as upload"
+    );
+    
+    // Test setRetention - should return displayFilename
+    const retentionResponse = await axios.get(baseUrl, {
+      params: {
+        hash,
+        setRetention: true,
+        retention: "permanent",
+      },
+      validateStatus: (status) => true,
+    });
+    
+    t.is(retentionResponse.status, 200, "setRetention should succeed");
+    t.is(
+      retentionResponse.data.displayFilename,
+      originalFilename,
+      "setRetention response should contain displayFilename"
+    );
+    
+    // Test delete - should return displayFilename
+    deleteResponse = await axios.delete(baseUrl, {
+      params: {
+        hash,
+      },
+      validateStatus: (status) => true,
+    });
+    
+    t.is(deleteResponse.status, 200, "Delete should succeed");
+    t.is(
+      deleteResponse.data.deleted.filename,
+      uploadResponse.data.filename,
+      "Delete response should contain filename"
+    );
+    t.is(
+      deleteResponse.data.deleted.displayFilename,
+      originalFilename,
+      "Delete response should contain displayFilename"
+    );
+  } finally {
+    fs.unlinkSync(filePath);
+    // Cleanup is handled by delete operation above
+  }
+});

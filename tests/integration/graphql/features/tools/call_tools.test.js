@@ -74,6 +74,7 @@ test.after.always('cleanup', async () => {
   }
 });
 
+
 // Add after.always hook to print rankings
 test.after.always('print rankings', async () => {
   printModelRankings();

@@ -14,12 +14,12 @@ import {
   removeFromFileStoreMap,
   setFileStoreMap,
   cleanupRedisFileStoreMapAge,
-  getScopedHashKey,
 } from "./redis.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageService } from "./services/storage/StorageService.js";
 import { uploadBlob } from "./blobHandler.js";
 import { generateShortId } from "./utils/filenameUtils.js";
+import { redactContextId, redactSasToken, sanitizeForLogging } from "./utils/logSecurity.js";
 
 // Hybrid cleanup approach:
 // 1. Lazy cleanup: Check file existence when cache entries are accessed (in getFileStoreMap)
@@ -79,8 +79,11 @@ async function CortexFileHandler(context, req) {
     fetch,
     load,
     restore,
-    container,
+    setRetention,
+    contextId,
   } = source;
+  // Container parameter is ignored - always uses default container from env var
+  const resolvedContextId = contextId || null;
 
   // Normalize boolean parameters
   const shouldSave = save === true || save === "true";
@@ -91,25 +94,30 @@ async function CortexFileHandler(context, req) {
 
 
 
+  const shouldSetRetention = setRetention === true || setRetention === "true" || 
+                              (req.query?.operation === "setRetention") || (parsedBody?.operation === "setRetention");
+  
   const operation = shouldSave
     ? "save"
     : shouldCheckHash
       ? "checkHash"
       : shouldClearHash
         ? "clearHash"
-        : shouldFetchRemote
-          ? "remoteFile"
-          : req.method.toLowerCase() === "delete" ||
-              req.query.operation === "delete"
-            ? "delete"
-            : uri
-              ? DOC_EXTENSIONS.some((ext) => uri.toLowerCase().endsWith(ext))
-                ? "document_processing"
-                : "media_chunking"
-              : "upload";
+        : shouldSetRetention
+          ? "setRetention"
+          : shouldFetchRemote
+            ? "remoteFile"
+            : req.method.toLowerCase() === "delete" ||
+                (req.query?.operation === "delete") || (parsedBody?.operation === "delete")
+              ? "delete"
+              : uri
+                ? DOC_EXTENSIONS.some((ext) => uri.toLowerCase().endsWith(ext))
+                  ? "document_processing"
+                  : "media_chunking"
+                : "upload";
 
   context.log(
-    `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ""}${uri ? `uri: ${uri}, ` : ""}${hash ? `hash: ${hash}, ` : ""}operation: ${operation}`,
+    `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ""}${uri ? `uri: ${redactSasToken(uri)}, ` : ""}${hash ? `hash: ${hash}, ` : ""}${resolvedContextId ? `contextId: ${redactContextId(resolvedContextId)}, ` : ""}operation: ${operation}`,
   );
 
   // Trigger lightweight age-based cleanup (runs every 100 requests)
@@ -159,13 +167,15 @@ async function CortexFileHandler(context, req) {
   if (operation === "delete") {
     // Check both query string and body params for delete parameters
     // Handle both req.body.params.hash and req.body.hash formats
+    // Note: container is already extracted from source above (line 82), same as checkHash
     const deleteRequestId = req.query.requestId || parsedBody?.params?.requestId || parsedBody?.requestId || requestId;
     const deleteHash = req.query.hash || parsedBody?.params?.hash || parsedBody?.hash || hash;
     
     // If only hash is provided, delete single file by hash
     if (deleteHash && !deleteRequestId) {
       try {
-        const deleted = await storageService.deleteFileByHash(deleteHash, container);
+        // Container parameter is ignored - always uses default container from env var
+        const deleted = await storageService.deleteFileByHash(deleteHash, resolvedContextId);
         context.res = {
           status: 200,
           body: { 
@@ -194,11 +204,10 @@ async function CortexFileHandler(context, req) {
 
     // First, get the hash from the map if it exists
     if (deleteHash) {
-      const scopedHash = getScopedHashKey(deleteHash, container);
-      const hashResult = await getFileStoreMap(scopedHash);
+      const hashResult = await getFileStoreMap(deleteHash, false, resolvedContextId);
       if (hashResult) {
-        context.log(`Found hash in map for deletion: ${deleteHash} (scoped key: ${scopedHash})`);
-        await removeFromFileStoreMap(scopedHash);
+        context.log(`Found hash in map for deletion: ${deleteHash}${resolvedContextId ? ` (contextId: ${redactContextId(resolvedContextId)})` : ""}`);
+        await removeFromFileStoreMap(deleteHash, resolvedContextId);
       }
     }
 
@@ -210,9 +219,56 @@ async function CortexFileHandler(context, req) {
     return;
   }
 
+  // Set file retention (temporary or permanent)
+  if (operation === "setRetention") {
+    // Extract parameters from query string or body
+    const fileHash = req.query.hash || parsedBody?.params?.hash || parsedBody?.hash || hash;
+    const retention = req.query.retention || parsedBody?.params?.retention || parsedBody?.retention;
+    
+    if (!fileHash) {
+      context.res = {
+        status: 400,
+        body: "Missing hash parameter. Please provide hash in query string or request body.",
+      };
+      return;
+    }
+    
+    if (!retention) {
+      context.res = {
+        status: 400,
+        body: "Missing retention parameter. Please provide retention ('temporary' or 'permanent') in query string or request body.",
+      };
+      return;
+    }
+    
+    // Validate retention value
+    if (retention !== 'temporary' && retention !== 'permanent') {
+      context.res = {
+        status: 400,
+        body: "Invalid retention value. Must be 'temporary' or 'permanent'.",
+      };
+      return;
+    }
+
+    try {
+      const result = await storageService.setRetention(fileHash, retention, context, resolvedContextId);
+      context.res = {
+        status: 200,
+        body: result,
+      };
+      return;
+    } catch (error) {
+      context.res = {
+        status: error.message.includes("not found") ? 404 : 500,
+        body: error.message,
+      };
+      return;
+    }
+  }
+
   const remoteUrl = shouldFetchRemote;
   if (req.method.toLowerCase() === "get" && remoteUrl) {
-    context.log(`Remote file: ${remoteUrl}`);
+    context.log(`Remote file: ${redactSasToken(remoteUrl)}`);
     let filename;
     try {
       // Validate URL format and accessibility
@@ -226,16 +282,21 @@ async function CortexFileHandler(context, req) {
       }
 
       // Check if file already exists (using hash or URL as the key)
-      // If hash is provided, scope it by container; otherwise use URL as-is
-      const cacheKey = hash ? getScopedHashKey(hash, container) : remoteUrl;
-      const exists = await getFileStoreMap(cacheKey);
+      // Always respect contextId if provided, even for URL-based lookups
+      const exists = hash 
+        ? await getFileStoreMap(hash, false, resolvedContextId)
+        : await getFileStoreMap(remoteUrl, false, resolvedContextId);
       if (exists) {
         context.res = {
           status: 200,
           body: exists,
         };
         //update redis timestamp with current time
-        await setFileStoreMap(cacheKey, exists);
+        if (hash) {
+          await setFileStoreMap(hash, exists, resolvedContextId);
+        } else {
+          await setFileStoreMap(remoteUrl, exists, resolvedContextId);
+        }
         return;
       }
 
@@ -250,10 +311,19 @@ async function CortexFileHandler(context, req) {
 
       // For remote files, we don't need a requestId folder structure since it's just a single file
       // Pass empty string to store the file directly in the root
-      const res = await storageService.uploadFile(context, filename, '', null, null, container);
+      // Container parameter is ignored - always uses default container from env var
+      const res = await storageService.uploadFile(context, filename, '', null, null);
+
+      // All uploads default to temporary (permanent: false) to match file collection logic
+      res.permanent = false;
 
       //Update Redis (using hash or URL as the key)
-      await setFileStoreMap(cacheKey, res);
+      // Always respect contextId if provided, even for URL-based lookups
+      if (hash) {
+        await setFileStoreMap(hash, res, resolvedContextId);
+      } else {
+        await setFileStoreMap(remoteUrl, res, resolvedContextId);
+      }
 
       // Return the file URL
       context.res = {
@@ -281,10 +351,9 @@ async function CortexFileHandler(context, req) {
 
   if (hash && clearHash) {
     try {
-      const scopedHash = getScopedHashKey(hash, container);
-      const hashValue = await getFileStoreMap(scopedHash);
+      const hashValue = await getFileStoreMap(hash, false, resolvedContextId);
       if (hashValue) {
-        await removeFromFileStoreMap(scopedHash);
+        await removeFromFileStoreMap(hash, resolvedContextId);
         context.res = {
           status: 200,
           body: `Hash ${hash} removed`,
@@ -306,14 +375,13 @@ async function CortexFileHandler(context, req) {
   }
 
   if (hash && checkHash) {
-    const scopedHash = getScopedHashKey(hash, container);
-    let hashResult = await getFileStoreMap(scopedHash, true); // Skip lazy cleanup to handle it ourselves
+    let hashResult = await getFileStoreMap(hash, true, resolvedContextId); // Skip lazy cleanup to handle it ourselves
 
     if (hashResult) {
-      context.log(`File exists in map: ${hash} (scoped key: ${scopedHash})`);
+      context.log(`File exists in map: ${hash}${resolvedContextId ? ` (contextId: ${redactContextId(resolvedContextId)})` : ""}`);
 
       // Log the URL retrieved from Redis before checking existence
-      context.log(`Checking existence of URL from Redis: ${hashResult?.url}`);
+      context.log(`Checking existence of URL from Redis: ${redactSasToken(hashResult?.url || '')}`);
 
       try {
         // Check primary storage first
@@ -329,7 +397,7 @@ async function CortexFileHandler(context, req) {
           context.log(
             `File not found in any storage. Removing from map: ${hash}`,
           );
-          await removeFromFileStoreMap(scopedHash);
+          await removeFromFileStoreMap(hash, resolvedContextId);
           context.res = {
             status: 404,
             body: `Hash ${hash} not found in storage`,
@@ -348,7 +416,7 @@ async function CortexFileHandler(context, req) {
           } catch (error) {
             context.log(`Error restoring to GCS: ${error}`);
             // If restoration fails, remove the hash from the map
-            await removeFromFileStoreMap(scopedHash);
+            await removeFromFileStoreMap(hash, resolvedContextId);
             context.res = {
               status: 404,
               body: `Hash ${hash} not found`,
@@ -380,13 +448,13 @@ async function CortexFileHandler(context, req) {
             await storageService.downloadFile(hashResult.gcs, downloadedFile);
 
             // Upload to primary storage
+            // Container parameter is ignored - always uses default container from env var
             const res = await storageService.uploadFile(
               context,
               downloadedFile,
               hash,
               null,
               null,
-              container,
             );
 
             // Update the hash result with the new primary storage URL
@@ -406,7 +474,7 @@ async function CortexFileHandler(context, req) {
           } catch (error) {
             console.error("Error restoring from GCS:", error);
             // If restoration fails, remove the hash from the map
-            await removeFromFileStoreMap(scopedHash);
+            await removeFromFileStoreMap(hash, resolvedContextId);
             context.res = {
               status: 404,
               body: `Hash ${hash} not found`,
@@ -424,7 +492,7 @@ async function CortexFileHandler(context, req) {
           : false;
         if (!finalPrimaryCheck && !finalGCSCheck) {
           context.log(`Failed to restore file. Removing from map: ${hash}`);
-          await removeFromFileStoreMap(scopedHash);
+          await removeFromFileStoreMap(hash, resolvedContextId);
           context.res = {
             status: 404,
             body: `Hash ${hash} not found`,
@@ -441,13 +509,18 @@ async function CortexFileHandler(context, req) {
           hash: hashResult.hash,
           timestamp: new Date().toISOString(),
         };
+        
+        // Include displayFilename if it exists in Redis record
+        if (hashResult.displayFilename) {
+          response.displayFilename = hashResult.displayFilename;
+        }
 
         // Ensure converted version exists and is synced across storage providers
         try {
+          // Container parameter is ignored - always uses default container from env var
           hashResult = await conversionService.ensureConvertedVersion(
             hashResult,
             requestId,
-            container,
           );
         } catch (error) {
           context.log(`Error ensuring converted version: ${error}`);
@@ -466,6 +539,7 @@ async function CortexFileHandler(context, req) {
         const urlForShortLived = hashResult.converted?.url || hashResult.url;
         try {
           // Extract blob name from the URL to generate new SAS token
+          // Container parameter is ignored - always uses default container from env var
           let blobName;
           try {
             const url = new URL(urlForShortLived);
@@ -474,18 +548,19 @@ async function CortexFileHandler(context, req) {
             
             // For Azurite URLs, the path includes account name: devstoreaccount1/container/blob
             // For real Azure URLs, the path is: container/blob
-            const containerName = storageService.primaryProvider.containerName;
-            
-    // Check if this is an Azurite URL (contains devstoreaccount1)
-    if (path.startsWith(`${AZURITE_ACCOUNT_NAME}/`)) {
-      path = path.substring(`${AZURITE_ACCOUNT_NAME}/`.length); // Remove account prefix
+            // Check if this is an Azurite URL (contains devstoreaccount1)
+            if (path.startsWith(`${AZURITE_ACCOUNT_NAME}/`)) {
+              path = path.substring(`${AZURITE_ACCOUNT_NAME}/`.length); // Remove account prefix
             }
             
-            // Now remove container prefix if it exists
-            if (path.startsWith(containerName + '/')) {
-              blobName = path.substring(containerName.length + 1);
-            } else {
-              blobName = path;
+            // Extract blob name from path (skip container name, always use default container)
+            const pathSegments = path.split('/').filter(segment => segment.length > 0);
+            if (pathSegments.length >= 2) {
+              // Skip container name (first segment), get blob name (remaining segments)
+              blobName = pathSegments.slice(1).join('/');
+            } else if (pathSegments.length === 1) {
+              // Fallback: assume it's just the blob name in default container
+              blobName = pathSegments[0];
             }
             
           } catch (urlError) {
@@ -493,30 +568,42 @@ async function CortexFileHandler(context, req) {
           }
 
           // Generate short-lived SAS token
-          if (blobName && storageService.primaryProvider.generateShortLivedSASToken) {
-            const { containerClient } = await storageService.primaryProvider.getBlobClient();
-            const sasToken = storageService.primaryProvider.generateShortLivedSASToken(
-              containerClient, 
-              blobName, 
-              shortLivedDuration
-            );
+          // Container parameter is ignored - always uses default container from env var
+          if (blobName) {
+            const provider = storageService.primaryProvider;
             
-            // Construct new URL with short-lived SAS token
-            const baseUrl = urlForShortLived.split('?')[0]; // Remove existing SAS token
-            const shortLivedUrl = `${baseUrl}?${sasToken}`;
-            
-            // Add short-lived URL to response
-            response.shortLivedUrl = shortLivedUrl;
-            response.expiresInMinutes = shortLivedDuration;
-            
-            const urlType = hashResult.converted?.url ? 'converted' : 'original';
-            context.log(`Generated short-lived URL for hash: ${hash} using ${urlType} URL (expires in ${shortLivedDuration} minutes)`);
+            if (provider && provider.generateShortLivedSASToken) {
+              const blobClientResult = await provider.getBlobClient();
+              const containerClient = blobClientResult.containerClient;
+              
+              const sasToken = provider.generateShortLivedSASToken(
+                containerClient, 
+                blobName, 
+                shortLivedDuration
+              );
+              
+              // Construct new URL with short-lived SAS token
+              const baseUrl = urlForShortLived.split('?')[0]; // Remove existing SAS token
+              const shortLivedUrl = `${baseUrl}?${sasToken}`;
+              
+              // Add short-lived URL to response
+              response.shortLivedUrl = shortLivedUrl;
+              response.expiresInMinutes = shortLivedDuration;
+              
+              const urlType = hashResult.converted?.url ? 'converted' : 'original';
+              context.log(`Generated short-lived URL for hash: ${hash} using ${urlType} URL (expires in ${shortLivedDuration} minutes)`);
+            } else {
+              // Fallback for storage providers that don't support short-lived tokens
+              response.shortLivedUrl = urlForShortLived;
+              response.expiresInMinutes = shortLivedDuration;
+              const urlType = hashResult.converted?.url ? 'converted' : 'original';
+              context.log(`Storage provider doesn't support short-lived tokens, using ${urlType} URL`);
+            }
           } else {
-            // Fallback for storage providers that don't support short-lived tokens
+            // If we couldn't extract blob name, use original URL
             response.shortLivedUrl = urlForShortLived;
             response.expiresInMinutes = shortLivedDuration;
-            const urlType = hashResult.converted?.url ? 'converted' : 'original';
-            context.log(`Storage provider doesn't support short-lived tokens, using ${urlType} URL`);
+            context.log(`Could not extract blob name from URL, using original URL for short-lived`);
           }
         } catch (error) {
           context.log(`Error generating short-lived URL: ${error}`);
@@ -526,7 +613,7 @@ async function CortexFileHandler(context, req) {
         }
 
         //update redis timestamp with current time
-        await setFileStoreMap(scopedHash, hashResult);
+        await setFileStoreMap(hash, hashResult, resolvedContextId);
 
         context.res = {
           status: 200,
@@ -536,7 +623,7 @@ async function CortexFileHandler(context, req) {
       } catch (error) {
         context.log(`Error checking file existence: ${error}`);
         // If there's an error checking file existence, remove the hash from the map
-        await removeFromFileStoreMap(scopedHash);
+        await removeFromFileStoreMap(hash, resolvedContextId);
         context.res = {
           status: 404,
           body: `Hash ${hash} not found`,
@@ -558,10 +645,16 @@ async function CortexFileHandler(context, req) {
       storageService.primaryProvider.constructor.name ===
       "LocalStorageProvider";
     // Use uploadBlob to handle multipart/form-data
-    const result = await uploadBlob(context, req, saveToLocal, null, hash, container);
+    // Container parameter is ignored - always uses default container from env var
+    const result = await uploadBlob(context, req, saveToLocal, null, hash);
     if (result?.hash && context?.res?.body) {
-      const scopedHash = getScopedHashKey(result.hash, result.container || container);
-      await setFileStoreMap(scopedHash, context.res.body);
+      // Use contextId from result (extracted from form fields) or from resolvedContextId (query/body)
+      const uploadContextId = result.contextId || resolvedContextId;
+      // Store contextId alongside the entry for debugging/traceability
+      if (uploadContextId && typeof context.res.body === "object" && context.res.body) {
+        context.res.body.contextId = uploadContextId;
+      }
+      await setFileStoreMap(result.hash, context.res.body, uploadContextId);
     }
     return;
   }
@@ -623,12 +716,12 @@ async function CortexFileHandler(context, req) {
             }
 
             // Save the converted file
+            // Container parameter is ignored - always uses default container from env var
             const convertedSaveResult =
               await conversionService._saveConvertedFile(
                 conversion.convertedPath,
                 requestId,
                 null,
-                container,
               );
 
             // Return the converted file URL
@@ -641,11 +734,11 @@ async function CortexFileHandler(context, req) {
             };
           } else {
             // File doesn't need conversion, save the original file
+            // Container parameter is ignored - always uses default container from env var
             const saveResult = await conversionService._saveConvertedFile(
               downloadedFile,
               requestId,
               null,
-              container,
             );
 
             // Return the original file URL
@@ -721,13 +814,13 @@ async function CortexFileHandler(context, req) {
         const chunkPath = chunks[index];
         // Use the same base filename for all chunks to ensure consistency
         const chunkFilename = `chunk-${index + 1}-${chunkBaseName}`;
+        // Container parameter is ignored - always uses default container from env var
         const chunkResult = await storageService.uploadFile(
           context,
           chunkPath,
           requestId,
           null,
           chunkFilename,
-          container,
         );
 
         const chunkOffset = chunkOffsets[index];
@@ -765,9 +858,11 @@ async function CortexFileHandler(context, req) {
     return;
   }
 
+  // Sanitize result before logging to redact SAS tokens and contextIds
+  const sanitizedResult = sanitizeForLogging(result);
   console.log(
     "result:",
-    result
+    sanitizedResult
       .map((item) =>
         typeof item === "object" ? JSON.stringify(item, null, 2) : item,
       )

@@ -107,7 +107,7 @@ export class AzureStorageProvider extends StorageProvider {
     return this.generateSASToken(containerClient, blobName, { minutes });
   }
 
-  async uploadFile(context, filePath, requestId, hash = null, filename = null) {
+  async uploadFile(context, filePath, requestId, hash = null, filename = null, retention = 'temporary') {
     const { containerClient } = await this.getBlobClient();
 
     // Use provided filename or generate LLM-friendly naming
@@ -151,13 +151,18 @@ export class AzureStorageProvider extends StorageProvider {
         ...(contentEncoding ? { blobContentEncoding: contentEncoding } : {}),
         blobCacheControl: 'public, max-age=2592000, immutable',
       },
+      tags: {
+        retention: retention
+      },
     };
     await blockBlobClient.uploadStream(fileStream, undefined, undefined, uploadOptions);
 
     // Generate SAS token after successful upload
     const sasToken = this.generateSASToken(containerClient, blobName);
+    const shortLivedSasToken = this.generateShortLivedSASToken(containerClient, blobName, 5);
 
     const url = `${blockBlobClient.url}?${sasToken}`;
+    const shortLivedUrl = `${blockBlobClient.url}?${shortLivedSasToken}`;
     
     // Validate that the URL contains a blob name (not just container)
     // Azure blob URLs should be: https://account.blob.core.windows.net/container/blobname
@@ -171,11 +176,12 @@ export class AzureStorageProvider extends StorageProvider {
 
     return {
       url: url,
+      shortLivedUrl: shortLivedUrl,
       blobName: blobName,
     };
   }
 
-  async uploadStream(context, encodedFilename, stream, providedContentType = null) {
+  async uploadStream(context, encodedFilename, stream, providedContentType = null, retention = 'temporary') {
     const { containerClient } = await this.getBlobClient();
     let contentType = providedContentType || mime.lookup(encodedFilename);
 
@@ -205,6 +211,9 @@ export class AzureStorageProvider extends StorageProvider {
         ...(contentEncoding ? { blobContentEncoding: contentEncoding } : {}),
         blobCacheControl: 'public, max-age=2592000, immutable',
       },
+      tags: {
+        retention: retention
+      },
       maxConcurrency: 50,
       blockSize: 8 * 1024 * 1024,
     };
@@ -218,8 +227,10 @@ export class AzureStorageProvider extends StorageProvider {
     await blockBlobClient.uploadStream(stream, undefined, undefined, options);
     
     const sasToken = this.generateSASToken(containerClient, blobName);
+    const shortLivedSasToken = this.generateShortLivedSASToken(containerClient, blobName, 5);
     
     const url = `${blockBlobClient.url}?${sasToken}`;
+    const shortLivedUrl = `${blockBlobClient.url}?${shortLivedSasToken}`;
     
     // Validate that the URL contains a blob name (not just container)
     const urlObj = new URL(url);
@@ -228,7 +239,7 @@ export class AzureStorageProvider extends StorageProvider {
       throw new Error(`Generated invalid Azure URL (container-only) from uploadStream: ${url}, blobName: ${blobName}`);
     }
     
-    return url;
+    return { url, shortLivedUrl };
   }
 
   // Use shared utility for MIME type checking
@@ -410,6 +421,61 @@ export class AzureStorageProvider extends StorageProvider {
     } catch (error) {
       console.error("Error extracting blob name from URL:", error);
       return null;
+    }
+  }
+
+  /**
+   * Update blob index tags (specifically the retention tag)
+   * @param {string} blobName - The blob name
+   * @param {string} retention - The retention value ('temporary' or 'permanent')
+   * @returns {Promise<void>}
+   */
+  async updateBlobTags(blobName, retention) {
+    const { containerClient } = await this.getBlobClient();
+    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    
+    // Check if we're using Azurite (local emulator) which may not fully support blob tags
+    const isAzurite = this.connectionString?.includes('UseDevelopmentStorage=true') || 
+                       this.connectionString?.includes('127.0.0.1') ||
+                       this.connectionString?.includes('localhost');
+    
+    // Get current tags first (may return empty object if no tags exist)
+    let currentTags = {};
+    try {
+      const tagsResponse = await blockBlobClient.getTags();
+      // Tags response might be an object with a tags property or a plain object
+      if (tagsResponse && typeof tagsResponse === 'object') {
+        currentTags = tagsResponse.tags || tagsResponse;
+      }
+    } catch (error) {
+      // If getTags fails (e.g., no tags exist or Azurite doesn't support it), start with empty object
+      if (isAzurite) {
+        // Azurite may not support blob tags - this is expected, so we'll skip tag updates
+        console.log(`[Azurite] Blob tags not supported, skipping tag update for ${blobName}`);
+        return;
+      }
+      currentTags = {};
+    }
+    
+    // Update retention tag
+    const updatedTags = {
+      ...currentTags,
+      retention: retention
+    };
+    
+    try {
+      await blockBlobClient.setTags(updatedTags);
+    } catch (error) {
+      // If setTags fails (e.g., Azurite doesn't support it), log but don't throw
+      // This allows the operation to continue even if tags aren't supported
+      // In test environments, we'll be lenient and not throw errors for tag operations
+      const isTestEnv = process.env.NODE_ENV === 'test' || isAzurite;
+      if (isTestEnv) {
+        console.log(`[Test/Azurite] Blob tags not supported, skipping tag update for ${blobName}: ${error.message}`);
+        return;
+      }
+      // For real Azure in production, re-throw the error as it's unexpected
+      throw error;
     }
   }
 }

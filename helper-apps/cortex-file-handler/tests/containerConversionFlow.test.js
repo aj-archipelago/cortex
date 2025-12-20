@@ -10,8 +10,7 @@ import XLSX from "xlsx";
 import { port } from "../src/start.js";
 import {
   uploadBlob,
-  isValidContainerName,
-  AZURE_STORAGE_CONTAINER_NAMES,
+  AZURE_STORAGE_CONTAINER_NAME,
   saveFileToBlob,
 } from "../src/blobHandler.js";
 import { FileConversionService } from "../src/services/FileConversionService.js";
@@ -107,62 +106,12 @@ test.after.always(async (t) => {
   }
 });
 
-// Test that FileConversionService._saveConvertedFile respects container parameter
-test("FileConversionService._saveConvertedFile should use specified container", async (t) => {
+// Test that file upload with conversion works
+test("File upload with conversion should work", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
   }
-
-  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-  process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
-
-  try {
-    const service = new FileConversionService(mockContext, true); // useAzure = true
-    
-    // Create a test file to save
-    const testContent = "This is converted file content";
-    const testFile = await createTestFile(testContent, "txt", "converted-test.txt");
-    const requestId = uuidv4();
-    const targetContainer = "test2";
-
-    // Call _saveConvertedFile with container parameter
-    const result = await service._saveConvertedFile(
-      testFile,
-      requestId,
-      null, // filename
-      targetContainer
-    );
-
-    t.truthy(result);
-    t.truthy(result.url);
-
-    // Verify the URL indicates it was uploaded to the correct container
-    const containerFromUrl = getContainerFromUrl(result.url);
-    t.is(containerFromUrl, targetContainer, 
-      `File should be uploaded to container ${targetContainer}, but was uploaded to ${containerFromUrl}`);
-
-    // Cleanup
-    await cleanupHashAndFile(null, result.url, baseUrl);
-  } finally {
-    // Restore environment
-    if (originalEnv) {
-      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-    } else {
-      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-    }
-  }
-});
-
-// Test that file upload with conversion respects container parameter
-test("File upload with conversion should upload both original and converted files to specified container", async (t) => {
-  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
-    t.pass("Skipping test - Azure not configured");
-    return;
-  }
-
-  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-  process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
 
   try {
     // Create an Excel file that will need conversion
@@ -172,12 +121,10 @@ test("File upload with conversion should upload both original and converted file
       ["Jane", 25, "Boston"],
     ];
     const testFile = await createTestFile(excelData, "xlsx", "test-conversion.xlsx");
-    const targetContainer = "test3";
 
-    // Create form data with container parameter
+    // Create form data
     const form = new FormData();
     form.append("file", fs.createReadStream(testFile), "test-conversion.xlsx");
-    form.append("container", targetContainer);
 
     const response = await axios.post(baseUrl, form, {
       headers: {
@@ -191,16 +138,9 @@ test("File upload with conversion should upload both original and converted file
     t.is(response.status, 200);
     t.truthy(response.data.url);
 
-    // Check that the main uploaded file is in the correct container
-    const mainContainerFromUrl = getContainerFromUrl(response.data.url);
-    t.is(mainContainerFromUrl, targetContainer,
-      `Original file should be in container ${targetContainer}, but was in ${mainContainerFromUrl}`);
-
-    // If there's a converted file mentioned in the response, check its container too
+    // Check that conversion worked
     if (response.data.converted && response.data.converted.url) {
-      const convertedContainerFromUrl = getContainerFromUrl(response.data.converted.url);
-      t.is(convertedContainerFromUrl, targetContainer,
-        `Converted file should be in container ${targetContainer}, but was in ${convertedContainerFromUrl}`);
+      t.truthy(response.data.converted.url);
     }
 
     // Cleanup
@@ -209,35 +149,25 @@ test("File upload with conversion should upload both original and converted file
       await cleanupHashAndFile(null, response.data.converted.url, baseUrl);
     }
   } finally {
-    // Restore environment
-    if (originalEnv) {
-      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-    } else {
-      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-    }
+    // No env changes needed
   }
 });
 
-// Test document processing with save=true and container parameter
-test("Document processing with save=true should save converted file to specified container", async (t) => {
+// Test document processing with save=true
+test("Document processing with save=true should work", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
   }
 
-  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-  process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
-
   try {
     // First upload a document file to get a URI
     const docContent = "This is a test document content for processing.";
     const testFile = await createTestFile(docContent, "txt", "test-doc.txt");
-    const targetContainer = "test1";
 
     // Upload the file first
     const uploadForm = new FormData();
     uploadForm.append("file", fs.createReadStream(testFile), "test-doc.txt");
-    uploadForm.append("container", targetContainer);
 
     const uploadResponse = await axios.post(baseUrl, uploadForm, {
       headers: {
@@ -251,13 +181,12 @@ test("Document processing with save=true should save converted file to specified
     t.is(uploadResponse.status, 200);
     const documentUri = uploadResponse.data.url;
 
-    // Now process the document with save=true and container parameter
+    // Now process the document with save=true
     const processResponse = await axios.get(baseUrl, {
       params: {
         uri: documentUri,
         requestId: uuidv4(),
         save: true,
-        container: targetContainer,
       },
       validateStatus: (status) => true,
       timeout: 60000,
@@ -266,33 +195,20 @@ test("Document processing with save=true should save converted file to specified
     t.is(processResponse.status, 200);
     t.truthy(processResponse.data.url);
 
-    // Check that the saved file is in the correct container
-    const savedContainerFromUrl = getContainerFromUrl(processResponse.data.url);
-    t.is(savedContainerFromUrl, targetContainer,
-      `Saved processed file should be in container ${targetContainer}, but was in ${savedContainerFromUrl}`);
-
     // Cleanup
     await cleanupHashAndFile(null, documentUri, baseUrl);
     await cleanupHashAndFile(null, processResponse.data.url, baseUrl);
   } finally {
-    // Restore environment
-    if (originalEnv) {
-      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-    } else {
-      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-    }
+    // No env changes needed
   }
 });
 
-// Test checkHash operation preserves container for converted files
-test("checkHash operation should respect container parameter for converted files", async (t) => {
+// Test checkHash operation with conversion
+test("checkHash operation should work with converted files", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
   }
-
-  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-  process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
 
   try {
     // Create an Excel file that will need conversion
@@ -302,14 +218,12 @@ test("checkHash operation should respect container parameter for converted files
       ["Gadget", 15.50],
     ];
     const testFile = await createTestFile(excelData, "xlsx", "hash-test.xlsx");
-    const targetContainer = "test2";
     const testHash = uuidv4();
 
-    // Upload the file with a hash and container parameter
+    // Upload the file with a hash
     const form = new FormData();
     form.append("file", fs.createReadStream(testFile), "hash-test.xlsx");
     form.append("hash", testHash);
-    form.append("container", targetContainer);
 
     const uploadResponse = await axios.post(baseUrl, form, {
       headers: {
@@ -322,12 +236,11 @@ test("checkHash operation should respect container parameter for converted files
 
     t.is(uploadResponse.status, 200);
 
-    // Now check the hash with container parameter
+    // Now check the hash
     const checkResponse = await axios.get(baseUrl, {
       params: {
         hash: testHash,
         checkHash: true,
-        container: targetContainer,
       },
       validateStatus: (status) => true,
       timeout: 60000,
@@ -336,16 +249,9 @@ test("checkHash operation should respect container parameter for converted files
     t.is(checkResponse.status, 200);
     t.truthy(checkResponse.data.url);
 
-    // Check that the original file is in the correct container
-    const originalContainerFromUrl = getContainerFromUrl(checkResponse.data.url);
-    t.is(originalContainerFromUrl, targetContainer,
-      `Original file should be in container ${targetContainer}, but was in ${originalContainerFromUrl}`);
-
-    // If there's a converted file, check its container too
+    // Check that conversion worked
     if (checkResponse.data.converted && checkResponse.data.converted.url) {
-      const convertedContainerFromUrl = getContainerFromUrl(checkResponse.data.converted.url);
-      t.is(convertedContainerFromUrl, targetContainer,
-        `Converted file should be in container ${targetContainer}, but was in ${convertedContainerFromUrl}`);
+      t.truthy(checkResponse.data.converted.url);
     }
 
     // Cleanup
@@ -354,101 +260,6 @@ test("checkHash operation should respect container parameter for converted files
       await cleanupHashAndFile(null, checkResponse.data.converted.url, baseUrl);
     }
   } finally {
-    // Restore environment
-    if (originalEnv) {
-      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-    } else {
-      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-    }
-  }
-});
-
-// Test that default container is used when no container specified for conversions
-test("Conversion should use default container when no container specified", async (t) => {
-  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
-    t.pass("Skipping test - Azure not configured");
-    return;
-  }
-
-  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-  process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
-
-  try {
-    const service = new FileConversionService(mockContext, true);
-    
-    // Create a test file to save
-    const testContent = "This is converted file content for default container test";
-    const testFile = await createTestFile(testContent, "txt", "default-container-test.txt");
-    const requestId = uuidv4();
-
-    // Call _saveConvertedFile without container parameter (should use default)
-    const result = await service._saveConvertedFile(
-      testFile,
-      requestId,
-      null, // filename
-      null  // container - should use default
-    );
-
-    t.truthy(result);
-    t.truthy(result.url);
-
-    // Verify the URL indicates it was uploaded to the default container
-    const containerFromUrl = getContainerFromUrl(result.url);
-    // Read current default from environment (not the cached module value)
-    const currentContainerStr = process.env.AZURE_STORAGE_CONTAINER_NAME || "cortextempfiles";
-    const currentDefaultContainer = currentContainerStr.split(',').map(name => name.trim())[0];
-    t.is(containerFromUrl, currentDefaultContainer,
-      `File should be uploaded to default container ${currentDefaultContainer}, but was uploaded to ${containerFromUrl}`);
-
-    // Cleanup
-    await cleanupHashAndFile(null, result.url, baseUrl);
-  } finally {
-    // Restore environment
-    if (originalEnv) {
-      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-    } else {
-      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-    }
-  }
-});
-
-// Test saveFileToBlob function directly with container parameter
-test("saveFileToBlob should respect container parameter", async (t) => {
-  if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
-    t.pass("Skipping test - Azure not configured");
-    return;
-  }
-
-  const originalEnv = process.env.AZURE_STORAGE_CONTAINER_NAME;
-  process.env.AZURE_STORAGE_CONTAINER_NAME = "test1,test2,test3";
-
-  try {
-    // Create a test file
-    const testContent = "This is a test for saveFileToBlob with container parameter";
-    const testFile = await createTestFile(testContent, "txt", "save-blob-test.txt");
-    const requestId = uuidv4();
-    const targetContainer = "test3";
-
-    // Call saveFileToBlob directly with container parameter
-    const result = await saveFileToBlob(testFile, requestId, null, targetContainer);
-
-    t.truthy(result);
-    t.truthy(result.url);
-    t.truthy(result.blobName);
-
-    // Verify the URL indicates it was uploaded to the correct container
-    const containerFromUrl = getContainerFromUrl(result.url);
-    t.is(containerFromUrl, targetContainer,
-      `File should be uploaded to container ${targetContainer}, but was uploaded to ${containerFromUrl}`);
-
-    // Cleanup
-    await cleanupHashAndFile(null, result.url, baseUrl);
-  } finally {
-    // Restore environment
-    if (originalEnv) {
-      process.env.AZURE_STORAGE_CONTAINER_NAME = originalEnv;
-    } else {
-      delete process.env.AZURE_STORAGE_CONTAINER_NAME;
-    }
+    // No env changes needed
   }
 });

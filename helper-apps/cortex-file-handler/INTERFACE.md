@@ -4,6 +4,16 @@
 
 The Cortex File Handler is a service that processes files through various operations including uploading, downloading, chunking, and document processing. It supports multiple storage backends (Azure Blob Storage, Google Cloud Storage, and Local File System).
 
+## Storage Architecture
+
+The file handler uses a unified storage approach with Azure Blob Storage:
+- **Single Container**: All files are stored in a single Azure Blob Storage container
+- **Blob Index Tags**: Files are distinguished by blob index tags rather than separate containers
+  - `retention=temporary`: Files that will be automatically deleted after 30 days (default for all uploads)
+  - `retention=permanent`: Files that should be retained indefinitely
+- **Lifecycle Management**: Azure lifecycle management policies automatically delete temporary files after 30 days based on the blob index tag
+- **Set Retention Operation**: Setting a file's retention from temporary to permanent (or vice versa) simply updates the blob index tag (no copying between containers)
+
 ## Request Methods
 
 ### POST
@@ -12,7 +22,8 @@ The Cortex File Handler is a service that processes files through various operat
 - **Content-Type**: `multipart/form-data`
 - **Parameters**:
   - `hash` (optional): Unique identifier for the file
-  - `requestId` (required): Unique identifier for the request
+  - `requestId` (optional): Unique identifier for the request (not required for simple uploads)
+  - `contextId` (optional): Context identifier for per-user/per-context file scoping
   - File content must be included in the form data
 - **Behavior**:
   - Uploads file to primary storage (Azure or Local)
@@ -20,9 +31,11 @@ The Cortex File Handler is a service that processes files through various operat
   - If hash is provided, stores file metadata in Redis
   - Returns upload result with file URLs
 - **Response**: Object containing:
-  - `url`: Primary storage URL
+  - `url`: Primary storage URL (with long-lived SAS token)
+  - `shortLivedUrl`: Short-lived URL (5-minute expiration, always included)
   - `gcs`: GCS URL (if GCS is configured)
   - `hash`: Hash value (if provided)
+  - `contextId`: Context identifier (if provided)
   - `message`: Success message
   - `filename`: Original filename
 - **Note**: The `save` parameter is not supported in POST requests. To convert and save a document as text, use GET with the `save` parameter.
@@ -41,6 +54,7 @@ The Cortex File Handler is a service that processes files through various operat
     - Does not save to GCS
     - Original document is deleted from storage after text conversion
   - `hash` (optional): Unique identifier for the file
+  - `contextId` (optional): Context identifier for per-user/per-context file scoping
   - `checkHash` (optional): Check if hash exists
   - `clearHash` (optional): Remove hash from storage
   - `generateShortLived` (optional): Generate a short-lived URL for an existing hash
@@ -89,12 +103,52 @@ The Cortex File Handler is a service that processes files through various operat
 
 - **Purpose**: Remove files from storage
 - **Parameters** (can be in query string or request body):
-  - `requestId` (required): Unique identifier for the request
+  - `requestId` (optional): Unique identifier for the request (for multi-file deletion)
+  - `hash` (optional): Hash of the file to delete (for single-file deletion)
+  - `contextId` (optional): Context identifier for per-user/per-context file scoping
+  - `operation` (optional): Set to `"delete"` to explicitly trigger delete operation
 - **Behavior**:
+  - Supports two deletion modes:
+    1. **By requestId**: Deletes all files associated with a requestId
+    2. **By hash**: Deletes a single file by its hash
   - Deletes file from primary storage (Azure or Local)
   - Deletes file from GCS if configured
+  - Removes file metadata from Redis (including legacy keys if they exist)
   - Returns deletion result
-- **Response**: Array of deleted file URLs
+- **Response**: 
+  - For requestId deletion: Array of deleted file URLs
+  - For hash deletion: Object containing deletion details with hash, filename, and deletion results
+
+### SET RETENTION (POST/PUT)
+
+- **Purpose**: Set the retention tag for a file (temporary or permanent)
+- **Parameters** (can be in query string or request body):
+  - `hash` (required): Hash of the file
+  - `retention` (required): Retention value - either `'temporary'` or `'permanent'`
+  - `contextId` (optional): Context identifier for per-user/per-context file scoping
+  - `setRetention` (optional): Set to `true` to trigger operation, or use `operation=setRetention` in query string
+- **Behavior**:
+  - Updates the blob index tag to the specified retention value
+  - No file copying is performed - the file stays in the same location
+  - Updates Redis map with new information including shortLivedUrl
+  - Also updates converted file tags if they exist
+  - Preserves file metadata (filename, hash, etc.)
+  - Generates new shortLivedUrl for the file
+- **Response**: Object containing:
+  - `hash`: File hash
+  - `filename`: Original filename
+  - `retention`: The retention value that was set
+  - `url`: Primary storage URL (same as before, file location unchanged)
+  - `shortLivedUrl`: New short-lived URL (5-minute expiration)
+  - `gcs`: GCS URL (if GCS is configured, unchanged)
+  - `converted`: Converted file info (if applicable)
+  - `message`: Success message
+- **Note**: 
+  - This is a simple tag update operation - no file copying occurs
+  - The file URL remains the same, only the blob index tag changes
+  - This operation is fast and idempotent
+  - Both the original file and any converted versions have their tags updated
+  - No locking is required since it's just a tag update
 
 ## Storage Configuration
 
@@ -159,6 +213,11 @@ The Cortex File Handler is a service that processes files through various operat
   - Files are stored with UUID-based names
   - Organized by requestId folders
   - Azure: Uses SAS tokens for access
+    - All files are stored in a single container (configured via `AZURE_STORAGE_CONTAINER_NAME` environment variable)
+    - Files are tagged with `retention=temporary` by default
+    - Files can be set to permanent using the `setRetention` operation (updates tag to `retention=permanent`)
+    - Lifecycle management automatically deletes temporary files after 30 days
+    - No container specification is supported - all files use the single configured container
   - Local: Served via HTTP on configured port
 - **GCS** (if configured):
   - Files stored with gs:// protocol URLs
@@ -169,6 +228,26 @@ The Cortex File Handler is a service that processes files through various operat
   - Used for caching remote file results
   - Tracks file access timestamps
   - Used for progress tracking
+  - **Key Format**:
+    - Without context: `<hash>` (unscoped)
+    - With context: `<hash>:ctx:<contextId>` (context-scoped)
+    - Legacy keys (`<hash>:<containerName>`) are automatically migrated on read
+  - **Key Scoping**:
+    - Files can be scoped by `contextId` for per-user/per-context isolation
+    - When `contextId` is provided, files are stored with context-scoped keys
+    - When `contextId` is not provided, files use unscoped keys
+    - Context-scoped reads fall back to unscoped keys if not found
+    - Unscoped reads fall back to legacy container-scoped keys (if they exist) and migrate them automatically
+  - **Migration Behavior**:
+    - Legacy container-scoped keys are automatically migrated to unscoped keys on first read
+    - Migration copies data to new key format and deletes legacy key
+    - New writes never create legacy keys
+    - Deletes clean up both new and legacy keys
+- **Short-Lived URLs**:
+  - All file operations now return a `shortLivedUrl` field
+  - Short-lived URLs expire after 5 minutes (configurable via `shortLivedMinutes`)
+  - Provides secure, time-limited access to files
+  - Always included in responses for consistency
 
 ## Cleanup
 
@@ -182,6 +261,36 @@ The Cortex File Handler is a service that processes files through various operat
   - After 1 hour of inactivity
   - After successful processing
   - On error conditions
+
+## Context Scoping
+
+The file handler supports optional context scoping for per-user or per-context file isolation:
+
+- **Parameter**: `contextId`
+- **Usage**: Include in any request that uses `hash` parameter
+- **Behavior**:
+  - When provided, files are stored/retrieved using context-scoped Redis keys: `<hash>:ctx:<contextId>`
+  - When not provided, files use unscoped keys: `<hash>`
+  - Context-scoped reads fall back to unscoped keys if context-scoped key doesn't exist
+  - Unscoped reads fall back to legacy container-scoped keys and migrate them automatically
+- **Use Cases**:
+  - Multi-tenant applications where files should be isolated per user/tenant
+  - Per-session file management
+  - Per-workspace file organization
+
+**Example:**
+```bash
+# Upload with contextId
+POST /file-handler
+Content-Type: multipart/form-data
+hash=abc123&contextId=user-456&requestId=req-789
+
+# Check hash with contextId
+GET /file-handler?hash=abc123&checkHash=true&contextId=user-456
+
+# Delete with contextId
+DELETE /file-handler?hash=abc123&contextId=user-456
+```
 
 ## Usage Examples
 
@@ -201,17 +310,39 @@ GET /file-handler?hash=abc123&checkHash=true&shortLivedMinutes=10
   "message": "File 'document.pdf' uploaded successfully.",
   "filename": "document.pdf",
   "url": "https://storage.blob.core.windows.net/container/file.pdf?original-sas-token",
+  "shortLivedUrl": "https://storage.blob.core.windows.net/container/file.pdf?sv=2023-11-03&se=2024-01-15T10%3A15%3A00Z&sr=b&sp=r&sig=...",
   "gcs": "gs://bucket/file.pdf",
   "hash": "abc123",
-  "shortLivedUrl": "https://storage.blob.core.windows.net/container/file.pdf?sv=2023-11-03&se=2024-01-15T10%3A15%3A00Z&sr=b&sp=r&sig=...",
   "expiresInMinutes": 5,
   "timestamp": "2024-01-15T10:10:00.000Z",
   "converted": {
     "url": "https://storage.blob.core.windows.net/container/converted.pdf",
+    "shortLivedUrl": "https://storage.blob.core.windows.net/container/converted.pdf?sv=2023-11-03&se=2024-01-15T10%3A15%3A00Z&sr=b&sp=r&sig=...",
     "gcs": "gs://bucket/converted.pdf"
   }
 }
 ```
+
+### Context-Scoped File Operations
+
+```bash
+# Upload file with contextId
+POST /file-handler
+Content-Type: multipart/form-data
+hash=abc123&contextId=user-456&requestId=req-789
+[file content]
+
+# Check hash with contextId (falls back to unscoped if context-scoped not found)
+GET /file-handler?hash=abc123&checkHash=true&contextId=user-456
+
+# Delete file with contextId
+DELETE /file-handler?hash=abc123&contextId=user-456
+
+# Set retention with contextId
+POST /file-handler?hash=abc123&retention=permanent&contextId=user-456&setRetention=true
+```
+
+**Note**: When `contextId` is provided, files are stored in Redis with context-scoped keys. If a context-scoped key doesn't exist, the system falls back to unscoped keys, and if those don't exist, it falls back to legacy container-scoped keys (which are automatically migrated).
 
 ## Error Handling
 

@@ -296,11 +296,12 @@ test("age-based cleanup should remove old entries", async (t) => {
     const context = { log: console.log };
     const uploadResult = await uploadBlob(context, null, true, testFile); // Use local storage
 
-    // Store the hash in Redis with an old timestamp
+    // Store the hash in Redis with an old timestamp (temporary file)
     const hash = "test-old-entry";
     const oldEntry = {
       ...uploadResult,
       timestamp: createOldTimestamp(8), // 8 days old
+      permanent: false, // Temporary file should be cleaned up
     };
     console.log(`Storing old entry with timestamp: ${oldEntry.timestamp}`);
     await setFileStoreMap(hash, oldEntry);
@@ -376,6 +377,59 @@ test("age-based cleanup should keep recent entries", async (t) => {
   }
 });
 
+test("age-based cleanup should not remove permanent files", async (t) => {
+  // Create a test file and upload it
+  const testFile = await createTestFile("Test content for permanent file test");
+
+  try {
+    const context = { log: console.log };
+    const uploadResult = await uploadBlob(
+      context,
+      null,
+      shouldUseLocalStorage(),
+      testFile,
+    ); // Use appropriate storage
+
+    // Store the hash in Redis with an old timestamp but permanent=true
+    const hash = "test-permanent-entry";
+    const permanentEntry = {
+      ...uploadResult,
+      timestamp: createOldTimestamp(8), // 8 days old
+      permanent: true, // Mark as permanent
+    };
+    console.log(`Storing permanent entry with timestamp: ${permanentEntry.timestamp}`);
+    await setFileStoreMap(hash, permanentEntry);
+
+    // Verify it exists initially (with skipLazyCleanup to avoid interference)
+    const initialResult = await getFileStoreMap(hash, true);
+    t.truthy(initialResult, "Permanent entry should exist initially");
+    t.is(initialResult.permanent, true, "Entry should be marked as permanent");
+
+    // Run age-based cleanup with 7-day threshold
+    const cleaned = await cleanupRedisFileStoreMapAge(7, 10);
+    console.log(
+      `Age cleanup returned ${cleaned.length} entries:`,
+      cleaned.map((c) => c.hash),
+    );
+
+    // Verify the permanent entry was NOT cleaned up
+    const cleanedHash = cleaned.find(
+      (entry) => entry.hash === "test-permanent-entry",
+    );
+    t.falsy(cleanedHash, "Permanent entry should NOT be in cleaned list");
+
+    // Verify the entry still exists in cache
+    const resultAfterCleanup = await getFileStoreMap(hash, true);
+    t.truthy(resultAfterCleanup, "Permanent entry should still exist in cache");
+    t.is(resultAfterCleanup.permanent, true, "Entry should still be marked as permanent");
+
+    // Clean up
+    await removeFromFileStoreMap("test-permanent-entry");
+  } finally {
+    cleanupTestFile(testFile);
+  }
+});
+
 test("age-based cleanup should respect maxEntriesToCheck limit", async (t) => {
   // Create multiple test files and upload them
   const testFiles = [];
@@ -397,11 +451,12 @@ test("age-based cleanup should respect maxEntriesToCheck limit", async (t) => {
         testFile,
       ); // Use appropriate storage
 
-      // Store with old timestamp
+      // Store with old timestamp (temporary files)
       const hash = `test-old-entry-${i}`;
       const oldEntry = {
         ...uploadResult,
         timestamp: createOldTimestamp(8), // 8 days old
+        permanent: false, // Temporary files should be cleaned up
       };
       oldEntries.push(oldEntry);
       await setFileStoreMap(hash, oldEntry);

@@ -427,10 +427,144 @@ Each pathway can define the following properties (with defaults from basePathway
 - `json`: Require valid JSON response from model. Default: false
 - `manageTokenLength`: Manage input token length for model. Default: true
   
-#### Dynamic model override
+#### Model Overrides
 
-- `model`: In many cases, specifying the model as an input parameter will tell the pathway which model to use when setting up the pathway for execution.
-- `modelOverride`: In some cases, you need even more dynamic model selection. At runtime, a pathway can optionally specify `modelOverride` in request args to switch the model used for execution without restarting the server. Cortex will attempt a hot swap and continue execution; errors are logged gracefully if the model is invalid.
+Cortex provides two mechanisms for specifying which model to use: static model selection (via `model`) and dynamic runtime model override (via `modelOverride`).
+
+##### Static Model Selection (`model`)
+
+The `model` parameter can be specified in multiple ways, and Cortex follows this order of precedence when selecting a model at pathway initialization:
+
+1. `pathway.model` - The model specified directly in the pathway definition
+2. `args.model` - The model passed in the request arguments
+3. `pathway.inputParameters.model` - The model specified in the pathway's input parameters
+4. `config.get('defaultModelName')` - The default model specified in the configuration
+
+The first valid model found in this order will be used. If none of these models are found in the configured endpoints, Cortex will log a warning and use the default model defined in the configuration.
+
+**Example:**
+```js
+export default {
+    model: 'oai-gpt4o',  // Static model for this pathway
+    prompt: '{{text}}',
+    // ...
+};
+```
+
+##### Runtime Model Override (`modelOverride`)
+
+The `modelOverride` parameter enables dynamic model switching at runtime, after the pathway has been initialized. This is useful when:
+
+- You need to switch models based on runtime conditions
+- Different parts of a pathway should use different models
+- You want to implement model fallback strategies
+- You need to test different models without restarting the server
+
+**How it works:**
+
+1. The pathway is initialized with a model using the static selection precedence above
+2. During execution, if `modelOverride` is specified in the request args and differs from the current model, Cortex performs a "hot swap"
+3. The `swapModel()` method updates the model reference, creates a new `ModelExecutor` instance, and recalculates token limits
+4. Execution continues with the new model
+5. If the override model is invalid, an error is logged gracefully and execution continues with the original model
+
+**Implementation details:**
+
+The model swap occurs in the `promptAndParse()` method of `PathwayResolver`:
+
+```649:666:server/pathwayResolver.js
+    swapModel(newModelName) {
+        // Validate that the new model exists in endpoints
+        if (!this.endpoints[newModelName]) {
+            throw new Error(`Model ${newModelName} not found in config`);
+        }
+
+        // Update model references
+        this.modelName = newModelName;
+        this.model = this.endpoints[newModelName];
+
+        // Create new ModelExecutor with the new model
+        this.modelExecutor = new ModelExecutor(this.pathway, this.model);
+
+        // Recalculate chunk max token length as it depends on the model
+        this.chunkMaxTokenLength = this.getChunkMaxTokenLength();
+
+        this.logWarning(`Model swapped to ${newModelName}`);
+    }
+```
+
+**Usage examples:**
+
+1. **In a pathway's `executePathway` function:**
+```js
+export default {
+    model: 'oai-gpt4o',
+    executePathway: async ({args, runAllPrompts}) => {
+        // Switch to a different model based on input length
+        if (args.text && args.text.length > 10000) {
+            args.modelOverride = 'oai-gpt4-turbo';  // Use faster model for long text
+        }
+        return await runAllPrompts();
+    }
+};
+```
+
+2. **In a pathway that calls other pathways:**
+```js
+export default {
+    executePathway: async ({args, runAllPrompts}) => {
+        // First pass with one model
+        const initialResult = await runAllPrompts();
+        
+        // Second pass with a different model
+        args.modelOverride = 'oai-gpt4o';
+        args.text = initialResult;
+        return await runAllPrompts();
+    }
+};
+```
+
+3. **Conditional model selection:**
+```js
+export default {
+    executePathway: async ({args, runAllPrompts}) => {
+        // Select model based on language or complexity
+        if (args.language === 'ja' || args.complexity === 'high') {
+            args.modelOverride = 'oai-gpt4o';
+        } else {
+            args.modelOverride = 'oai-gpt4-turbo';
+        }
+        return await runAllPrompts();
+    }
+};
+```
+
+**Error handling:**
+
+If `modelOverride` specifies a model that doesn't exist in the configured endpoints, Cortex will:
+- Log an error message: `Failed to swap model to {modelName}: {error message}`
+- Continue execution with the originally selected model
+- Not throw an exception that would stop pathway execution
+
+**When to use `model` vs `modelOverride`:**
+
+- Use `model` when:
+  - The model selection is known at pathway definition time
+  - The pathway always uses the same model
+  - You want the model to be part of the pathway's configuration
+
+- Use `modelOverride` when:
+  - The model needs to change based on runtime conditions
+  - Different parts of execution need different models
+  - You're implementing model fallback or A/B testing
+  - The model selection depends on input characteristics (length, language, complexity, etc.)
+
+**Important notes:**
+
+- `modelOverride` only takes effect if it differs from the currently selected model
+- The swap happens before prompt execution, so all subsequent prompts in the pathway will use the new model
+- Token limits are automatically recalculated after a model swap to account for different model capabilities
+- Model swaps are logged as warnings for debugging purposes
 
 ## Core (Default) Pathways
 
@@ -566,6 +700,16 @@ Each model configuration can include:
     "maxImageSize": 5242880,
     "supportsStreaming": true,
     "supportsVision": true,
+    "emulateOpenAIChatModel": "gpt-4o",
+    "emulateOpenAICompletionModel": "gpt-3.5-turbo",
+    "restStreaming": {
+        "inputParameters": {
+            "stream": false
+        },
+        "timeout": 120,
+        "enableDuplicateRequests": false,
+        "geminiSafetySettings": []
+    },
     "geminiSafetySettings": [
         {
             "category": "HARM_CATEGORY",
@@ -574,6 +718,50 @@ Each model configuration can include:
     ]
 }
 ```
+
+**REST Endpoint Emulation**: To expose a model through OpenAI-compatible REST endpoints (`/v1/chat/completions` or `/v1/completions`), add one of these properties:
+
+- `emulateOpenAIChatModel`: Exposes the model as a chat completion model (e.g., `"gpt-4o"`, `"gpt-5"`, `"claude-4-sonnet"`)
+- `emulateOpenAICompletionModel`: Exposes the model as a text completion model (e.g., `"gpt-3.5-turbo"`, `"ollama-completion"`)
+
+When `enableRestEndpoints` is `true`, Cortex automatically:
+1. Generates REST streaming pathways for models with `emulateOpenAIChatModel` or `emulateOpenAICompletionModel`
+2. Exposes them through `/v1/chat/completions` or `/v1/completions` endpoints
+3. Makes them available via the `/v1/models` endpoint
+
+**Optional `restStreaming` Configuration**: You can customize the generated REST pathways with:
+- `inputParameters`: Additional input parameters for the REST endpoint
+- `timeout`: Request timeout in seconds
+- `enableDuplicateRequests`: Enable duplicate request handling
+- `geminiSafetySettings`: Gemini-specific safety settings (for Gemini models)
+
+**Example**:
+```json
+{
+    "oai-gpt4o": {
+        "type": "OPENAI-VISION",
+        "emulateOpenAIChatModel": "gpt-4o",
+        "restStreaming": {
+            "inputParameters": {
+                "stream": false
+            },
+            "timeout": 120
+        },
+        "url": "https://api.openai.com/v1/chat/completions",
+        "headers": {
+            "Authorization": "Bearer {{OPENAI_API_KEY}}",
+            "Content-Type": "application/json"
+        },
+        "params": {
+            "model": "gpt-4o"
+        },
+        "maxTokenLength": 131072,
+        "supportsStreaming": true
+    }
+}
+```
+
+This configuration will make the model available as `gpt-4o` through the `/v1/chat/completions` endpoint when `enableRestEndpoints` is `true`.
 
 **Rate Limiting**: The `requestsPerSecond` parameter controls the rate limiting for each model endpoint. If not specified, Cortex defaults to **100 requests per second** per endpoint. This rate limiting is implemented using the Bottleneck library with a token bucket algorithm that includes:
 - Minimum time between requests (`minTime`)
@@ -585,9 +773,11 @@ Each model configuration can include:
 
 Cortex provides OpenAI-compatible REST endpoints that allow you to use various models through a standardized interface. When `enableRestEndpoints` is set to `true`, Cortex exposes the following endpoints:
 
-- `/v1/models`: List available models
-- `/v1/chat/completions`: Chat completion endpoint
-- `/v1/completions`: Text completion endpoint
+- `/v1/models`: List available models (includes all models with `emulateOpenAIChatModel` or `emulateOpenAICompletionModel`)
+- `/v1/chat/completions`: Chat completion endpoint (for models with `emulateOpenAIChatModel`)
+- `/v1/completions`: Text completion endpoint (for models with `emulateOpenAICompletionModel`)
+
+**Model Exposure**: To expose a model through these endpoints, add `emulateOpenAIChatModel` or `emulateOpenAICompletionModel` to your model configuration (see [Model Configuration](#model-configuration) above). Cortex automatically generates REST streaming pathways for these models.
 
 This means you can use Cortex with any client library or tool that supports the OpenAI API format. For example:
 
@@ -736,6 +926,8 @@ Extends Cortex with several file processing capabilities:
 - Progress reporting for file operations
 - Cleanup and deletion management
 
+For comprehensive documentation on the Cortex file system architecture, see [FILE_SYSTEM_DOCUMENTATION.md](FILE_SYSTEM_DOCUMENTATION.md).
+
 Each helper app can be deployed independently using Docker:
 ```sh
 # Build the Docker image
@@ -747,6 +939,17 @@ docker tag [app-name] [registry-url]/cortex/[app-name]
 # Push to registry (optional login may be required)
 docker push [registry-url]/cortex/[app-name]
 ```
+
+## Documentation
+
+### File System
+For detailed documentation on Cortex's file system architecture, including file upload, storage, retrieval, and management, see [FILE_SYSTEM_DOCUMENTATION.md](FILE_SYSTEM_DOCUMENTATION.md). This document covers:
+- File handler service integration
+- File collection system
+- Storage layers (Azure Blob Storage, GCS, Redis)
+- System tools that use files
+- Complete function reference
+- Best practices and error handling
 
 ## Troubleshooting
 If you encounter any issues while using Cortex, there are a few things you can do. First, check the Cortex documentation for any common errors and their solutions. If that does not help, you can also open an issue on the Cortex GitHub repository.
