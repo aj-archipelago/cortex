@@ -130,7 +130,9 @@ test('should execute SearchXPlatform with included handles', async t => {
 });
 
 // Test X platform search with engagement filters
-test('should execute SearchXPlatform with engagement filters', async t => {
+// NOTE: Skipped - minFavorites and minViews engagement filters are not supported in the new xAI Responses API
+// The old Live Search API supported these, but they have been removed in the new agentic tool calling API
+test.skip('should execute SearchXPlatform with engagement filters', async t => {
   t.timeout(60000);
   
   const response = await testServer.executeOperation({

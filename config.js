@@ -664,6 +664,52 @@ var config = convict({
                 "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
+            "xai-grok-4-1-fast-responses": {
+                "type": "GROK-RESPONSES",
+                "emulateOpenAIChatModel": "grok-4-1-fast",
+                "restStreaming": {
+                    "inputParameters": {
+                        "stream": true,
+                        "tools": "",
+                        "inline_citations": true
+                    }
+                },
+                "url": "https://api.x.ai/v1/responses",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-1-fast"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-search": {
+                "type": "GROK-RESPONSES",
+                "emulateOpenAIChatModel": "grok-4",
+                "restStreaming": {
+                    "inputParameters": {
+                        "stream": true,
+                        "tools": "",
+                        "inline_citations": true
+                    }
+                },
+                "url": "https://api.x.ai/v1/responses",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 256000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
             "apptek-translate": {
                 "type": "APPTEK-TRANSLATE",
                 "url": "{{APPTEK_API_ENDPOINT}}",

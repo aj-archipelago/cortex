@@ -1,5 +1,5 @@
 // sys_tool_grok_x_search.js
-// Tool pathway that handles Grok Live Search functionality specifically for X platform search
+// Tool pathway that handles Grok X Platform search using the new Responses API with search tools
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import logger from '../../../../lib/logger.js';
 import { getSearchResultId, extractCitationTitle } from '../../../../lib/util.js';
@@ -12,8 +12,10 @@ export default {
         userMessage: '',
         includedHandles: { type: 'array', items: { type: 'string' }, default: [] },
         excludedHandles: { type: 'array', items: { type: 'string' }, default: [] },
-        minFavorites: 0,
-        minViews: 0,
+        fromDate: '',
+        toDate: '',
+        enableImageUnderstanding: false,
+        enableVideoUnderstanding: false,
         maxResults: 10
     },
     toolDefinition: { 
@@ -47,27 +49,27 @@ export default {
                     },
                     fromDate: {
                         type: "string",
-                        description: "Optional date from which to start searching (YYYY-MM-DD)",
+                        description: "Optional date from which to start searching (YYYY-MM-DD format)",
                         format: "date"
                     },
                     toDate: {
                         type: "string",
-                        description: "Optional date to which to end searching (YYYY-MM-DD)",
+                        description: "Optional date to which to end searching (YYYY-MM-DD format)",
                         format: "date"
                     },
-                    minFavorites: {
-                        type: "number",
-                        description: "Minimum number of favorites (likes) that a post must have to be included. Use this to filter to most liked posts.",
-                        minimum: 0
+                    enableImageUnderstanding: {
+                        type: "boolean",
+                        description: "Enable the agent to analyze images found in X posts",
+                        default: false
                     },
-                    minViews: {
-                        type: "number",
-                        description: "Minimum number of views that a post must have to be included. Use this to filter to most viewed posts.",
-                        minimum: 0
+                    enableVideoUnderstanding: {
+                        type: "boolean",
+                        description: "Enable the agent to analyze videos found in X posts",
+                        default: false
                     },
                     maxResults: {
                         type: "number",
-                        description: "Maximum number of search results to return (default: 10, max: 50)",
+                        description: "Maximum number of search results to return (default: 10)",
                         minimum: 1,
                         maximum: 50,
                         default: 10
@@ -81,33 +83,42 @@ export default {
     executePathway: async ({args, runAllPrompts, resolver}) => {
         
         try {
-            // Build search parameters for X platform search
-            const searchParameters = {
-                mode: 'auto',
-                return_citations: true,
-                max_search_results: args.maxResults || 10,
-                sources: [{
-                    type: 'x',
-                    ...(args.includedHandles && args.includedHandles.length > 0 && {
-                        included_x_handles: args.includedHandles
-                    }),
-                    ...(args.excludedHandles && args.excludedHandles.length > 0 && {
-                        excluded_x_handles: args.excludedHandles
-                    }),
-                    ...(args.minFavorites && {
-                        post_favorite_count: args.minFavorites
-                    }),
-                    ...(args.minViews && {
-                        post_view_count: args.minViews
-                    })
-                }]
+            // Build tools configuration for the new Responses API
+            // X Search tool with all supported parameters
+            const xSearchConfig = {
+                ...(args.includedHandles && args.includedHandles.length > 0 && {
+                    allowed_x_handles: args.includedHandles.slice(0, 10)
+                }),
+                ...(args.excludedHandles && args.excludedHandles.length > 0 && {
+                    excluded_x_handles: args.excludedHandles.slice(0, 10)
+                }),
+                ...(args.fromDate && {
+                    from_date: args.fromDate
+                }),
+                ...(args.toDate && {
+                    to_date: args.toDate
+                }),
+                ...(args.enableImageUnderstanding && {
+                    enable_image_understanding: true
+                }),
+                ...(args.enableVideoUnderstanding && {
+                    enable_video_understanding: true
+                })
             };
 
-            // Call the Grok Live Search pathway
+            // Build the tools object for the new Responses API
+            const tools = {
+                x_search: Object.keys(xSearchConfig).length > 0 ? xSearchConfig : true
+            };
+
+            // Call the Grok Live Search pathway with new tools format
+            // Use the new Responses API model for X search
             const { model, ...restArgs } = args;
             const result = await callPathway('grok_live_search', { 
                 ...restArgs,
-                search_parameters: JSON.stringify(searchParameters)
+                model: 'xai-grok-4-1-fast-responses',
+                tools: JSON.stringify(tools),
+                inline_citations: true
             }, resolver);
             
             if (resolver.errors && resolver.errors.length > 0) {
@@ -156,13 +167,13 @@ export default {
                     });
                 }
                 
-                // Extract inline citations from the text in format [1](https://example.com) or [1(https://example.com)]
-                const inlineCitationPattern = /\[(\d+)\]\(([^)]+)\)|\[(\d+)\(([^)]+)\)\]/g;
+                // Extract inline citations from the text
+                // Handle multiple formats: [1](url), [[1]](url), [1(url)]
+                const inlineCitationPattern = /\[\[?(\d+)\]?\]\(([^)]+)\)|\[(\d+)\(([^)]+)\)\]/g;
                 let match;
                 const inlineCitations = new Set();
                 
                 while ((match = inlineCitationPattern.exec(valueText)) !== null) {
-                    // Handle both formats: [1](url) and [1(url)]
                     const citationNumber = match[1] || match[3];
                     const citationUrl = match[2] || match[4];
                     inlineCitations.add(citationUrl);
@@ -193,16 +204,14 @@ export default {
                     return searchResultId ? `:cd_source[${searchResultId}]` : match;
                 });
                 
-                // Also handle simple numbered citations [1] format
-                transformedText = transformedText.replace(/\[(\d+)\]/g, (match, num) => {
+                // Also handle simple numbered citations [1] or [[1]] format
+                transformedText = transformedText.replace(/\[\[?(\d+)\]?\](?!\()/g, (match, num) => {
                     const citationIndex = parseInt(num) - 1;
                     if (citations[citationIndex]) {
                         const citation = citations[citationIndex];
-                        // If citation is already in searchResults format, use its searchResultId
                         if (citation.searchResultId) {
                             return `:cd_source[${citation.searchResultId}]`;
                         }
-                        // Otherwise, try to find by URL
                         const url = typeof citation === 'string' ? citation : citation.url;
                         const searchResultId = citationToIdMap.get(url);
                         return searchResultId ? `:cd_source[${searchResultId}]` : match;
@@ -215,7 +224,7 @@ export default {
                     finalSearchResults.push({
                         searchResultId: getSearchResultId(),
                         title: 'X Platform Search Results',
-                        url: 'https://x.com/search', // Provide a valid URL for X platform search
+                        url: 'https://x.com/search',
                         content: transformedText,
                         path: '',
                         wireid: '',

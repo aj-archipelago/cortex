@@ -37,6 +37,7 @@ import GoogleTranslatePlugin from './plugins/googleTranslatePlugin.js';
 import GroqChatPlugin from './plugins/groqChatPlugin.js';
 import VeoVideoPlugin from './plugins/veoVideoPlugin.js';
 import GrokVisionPlugin from './plugins/grokVisionPlugin.js';
+import GrokResponsesPlugin from './plugins/grokResponsesPlugin.js';
 import AzureFoundryAgentsPlugin from './plugins/azureFoundryAgentsPlugin.js';
 import GoogleCsePlugin from './plugins/googleCsePlugin.js';
 
@@ -150,6 +151,9 @@ class ModelExecutor {
                 break;
             case 'GROK-VISION':
                 plugin = new GrokVisionPlugin(pathway, model);
+                break;
+            case 'GROK-RESPONSES':
+                plugin = new GrokResponsesPlugin(pathway, model);
                 break;
             case 'AZURE-FOUNDRY-AGENTS':
                 plugin = new AzureFoundryAgentsPlugin(pathway, model);
