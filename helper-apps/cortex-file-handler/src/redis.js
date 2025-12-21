@@ -238,6 +238,15 @@ const setFileStoreMap = async (hash, value, contextId = null) => {
     // Remove 'message' field - it's only for the upload response, not for persistence
     delete valueToStore.message;
     
+    // Remove shortLivedUrl fields - they're only for responses, not for persistence
+    // Store only permanent URLs (url, gcs, converted.url, converted.gcs)
+    delete valueToStore.shortLivedUrl;
+    if (valueToStore.converted) {
+      const convertedCopy = { ...valueToStore.converted };
+      delete convertedCopy.shortLivedUrl;
+      valueToStore.converted = convertedCopy;
+    }
+    
     // Only set timestamp if one doesn't already exist
     if (!valueToStore.timestamp) {
       valueToStore.timestamp = new Date().toISOString();

@@ -623,11 +623,27 @@ function uploadBlob(
                       // Fallback to regular URL
                     }
 
+                    // Determine MIME type of converted file from its URL
+                    let convertedMimeType = 'application/octet-stream';
+                    try {
+                      const convertedUrlObj = new URL(convertedSaveResult.url);
+                      const convertedPathname = convertedUrlObj.pathname;
+                      const convertedExtension = path.extname(convertedPathname);
+                      convertedMimeType = mime.lookup(convertedExtension) || 'application/octet-stream';
+                    } catch (e) {
+                      // If URL parsing fails, try to extract extension from URL string
+                      const urlMatch = convertedSaveResult.url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
+                      if (urlMatch) {
+                        convertedMimeType = mime.lookup(urlMatch[1]) || 'application/octet-stream';
+                      }
+                    }
+
                     // Attach to response body
                     result.converted = {
                       url: convertedSaveResult.url,
                       shortLivedUrl: convertedShortLivedUrl,
                       gcs: convertedGcsUrl,
+                      mimeType: convertedMimeType,
                     };
                     
                     // Note: result.shortLivedUrl remains pointing to the original file
@@ -951,11 +967,27 @@ async function uploadFile(
             // Fallback to regular URL
           }
 
+          // Determine MIME type of converted file from its URL
+          let convertedMimeType = 'application/octet-stream';
+          try {
+            const convertedUrlObj = new URL(convertedSaveResult.url);
+            const convertedPathname = convertedUrlObj.pathname;
+            const convertedExtension = path.extname(convertedPathname);
+            convertedMimeType = mime.lookup(convertedExtension) || 'application/octet-stream';
+          } catch (e) {
+            // If URL parsing fails, try to extract extension from URL string
+            const urlMatch = convertedSaveResult.url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
+            if (urlMatch) {
+              convertedMimeType = mime.lookup(urlMatch[1]) || 'application/octet-stream';
+            }
+          }
+
           // Add converted file info to result
           result.converted = {
             url: convertedSaveResult.url,
             shortLivedUrl: convertedShortLivedUrl,
             gcs: convertedGcsUrl,
+            mimeType: convertedMimeType,
           };
           
           // Note: result.shortLivedUrl remains pointing to the original file

@@ -350,7 +350,8 @@ export class StorageService {
             convertedResult = {
               url: hashResult.converted.url,
               shortLivedUrl: convertedShortLivedUrl,
-              gcs: hashResult.converted.gcs
+              gcs: hashResult.converted.gcs,
+              mimeType: hashResult.converted.mimeType || null
             };
           } catch (error) {
             context.log?.(`Warning: Failed to update converted file tag: ${error.message}`);
