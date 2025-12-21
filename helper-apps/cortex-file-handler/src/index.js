@@ -18,7 +18,7 @@ import {
 } from "./redis.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageService } from "./services/storage/StorageService.js";
-import { uploadBlob } from "./blobHandler.js";
+import { uploadBlob, getMimeTypeFromUrl } from "./blobHandler.js";
 import { generateShortId } from "./utils/filenameUtils.js";
 import { redactContextId, redactSasToken, sanitizeForLogging } from "./utils/logSecurity.js";
 
@@ -529,20 +529,7 @@ async function CortexFileHandler(context, req) {
 
         // Add mimeType to converted block if it exists but doesn't have mimeType yet
         if (hashResult.converted && !hashResult.converted.mimeType) {
-          let convertedMimeType = 'application/octet-stream';
-          try {
-            const convertedUrlObj = new URL(hashResult.converted.url);
-            const convertedPathname = convertedUrlObj.pathname;
-            const convertedExtension = path.extname(convertedPathname);
-            convertedMimeType = mime.lookup(convertedExtension) || 'application/octet-stream';
-          } catch (e) {
-            // If URL parsing fails, try to extract extension from URL string
-            const urlMatch = hashResult.converted.url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
-            if (urlMatch) {
-              convertedMimeType = mime.lookup(urlMatch[1]) || 'application/octet-stream';
-            }
-          }
-          hashResult.converted.mimeType = convertedMimeType;
+          hashResult.converted.mimeType = getMimeTypeFromUrl(hashResult.converted.url);
         }
 
         // Generate short-lived URLs for both original and converted files (if converted exists)

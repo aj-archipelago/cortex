@@ -177,6 +177,64 @@ async function downloadFromGCS(gcsUrl, destinationPath) {
   }
 }
 
+/**
+ * Extracts MIME type from a URL based on file extension
+ * @param {string} url - The URL to extract MIME type from
+ * @returns {string} The MIME type or 'application/octet-stream' as fallback
+ */
+function getMimeTypeFromUrl(url) {
+  const defaultMimeType = 'application/octet-stream';
+  if (!url) return defaultMimeType;
+
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+    const extension = path.extname(pathname);
+    return mime.lookup(extension) || defaultMimeType;
+  } catch (e) {
+    // If URL parsing fails, try to extract extension from URL string
+    const urlMatch = url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
+    if (urlMatch) {
+      return mime.lookup(urlMatch[1]) || defaultMimeType;
+    }
+    return defaultMimeType;
+  }
+}
+
+/**
+ * Generates a short-lived SAS URL for a converted file
+ * @param {object} context - The request context for logging
+ * @param {string} convertedUrl - The URL of the converted file
+ * @param {string} [logSuffix=''] - Optional suffix for log messages
+ * @returns {Promise<string>} The short-lived URL or the original URL as fallback
+ */
+async function generateShortLivedUrlForConvertedFile(context, convertedUrl, logSuffix = '') {
+  let shortLivedUrl = convertedUrl; // Fallback to regular URL
+  try {
+    const storageFactory = StorageFactory.getInstance();
+    const primaryProvider = await storageFactory.getAzureProvider();
+    if (primaryProvider.generateShortLivedSASToken && primaryProvider.extractBlobNameFromUrl) {
+      const blobName = primaryProvider.extractBlobNameFromUrl(convertedUrl);
+      if (blobName) {
+        const { containerClient } = await primaryProvider.getBlobClient();
+        const sasToken = primaryProvider.generateShortLivedSASToken(
+          containerClient,
+          blobName,
+          5
+        );
+        const urlObj = new URL(convertedUrl);
+        const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
+        shortLivedUrl = `${baseUrl}?${sasToken}`;
+        context.log(`Generated shortLivedUrl for converted file${logSuffix}`);
+      }
+    }
+  } catch (error) {
+    context.log(`Warning: Could not generate shortLivedUrl for converted file: ${error.message}`);
+    // Fallback to regular URL
+  }
+  return shortLivedUrl;
+}
+
 export const getBlobClient = async () => {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   // Always use default container from env var
@@ -599,44 +657,14 @@ function uploadBlob(
                     }
 
                     // Generate shortLivedUrl for converted file
-                    let convertedShortLivedUrl = convertedSaveResult.url; // Fallback to regular URL
-                    try {
-                      const storageFactory = StorageFactory.getInstance();
-                      const primaryProvider = await storageFactory.getAzureProvider();
-                      if (primaryProvider.generateShortLivedSASToken && primaryProvider.extractBlobNameFromUrl) {
-                        const convertedBlobName = primaryProvider.extractBlobNameFromUrl(convertedSaveResult.url);
-                        if (convertedBlobName) {
-                          const { containerClient } = await primaryProvider.getBlobClient();
-                          const convertedShortLivedSasToken = primaryProvider.generateShortLivedSASToken(
-                            containerClient,
-                            convertedBlobName,
-                            5
-                          );
-                          const convertedUrlObj = new URL(convertedSaveResult.url);
-                          const convertedBaseUrl = `${convertedUrlObj.protocol}//${convertedUrlObj.host}${convertedUrlObj.pathname}`;
-                          convertedShortLivedUrl = `${convertedBaseUrl}?${convertedShortLivedSasToken}`;
-                          context.log("Generated shortLivedUrl for converted file (busboy)");
-                        }
-                      }
-                    } catch (error) {
-                      context.log(`Warning: Could not generate shortLivedUrl for converted file: ${error.message}`);
-                      // Fallback to regular URL
-                    }
+                    const convertedShortLivedUrl = await generateShortLivedUrlForConvertedFile(
+                      context,
+                      convertedSaveResult.url,
+                      ' (busboy)'
+                    );
 
                     // Determine MIME type of converted file from its URL
-                    let convertedMimeType = 'application/octet-stream';
-                    try {
-                      const convertedUrlObj = new URL(convertedSaveResult.url);
-                      const convertedPathname = convertedUrlObj.pathname;
-                      const convertedExtension = path.extname(convertedPathname);
-                      convertedMimeType = mime.lookup(convertedExtension) || 'application/octet-stream';
-                    } catch (e) {
-                      // If URL parsing fails, try to extract extension from URL string
-                      const urlMatch = convertedSaveResult.url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
-                      if (urlMatch) {
-                        convertedMimeType = mime.lookup(urlMatch[1]) || 'application/octet-stream';
-                      }
-                    }
+                    const convertedMimeType = getMimeTypeFromUrl(convertedSaveResult.url);
 
                     // Attach to response body
                     result.converted = {
@@ -943,44 +971,13 @@ async function uploadFile(
           }
 
           // Generate shortLivedUrl for converted file
-          let convertedShortLivedUrl = convertedSaveResult.url; // Fallback to regular URL
-          try {
-            const storageFactory = StorageFactory.getInstance();
-            const primaryProvider = await storageFactory.getAzureProvider();
-            if (primaryProvider.generateShortLivedSASToken && primaryProvider.extractBlobNameFromUrl) {
-              const convertedBlobName = primaryProvider.extractBlobNameFromUrl(convertedSaveResult.url);
-              if (convertedBlobName) {
-                const { containerClient } = await primaryProvider.getBlobClient();
-                const convertedShortLivedSasToken = primaryProvider.generateShortLivedSASToken(
-                  containerClient,
-                  convertedBlobName,
-                  5
-                );
-                const convertedUrlObj = new URL(convertedSaveResult.url);
-                const convertedBaseUrl = `${convertedUrlObj.protocol}//${convertedUrlObj.host}${convertedUrlObj.pathname}`;
-                convertedShortLivedUrl = `${convertedBaseUrl}?${convertedShortLivedSasToken}`;
-                context.log("Generated shortLivedUrl for converted file");
-              }
-            }
-          } catch (error) {
-            context.log(`Warning: Could not generate shortLivedUrl for converted file: ${error.message}`);
-            // Fallback to regular URL
-          }
+          const convertedShortLivedUrl = await generateShortLivedUrlForConvertedFile(
+            context,
+            convertedSaveResult.url
+          );
 
           // Determine MIME type of converted file from its URL
-          let convertedMimeType = 'application/octet-stream';
-          try {
-            const convertedUrlObj = new URL(convertedSaveResult.url);
-            const convertedPathname = convertedUrlObj.pathname;
-            const convertedExtension = path.extname(convertedPathname);
-            convertedMimeType = mime.lookup(convertedExtension) || 'application/octet-stream';
-          } catch (e) {
-            // If URL parsing fails, try to extract extension from URL string
-            const urlMatch = convertedSaveResult.url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
-            if (urlMatch) {
-              convertedMimeType = mime.lookup(urlMatch[1]) || 'application/octet-stream';
-            }
-          }
+          const convertedMimeType = getMimeTypeFromUrl(convertedSaveResult.url);
 
           // Add converted file info to result
           result.converted = {
@@ -1282,6 +1279,7 @@ export {
   gcs,
   uploadChunkToGCS,
   downloadFromGCS,
+  getMimeTypeFromUrl,
   // Re-export container constants
   getDefaultContainerName,
   GCS_BUCKETNAME,

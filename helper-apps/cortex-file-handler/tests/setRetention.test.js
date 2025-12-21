@@ -313,7 +313,8 @@ test.serial("should update Redis map with retention information", async (t) => {
     const newEntry = await getFileStoreMap(testHash);
     t.truthy(newEntry, "Redis entry should still exist after setting retention");
     t.is(newEntry.url, retentionResponse.data.url, "Entry should have correct URL");
-    t.truthy(newEntry.shortLivedUrl, "Entry should have shortLivedUrl");
+    // Note: shortLivedUrl is intentionally NOT stored in Redis (stripped before persistence)
+    // It's only returned in the response, which is checked above
     t.is(newEntry.permanent, true, "Entry should have permanent=true in Redis (matches file collection logic)");
 
   } finally {
@@ -551,7 +552,8 @@ test.serial("should set retention for context-scoped file", async (t) => {
     // Verify Redis entry was updated with context-scoped key
     const updatedEntry = await getFileStoreMap(testHash, false, contextId);
     t.truthy(updatedEntry, "Should have updated entry in Redis");
-    t.truthy(updatedEntry.shortLivedUrl, "Should have shortLivedUrl in Redis entry");
+    // Note: shortLivedUrl is intentionally NOT stored in Redis (stripped before persistence)
+    // It's only returned in the response, which is checked above
     t.is(updatedEntry.permanent, true, "Entry should have permanent=true in Redis (matches file collection logic)");
 
     // Wait for operations to complete
