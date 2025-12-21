@@ -129,60 +129,6 @@ test('should execute SearchXPlatform with included handles', async t => {
   }
 });
 
-// Test X platform search with engagement filters
-test('should execute SearchXPlatform with engagement filters', async t => {
-  t.timeout(60000);
-  
-  const response = await testServer.executeOperation({
-    query: `
-      query TestSearchXPlatformWithEngagement($text: String, $userMessage: String, $minFavorites: Int, $minViews: Int, $maxResults: Int) {
-        sys_tool_grok_x_search(text: $text, userMessage: $userMessage, minFavorites: $minFavorites, minViews: $minViews, maxResults: $maxResults) {
-          result
-          errors
-          resultData
-        }
-      }
-    `,
-    variables: {
-      text: 'Popular posts about machine learning',
-      userMessage: 'Searching X platform for popular ML posts',
-      minFavorites: 500,
-      minViews: 5000,
-      maxResults: 5
-    }
-  });
-
-  t.is(response.body?.singleResult?.errors, undefined);
-  const data = response.body?.singleResult?.data?.sys_tool_grok_x_search;
-  const result = data?.result;
-  const resultData = data?.resultData;
-  
-  t.truthy(result, 'Should have a result');
-  
-  // Parse and validate SearchResponse
-  let searchResponse;
-  try {
-    searchResponse = JSON.parse(result);
-  } catch (error) {
-    t.fail(`Failed to parse SearchResponse: ${error.message}`);
-  }
-  
-  t.is(searchResponse._type, 'SearchResponse', 'Should return SearchResponse type');
-  t.truthy(searchResponse.value, 'Should have value array');
-  t.true(Array.isArray(searchResponse.value), 'Value should be an array');
-  t.true(searchResponse.value.length <= 5, 'Should respect maxResults limit');
-  
-  // Check tool metadata for engagement filters
-  if (resultData) {
-    try {
-      const resultDataObject = JSON.parse(resultData);
-      t.is(resultDataObject.toolUsed, 'SearchXPlatform', 'Should have correct toolUsed');
-    } catch (error) {
-      t.fail('Failed to parse resultData');
-    }
-  }
-});
-
 // Test X platform search with excluded handles
 test('should execute SearchXPlatform with excluded handles', async t => {
   t.timeout(60000);

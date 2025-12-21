@@ -4,15 +4,23 @@ export default {
     prompt:
         [
             new Prompt({ messages: [
-                {"role": "system", "content": "You are a helpful AI assistant with live search capabilities across a variety of internet sources including news, web, x, rss, etc. Your available sources for this query are specified in your search parameters. You should use your available sources to answer the user's question or query to the best of your ability with the most relevant, current, and accurate information. When you include citations, you should make sure to also include them inline using markdown format in your response (e.g. [1(https://example.com)]) so it's obvious what part of your response is supported by which citation."},
+                {"role": "system", "content": "You are a helpful AI assistant with real-time search capabilities across web and X (Twitter) sources. Use your search capabilities to answer the user's question or query to the best of your ability with the most relevant, current, and accurate information. When you include citations, make sure to include them inline using markdown format (e.g. [[1]](https://example.com)) so it's clear what part of your response is supported by which source."},
                 {"role": "user", "content": "{{text}}"},
             ]}),
         ],
 
-    model: 'xai-grok-4',
+    // Default to the new Responses API model (xai-grok-4-1-fast-responses)
+    // The legacy xai-grok-4-fast-non-reasoning model with search_parameters is deprecated
+    model: 'xai-grok-4-1-fast-responses',
     useInputChunking: false,
     inputParameters: {
-        stream: false,
+        stream: true,
+        // New Responses API format - tools configuration
+        // Example: { "x_search": { "from_date": "2025-01-01", "enable_image_understanding": true } }
+        tools: '',
+        // Enable inline citations by default
+        inline_citations: true,
+        // Legacy search_parameters format - will be converted to tools format by the plugin
         search_parameters: ''
     }
-}; 
+};
