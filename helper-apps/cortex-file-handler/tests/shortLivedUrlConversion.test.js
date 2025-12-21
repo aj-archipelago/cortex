@@ -163,6 +163,99 @@ test.serial(
 );
 
 /**
+ * Test that initial upload response includes shortLivedUrl for converted files
+ */
+test.serial(
+  "upload should generate shortLivedUrl for converted file in initial response",
+  async (t) => {
+    // Create a minimal XLSX workbook in-memory
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.aoa_to_sheet([
+      ["Product", "Price"],
+      ["Apple", 1.50],
+      ["Banana", 0.75],
+    ]);
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Products");
+
+    // Write it to a temp file
+    const filePath = path.join(t.context.testDir, `${uuidv4()}.xlsx`);
+    XLSX.writeFile(workbook, filePath);
+
+    const hash = `test-upload-converted-${uuidv4()}`;
+    let uploadedUrl;
+    let convertedUrl;
+
+    try {
+      // Upload the XLSX file (conversion should run automatically)
+      const uploadResponse = await uploadFile(filePath, null, hash);
+      t.is(uploadResponse.status, 200, "Upload should succeed");
+      t.truthy(uploadResponse.data.converted, "Upload response must contain converted info");
+      t.truthy(uploadResponse.data.converted.url, "Converted URL should be present");
+
+      uploadedUrl = uploadResponse.data.url;
+      convertedUrl = uploadResponse.data.converted.url;
+
+      // Verify the original file is .xlsx and converted file is .csv
+      t.is(getFileExtensionFromUrl(uploadedUrl), '.xlsx', "Original URL should point to .xlsx file");
+      t.is(getFileExtensionFromUrl(convertedUrl), '.csv', "Converted URL should point to .csv file");
+
+      // CRITICAL TEST: Verify converted.shortLivedUrl is present in upload response
+      t.truthy(
+        uploadResponse.data.converted.shortLivedUrl,
+        "Upload response should include converted.shortLivedUrl"
+      );
+
+      // Verify converted.shortLivedUrl points to the converted file (.csv)
+      const convertedShortLivedBase = uploadResponse.data.converted.shortLivedUrl.split('?')[0];
+      const convertedUrlBase = convertedUrl.split('?')[0];
+      t.is(
+        convertedShortLivedBase,
+        convertedUrlBase,
+        "converted.shortLivedUrl should be based on converted file URL (.csv)"
+      );
+
+      // Verify converted.shortLivedUrl points to CSV, not XLSX
+      t.true(
+        uploadResponse.data.converted.shortLivedUrl.includes('.csv'),
+        "converted.shortLivedUrl should point to .csv file"
+      );
+      t.false(
+        uploadResponse.data.converted.shortLivedUrl.includes('.xlsx'),
+        "converted.shortLivedUrl should NOT contain .xlsx extension"
+      );
+
+      // Verify main shortLivedUrl points to original file (for reference)
+      // The converted file's shortLivedUrl is in result.converted.shortLivedUrl
+      if (uploadResponse.data.shortLivedUrl) {
+        const mainShortLivedBase = uploadResponse.data.shortLivedUrl.split('?')[0];
+        const originalUrlBase = uploadedUrl.split('?')[0];
+        t.is(
+          mainShortLivedBase,
+          originalUrlBase,
+          "Main shortLivedUrl should point to original file (.xlsx)"
+        );
+        t.true(
+          uploadResponse.data.shortLivedUrl.includes('.xlsx'),
+          "Main shortLivedUrl should point to .xlsx file (original)"
+        );
+        t.false(
+          uploadResponse.data.shortLivedUrl.includes('.csv'),
+          "Main shortLivedUrl should NOT point to .csv file (that's in converted.shortLivedUrl)"
+        );
+      }
+
+    } finally {
+      // Clean up
+      fs.unlinkSync(filePath);
+      await cleanupHashAndFile(hash, uploadedUrl, baseUrl);
+      if (convertedUrl) {
+        await cleanupHashAndFile(null, convertedUrl, baseUrl);
+      }
+    }
+  },
+);
+
+/**
  * Test that short-lived URLs fallback to original files when no conversion exists
  */
 test.serial(

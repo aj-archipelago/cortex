@@ -2055,3 +2055,157 @@ test('Analyzer tool: Returns error JSON format when file not found', async t => 
         await cleanup(contextId);
     }
 });
+
+// ============================================
+// Converted Files Tests (displayFilename != URL extension)
+// ============================================
+
+test('Converted files: displayFilename .docx but URL .md - MIME type from URL', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a file where displayFilename is .docx but URL points to converted .md file
+        // This simulates the case where a docx file was converted to markdown
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/converted-document.md', // Converted to markdown
+            gcs: 'gs://bucket/converted-document.md',
+            filename: 'original-document.docx', // Original filename preserved
+            userMessage: 'Add converted file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        
+        // Verify file was stored correctly
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 1);
+        
+        const file = collection[0];
+        // displayFilename should preserve original user filename
+        t.is(file.displayFilename, 'original-document.docx', 'displayFilename should preserve original filename');
+        // mimeType should be determined from URL (actual content), not displayFilename
+        t.is(file.mimeType, 'text/markdown', 'mimeType should be from URL (.md), not displayFilename (.docx)');
+        t.is(file.url, 'https://example.com/converted-document.md', 'URL should point to converted file');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('Converted files: EditFile should use URL MIME type, not displayFilename', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a converted file: displayFilename is .docx but URL is .md
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/report.md', // Converted markdown
+            gcs: 'gs://bucket/report.md',
+            filename: 'report.docx', // Original filename
+            userMessage: 'Add converted file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        
+        // Verify the file has correct MIME type from URL
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection[0];
+        t.is(file.mimeType, 'text/markdown', 'MIME type should be from URL');
+        t.is(file.displayFilename, 'report.docx', 'displayFilename should be original');
+        
+        // Note: We can't actually test EditFile here without a real file handler,
+        // but we can verify the file is set up correctly for editing
+        // The EditFile tool should use getActualContentMimeType() which uses URL
+        const { getActualContentMimeType } = await import('../../../../lib/fileUtils.js');
+        const actualMimeType = getActualContentMimeType(file);
+        t.is(actualMimeType, 'text/markdown', 'getActualContentMimeType should return URL MIME type');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('Converted files: ReadFile should accept text files based on URL, not displayFilename', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a converted file: displayFilename is .docx but URL is .md
+        const addResult = await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/document.md', // Converted markdown (text file)
+            gcs: 'gs://bucket/document.md',
+            filename: 'document.docx', // Original filename (would be binary if checked)
+            userMessage: 'Add converted text file'
+        });
+        
+        const addParsed = JSON.parse(addResult);
+        t.is(addParsed.success, true);
+        
+        // Verify file setup
+        const collection = await loadFileCollection(contextId, null, false);
+        const file = collection[0];
+        t.is(file.displayFilename, 'document.docx');
+        t.is(file.mimeType, 'text/markdown');
+        
+        // ReadFile should use resolveFileParameter which returns the URL
+        // The URL (.md) should be recognized as text, not the displayFilename (.docx)
+        const { resolveFileParameter } = await import('../../../../lib/fileUtils.js');
+        const resolvedUrl = await resolveFileParameter('document.docx', contextId);
+        t.is(resolvedUrl, 'https://example.com/document.md', 'Should resolve to URL');
+        
+        // The isTextFile function in ReadFile should check the URL, not displayFilename
+        // Since the URL is .md, it should be recognized as text
+        const { getMimeTypeFromFilename, isTextMimeType } = await import('../../../../lib/fileUtils.js');
+        const urlMimeType = getMimeTypeFromFilename(resolvedUrl);
+        t.is(urlMimeType, 'text/markdown', 'URL should be recognized as markdown');
+        t.true(isTextMimeType(urlMimeType), 'Markdown should be recognized as text type');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('Converted files: Multiple converted files with different extensions', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add multiple converted files
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/doc1.md', // docx -> md
+            filename: 'document1.docx',
+            userMessage: 'Add docx->md'
+        });
+        
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/doc2.txt', // xlsx -> txt (CSV)
+            filename: 'spreadsheet.xlsx',
+            userMessage: 'Add xlsx->txt'
+        });
+        
+        await callPathway('sys_tool_file_collection', {
+            contextId,
+            url: 'https://example.com/doc3.json', // pptx -> json (structured data)
+            filename: 'presentation.pptx',
+            userMessage: 'Add pptx->json'
+        });
+        
+        // Verify all files have correct MIME types from URLs
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 3);
+        
+        const doc1 = collection.find(f => f.displayFilename === 'document1.docx');
+        t.truthy(doc1);
+        t.is(doc1.mimeType, 'text/markdown', 'docx->md should have markdown MIME type');
+        
+        const doc2 = collection.find(f => f.displayFilename === 'spreadsheet.xlsx');
+        t.truthy(doc2);
+        t.is(doc2.mimeType, 'text/plain', 'xlsx->txt should have text/plain MIME type');
+        
+        const doc3 = collection.find(f => f.displayFilename === 'presentation.pptx');
+        t.truthy(doc3);
+        t.is(doc3.mimeType, 'application/json', 'pptx->json should have JSON MIME type');
+    } finally {
+        await cleanup(contextId);
+    }
+});

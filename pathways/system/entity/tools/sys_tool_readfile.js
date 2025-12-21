@@ -4,8 +4,53 @@ import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
 import { resolveFileParameter, getMimeTypeFromFilename, isTextMimeType } from '../../../../lib/fileUtils.js';
 
+// Code/text file extensions that mime-types doesn't recognize or misidentifies
+// The mime-types library lacks coverage for many programming languages
+// See: https://github.com/jshttp/mime-types (uses mime-db which is IANA-focused)
+//
+// We only list extensions where mime.lookup() returns false or a wrong type
+// (e.g., .ts -> video/mp2t instead of TypeScript)
+const KNOWN_TEXT_EXTENSIONS = new Set([
+    // TypeScript (mime-types returns video/mp2t for .ts!)
+    'ts', 'tsx', 'mts', 'cts',
+    // Languages not in mime-db
+    'py', 'pyw', 'pyi',         // Python
+    'go',                        // Go  
+    'rs',                        // Rust
+    'rb', 'rake', 'gemspec',     // Ruby
+    'swift',                     // Swift
+    'kt', 'kts',                 // Kotlin
+    'scala', 'sbt',              // Scala
+    'clj', 'cljs', 'cljc', 'edn',// Clojure
+    'elm',                       // Elm
+    'ex', 'exs',                 // Elixir
+    'erl', 'hrl',                // Erlang
+    'hs', 'lhs',                 // Haskell
+    'ml', 'mli',                 // OCaml
+    'fs', 'fsi', 'fsx',          // F#
+    'r', 'rmd',                  // R
+    'jl',                        // Julia
+    'nim',                       // Nim
+    'zig',                       // Zig
+    'v',                         // V
+    'cr',                        // Crystal
+    // Modern web frameworks
+    'vue', 'svelte', 'astro',
+    // Shell variants (only bash/zsh/fish not recognized)
+    'bash', 'zsh', 'fish',
+    // Config files (dotfiles without extension)
+    'env', 'envrc', 'editorconfig', 'gitignore', 'dockerignore',
+    // Data/config formats not in mime-db
+    'prisma', 'graphql', 'gql',
+    'tf', 'tfvars', 'hcl',       // Terraform
+    'proto',                     // Protocol Buffers
+    'diff', 'patch',
+]);
+
 /**
  * Check if a file is a text file type that can be read
+ * Uses MIME type detection via the mime-types library, with fallback for
+ * common code file extensions that the library doesn't recognize
  * @param {string} url - File URL or path
  * @returns {boolean} - Returns true if it's a text file, false otherwise
  */
@@ -16,39 +61,29 @@ function isTextFile(url) {
 
     // Extract filename from URL (remove query string and fragment)
     const urlPath = url.split('?')[0].split('#')[0];
+    const extension = urlPath.split('.').pop()?.toLowerCase();
     
-    // Use existing MIME utility to get MIME type
+    // Use MIME library to get MIME type from filename/extension
     const mimeType = getMimeTypeFromFilename(urlPath);
     
-    // If we have a valid MIME type (not unknown/octet-stream), check it
+    // If MIME library returns a valid type, check it (but watch for misidentifications)
     if (mimeType && mimeType !== 'application/octet-stream') {
+        // Handle known misidentifications from mime-types library
+        // .ts -> video/mp2t (wrong, it's TypeScript)
+        // .rs -> application/rls-services+xml (wrong, it's Rust)
+        if (extension && KNOWN_TEXT_EXTENSIONS.has(extension)) {
+            return true; // Trust our extension list over wrong MIME type
+        }
         return isTextMimeType(mimeType);
     }
     
-    // Fallback: Check file extension for common text/code file types
-    // This handles cases where MIME type detection fails
-    const extension = urlPath.split('.').pop()?.toLowerCase();
-    if (extension) {
-        const textExtensions = [
-            // Code files
-            'json', 'js', 'jsx', 'ts', 'tsx', 'py', 'go', 'rs', 'java', 'c', 'cpp', 'cc', 'cxx', 'h', 'hpp', 'hxx',
-            'rb', 'php', 'pl', 'lua', 'sql', 'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'cmd',
-            // Config/data files
-            'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'config', 'xml', 'csv', 'tsv',
-            // Markup/documentation
-            'md', 'markdown', 'txt', 'text', 'log', 'diff', 'patch',
-            // Web
-            'html', 'htm', 'css', 'scss', 'sass', 'less', 'vue', 'svelte',
-            // Other text formats
-            'rtf', 'rtfd', 'tex', 'latex', 'bib', 'r', 'm', 'swift', 'kt', 'scala', 'clj', 'cljs', 'edn',
-            'dart', 'elm', 'ex', 'exs', 'fs', 'fsx', 'ml', 'mli', 'hs', 'lhs', 'vim', 'vimrc'
-        ];
-        if (textExtensions.includes(extension)) {
-            return true;
-        }
+    // Fallback: Check our list of known text/code extensions
+    // This handles cases where the MIME library doesn't recognize the extension
+    if (extension && KNOWN_TEXT_EXTENSIONS.has(extension)) {
+        return true;
     }
     
-    // Unknown type, reject to be safe
+    // For truly unknown extensions, we can't reliably determine if it's text
     return false;
 }
 

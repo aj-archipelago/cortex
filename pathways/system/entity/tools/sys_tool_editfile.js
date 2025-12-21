@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache, getActualContentMimeType } from '../../../../lib/fileUtils.js';
 
 // Maximum file size for editing (50MB) - prevents memory blowup on huge files
 const MAX_EDITABLE_FILE_SIZE = 50 * 1024 * 1024;
@@ -398,10 +398,11 @@ export default {
                     }
                 }
 
-                // Determine MIME type from filename using utility function
-                // Use displayFilename (user-friendly) if available, otherwise fall back to filename (CFH-managed)
+                // Determine MIME type from actual stored content (URL), not displayFilename
+                // displayFilename may have a different extension than the actual content
+                // (e.g., displayFilename="report.docx" but content is markdown after conversion)
                 const filename = currentFile.displayFilename || currentFile.filename || 'modified.txt';
-                let mimeType = getMimeTypeFromFilename(filename, 'text/plain');
+                let mimeType = getActualContentMimeType(currentFile) || getMimeTypeFromFilename(filename, 'text/plain');
                 
                 // Add charset=utf-8 for text-based MIME types
                 if (isTextMimeType(mimeType)) {

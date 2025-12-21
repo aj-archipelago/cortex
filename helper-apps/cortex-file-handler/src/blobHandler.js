@@ -598,11 +598,42 @@ function uploadBlob(
                         );
                     }
 
+                    // Generate shortLivedUrl for converted file
+                    let convertedShortLivedUrl = convertedSaveResult.url; // Fallback to regular URL
+                    try {
+                      const storageFactory = StorageFactory.getInstance();
+                      const primaryProvider = await storageFactory.getAzureProvider();
+                      if (primaryProvider.generateShortLivedSASToken && primaryProvider.extractBlobNameFromUrl) {
+                        const convertedBlobName = primaryProvider.extractBlobNameFromUrl(convertedSaveResult.url);
+                        if (convertedBlobName) {
+                          const { containerClient } = await primaryProvider.getBlobClient();
+                          const convertedShortLivedSasToken = primaryProvider.generateShortLivedSASToken(
+                            containerClient,
+                            convertedBlobName,
+                            5
+                          );
+                          const convertedUrlObj = new URL(convertedSaveResult.url);
+                          const convertedBaseUrl = `${convertedUrlObj.protocol}//${convertedUrlObj.host}${convertedUrlObj.pathname}`;
+                          convertedShortLivedUrl = `${convertedBaseUrl}?${convertedShortLivedSasToken}`;
+                          context.log("Generated shortLivedUrl for converted file (busboy)");
+                        }
+                      }
+                    } catch (error) {
+                      context.log(`Warning: Could not generate shortLivedUrl for converted file: ${error.message}`);
+                      // Fallback to regular URL
+                    }
+
                     // Attach to response body
                     result.converted = {
                       url: convertedSaveResult.url,
+                      shortLivedUrl: convertedShortLivedUrl,
                       gcs: convertedGcsUrl,
                     };
+                    
+                    // Note: result.shortLivedUrl remains pointing to the original file
+                    // result.converted.shortLivedUrl points to the converted file
+                    // Both are available for different use cases
+                    
                     context.log(
                       "Conversion process (busboy) completed successfully",
                     );
@@ -895,11 +926,42 @@ async function uploadFile(
             context.log("Converted file saved to GCS");
           }
 
+          // Generate shortLivedUrl for converted file
+          let convertedShortLivedUrl = convertedSaveResult.url; // Fallback to regular URL
+          try {
+            const storageFactory = StorageFactory.getInstance();
+            const primaryProvider = await storageFactory.getAzureProvider();
+            if (primaryProvider.generateShortLivedSASToken && primaryProvider.extractBlobNameFromUrl) {
+              const convertedBlobName = primaryProvider.extractBlobNameFromUrl(convertedSaveResult.url);
+              if (convertedBlobName) {
+                const { containerClient } = await primaryProvider.getBlobClient();
+                const convertedShortLivedSasToken = primaryProvider.generateShortLivedSASToken(
+                  containerClient,
+                  convertedBlobName,
+                  5
+                );
+                const convertedUrlObj = new URL(convertedSaveResult.url);
+                const convertedBaseUrl = `${convertedUrlObj.protocol}//${convertedUrlObj.host}${convertedUrlObj.pathname}`;
+                convertedShortLivedUrl = `${convertedBaseUrl}?${convertedShortLivedSasToken}`;
+                context.log("Generated shortLivedUrl for converted file");
+              }
+            }
+          } catch (error) {
+            context.log(`Warning: Could not generate shortLivedUrl for converted file: ${error.message}`);
+            // Fallback to regular URL
+          }
+
           // Add converted file info to result
           result.converted = {
             url: convertedSaveResult.url,
+            shortLivedUrl: convertedShortLivedUrl,
             gcs: convertedGcsUrl,
           };
+          
+          // Note: result.shortLivedUrl remains pointing to the original file
+          // result.converted.shortLivedUrl points to the converted file
+          // Both are available for different use cases
+          
           context.log("Conversion process completed successfully");
         }
       } catch (error) {
