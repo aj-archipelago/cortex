@@ -74,9 +74,10 @@ test('checkHashExists should prefer converted URL in shortLivedUrl', async t => 
         status: 200,
         data: {
             url: 'https://storage.example.com/file.xlsx?sv=2023-11-03&se=2025-01-01T00:00:00Z&sig=long-lived',
-            shortLivedUrl: 'https://storage.example.com/file.csv?sv=2023-11-03&se=2024-01-01T10:15:00Z&sig=short-lived',
+            shortLivedUrl: 'https://storage.example.com/file.xlsx?sv=2023-11-03&se=2024-01-01T10:15:00Z&sig=short-lived',
             converted: {
                 url: 'https://storage.example.com/file.csv?sv=2023-11-03&se=2025-01-01T00:00:00Z&sig=long-lived',
+                shortLivedUrl: 'https://storage.example.com/file.csv?sv=2023-11-03&se=2024-01-01T10:15:00Z&sig=short-lived',
                 gcs: 'gs://bucket/file.csv'
             },
             gcs: 'gs://bucket/file.xlsx',
@@ -89,8 +90,9 @@ test('checkHashExists should prefer converted URL in shortLivedUrl', async t => 
     const result = await checkHashExists(hash, fileHandlerUrl);
 
     t.truthy(result);
-    // shortLivedUrl should be based on converted file
-    t.is(result.url, mockResponse.data.shortLivedUrl, 'Should use shortLivedUrl (which prefers converted)');
+    // Should prefer converted.shortLivedUrl first, then converted.url, then original shortLivedUrl/url
+    // Since converted.shortLivedUrl exists, it should be used
+    t.is(result.url, mockResponse.data.converted.shortLivedUrl, 'Should prefer converted.shortLivedUrl');
     // GCS should prefer converted
     t.is(result.gcs, mockResponse.data.converted.gcs, 'Should prefer converted GCS URL');
 });

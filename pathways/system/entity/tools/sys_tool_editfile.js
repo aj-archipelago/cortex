@@ -255,6 +255,16 @@ export default {
                 return JSON.stringify(errorResult);
             }
             
+            // Prevent editing converted files (they can be read but not edited)
+            if (foundFile._isConverted) {
+                const errorResult = {
+                    success: false,
+                    error: `Cannot edit converted files. The file "${foundFile.displayFilename || file}" is a converted version and cannot be edited. You can read it using ReadTextFile, but to edit it you would need to edit the original file.`
+                };
+                resolver.tool = JSON.stringify({ toolUsed: toolName });
+                return JSON.stringify(errorResult);
+            }
+            
             const fileId = foundFile.id;
             
             // Serialize edits to this file (prevents concurrent edits on same instance)
@@ -283,6 +293,7 @@ export default {
                         return { jsonResult: JSON.stringify(errorResult) };
                     }
                     
+                    // Use the file URL (already uses converted URL if it exists)
                     const fileUrl = currentFile.url;
                 
                     if (!fileUrl) {
