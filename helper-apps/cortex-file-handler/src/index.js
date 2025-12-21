@@ -2,6 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import mime from "mime-types";
 
 import { DOC_EXTENSIONS, AZURITE_ACCOUNT_NAME } from "./constants.js";
 import { easyChunker } from "./docHelper.js";
@@ -17,7 +18,7 @@ import {
 } from "./redis.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageService } from "./services/storage/StorageService.js";
-import { uploadBlob } from "./blobHandler.js";
+import { uploadBlob, getMimeTypeFromUrl } from "./blobHandler.js";
 import { generateShortId } from "./utils/filenameUtils.js";
 import { redactContextId, redactSasToken, sanitizeForLogging } from "./utils/logSecurity.js";
 
@@ -526,93 +527,104 @@ async function CortexFileHandler(context, req) {
           context.log(`Error ensuring converted version: ${error}`);
         }
 
-        // Attach converted info to response if present
+        // Add mimeType to converted block if it exists but doesn't have mimeType yet
+        if (hashResult.converted && !hashResult.converted.mimeType) {
+          hashResult.converted.mimeType = getMimeTypeFromUrl(hashResult.converted.url);
+        }
+
+        // Generate short-lived URLs for both original and converted files (if converted exists)
+        // Helper function to generate short-lived URL for a given URL
+        const generateShortLivedUrlForUrl = async (urlToProcess) => {
+          if (!urlToProcess) return null;
+          
+          try {
+            // Extract blob name from the URL to generate new SAS token
+            let blobName;
+            try {
+              const url = new URL(urlToProcess);
+              let path = url.pathname.substring(1);
+              
+              // For Azurite URLs, the path includes account name: devstoreaccount1/container/blob
+              // For real Azure URLs, the path is: container/blob
+              if (path.startsWith(`${AZURITE_ACCOUNT_NAME}/`)) {
+                path = path.substring(`${AZURITE_ACCOUNT_NAME}/`.length);
+              }
+              
+              const pathSegments = path.split('/').filter(segment => segment.length > 0);
+              if (pathSegments.length >= 2) {
+                blobName = pathSegments.slice(1).join('/');
+              } else if (pathSegments.length === 1) {
+                blobName = pathSegments[0];
+              }
+            } catch (urlError) {
+              context.log(`Error parsing URL for short-lived generation: ${urlError}`);
+              return null;
+            }
+
+            if (blobName) {
+              const provider = storageService.primaryProvider;
+              
+              if (provider && provider.generateShortLivedSASToken) {
+                const blobClientResult = await provider.getBlobClient();
+                const containerClient = blobClientResult.containerClient;
+                
+                const sasToken = provider.generateShortLivedSASToken(
+                  containerClient, 
+                  blobName, 
+                  shortLivedDuration
+                );
+                
+                const baseUrl = urlToProcess.split('?')[0];
+                return `${baseUrl}?${sasToken}`;
+              }
+            }
+          } catch (error) {
+            context.log(`Error generating short-lived URL: ${error}`);
+          }
+          
+          return null;
+        };
+
+        // Generate short-lived URLs for response (not stored in Redis)
+        // Generate short-lived URL for converted file if it exists
+        let convertedShortLivedUrl = null;
+        if (hashResult.converted?.url) {
+          convertedShortLivedUrl = await generateShortLivedUrlForUrl(hashResult.converted.url);
+          if (!convertedShortLivedUrl) {
+            // Fallback to regular URL
+            convertedShortLivedUrl = hashResult.converted.url;
+          }
+          context.log(`Generated shortLivedUrl for converted file`);
+        }
+
+        // Generate short-lived URL for original file (for main response)
+        const urlForShortLived = hashResult.converted?.url || hashResult.url;
+        const mainShortLivedUrl = await generateShortLivedUrlForUrl(urlForShortLived);
+        if (mainShortLivedUrl) {
+          response.shortLivedUrl = mainShortLivedUrl;
+          response.expiresInMinutes = shortLivedDuration;
+          const urlType = hashResult.converted?.url ? 'converted' : 'original';
+          context.log(`Generated short-lived URL for hash: ${hash} using ${urlType} URL (expires in ${shortLivedDuration} minutes)`);
+        } else {
+          // Fallback for storage providers that don't support short-lived tokens
+          response.shortLivedUrl = urlForShortLived;
+          response.expiresInMinutes = shortLivedDuration;
+          const urlType = hashResult.converted?.url ? 'converted' : 'original';
+          context.log(`Storage provider doesn't support short-lived tokens, using ${urlType} URL`);
+        }
+
+        // Attach converted info to response if present (include shortLivedUrl in response only)
         if (hashResult.converted) {
           response.converted = {
             url: hashResult.converted.url,
+            shortLivedUrl: convertedShortLivedUrl || hashResult.converted.url,
             gcs: hashResult.converted.gcs,
+            mimeType: hashResult.converted.mimeType || null,
           };
         }
 
-        // Always generate short-lived URL for checkHash operations
-        // Use converted URL if available, otherwise use original URL
-        const urlForShortLived = hashResult.converted?.url || hashResult.url;
-        try {
-          // Extract blob name from the URL to generate new SAS token
-          // Container parameter is ignored - always uses default container from env var
-          let blobName;
-          try {
-            const url = new URL(urlForShortLived);
-            // Extract blob name from the URL path (remove leading slash)
-            let path = url.pathname.substring(1);
-            
-            // For Azurite URLs, the path includes account name: devstoreaccount1/container/blob
-            // For real Azure URLs, the path is: container/blob
-            // Check if this is an Azurite URL (contains devstoreaccount1)
-            if (path.startsWith(`${AZURITE_ACCOUNT_NAME}/`)) {
-              path = path.substring(`${AZURITE_ACCOUNT_NAME}/`.length); // Remove account prefix
-            }
-            
-            // Extract blob name from path (skip container name, always use default container)
-            const pathSegments = path.split('/').filter(segment => segment.length > 0);
-            if (pathSegments.length >= 2) {
-              // Skip container name (first segment), get blob name (remaining segments)
-              blobName = pathSegments.slice(1).join('/');
-            } else if (pathSegments.length === 1) {
-              // Fallback: assume it's just the blob name in default container
-              blobName = pathSegments[0];
-            }
-            
-          } catch (urlError) {
-            context.log(`Error parsing URL for short-lived generation: ${urlError}`);
-          }
-
-          // Generate short-lived SAS token
-          // Container parameter is ignored - always uses default container from env var
-          if (blobName) {
-            const provider = storageService.primaryProvider;
-            
-            if (provider && provider.generateShortLivedSASToken) {
-              const blobClientResult = await provider.getBlobClient();
-              const containerClient = blobClientResult.containerClient;
-              
-              const sasToken = provider.generateShortLivedSASToken(
-                containerClient, 
-                blobName, 
-                shortLivedDuration
-              );
-              
-              // Construct new URL with short-lived SAS token
-              const baseUrl = urlForShortLived.split('?')[0]; // Remove existing SAS token
-              const shortLivedUrl = `${baseUrl}?${sasToken}`;
-              
-              // Add short-lived URL to response
-              response.shortLivedUrl = shortLivedUrl;
-              response.expiresInMinutes = shortLivedDuration;
-              
-              const urlType = hashResult.converted?.url ? 'converted' : 'original';
-              context.log(`Generated short-lived URL for hash: ${hash} using ${urlType} URL (expires in ${shortLivedDuration} minutes)`);
-            } else {
-              // Fallback for storage providers that don't support short-lived tokens
-              response.shortLivedUrl = urlForShortLived;
-              response.expiresInMinutes = shortLivedDuration;
-              const urlType = hashResult.converted?.url ? 'converted' : 'original';
-              context.log(`Storage provider doesn't support short-lived tokens, using ${urlType} URL`);
-            }
-          } else {
-            // If we couldn't extract blob name, use original URL
-            response.shortLivedUrl = urlForShortLived;
-            response.expiresInMinutes = shortLivedDuration;
-            context.log(`Could not extract blob name from URL, using original URL for short-lived`);
-          }
-        } catch (error) {
-          context.log(`Error generating short-lived URL: ${error}`);
-          // Provide fallback even on error
-          response.shortLivedUrl = urlForShortLived;
-          response.expiresInMinutes = shortLivedDuration;
-        }
-
-        //update redis timestamp with current time
+        // Update redis timestamp with current time
+        // Note: setFileStoreMap will remove shortLivedUrl fields before storing
         await setFileStoreMap(hash, hashResult, resolvedContextId);
 
         context.res = {

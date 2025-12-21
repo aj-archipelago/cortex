@@ -411,3 +411,131 @@ test('isTextMimeType should identify text MIME types', async t => {
     t.false(isTextMimeType(''));
 });
 
+// Test converted files: displayFilename has different MIME type than URL
+test('determineMimeTypeFromUrl should use URL extension, not displayFilename', async t => {
+    const { determineMimeTypeFromUrl } = await import('../../../lib/fileUtils.js');
+    
+    // Simulate converted file: displayFilename is .docx but URL is .md
+    const url = 'https://example.com/converted-file.md';
+    const gcs = 'gs://bucket/converted-file.md';
+    const displayFilename = 'original-document.docx';
+    
+    // MIME type should be determined from URL (.md), not displayFilename (.docx)
+    const mimeType = determineMimeTypeFromUrl(url, gcs, null);
+    t.is(mimeType, 'text/markdown', 'Should use URL extension (.md) for MIME type');
+    
+    // Even if displayFilename is provided, URL takes precedence
+    const mimeType2 = determineMimeTypeFromUrl(url, gcs, displayFilename);
+    t.is(mimeType2, 'text/markdown', 'Should still use URL extension even with displayFilename');
+});
+
+test('getActualContentMimeType should use URL, not displayFilename', async t => {
+    const { getActualContentMimeType } = await import('../../../lib/fileUtils.js');
+    
+    // Simulate converted file: displayFilename is .docx but URL is .md
+    const file = {
+        url: 'https://example.com/converted-file.md',
+        gcs: 'gs://bucket/converted-file.md',
+        displayFilename: 'original-document.docx',
+        mimeType: null // Not set yet
+    };
+    
+    const mimeType = getActualContentMimeType(file);
+    t.is(mimeType, 'text/markdown', 'Should determine MIME type from URL, not displayFilename');
+    
+    // If mimeType is already set (from URL), use it
+    const fileWithMimeType = {
+        ...file,
+        mimeType: 'text/markdown'
+    };
+    const mimeType2 = getActualContentMimeType(fileWithMimeType);
+    t.is(mimeType2, 'text/markdown', 'Should use stored mimeType if available');
+});
+
+test('addFileToCollection should preserve original displayFilename for converted files', async t => {
+    const { addFileToCollection } = await import('../../../lib/fileUtils.js');
+    
+    // Simulate adding a file where URL points to converted content (.md) 
+    // but user wants to keep original filename (.docx)
+    const contextId = `test-converted-${Date.now()}`;
+    const url = 'https://example.com/converted-file.md'; // Converted to markdown
+    const gcs = 'gs://bucket/converted-file.md';
+    const originalFilename = 'original-document.docx'; // User's original filename
+    
+    try {
+        const fileEntry = await addFileToCollection(
+            contextId,
+            null,
+            url,
+            gcs,
+            originalFilename, // This should be preserved as displayFilename
+            [],
+            '',
+            null,
+            null,
+            null,
+            false
+        );
+        
+        // displayFilename should be the original user-provided filename
+        t.is(fileEntry.displayFilename, 'original-document.docx', 'displayFilename should preserve original filename');
+        
+        // mimeType should be determined from URL (actual content)
+        t.is(fileEntry.mimeType, 'text/markdown', 'mimeType should be from URL, not displayFilename');
+        
+        // Verify it was saved correctly
+        const { loadFileCollection } = await import('../../../lib/fileUtils.js');
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 1);
+        t.is(collection[0].displayFilename, 'original-document.docx');
+        t.is(collection[0].mimeType, 'text/markdown');
+        t.is(collection[0].url, url);
+    } finally {
+        // Cleanup
+        const { getRedisClient } = await import('../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        if (redisClient) {
+            await redisClient.del(`FileStoreMap:ctx:${contextId}`);
+        }
+    }
+});
+
+test('syncFilesToCollection should determine MIME type from URL, not displayFilename', async t => {
+    const { syncFilesToCollection } = await import('../../../lib/fileUtils.js');
+    
+    // Simulate chat history with converted file
+    const contextId = `test-sync-converted-${Date.now()}`;
+    const chatHistory = [
+        {
+            role: 'user',
+            content: [
+                {
+                    type: 'file',
+                    url: 'https://example.com/converted-report.md', // Converted to markdown
+                    gcs: 'gs://bucket/converted-report.md',
+                    hash: 'hash123'
+                }
+            ]
+        }
+    ];
+    
+    try {
+        await syncFilesToCollection(chatHistory, contextId, null);
+        
+        const { loadFileCollection } = await import('../../../lib/fileUtils.js');
+        const collection = await loadFileCollection(contextId, null, false);
+        t.is(collection.length, 1);
+        
+        // MIME type should be from URL (.md), not from any displayFilename
+        t.is(collection[0].mimeType, 'text/markdown', 'MIME type should be determined from URL');
+        t.is(collection[0].url, 'https://example.com/converted-report.md');
+    } finally {
+        // Cleanup
+        const { getRedisClient } = await import('../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        if (redisClient) {
+            await redisClient.del(`FileStoreMap:ctx:${contextId}`);
+        }
+    }
+});
+

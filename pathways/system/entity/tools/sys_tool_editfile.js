@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadFileCollection, getMimeTypeFromFilename, resolveFileParameter, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadFileCollection, getMimeTypeFromFilename, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache, getActualContentMimeType } from '../../../../lib/fileUtils.js';
 
 // Maximum file size for editing (50MB) - prevents memory blowup on huge files
 const MAX_EDITABLE_FILE_SIZE = 50 * 1024 * 1024;
@@ -255,6 +255,16 @@ export default {
                 return JSON.stringify(errorResult);
             }
             
+            // Prevent editing converted files (they can be read but not edited)
+            if (foundFile._isConverted) {
+                const errorResult = {
+                    success: false,
+                    error: `Cannot edit converted files. The file "${foundFile.displayFilename || file}" is a converted version and cannot be edited. You can read it using ReadTextFile, but to edit it you would need to edit the original file.`
+                };
+                resolver.tool = JSON.stringify({ toolUsed: toolName });
+                return JSON.stringify(errorResult);
+            }
+            
             const fileId = foundFile.id;
             
             // Serialize edits to this file (prevents concurrent edits on same instance)
@@ -283,6 +293,7 @@ export default {
                         return { jsonResult: JSON.stringify(errorResult) };
                     }
                     
+                    // Use the file URL (already uses converted URL if it exists)
                     const fileUrl = currentFile.url;
                 
                     if (!fileUrl) {
@@ -398,10 +409,11 @@ export default {
                     }
                 }
 
-                // Determine MIME type from filename using utility function
-                // Use displayFilename (user-friendly) if available, otherwise fall back to filename (CFH-managed)
+                // Determine MIME type from actual stored content (URL), not displayFilename
+                // displayFilename may have a different extension than the actual content
+                // (e.g., displayFilename="report.docx" but content is markdown after conversion)
                 const filename = currentFile.displayFilename || currentFile.filename || 'modified.txt';
-                let mimeType = getMimeTypeFromFilename(filename, 'text/plain');
+                let mimeType = getActualContentMimeType(currentFile) || getMimeTypeFromFilename(filename, 'text/plain');
                 
                 // Add charset=utf-8 for text-based MIME types
                 if (isTextMimeType(mimeType)) {
