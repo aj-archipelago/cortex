@@ -355,13 +355,98 @@ class GrokResponsesPlugin extends OpenAIVisionPlugin {
         // Handle citations - can come from citations array or be parsed from inline citations
         let citations = [];
         
+        // Helper to extract rich metadata from text near a URL citation
+        const extractCitationMetadata = (url, text) => {
+            const defaultResult = {
+                title: extractCitationTitle(url),
+                content: '',
+                author: null,
+                timestamp: null,
+                postType: null
+            };
+            
+            if (!text || !url || typeof url !== 'string') return defaultResult;
+            
+            try {
+                // Find where this URL appears in the text (as inline citation)
+                const urlEscaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                // Look for up to 300 chars before the citation to capture full context
+                const citationRegex = new RegExp(`([^\\n]{0,300})\\[\\[\\d+\\]\\]\\(${urlEscaped}\\)`, 'g');
+                const match = citationRegex.exec(text);
+                
+                if (match) {
+                    const contextBefore = (match[1] || '').trim();
+                    
+                    // Extract author handle (e.g., @elonmusk, @OpenAI)
+                    const authorMatch = contextBefore.match(/@([A-Za-z0-9_]+)/);
+                    if (authorMatch) {
+                        defaultResult.author = authorMatch[1];
+                        // Update title to include the author
+                        const statusMatch = url.match(/status\/(\d+)/);
+                        if (statusMatch) {
+                            defaultResult.title = `X Post ${statusMatch[1]} from @${authorMatch[1]}`;
+                        }
+                    }
+                    
+                    // Extract timestamp (HH:MM:SS or dates like "December 18, 2025" or "Dec 20, 2025")
+                    const timeMatch = contextBefore.match(/(\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM|GMT))?)/i);
+                    const dateMatch = contextBefore.match(/((?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s*\d{4})/i);
+                    if (timeMatch) {
+                        defaultResult.timestamp = timeMatch[1];
+                    }
+                    if (dateMatch) {
+                        defaultResult.timestamp = defaultResult.timestamp 
+                            ? `${dateMatch[1]} ${defaultResult.timestamp}` 
+                            : dateMatch[1];
+                    }
+                    
+                    // Extract post type (quote, reply, repost)
+                    const typeMatch = contextBefore.match(/\((quote|reply|repost|thread)\)/i);
+                    if (typeMatch) {
+                        defaultResult.postType = typeMatch[1].toLowerCase();
+                    }
+                    
+                    // Extract quoted content (text in quotes)
+                    const quotedMatch = contextBefore.match(/"([^"]{1,200})"/);
+                    if (quotedMatch) {
+                        defaultResult.content = quotedMatch[1];
+                    } else {
+                        // Fall back to the last meaningful chunk of context
+                        let content = contextBefore;
+                        // Remove markdown formatting and clean up
+                        content = content.replace(/\*\*/g, '').replace(/\[View[^\]]*\]/gi, '').trim();
+                        // Get the last sentence or phrase
+                        const lastSentence = content.match(/[.!?]\s*([^.!?]+)$/);
+                        if (lastSentence) {
+                            content = lastSentence[1].trim();
+                        }
+                        if (content.length > 150) {
+                            content = '...' + content.slice(-150);
+                        }
+                        defaultResult.content = content;
+                    }
+                }
+            } catch (e) {
+                // If parsing fails, fall back to defaults
+                logger.debug(`[grok responses] Citation metadata extraction failed: ${e.message}`);
+            }
+            
+            return defaultResult;
+        };
+        
         // First, check for explicit citations array from the API
         if (data.citations && Array.isArray(data.citations)) {
-            citations = data.citations.map(url => ({
-                title: extractCitationTitle(url),
-                url: url,
-                content: extractCitationTitle(url)
-            }));
+            citations = data.citations.map(url => {
+                const metadata = extractCitationMetadata(url, outputText);
+                return {
+                    title: metadata.title,
+                    url: url,
+                    content: metadata.content || metadata.title,
+                    ...(metadata.author && { author: metadata.author }),
+                    ...(metadata.timestamp && { timestamp: metadata.timestamp }),
+                    ...(metadata.postType && { postType: metadata.postType })
+                };
+            });
         }
         
         // If no explicit citations, extract them from inline citations in the text
@@ -372,17 +457,31 @@ class GrokResponsesPlugin extends OpenAIVisionPlugin {
             const uniqueUrls = [...new Set(matches.map(m => m[1]))];
             
             if (uniqueUrls.length > 0) {
-                citations = uniqueUrls.map(url => ({
-                    title: extractCitationTitle(url),
-                    url: url,
-                    content: extractCitationTitle(url)
-                }));
+                citations = uniqueUrls.map(url => {
+                    const metadata = extractCitationMetadata(url, outputText);
+                    return {
+                        title: metadata.title,
+                        url: url,
+                        content: metadata.content || metadata.title,
+                        ...(metadata.author && { author: metadata.author }),
+                        ...(metadata.timestamp && { timestamp: metadata.timestamp }),
+                        ...(metadata.postType && { postType: metadata.postType })
+                    };
+                });
             }
         }
         
         if (citations.length > 0) {
             cortexResponse.citations = citations;
-            logger.debug(`[grok responses] Extracted ${citations.length} citations from response`);
+            // Log a sample of enriched citations
+            const enrichedCount = citations.filter(c => c.author || c.timestamp || c.postType).length;
+            logger.info(`[grok responses] Extracted ${citations.length} citations (${enrichedCount} with rich metadata)`);
+            if (enrichedCount > 0) {
+                const sample = citations.find(c => c.author || c.timestamp);
+                if (sample) {
+                    logger.debug(`[grok responses] Sample citation: ${JSON.stringify(sample)}`);
+                }
+            }
         }
 
         // Handle inline citations
