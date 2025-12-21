@@ -14,7 +14,7 @@ test.afterEach.always(t => {
     t.context.sandbox.restore();
 });
 
-test('checkHashExists should return shortLivedUrl when available', async t => {
+test('checkHashExists should return long-lived URL for storage', async t => {
     const hash = 'test-hash-123';
     const fileHandlerUrl = 'https://file-handler.example.com';
     const mockResponse = {
@@ -33,7 +33,7 @@ test('checkHashExists should return shortLivedUrl when available', async t => {
     const result = await checkHashExists(hash, fileHandlerUrl);
 
     t.truthy(result);
-    t.is(result.url, mockResponse.data.shortLivedUrl, 'Should return shortLivedUrl');
+    t.is(result.url, mockResponse.data.url, 'Should return long-lived URL for storage');
     t.is(result.gcs, mockResponse.data.gcs, 'Should return GCS URL');
     t.is(result.hash, hash, 'Should return hash');
 
@@ -41,7 +41,6 @@ test('checkHashExists should return shortLivedUrl when available', async t => {
     t.true(axiosGetStub.calledOnce);
     const callArgs = axiosGetStub.getCall(0).args;
     t.true(callArgs[0].includes('checkHash=true'));
-    t.true(callArgs[0].includes('shortLivedMinutes=5'));
 });
 
 test('checkHashExists should fallback to regular URL when shortLivedUrl not available', async t => {
@@ -67,7 +66,7 @@ test('checkHashExists should fallback to regular URL when shortLivedUrl not avai
     t.is(result.gcs, mockResponse.data.gcs, 'Should return GCS URL');
 });
 
-test('checkHashExists should prefer converted URL in shortLivedUrl', async t => {
+test('checkHashExists should prefer converted URL for storage', async t => {
     const hash = 'test-hash-789';
     const fileHandlerUrl = 'https://file-handler.example.com';
     const mockResponse = {
@@ -90,9 +89,8 @@ test('checkHashExists should prefer converted URL in shortLivedUrl', async t => 
     const result = await checkHashExists(hash, fileHandlerUrl);
 
     t.truthy(result);
-    // Should prefer converted.shortLivedUrl first, then converted.url, then original shortLivedUrl/url
-    // Since converted.shortLivedUrl exists, it should be used
-    t.is(result.url, mockResponse.data.converted.shortLivedUrl, 'Should prefer converted.shortLivedUrl');
+    // Should prefer converted.url (long-lived) for storage, then fallback to original url
+    t.is(result.url, mockResponse.data.converted.url, 'Should prefer converted.url (long-lived) for storage');
     // GCS should prefer converted
     t.is(result.gcs, mockResponse.data.converted.gcs, 'Should prefer converted GCS URL');
 });
@@ -149,7 +147,7 @@ test('ensureShortLivedUrl should resolve file to short-lived URL when hash avail
         }
     };
 
-    t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
+    const axiosGetStub = t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
 
     const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl);
 
@@ -158,6 +156,11 @@ test('ensureShortLivedUrl should resolve file to short-lived URL when hash avail
     t.is(result.gcs, fileObject.gcs, 'Should preserve GCS URL');
     t.is(result.hash, fileObject.hash, 'Should preserve hash');
     t.is(result.filename, fileObject.filename, 'Should preserve filename');
+    
+    // Verify axios was called with shortLivedMinutes parameter
+    t.true(axiosGetStub.calledOnce);
+    const callArgs = axiosGetStub.getCall(0).args;
+    t.true(callArgs[0].includes('shortLivedMinutes=5'));
 });
 
 test('ensureShortLivedUrl should return original object when no hash', async t => {
@@ -200,7 +203,7 @@ test('ensureShortLivedUrl should fallback to original object on error', async t 
     t.deepEqual(result, fileObject, 'Should fallback to original object on error');
 });
 
-test('ensureShortLivedUrl should update GCS URL from checkHash response', async t => {
+test('ensureShortLivedUrl should prefer converted.shortLivedUrl and update GCS URL', async t => {
     const fileObject = {
         url: 'https://storage.example.com/file.xlsx',
         gcs: 'gs://bucket/file.xlsx',
@@ -209,13 +212,16 @@ test('ensureShortLivedUrl should update GCS URL from checkHash response', async 
     };
     const fileHandlerUrl = 'https://file-handler.example.com';
     const convertedGcs = 'gs://bucket/file.csv';
+    const convertedShortLivedUrl = 'https://storage.example.com/file.csv?sv=2023-11-03&se=2024-01-01T10:15:00Z&sig=short-lived';
 
     const mockResponse = {
         status: 200,
         data: {
             url: fileObject.url,
-            shortLivedUrl: 'https://storage.example.com/file.csv?sv=2023-11-03&se=2024-01-01T10:15:00Z&sig=short-lived',
+            shortLivedUrl: 'https://storage.example.com/file.xlsx?sv=2023-11-03&se=2024-01-01T10:15:00Z&sig=short-lived',
             converted: {
+                url: 'https://storage.example.com/file.csv',
+                shortLivedUrl: convertedShortLivedUrl,
                 gcs: convertedGcs
             },
             gcs: fileObject.gcs,
@@ -228,6 +234,7 @@ test('ensureShortLivedUrl should update GCS URL from checkHash response', async 
     const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl);
 
     t.truthy(result);
+    t.is(result.url, convertedShortLivedUrl, 'Should prefer converted.shortLivedUrl for LLM processing');
     t.is(result.gcs, convertedGcs, 'Should update GCS URL from converted');
 });
 
