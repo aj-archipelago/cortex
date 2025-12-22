@@ -687,9 +687,9 @@ var config = convict({
                 "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
-            "xai-grok-4-search": {
+            "xai-grok-4-responses": {
                 "type": "GROK-RESPONSES",
-                "emulateOpenAIChatModel": "grok-4",
+                "emulateOpenAIChatModel": "grok-4-responses",
                 "restStreaming": {
                     "inputParameters": {
                         "stream": true,
