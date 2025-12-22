@@ -14,8 +14,7 @@ import {
 } from "./testUtils.helper.js";
 import { 
   getFileStoreMap, 
-  removeFromFileStoreMap,
-  getScopedHashKey
+  removeFromFileStoreMap
 } from "../src/redis.js";
 
 const __filename = fileURLToPath(import.meta.url);

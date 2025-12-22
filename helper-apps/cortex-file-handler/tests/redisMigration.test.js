@@ -5,7 +5,6 @@ import {
   setFileStoreMap,
   getFileStoreMap,
   removeFromFileStoreMap,
-  getScopedHashKey,
   client,
 } from "../src/redis.js";
 import { getDefaultContainerName } from "../src/constants.js";
@@ -15,7 +14,10 @@ import { getDefaultContainerName } from "../src/constants.js";
  * 
  * Key formats:
  * - Legacy: `<hash>:<containerName>` (read-only, migrated on access)
- * - Current: `<hash>` (unscoped) or `<hash>:ctx:<contextId>` (context-scoped)
+ * - Current: `<hash>` (unscoped) stored in `FileStoreMap` hash map
+ * - Context-scoped: `<hash>` stored in `FileStoreMap:ctx:<contextId>` hash map
+ * 
+ * Note: Hashes are never scoped - scoping is at the Redis map level, not the hash level.
  * 
  * Migration behavior:
  * - On read: If legacy key found, copy to new key, delete legacy key
@@ -49,35 +51,6 @@ async function deleteRawKey(key) {
 
 test.beforeEach(() => {
   // Tests use the mock Redis client automatically (NODE_ENV=test)
-});
-
-// =============================================================================
-// getScopedHashKey tests
-// =============================================================================
-
-test("getScopedHashKey - returns hash when no contextId", (t) => {
-  const hash = "abc123";
-  const result = getScopedHashKey(hash);
-  t.is(result, "abc123");
-});
-
-test("getScopedHashKey - returns hash when contextId is null", (t) => {
-  const hash = "abc123";
-  const result = getScopedHashKey(hash, null);
-  t.is(result, "abc123");
-});
-
-test("getScopedHashKey - returns context-scoped key when contextId provided", (t) => {
-  const hash = "abc123";
-  const contextId = "user-456";
-  const result = getScopedHashKey(hash, contextId);
-  t.is(result, "abc123:ctx:user-456");
-});
-
-test("getScopedHashKey - handles empty hash", (t) => {
-  t.is(getScopedHashKey(""), "");
-  t.is(getScopedHashKey(null), null);
-  t.is(getScopedHashKey(undefined), undefined);
 });
 
 // =============================================================================
@@ -146,15 +119,14 @@ test("getFileStoreMap - does not migrate when unscoped key already exists", asyn
 test("getFileStoreMap - context-scoped key does NOT fall back to unscoped hash (security)", async (t) => {
   const hash = `test-ctx-no-fallback-${uuidv4()}`;
   const contextId = "user-123";
-  const contextKey = `${hash}:ctx:${contextId}`;
 
   const unscopedData = { url: "http://unscoped.com/file.txt", filename: "unscoped.txt" };
 
   // Only set unscoped key (no context-scoped key)
   await client.hset("FileStoreMap", hash, JSON.stringify(unscopedData));
 
-  // Read using context-scoped key - should NOT fall back for security
-  const result = await getFileStoreMap(contextKey, true);
+  // Read using contextId - should NOT fall back for security
+  const result = await getFileStoreMap(hash, true, contextId);
 
   // Should NOT return unscoped data (security isolation)
   t.is(result, null, "Should NOT fall back to unscoped data for security");
@@ -169,7 +141,6 @@ test("getFileStoreMap - context-scoped key does NOT fall back to unscoped hash (
 test("getFileStoreMap - context-scoped key does NOT fall back through unscoped to legacy (security)", async (t) => {
   const hash = `test-ctx-legacy-no-fallback-${uuidv4()}`;
   const contextId = "user-456";
-  const contextKey = `${hash}:ctx:${contextId}`;
   const containerName = getDefaultContainerName();
   const legacyKey = `${hash}:${containerName}`;
 
@@ -178,8 +149,8 @@ test("getFileStoreMap - context-scoped key does NOT fall back through unscoped t
   // Only set legacy key (no context-scoped or unscoped keys)
   await setLegacyKey(hash, containerName, legacyData);
 
-  // Read using context-scoped key - should NOT fall back for security
-  const result = await getFileStoreMap(contextKey, true);
+  // Read using contextId - should NOT fall back for security
+  const result = await getFileStoreMap(hash, true, contextId);
 
   // Should NOT return legacy data (security isolation)
   t.is(result, null, "Should NOT fall back to legacy data for security");
@@ -215,21 +186,22 @@ test("setFileStoreMap - writes to the key provided (unscoped)", async (t) => {
 test("setFileStoreMap - writes to context-scoped key when provided", async (t) => {
   const hash = `test-write-ctx-${uuidv4()}`;
   const contextId = "user-789";
-  const contextKey = getScopedHashKey(hash, contextId);
   const testData = { url: "http://example.com/file.txt", filename: "file.txt" };
 
-  await setFileStoreMap(contextKey, testData);
+  await setFileStoreMap(hash, testData, contextId);
 
   // Verify it was written to the context-scoped key
-  const result = await getRawKey(contextKey);
+  const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+  const result = await client.hget(contextMapKey, hash);
   t.truthy(result);
-  t.is(result.url, testData.url);
+  const parsed = JSON.parse(result);
+  t.is(parsed.url, testData.url);
 
   // Unscoped key should NOT exist
   t.false(await keyExists(hash), "Unscoped key should not be created");
 
   // Cleanup
-  await deleteRawKey(contextKey);
+  await client.hdel(contextMapKey, hash);
 });
 
 // =============================================================================
@@ -283,23 +255,24 @@ test("removeFromFileStoreMap - deletes legacy key even when unscoped doesn't exi
 test("removeFromFileStoreMap - handles context-scoped key deletion", async (t) => {
   const hash = `test-delete-ctx-${uuidv4()}`;
   const contextId = "user-delete";
-  const contextKey = `${hash}:ctx:${contextId}`;
   const containerName = getDefaultContainerName();
   const legacyKey = `${hash}:${containerName}`;
 
   const testData = { url: "http://example.com/file.txt", filename: "file.txt" };
 
   // Set up context-scoped key and legacy key
-  await client.hset("FileStoreMap", contextKey, JSON.stringify(testData));
+  await setFileStoreMap(hash, testData, contextId);
   await setLegacyKey(hash, containerName, testData);
 
-  // Delete using context-scoped key
-  await removeFromFileStoreMap(contextKey);
+  // Delete using hash and contextId
+  await removeFromFileStoreMap(hash, contextId);
 
   // Context key should be deleted
-  t.false(await keyExists(contextKey), "Context-scoped key should be deleted");
+  const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+  const contextResult = await client.hget(contextMapKey, hash);
+  t.is(contextResult, null, "Context-scoped key should be deleted");
   
-  // Legacy key should also be deleted (cleanup based on base hash)
+  // Legacy key should also be deleted (cleanup based on hash)
   t.false(await keyExists(legacyKey), "Legacy key should also be deleted");
 });
 
@@ -347,20 +320,19 @@ test("migration - preserves all original data fields", async (t) => {
 });
 
 test("migration - does not affect keys with colons in hash", async (t) => {
-  // Keys that already contain colons (like context-scoped keys) should not
-  // trigger legacy migration logic
-  const contextKey = `somehash:ctx:user123`;
+  // Hashes with colons should not trigger legacy migration logic
+  const hash = `somehash:with:colons`;
   const testData = { url: "http://example.com/file.txt", filename: "file.txt" };
 
-  await client.hset("FileStoreMap", contextKey, JSON.stringify(testData));
+  await client.hset("FileStoreMap", hash, JSON.stringify(testData));
 
   // Reading should just return the data without trying legacy migration
-  const result = await getFileStoreMap(contextKey, true);
+  const result = await getFileStoreMap(hash, true);
   t.truthy(result);
   t.is(result.url, testData.url);
 
   // Cleanup
-  await deleteRawKey(contextKey);
+  await deleteRawKey(hash);
 });
 
 // =============================================================================
@@ -370,7 +342,6 @@ test("migration - does not affect keys with colons in hash", async (t) => {
 test("getFileStoreMap - context-scoped file cannot be accessed without contextId", async (t) => {
   const hash = `test-security-${uuidv4()}`;
   const contextId = "user-secure";
-  const contextKey = `${hash}:ctx:${contextId}`;
   const testData = {
     url: "http://example.com/secure-file.txt",
     filename: "secure-file.txt",
@@ -378,30 +349,30 @@ test("getFileStoreMap - context-scoped file cannot be accessed without contextId
   };
 
   // Write file with contextId
-  await setFileStoreMap(contextKey, testData);
+  await setFileStoreMap(hash, testData, contextId);
 
   // Verify context-scoped key exists
-  t.true(await keyExists(contextKey), "Context-scoped key should exist");
+  const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+  const exists = await client.hget(contextMapKey, hash);
+  t.truthy(exists, "Context-scoped key should exist");
 
   // Try to read WITHOUT contextId - should NOT find it
   const unscopedResult = await getFileStoreMap(hash, true);
   t.is(unscopedResult, null, "Should NOT be able to read context-scoped file without contextId");
 
   // Try to read WITH correct contextId - should find it
-  const scopedResult = await getFileStoreMap(contextKey, true);
+  const scopedResult = await getFileStoreMap(hash, true, contextId);
   t.truthy(scopedResult, "Should be able to read with correct contextId");
   t.is(scopedResult.url, testData.url);
 
   // Cleanup
-  await deleteRawKey(contextKey);
+  await client.hdel(contextMapKey, hash);
 });
 
 test("getFileStoreMap - context-scoped file cannot be accessed with wrong contextId", async (t) => {
   const hash = `test-security-wrong-${uuidv4()}`;
   const correctContextId = "user-correct";
   const wrongContextId = "user-wrong";
-  const correctKey = `${hash}:ctx:${correctContextId}`;
-  const wrongKey = `${hash}:ctx:${wrongContextId}`;
   const testData = {
     url: "http://example.com/secure-file.txt",
     filename: "secure-file.txt",
@@ -409,24 +380,23 @@ test("getFileStoreMap - context-scoped file cannot be accessed with wrong contex
   };
 
   // Write file with correct contextId
-  await setFileStoreMap(correctKey, testData);
+  await setFileStoreMap(hash, testData, correctContextId);
 
   // Try to read with wrong contextId - should NOT find it
-  const wrongResult = await getFileStoreMap(wrongKey, true);
+  const wrongResult = await getFileStoreMap(hash, true, wrongContextId);
   t.is(wrongResult, null, "Should NOT be able to read with wrong contextId");
 
   // Verify correct contextId still works
-  const correctResult = await getFileStoreMap(correctKey, true);
+  const correctResult = await getFileStoreMap(hash, true, correctContextId);
   t.truthy(correctResult, "Should still be able to read with correct contextId");
 
   // Cleanup
-  await deleteRawKey(correctKey);
+  await removeFromFileStoreMap(hash, correctContextId);
 });
 
 test("removeFromFileStoreMap - context-scoped file cannot be deleted without contextId", async (t) => {
   const hash = `test-security-delete-${uuidv4()}`;
   const contextId = "user-delete-secure";
-  const contextKey = `${hash}:ctx:${contextId}`;
   const testData = {
     url: "http://example.com/secure-file.txt",
     filename: "secure-file.txt",
@@ -434,16 +404,20 @@ test("removeFromFileStoreMap - context-scoped file cannot be deleted without con
   };
 
   // Write file with contextId
-  await setFileStoreMap(contextKey, testData);
-  t.true(await keyExists(contextKey), "Context-scoped key should exist");
+  await setFileStoreMap(hash, testData, contextId);
+  const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+  const exists = await client.hget(contextMapKey, hash);
+  t.truthy(exists, "Context-scoped key should exist");
 
   // Try to delete WITHOUT contextId - should NOT delete context-scoped file
   await removeFromFileStoreMap(hash);
-  t.true(await keyExists(contextKey), "Context-scoped key should still exist after unscoped delete attempt");
+  const stillExists = await client.hget(contextMapKey, hash);
+  t.truthy(stillExists, "Context-scoped key should still exist after unscoped delete attempt");
 
   // Delete WITH correct contextId - should work
-  await removeFromFileStoreMap(contextKey);
-  t.false(await keyExists(contextKey), "Context-scoped key should be deleted with correct contextId");
+  await removeFromFileStoreMap(hash, contextId);
+  const deleted = await client.hget(contextMapKey, hash);
+  t.is(deleted, null, "Context-scoped key should be deleted with correct contextId");
 });
 
 test("getFileStoreMap - unscoped file can be read without contextId", async (t) => {
@@ -495,7 +469,6 @@ test("getFileStoreMap - unscoped file can fall back to legacy container-scoped k
 test("getFileStoreMap - context-scoped read does NOT fall back to unscoped or legacy", async (t) => {
   const hash = `test-no-fallback-${uuidv4()}`;
   const contextId = "user-no-fallback";
-  const contextKey = `${hash}:ctx:${contextId}`;
   const containerName = getDefaultContainerName();
   const legacyKey = `${hash}:${containerName}`;
   const unscopedData = { url: "http://example.com/unscoped.txt", filename: "unscoped.txt" };
@@ -506,7 +479,7 @@ test("getFileStoreMap - context-scoped read does NOT fall back to unscoped or le
   await setLegacyKey(hash, containerName, legacyData);
 
   // Try to read with contextId - should NOT find unscoped or legacy
-  const result = await getFileStoreMap(contextKey, true);
+  const result = await getFileStoreMap(hash, true, contextId);
   t.is(result, null, "Context-scoped read should NOT fall back to unscoped or legacy keys");
 
   // Verify unscoped and legacy keys still exist
