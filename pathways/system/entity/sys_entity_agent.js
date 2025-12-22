@@ -350,11 +350,12 @@ export default {
                 });
 
                 // Inject challenge message after tools are executed to encourage task completion
+                // Only inject in research mode - in normal mode, let the model be more decisive
                 // Skip this check if a hand-off tool was used (async agents handle their own completion)
-                if (!hasHandoffTool) {
+                if (!hasHandoffTool && args.researchMode) {
                     const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
                     finalMessages = insertSystemMessage(finalMessages, 
-                        "Review the tool results above. If your task is incomplete or requires additional steps or information, call the necessary tools now. Adapt your approach and re-plan if needed. Only respond to the user once the task is complete and all required information has been gathered.",
+                        "Review the tool results above. If your task is incomplete or requires additional steps or information, call the necessary tools now. Adapt your approach and re-plan if you are not finding the information you need. Only respond to the user once the task is complete and sufficient information has been gathered.",
                         requestId
                     );
                 }
