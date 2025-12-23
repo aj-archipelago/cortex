@@ -2,7 +2,6 @@ import test from 'ava';
 import Gemini3ReasoningVisionPlugin from '../../../server/plugins/gemini3ReasoningVisionPlugin.js';
 import { PathwayResolver } from '../../../server/pathwayResolver.js';
 import { config } from '../../../config.js';
-import { requestState } from '../../../server/requestState.js';
 
 // Mock logger to prevent issues in tests
 const mockLogger = {
@@ -223,9 +222,6 @@ test('getRequestParameters - transforms function role to user role', t => {
     ];
     return result;
   };
-  
-  // Override parent's message conversion to simulate having function responses
-  const originalSuper = Object.getPrototypeOf(Object.getPrototypeOf(plugin)).getRequestParameters;
   
   const params = plugin.getRequestParameters('test', {}, { prompt: 'test' }, { pathway: {} });
   

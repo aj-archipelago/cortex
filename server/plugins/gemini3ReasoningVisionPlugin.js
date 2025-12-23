@@ -24,6 +24,8 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
         } else {
             // Fallback: use documented dummy signature to prevent 400 errors
             // This allows the request to proceed but may affect reasoning quality
+            const toolName = toolCall?.function?.name || 'unknown';
+            logger.warn(`Missing thoughtSignature for tool "${toolName}"; using fallback. This may indicate thoughtSignatures were lost during history persistence.`);
             part.thoughtSignature = "skip_thought_signature_validator";
         }
         return part;
