@@ -41,6 +41,18 @@ export default {
                     userMessage: {
                         type: "string",
                         description: "A user-friendly message that describes what you're doing with this tool"
+                    },
+                    inputImages: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        },
+                        description: "Optional: Array of file references (hashes, filenames, or URLs) from the file collection to use as reference images for the slide design. These images will be used as style references or incorporated into the slide. Maximum 3 images."
+                    },
+                    aspectRatio: {
+                        type: "string",
+                        enum: ["1:1", "16:9", "9:16", "4:3", "3:4"],
+                        description: "Optional: The aspect ratio for the generated slide. Options: '1:1' (Square), '16:9' (Widescreen, default), '9:16' (Vertical/Portrait), '4:3' (Standard), '3:4' (Vertical/Portrait). Defaults to '16:9' if not specified."
                     }
                 },
                 required: ["detailedInstructions", "userMessage"]
@@ -77,6 +89,9 @@ export default {
             }
             
             // Call the image generation pathway using Gemini 3
+            // Default aspectRatio to 16:9 if not provided
+            const aspectRatio = args.aspectRatio || '16:9';
+            
             let result = await callPathway('image_gemini_3', {
                 ...args, 
                 text: prompt,
@@ -85,6 +100,7 @@ export default {
                 input_image: resolvedInputImages.length > 0 ? resolvedInputImages[0] : undefined,
                 input_image_2: resolvedInputImages.length > 1 ? resolvedInputImages[1] : undefined,
                 input_image_3: resolvedInputImages.length > 2 ? resolvedInputImages[2] : undefined,
+                aspectRatio: aspectRatio,
                 optimizePrompt: true,
             }, pathwayResolver);
 
@@ -96,9 +112,19 @@ export default {
                                  Array.isArray(pathwayResolver.pathwayResultData.artifacts) && 
                                  pathwayResolver.pathwayResultData.artifacts.length > 0;
 
-            // If no result AND no artifacts, then generation truly failed
+            // If no result AND no artifacts, check for specific error types
             if (!hasArtifacts && (result === null || result === undefined || result === '')) {
-                throw new Error('Slide generation failed: No response from image generation API. Try a different prompt.');
+                // Check pathwayResolver.errors for specific error information
+                const errors = pathwayResolver.errors || [];
+                const errorText = errors.join(' ').toLowerCase();
+                
+                if (errorText.includes('image_prohibited_content') || errorText.includes('prohibited_content')) {
+                    throw new Error('Content was blocked by safety filters. Try simplifying the prompt, using abstract designs, or removing potentially sensitive elements.');
+                } else if (errorText.includes('safety') || errorText.includes('blocked')) {
+                    throw new Error('Content was blocked by safety filters. Try a different approach or simplify the content.');
+                } else {
+                    throw new Error('No presentation content was generated. This may be due to content safety filters or an API error. Try using a different prompt or simplifying the content.');
+                }
             }
 
             // Process artifacts if we have them
@@ -208,18 +234,34 @@ export default {
                 }
             } else {
                 // No artifacts were generated - this likely means the content was blocked by safety filters
-                throw new Error('Slide generation failed: No presentation content was generated. This may be due to content safety filters blocking the request. Try using a different prompt or simplifying the content.');
+                // Check pathwayResolver.errors for specific error information
+                const errors = pathwayResolver.errors || [];
+                const errorText = errors.join(' ').toLowerCase();
+                
+                if (errorText.includes('image_prohibited_content') || errorText.includes('prohibited_content')) {
+                    throw new Error('Content was blocked by safety filters. Try simplifying the prompt, using abstract designs, or removing potentially sensitive elements.');
+                } else {
+                    throw new Error('No presentation content was generated. This may be due to content safety filters blocking the request. Try using a different prompt or simplifying the content.');
+                }
             }
 
         } catch (e) {
             // Return a structured error that the agent can understand and act upon
             // Do NOT call sys_generator_error - let the agent see the actual error
-            const errorMessage = e.message ?? String(e);
+            let errorMessage = e.message ?? String(e);
             pathwayResolver.logError(errorMessage);
+            
+            // Remove any duplicate "Slide generation failed:" prefix if it exists
+            if (errorMessage.startsWith('Slide generation failed: ')) {
+                errorMessage = errorMessage.substring('Slide generation failed: '.length);
+            }
             
             // Check for specific error types and provide actionable guidance
             let guidance = '';
-            if (errorMessage.includes('IMAGE_SAFETY') || errorMessage.includes('safety')) {
+            if (errorMessage.includes('safety filters') || errorMessage.includes('blocked by')) {
+                // Already has guidance, don't add more
+                guidance = '';
+            } else if (errorMessage.includes('IMAGE_SAFETY') || errorMessage.includes('IMAGE_PROHIBITED')) {
                 guidance = ' Try a different approach: simplify the content, use abstract designs, or remove any potentially sensitive elements.';
             } else if (errorMessage.includes('RECITATION')) {
                 guidance = ' The request may be too similar to copyrighted content. Try making the design more original.';
