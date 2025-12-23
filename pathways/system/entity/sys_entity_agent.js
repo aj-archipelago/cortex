@@ -247,7 +247,7 @@ export default {
                         if (toolResult?.error !== undefined) {
                             // Direct error from callTool (e.g., tool returned null)
                             hasError = true;
-                            errorMessage = toolResult.error;
+                            errorMessage = typeof toolResult.error === 'string' ? toolResult.error : String(toolResult.error);
                         } else if (toolResult?.result) {
                             // Check if result is a string that might contain error JSON
                             if (typeof toolResult.result === 'string') {
@@ -255,7 +255,15 @@ export default {
                                     const parsed = JSON.parse(toolResult.result);
                                     if (parsed.error !== undefined) {
                                         hasError = true;
-                                        errorMessage = parsed.error;
+                                        // Tools return { error: true, message: "..." } so we want the message field
+                                        if (parsed.message) {
+                                            errorMessage = parsed.message;
+                                        } else if (typeof parsed.error === 'string') {
+                                            errorMessage = parsed.error;
+                                        } else {
+                                            // error is true/boolean, so use a generic message
+                                            errorMessage = `Tool ${toolCall?.function?.name || 'unknown'} returned an error`;
+                                        }
                                     }
                                 } catch (e) {
                                     // Not JSON, ignore
@@ -264,7 +272,16 @@ export default {
                                 // Check if result object has error field
                                 if (toolResult.result.error !== undefined) {
                                     hasError = true;
-                                    errorMessage = toolResult.result.error;
+                                    // Tools return { error: true, message: "..." } so we want the message field
+                                    // If message exists, use it; otherwise fall back to error field (if it's a string)
+                                    if (toolResult.result.message) {
+                                        errorMessage = toolResult.result.message;
+                                    } else if (typeof toolResult.result.error === 'string') {
+                                        errorMessage = toolResult.result.error;
+                                    } else {
+                                        // error is true/boolean, so use a generic message
+                                        errorMessage = `Tool ${toolCall?.function?.name || 'unknown'} returned an error`;
+                                    }
                                 }
                             }
                         }
@@ -397,11 +414,25 @@ export default {
             await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `\n`, 1000, false, false);
 
             try {
-                return await pathwayResolver.promptAndParse({
+                const result = await pathwayResolver.promptAndParse({
                     ...args,
                     tools: entityToolsOpenAiFormat,
                     tool_choice: "auto",
                 });
+                
+                // Check if promptAndParse returned null (model call failed)
+                if (!result) {
+                    const errorMessage = pathwayResolver.errors.length > 0 
+                        ? pathwayResolver.errors.join(', ')
+                        : 'Model request failed - no response received';
+                    logger.error(`promptAndParse returned null during tool callback: ${errorMessage}`);
+                    const errorResponse = await generateErrorResponse(new Error(errorMessage), args, pathwayResolver);
+                    // Ensure errors are cleared before returning
+                    pathwayResolver.errors = [];
+                    return errorResponse;
+                }
+                
+                return result;
             } catch (parseError) {
                 // If promptAndParse fails, generate error response instead of re-throwing
                 logger.error(`Error in promptAndParse during tool callback: ${parseError.message}`);
