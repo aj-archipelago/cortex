@@ -254,13 +254,14 @@ export default {
                         const uploadedGcs = uploadResult.gcs || null;
                         const uploadedHash = uploadResult.hash || null;
                         
-                        uploadedVideos.push({
+                        // Prepare video data
+                        const videoData = {
                             type: 'video',
                             url: uploadedUrl,
                             gcs: uploadedGcs,
                             hash: uploadedHash,
                             mimeType: 'video/mp4'
-                        });
+                        };
                         
                         // Add uploaded video to file collection if contextId is available
                         if (args.contextId && uploadedUrl) {
@@ -282,8 +283,8 @@ export default {
                                 const providedTags = Array.isArray(args.tags) ? args.tags : [];
                                 const allTags = [...defaultTags, ...providedTags.filter(tag => !defaultTags.includes(tag))];
                                 
-                                // Use the centralized utility function to add to collection
-                                await addFileToCollection(
+                                // Use the centralized utility function to add to collection - capture returned entry
+                                const fileEntry = await addFileToCollection(
                                     args.contextId,
                                     args.contextKey || '',
                                     uploadedUrl,
@@ -298,11 +299,16 @@ export default {
                                     pathwayResolver,
                                     true // permanent => retention=permanent
                                 );
+                                
+                                // Use the file entry data for the return message
+                                videoData.fileEntry = fileEntry;
                             } catch (collectionError) {
                                 // Log but don't fail - file collection is optional
                                 pathwayResolver.logWarning(`Failed to add video to file collection: ${collectionError.message}`);
                             }
                         }
+                        
+                        uploadedVideos.push(videoData);
                     } catch (uploadError) {
                         pathwayResolver.logError(`Failed to upload video from Veo: ${uploadError.message}`);
                         // Keep original info as fallback
@@ -321,10 +327,26 @@ export default {
             if (uploadedVideos.length > 0) {
                 const successfulVideos = uploadedVideos.filter(v => v.url);
                 if (successfulVideos.length > 0) {
-                    const videoUrls = successfulVideos.map(v => v.url);
-                    // Include instructions for displaying the video
-                    const instructions = `Video generated successfully. To display the video to the user, use markdown image syntax with the video URL, for example: ![video.mp4](${videoUrls[0]})`;
-                    return `${instructions}\n\nVideo URL(s):\n${videoUrls.join('\n')}`;
+                    // Return video info in the same format as availableFiles
+                    // Format: hash | filename | url | date | tags
+                    const videoList = successfulVideos.map((vid) => {
+                        if (vid.fileEntry) {
+                            // Use the file entry data from addFileToCollection
+                            const fe = vid.fileEntry;
+                            const dateStr = fe.addedDate 
+                                ? new Date(fe.addedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                : '';
+                            const tagsStr = Array.isArray(fe.tags) ? fe.tags.join(',') : '';
+                            return `${fe.hash || ''} | ${fe.displayFilename || ''} | ${fe.url || vid.url} | ${dateStr} | ${tagsStr}`;
+                        } else {
+                            // Fallback if file collection wasn't available
+                            return `${vid.hash || 'unknown'} | | ${vid.url} | |`;
+                        }
+                    }).join('\n');
+                    
+                    const count = successfulVideos.length;
+                    // Note: The UI supports displaying videos using markdown image syntax
+                    return `Video generation successful. Generated ${count} video${count > 1 ? 's' : ''}. Videos can be displayed using markdown image syntax, e.g. ![video](url)\n${videoList}`;
                 } else {
                     // All videos failed to upload
                     const errors = uploadedVideos.map(v => v.error).filter(Boolean);
@@ -335,8 +357,26 @@ export default {
             }
 
         } catch (e) {
-            pathwayResolver.logError(e.message ?? e);
-            return await callPathway('sys_generator_error', { ...args, text: e.message }, pathwayResolver);
+            // Return a structured error that the agent can understand and act upon
+            // Do NOT call sys_generator_error - let the agent see the actual error
+            const errorMessage = e.message ?? String(e);
+            pathwayResolver.logError(errorMessage);
+            
+            // Check for specific error types and provide actionable guidance
+            let guidance = '';
+            if (errorMessage.includes('SAFETY') || errorMessage.includes('safety') || errorMessage.includes('blocked')) {
+                guidance = ' Try a different approach: use stylized/artistic content instead of photorealistic, avoid depicting real people, or simplify the prompt.';
+            } else if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+                guidance = ' The video generation timed out. Try a simpler scene or try again.';
+            } else if (errorMessage.includes('quota') || errorMessage.includes('rate limit')) {
+                guidance = ' Rate limit reached. Please wait a moment and try again.';
+            }
+            
+            return JSON.stringify({
+                error: true,
+                message: `Video generation failed: ${errorMessage}${guidance}`,
+                toolName: 'GenerateVideo'
+            });
         }
     }
 };

@@ -134,11 +134,13 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     }
                     // Gemini only supports user: and model: roles
                     else if (role === 'user' || role === 'assistant' || author) {
+                        // Convert 'assistant' to 'model' for Gemini API compatibility
+                        const geminiRole = author || (role === 'assistant' ? 'model' : role);
                         modifiedMessages.push({
-                            role: author || role,
+                            role: geminiRole,
                             parts: [geminiPart],
                         });
-                        lastAuthor = author || role;
+                        lastAuthor = geminiRole;
                     }
                 };
 
@@ -324,6 +326,19 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         return result; 
     }
 
+    // Build a toolCall object from a Gemini functionCall response
+    // Override in subclasses to capture model-specific fields (e.g., thoughtSignature for Gemini 3+)
+    buildToolCallFromFunctionCall(part) {
+        return {
+            id: part.functionCall.name + '_' + Date.now(),
+            type: "function",
+            function: {
+                name: part.functionCall.name,
+                arguments: JSON.stringify(part.functionCall.args || {})
+            }
+        };
+    }
+
     // Override parseResponse to handle tool calls
     parseResponse(data) {
         if (!data) {
@@ -359,14 +374,8 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
 
                 for (const part of content.parts) {
                     if (part.functionCall) {
-                        toolCalls.push({
-                            id: part.functionCall.name + '_' + Date.now(),
-                            type: "function",
-                            function: {
-                                name: part.functionCall.name,
-                                arguments: JSON.stringify(part.functionCall.args || {})
-                            }
-                        });
+                        // Use hook method to build toolCall (allows override for Gemini 3+ thoughtSignature)
+                        toolCalls.push(this.buildToolCallFromFunctionCall(part));
                     } else if (part.text) {
                         textContent += part.text;
                     }
@@ -437,15 +446,8 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     // Mark that we have tool calls
                     this.hadToolCalls = true;
                     
-                    // Create tool call object
-                    const toolCall = {
-                        id: part.functionCall.name + '_' + Date.now(),
-                        type: "function",
-                        function: {
-                            name: part.functionCall.name,
-                            arguments: JSON.stringify(part.functionCall.args || {})
-                        }
-                    };
+                    // Use hook method to build toolCall (allows override for Gemini 3+ thoughtSignature)
+                    const toolCall = this.buildToolCallFromFunctionCall(part);
                     
                     this.toolCallsBuffer.push(toolCall);
                     

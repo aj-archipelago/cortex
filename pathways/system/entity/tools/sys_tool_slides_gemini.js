@@ -90,94 +90,148 @@ export default {
 
             pathwayResolver.tool = JSON.stringify({ toolUsed: "slides" });
 
-            if (pathwayResolver.pathwayResultData) {
-                if (pathwayResolver.pathwayResultData.artifacts && Array.isArray(pathwayResolver.pathwayResultData.artifacts)) {
-                    const uploadedImages = [];
-                    
-                    // Process each image artifact
-                    for (const artifact of pathwayResolver.pathwayResultData.artifacts) {
-                        if (artifact.type === 'image' && artifact.data && artifact.mimeType) {
-                            try {
-                                // Upload image to cloud storage (returns {url, gcs, hash})
-                                const uploadResult = await uploadImageToCloud(artifact.data, artifact.mimeType, pathwayResolver, args.contextId);
-                                
-                                const imageUrl = uploadResult.url || uploadResult;
-                                const imageGcs = uploadResult.gcs || null;
-                                const imageHash = uploadResult.hash || null;
-                                
-                                uploadedImages.push({
-                                    type: 'image',
-                                    url: imageUrl,
-                                    gcs: imageGcs,
-                                    hash: imageHash,
-                                    mimeType: artifact.mimeType
-                                });
-                                
-                                // Add uploaded image to file collection if contextId is available
-                                if (args.contextId && imageUrl) {
-                                    try {
-                                        // Generate filename from mimeType (e.g., "image/png" -> "png")
-                                        const extension = artifact.mimeType.split('/')[1] || 'png';
-                                        // Use hash for uniqueness if available, otherwise use timestamp and index
-                                        const uniqueId = imageHash ? imageHash.substring(0, 8) : `${Date.now()}-${uploadedImages.length}`;
-                                        
-                                        // Determine filename prefix
-                                        const defaultPrefix = 'presentation-slide';
-                                        const filenamePrefix = args.filenamePrefix || defaultPrefix;
-                                        
-                                        // Sanitize the prefix to ensure it's a valid filename component
-                                        const sanitizedPrefix = filenamePrefix.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-                                        const filename = `${sanitizedPrefix}-${uniqueId}.${extension}`;
-                                        
-                                        // Merge provided tags with default tags
-                                        const defaultTags = ['presentation', 'generated'];
-                                        const providedTags = Array.isArray(args.tags) ? args.tags : [];
-                                        const allTags = [...defaultTags, ...providedTags.filter(tag => !defaultTags.includes(tag))];
-                                        
-                                        // Use the centralized utility function to add to collection
-                                        await addFileToCollection(
-                                            args.contextId,
-                                            args.contextKey || '',
-                                            imageUrl,
-                                            imageGcs,
-                                            filename,
-                                            allTags,
-                                            `Generated presentation content from prompt: ${args.detailedInstructions || 'presentation generation'}`,
-                                            imageHash,
-                                            null,
-                                            pathwayResolver,
-                                            true // permanent => retention=permanent
-                                        );
-                                    } catch (collectionError) {
-                                        // Log but don't fail - file collection is optional
-                                        pathwayResolver.logWarning(`Failed to add image to file collection: ${collectionError.message}`);
-                                    }
-                                }
-                            } catch (uploadError) {
-                                pathwayResolver.logError(`Failed to upload artifact: ${uploadError.message}`);
-                                // Keep original artifact as fallback
-                                uploadedImages.push(artifact);
-                            }
-                        } else {
-                            // Keep non-image artifacts as-is
-                            uploadedImages.push(artifact);
-                        }
-                    }
-                    
-                    // Return the urls of the uploaded images as text in the result
-                    result = result ? result + '\n' + uploadedImages.map(image => image.url || image).join('\n') : uploadedImages.map(image => image.url || image).join('\n');
-                }
-            } else {
-                // If result is not a CortexResponse, log a warning but return as-is
-                pathwayResolver.logWarning('No artifacts to upload');
-                result = result + '\n' + 'No presentation content generated';
+            // Check for artifacts first - image generation may return empty text but still have image artifacts
+            // The artifacts in pathwayResultData are the actual generated images
+            const hasArtifacts = pathwayResolver.pathwayResultData?.artifacts && 
+                                 Array.isArray(pathwayResolver.pathwayResultData.artifacts) && 
+                                 pathwayResolver.pathwayResultData.artifacts.length > 0;
+
+            // If no result AND no artifacts, then generation truly failed
+            if (!hasArtifacts && (result === null || result === undefined || result === '')) {
+                throw new Error('Slide generation failed: No response from image generation API. Try a different prompt.');
             }
 
-            return result;
+            // Process artifacts if we have them
+            if (hasArtifacts) {
+                const uploadedImages = [];
+                
+                // Process each image artifact
+                for (const artifact of pathwayResolver.pathwayResultData.artifacts) {
+                    if (artifact.type === 'image' && artifact.data && artifact.mimeType) {
+                        try {
+                            // Upload image to cloud storage (returns {url, gcs, hash})
+                            const uploadResult = await uploadImageToCloud(artifact.data, artifact.mimeType, pathwayResolver, args.contextId);
+                            
+                            const imageUrl = uploadResult.url || uploadResult;
+                            const imageGcs = uploadResult.gcs || null;
+                            const imageHash = uploadResult.hash || null;
+                            
+                            // Prepare image data
+                            const imageData = {
+                                type: 'image',
+                                url: imageUrl,
+                                gcs: imageGcs,
+                                hash: imageHash,
+                                mimeType: artifact.mimeType
+                            };
+                            
+                            // Add uploaded image to file collection if contextId is available
+                            if (args.contextId && imageUrl) {
+                                try {
+                                    // Generate filename from mimeType (e.g., "image/png" -> "png")
+                                    const extension = artifact.mimeType.split('/')[1] || 'png';
+                                    // Use hash for uniqueness if available, otherwise use timestamp and index
+                                    const uniqueId = imageHash ? imageHash.substring(0, 8) : `${Date.now()}-${uploadedImages.length}`;
+                                    
+                                    // Determine filename prefix
+                                    const defaultPrefix = 'presentation-slide';
+                                    const filenamePrefix = args.filenamePrefix || defaultPrefix;
+                                    
+                                    // Sanitize the prefix to ensure it's a valid filename component
+                                    const sanitizedPrefix = filenamePrefix.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+                                    const filename = `${sanitizedPrefix}-${uniqueId}.${extension}`;
+                                    
+                                    // Merge provided tags with default tags
+                                    const defaultTags = ['presentation', 'generated'];
+                                    const providedTags = Array.isArray(args.tags) ? args.tags : [];
+                                    const allTags = [...defaultTags, ...providedTags.filter(tag => !defaultTags.includes(tag))];
+                                    
+                                    // Use the centralized utility function to add to collection - capture returned entry
+                                    const fileEntry = await addFileToCollection(
+                                        args.contextId,
+                                        args.contextKey || '',
+                                        imageUrl,
+                                        imageGcs,
+                                        filename,
+                                        allTags,
+                                        `Generated presentation content from prompt: ${args.detailedInstructions || 'presentation generation'}`,
+                                        imageHash,
+                                        null,
+                                        pathwayResolver,
+                                        true // permanent => retention=permanent
+                                    );
+                                    
+                                    // Use the file entry data for the return message
+                                    imageData.fileEntry = fileEntry;
+                                } catch (collectionError) {
+                                    // Log but don't fail - file collection is optional
+                                    pathwayResolver.logWarning(`Failed to add image to file collection: ${collectionError.message}`);
+                                }
+                            }
+                            
+                            uploadedImages.push(imageData);
+                        } catch (uploadError) {
+                            pathwayResolver.logError(`Failed to upload artifact: ${uploadError.message}`);
+                            // Keep original artifact as fallback
+                            uploadedImages.push(artifact);
+                        }
+                    } else {
+                        // Keep non-image artifacts as-is
+                        uploadedImages.push(artifact);
+                    }
+                }
+                
+                // Check if we successfully uploaded any images
+                const successfulImages = uploadedImages.filter(img => img.url);
+                if (successfulImages.length > 0) {
+                    // Return image info in the same format as availableFiles
+                    // Format: hash | filename | url | date | tags
+                    const imageList = successfulImages.map((img) => {
+                        if (img.fileEntry) {
+                            // Use the file entry data from addFileToCollection
+                            const fe = img.fileEntry;
+                            const dateStr = fe.addedDate 
+                                ? new Date(fe.addedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                : '';
+                            const tagsStr = Array.isArray(fe.tags) ? fe.tags.join(',') : '';
+                            return `${fe.hash || ''} | ${fe.displayFilename || ''} | ${fe.url || img.url} | ${dateStr} | ${tagsStr}`;
+                        } else {
+                            // Fallback if file collection wasn't available
+                            return `${img.hash || 'unknown'} | | ${img.url} | |`;
+                        }
+                    }).join('\n');
+                    
+                    const count = successfulImages.length;
+                    return `Slide/infographic generation successful. Generated ${count} image${count > 1 ? 's' : ''}:\n${imageList}`;
+                } else {
+                    throw new Error('Slide generation failed: Content was generated but could not be uploaded to storage');
+                }
+            } else {
+                // No artifacts were generated - this likely means the content was blocked by safety filters
+                throw new Error('Slide generation failed: No presentation content was generated. This may be due to content safety filters blocking the request. Try using a different prompt or simplifying the content.');
+            }
 
         } catch (e) {
-            pathwayResolver.logError(e.message ?? e);
-            return await callPathway('sys_generator_error', { ...args, text: e.message }, pathwayResolver);
+            // Return a structured error that the agent can understand and act upon
+            // Do NOT call sys_generator_error - let the agent see the actual error
+            const errorMessage = e.message ?? String(e);
+            pathwayResolver.logError(errorMessage);
+            
+            // Check for specific error types and provide actionable guidance
+            let guidance = '';
+            if (errorMessage.includes('IMAGE_SAFETY') || errorMessage.includes('safety')) {
+                guidance = ' Try a different approach: simplify the content, use abstract designs, or remove any potentially sensitive elements.';
+            } else if (errorMessage.includes('RECITATION')) {
+                guidance = ' The request may be too similar to copyrighted content. Try making the design more original.';
+            } else if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+                guidance = ' The request timed out. Try a simpler design or try again.';
+            }
+            
+            return JSON.stringify({
+                error: true,
+                message: `Slide generation failed: ${errorMessage}${guidance}`,
+                toolName: 'GenerateSlides'
+            });
         }
     }
 };

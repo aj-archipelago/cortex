@@ -8,9 +8,132 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
         super(pathway, model);
     }
 
-    // Override getRequestParameters to add Gemini 3 thinking support
+    // Override to include thoughtSignature - required by Gemini 3 for function call history
+    buildFunctionCallPart(toolCall, args) {
+        const part = {
+            functionCall: {
+                name: toolCall.function.name,
+                args: args
+            }
+        };
+        // Include thoughtSignature if present - required by Gemini 3+ models
+        // If thoughtSignature was lost (e.g., during history persistence), use the documented
+        // dummy value to skip validation - see https://ai.google.dev/gemini-api/docs/thought-signatures
+        if (toolCall.thoughtSignature) {
+            part.thoughtSignature = toolCall.thoughtSignature;
+        } else {
+            // Fallback: use documented dummy signature to prevent 400 errors
+            // This allows the request to proceed but may affect reasoning quality
+            part.thoughtSignature = "skip_thought_signature_validator";
+        }
+        return part;
+    }
+
+    // Override to capture thoughtSignature from Gemini 3 functionCall responses
+    buildToolCallFromFunctionCall(part) {
+        const toolCall = {
+            id: part.functionCall.name + '_' + Date.now(),
+            type: "function",
+            function: {
+                name: part.functionCall.name,
+                arguments: JSON.stringify(part.functionCall.args || {})
+            }
+        };
+        // Preserve thoughtSignature for function call history
+        if (part.functionCall.thoughtSignature || part.thoughtSignature) {
+            toolCall.thoughtSignature = part.functionCall.thoughtSignature || part.thoughtSignature;
+        }
+        return toolCall;
+    }
+
+    // Override getRequestParameters to add Gemini 3 specific handling
     getRequestParameters(text, parameters, prompt, cortexRequest) {
+        // Get original messages from getCompiledPrompt before they're converted to Gemini format
+        const { modelPromptMessages } = this.getCompiledPrompt(text, parameters, prompt);
+        const messages = modelPromptMessages || [];
+        
         const baseParameters = super.getRequestParameters(text, parameters, prompt, cortexRequest);
+        
+        // Transform contents for Gemini 3 format:
+        // 1. Function responses: role 'function' -> 'user', response.content -> response.output
+        // 2. Add functionCall messages for assistant tool_calls (with thoughtSignature)
+        if (baseParameters.contents && Array.isArray(baseParameters.contents)) {
+            const newContents = [];
+            
+            // Build a map of tool response indices to find where to insert functionCall messages
+            // The pattern is: assistant+tool_calls message followed by tool response messages
+            let lastFunctionResponseIndex = -1;
+            
+            for (let i = 0; i < baseParameters.contents.length; i++) {
+                const content = baseParameters.contents[i];
+                
+                // Check if we need to insert a functionCall message before this function response
+                if (content.role === 'function' && content.parts?.[0]?.functionResponse) {
+                    // Look for the preceding assistant message with tool_calls in the original messages
+                    // that corresponds to this function response
+                    const functionName = content.parts[0].functionResponse.name;
+                    
+                    // Find matching assistant message with this tool call
+                    for (const message of messages) {
+                        if (message.role === 'assistant' && message.tool_calls?.length > 0) {
+                            const hasMatchingToolCall = message.tool_calls.some(tc => 
+                                tc.function?.name === functionName || 
+                                tc.id?.startsWith(functionName + '_')
+                            );
+                            
+                            if (hasMatchingToolCall && lastFunctionResponseIndex < i) {
+                                // Build functionCall message with thoughtSignature
+                                const parts = [];
+                                if (message.content && typeof message.content === 'string' && message.content.trim()) {
+                                    parts.push({ text: message.content });
+                                }
+                                for (const toolCall of message.tool_calls) {
+                                    if (toolCall.function?.name) {
+                                        let args = {};
+                                        try {
+                                            args = typeof toolCall.function.arguments === 'string' 
+                                                ? JSON.parse(toolCall.function.arguments) 
+                                                : (toolCall.function.arguments || {});
+                                        } catch (e) { args = {}; }
+                                        parts.push(this.buildFunctionCallPart(toolCall, args));
+                                    }
+                                }
+                                if (parts.length > 0) {
+                                    newContents.push({ role: 'model', parts: parts });
+                                }
+                                lastFunctionResponseIndex = i;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Transform function response: role 'function' -> 'user', content -> output
+                    const fr = content.parts[0].functionResponse;
+                    let responseData = fr.response;
+                    if (responseData?.content !== undefined) {
+                        const contentStr = responseData.content;
+                        try {
+                            responseData = JSON.parse(contentStr);
+                        } catch (e) {
+                            responseData = { output: contentStr };
+                        }
+                    }
+                    newContents.push({
+                        role: 'user',
+                        parts: [{
+                            functionResponse: {
+                                name: fr.name,
+                                response: responseData
+                            }
+                        }]
+                    });
+                } else {
+                    newContents.push(content);
+                }
+            }
+            
+            baseParameters.contents = newContents;
+        }
         
         // Add Gemini 3 thinking support
         // Gemini 3 uses thinkingLevel: 'low' or 'high' (instead of thinkingBudget)

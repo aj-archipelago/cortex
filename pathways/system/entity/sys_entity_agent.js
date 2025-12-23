@@ -158,21 +158,36 @@ export default {
 
                         // Tool calls and results need to be paired together in the message history
                         // Add the tool call to the isolated message history
+                        // Preserve thoughtSignature for Gemini 3+ models
+                        const toolCallEntry = {
+                            id: toolCall.id,
+                            type: "function",
+                            function: {
+                                name: toolCall.function.name,
+                                arguments: JSON.stringify(toolArgs)
+                            }
+                        };
+                        if (toolCall.thoughtSignature) {
+                            toolCallEntry.thoughtSignature = toolCall.thoughtSignature;
+                        }
                         toolMessages.push({
                             role: "assistant",
                             content: "",
-                            tool_calls: [{
-                                id: toolCall.id,
-                                type: "function",
-                                function: {
-                                    name: toolCall.function.name,
-                                    arguments: JSON.stringify(toolArgs)
-                                }
-                            }]
+                            tool_calls: [toolCallEntry]
                         });
 
                         // Add the tool result to the isolated message history
-                        const toolResultContent = typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult?.result || toolResult);
+                        // Extract the result - if it's already a string, use it directly; only stringify objects
+                        let toolResultContent;
+                        if (typeof toolResult === 'string') {
+                            toolResultContent = toolResult;
+                        } else if (typeof toolResult?.result === 'string') {
+                            toolResultContent = toolResult.result;
+                        } else if (toolResult?.result !== undefined) {
+                            toolResultContent = JSON.stringify(toolResult.result);
+                        } else {
+                            toolResultContent = JSON.stringify(toolResult);
+                        }
 
                         toolMessages.push({
                             role: "tool",
@@ -287,17 +302,22 @@ export default {
                         
                         // Create error message history
                         const errorMessages = JSON.parse(JSON.stringify(preToolCallMessages));
+                        // Preserve thoughtSignature for Gemini 3+ models
+                        const errorToolCallEntry = {
+                            id: toolCall.id,
+                            type: "function",
+                            function: {
+                                name: toolCall.function.name,
+                                arguments: JSON.stringify(toolCall.function.arguments)
+                            }
+                        };
+                        if (toolCall.thoughtSignature) {
+                            errorToolCallEntry.thoughtSignature = toolCall.thoughtSignature;
+                        }
                         errorMessages.push({
                             role: "assistant",
                             content: "",
-                            tool_calls: [{
-                                id: toolCall.id,
-                                type: "function",
-                                function: {
-                                    name: toolCall.function.name,
-                                    arguments: JSON.stringify(toolCall.function.arguments)
-                                }
-                            }]
+                            tool_calls: [errorToolCallEntry]
                         });
                         errorMessages.push({
                             role: "tool",
@@ -471,7 +491,7 @@ export default {
 
         pathwayResolver.args = {...args};
 
-        const promptPrefix = researchMode ? 'Formatting re-enabled\n' : '';
+        const promptPrefix = '';
 
         const memoryTemplates = entityUseMemory ? 
             `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_CONTEXT}}\n\n` : '';
