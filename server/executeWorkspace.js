@@ -87,16 +87,13 @@ const executePathwayWithFallback = async (pathway, pathwayArgs, contextValue, in
     if (cortexPathwayName) {
         // Use the specific cortex pathway
         // Transform parameters for cortex pathway
+        // Spread all pathway args first (including contextId, contextKey, etc.), then override specific fields
         const cortexArgs = {
+            ...pathwayArgs, // Spread all pathway args (including contextId, contextKey, etc.)
             model: pathway.model || pathwayArgs.model || "labeeb-agent", // Use pathway model or default
-            chatHistory: [],
-            systemPrompt: pathway.systemPrompt
+            chatHistory: pathwayArgs.chatHistory ? JSON.parse(JSON.stringify(pathwayArgs.chatHistory)) : [],
+            systemPrompt: pathway.systemPrompt || pathwayArgs.systemPrompt
         };
-        
-        // If we have existing chatHistory, use it as base
-        if (pathwayArgs.chatHistory && pathwayArgs.chatHistory.length > 0) {
-            cortexArgs.chatHistory = JSON.parse(JSON.stringify(pathwayArgs.chatHistory));
-        }
         
         // If we have text parameter, we need to add it to the chatHistory
         if (pathwayArgs.text) {

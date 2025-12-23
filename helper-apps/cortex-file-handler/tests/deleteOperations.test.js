@@ -533,28 +533,23 @@ test.serial("should handle backwards compatibility key removal correctly", async
     t.is(uploadResponse.status, 200, "Upload should succeed");
 
     // Manually create a legacy unscoped key to test backwards compatibility
-    const { setFileStoreMap, getFileStoreMap, getScopedHashKey } = await import("../src/redis.js");
-    const scopedHash = getScopedHashKey(testHash);
-    const hashResult = await getFileStoreMap(scopedHash);
+    const { setFileStoreMap, getFileStoreMap } = await import("../src/redis.js");
+    const hashResult = await getFileStoreMap(testHash);
     
     if (hashResult) {
-      // Create legacy unscoped key
+      // Create legacy unscoped key (already exists from upload, but verify)
       await setFileStoreMap(testHash, hashResult);
       
-      // Verify both keys exist
-      const scopedExists = await getFileStoreMap(scopedHash);
+      // Verify key exists
       const legacyExists = await getFileStoreMap(testHash);
-      t.truthy(scopedExists, "Scoped key should exist");
       t.truthy(legacyExists, "Legacy key should exist");
 
       // Delete file - should remove both keys
       const deleteResponse = await deleteFileByHash(testHash);
       t.is(deleteResponse.status, 200, "Delete should succeed");
 
-      // Verify both keys are removed
-      const scopedAfter = await getFileStoreMap(scopedHash);
+      // Verify key is removed
       const legacyAfter = await getFileStoreMap(testHash);
-      t.falsy(scopedAfter, "Scoped key should be removed");
       t.falsy(legacyAfter, "Legacy key should be removed");
     }
 

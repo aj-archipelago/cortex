@@ -501,13 +501,34 @@ async function CortexFileHandler(context, req) {
           return;
         }
 
+        // Reconstruct missing filename from URL if needed (before creating response)
+        if (!hashResult.filename && hashResult.url) {
+          try {
+            const urlObj = new URL(hashResult.url);
+            const pathSegments = urlObj.pathname.split('/').filter(segment => segment.length > 0);
+            if (pathSegments.length > 0) {
+              // Extract filename from URL path (last segment)
+              const blobName = pathSegments[pathSegments.length - 1];
+              // Remove query params if any got included
+              hashResult.filename = blobName.split('?')[0];
+            }
+          } catch (error) {
+            context.log(`Error extracting filename from URL: ${error.message}`);
+          }
+        }
+        
+        // Ensure hash is set if missing
+        if (!hashResult.hash) {
+          hashResult.hash = hash;
+        }
+
         // Create the response object
         const response = {
-          message: `File '${hashResult.filename}' uploaded successfully.`,
+          message: `File '${hashResult.filename || 'unknown'}' uploaded successfully.`,
           filename: hashResult.filename,
           url: hashResult.url,
           gcs: hashResult.gcs,
-          hash: hashResult.hash,
+          hash: hashResult.hash || hash,
           timestamp: new Date().toISOString(),
         };
         
@@ -625,6 +646,7 @@ async function CortexFileHandler(context, req) {
 
         // Update redis timestamp with current time
         // Note: setFileStoreMap will remove shortLivedUrl fields before storing
+        // hashResult has already been enriched with filename/hash above if missing
         await setFileStoreMap(hash, hashResult, resolvedContextId);
 
         context.res = {
