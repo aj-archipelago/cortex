@@ -279,7 +279,7 @@ test('Pathological cases', async (t) => {
     t.is(geminiMessages15[0].parts[1].text, 'Another greeting');
     
     // Assistant message "Hi there!"
-    t.is(geminiMessages15[1].role, 'assistant');
+    t.is(geminiMessages15[1].role, 'model');
     t.is(geminiMessages15[1].parts[0].text, 'Hi there!');
      
     // Final user message combines "How are you?", image content, and "Another question"
@@ -336,7 +336,7 @@ test('Simple string array content', async (t) => {
     t.is(modifiedMessages[0].role, 'user');
     t.is(modifiedMessages[0].parts.length, 1);
     t.is(modifiedMessages[0].parts[0].text, "Initial message");
-    t.is(modifiedMessages[1].role, 'assistant');
+    t.is(modifiedMessages[1].role, 'model');
     t.is(modifiedMessages[1].parts.length, 1);
     t.is(modifiedMessages[1].parts[0].text, "\"Searchin' for my lost shaker of salt...\"\n");
     t.is(modifiedMessages[2].role, 'user');
@@ -381,7 +381,7 @@ test('String-encoded multimodal content', async (t) => {
     t.is(modifiedMessages[0].parts[0].text, 'What is in this image?');
     t.true('fileData' in modifiedMessages[0].parts[1]);
     t.is(modifiedMessages[0].parts[1].fileData.fileUri, 'gs://my-bucket/image.jpg');
-    t.is(modifiedMessages[1].role, 'assistant');
+    t.is(modifiedMessages[1].role, 'model');
     t.is(modifiedMessages[1].parts.length, 1);
     t.is(modifiedMessages[1].parts[0].text, 'I see a cat.');
     t.is(modifiedMessages[2].role, 'user');
