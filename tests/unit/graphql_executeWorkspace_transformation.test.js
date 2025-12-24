@@ -32,7 +32,7 @@ test('should format cortex pathway arguments correctly with existing chatHistory
     const originalPrompt = {
         name: 'summarize',
         prompt: 'summarize this file',
-        cortexPathwayName: 'run_labeeb_agent'
+        cortexPathwayName: 'run_workspace_agent'
     };
     
     // Mock pathway data
@@ -132,7 +132,7 @@ test('should create new user message when no existing chatHistory', (t) => {
     const originalPrompt = {
         name: 'summarize',
         prompt: 'summarize this file',
-        cortexPathwayName: 'run_labeeb_agent'
+        cortexPathwayName: 'run_workspace_agent'
     };
     
     // Mock pathway data
@@ -219,7 +219,7 @@ test('should use default model when pathway model is not specified', (t) => {
     const originalPrompt = {
         name: 'summarize',
         prompt: 'summarize this file',
-        cortexPathwayName: 'run_labeeb_agent'
+        cortexPathwayName: 'run_workspace_agent'
     };
     
     // Mock pathway data without model
