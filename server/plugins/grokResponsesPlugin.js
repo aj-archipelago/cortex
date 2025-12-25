@@ -4,7 +4,7 @@
 
 import OpenAIVisionPlugin from './openAiVisionPlugin.js';
 import logger from '../../lib/logger.js';
-import { extractCitationTitle } from '../../lib/util.js';
+import { extractCitationTitle, sanitizeBase64 } from '../../lib/util.js';
 import CortexResponse from '../../lib/cortexResponse.js';
 import { requestState } from '../requestState.js';
 import { addCitationsToResolver } from '../../lib/pathwayTools.js';
@@ -37,15 +37,7 @@ class GrokResponsesPlugin extends OpenAIVisionPlugin {
             let totalLength = 0;
             let totalUnits;
             messages.forEach((message, index) => {
-                const content = message.content === undefined ? JSON.stringify(message) : (Array.isArray(message.content) ? message.content.map(item => {
-                    if (item.type === 'image_url' && item.image_url?.url?.startsWith('data:')) {
-                        return JSON.stringify({
-                            type: 'image_url',
-                            image_url: { url: '* base64 data truncated for log *' }
-                        });
-                    }
-                    return JSON.stringify(item);
-                }).join(', ') : message.content);
+                const content = message.content === undefined ? JSON.stringify(sanitizeBase64(message)) : (Array.isArray(message.content) ? message.content.map(item => JSON.stringify(sanitizeBase64(item))).join(', ') : message.content);
                 const { length, units } = this.getLength(content);
                 const displayContent = this.shortenContent(content);
 
@@ -62,15 +54,7 @@ class GrokResponsesPlugin extends OpenAIVisionPlugin {
             logger.info(`[grok responses request contained ${totalLength} ${totalUnits}]`);
         } else if (messages && messages.length === 1) {
             const message = messages[0];
-            const content = Array.isArray(message.content) ? message.content.map(item => {
-                if (item.type === 'image_url' && item.image_url?.url?.startsWith('data:')) {
-                    return JSON.stringify({
-                        type: 'image_url',
-                        image_url: { url: '* base64 data truncated for log *' }
-                    });
-                }
-                return JSON.stringify(item);
-            }).join(', ') : message.content;
+            const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(sanitizeBase64(item))).join(', ') : message.content;
             const { length, units } = this.getLength(content);
             logger.info(`[grok responses request sent containing ${length} ${units}]`);
             logger.verbose(`${this.shortenContent(content)}`);

@@ -1,6 +1,7 @@
 import Claude3VertexPlugin from "./claude3VertexPlugin.js";
 import logger from "../../lib/logger.js";
 import axios from 'axios';
+import { sanitizeBase64 } from "../../lib/util.js";
 
 // Claude 4 default maximum file size limit (30MB) for both images and PDFs
 const CLAUDE4_DEFAULT_MAX_FILE_SIZE = 30 * 1024 * 1024; // 30MB
@@ -475,13 +476,10 @@ class Claude4VertexPlugin extends Claude3VertexPlugin {
       messages.forEach((message, index) => {
         const content = Array.isArray(message.content)
           ? message.content.map((item) => {
-              if (item.source && item.source.type === 'base64') {
-                item.source.data = '* base64 data truncated for log *';
-              }
               if (item.type === 'document') {
-                return `{type: document, source: ${JSON.stringify(item.source)}}`;
+                return `{type: document, source: ${JSON.stringify(sanitizeBase64(item.source))}}`;
               }
-              return JSON.stringify(item);
+              return JSON.stringify(sanitizeBase64(item));
             }).join(", ")
           : message.content;
         const { length, units } = this.getLength(content);
@@ -500,13 +498,10 @@ class Claude4VertexPlugin extends Claude3VertexPlugin {
       const message = messages[0];
       const content = Array.isArray(message.content)
         ? message.content.map((item) => {
-            if (item.source && item.source.type === 'base64') {
-              item.source.data = '* base64 data truncated for log *';
-            }
             if (item.type === 'document') {
-              return `{type: document, source: ${JSON.stringify(item.source)}}`;
+              return `{type: document, source: ${JSON.stringify(sanitizeBase64(item.source))}}`;
             }
-            return JSON.stringify(item);
+            return JSON.stringify(sanitizeBase64(item));
           }).join(", ")
         : message.content;
       const { length, units } = this.getLength(content);

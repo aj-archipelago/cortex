@@ -4,6 +4,7 @@ import { requestState } from '../requestState.js';
 import { addCitationsToResolver } from '../../lib/pathwayTools.js';
 import CortexResponse from '../../lib/cortexResponse.js';
 import axios from 'axios';
+import { sanitizeBase64 } from "../../lib/util.js";
 
 async function convertContentItem(item, maxImageSize, plugin) {
   let imageUrl = "";
@@ -576,12 +577,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       let totalUnits;
       messages.forEach((message, index) => {
         const content = Array.isArray(message.content)
-          ? message.content.map((item) => {
-              if (item.source && item.source.type === 'base64') {
-                item.source.data = '* base64 data truncated for log *';
-              }
-              return JSON.stringify(item);
-            }).join(", ")
+          ? message.content.map((item) => JSON.stringify(sanitizeBase64(item))).join(", ")
           : message.content;
         const { length, units } = this.getLength(content);
         const preview = this.shortenContent(content);
