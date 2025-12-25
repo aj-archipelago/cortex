@@ -93,9 +93,9 @@ export default {
             let model = "replicate-seedream-4";
             let prompt = args.detailedInstructions || "";
 
-            // If we have input images, use the flux-kontext-max model
+            // If we have input images, use the qwen-image-edit-2511 model
             if (args.inputImages && Array.isArray(args.inputImages) && args.inputImages.length > 0) {
-                model = "replicate-qwen-image-edit-plus";
+                model = "replicate-qwen-image-edit-2511";
             }
 
             pathwayResolver.tool = JSON.stringify({ toolUsed: "image" });
@@ -139,8 +139,8 @@ export default {
                 params.input_image_3 = resolvedInputImages[2];
             }
 
-            // Set default aspectRatio for qwen-image-edit-plus model
-            if (model === "replicate-qwen-image-edit-plus") {
+            // Set default aspectRatio for qwen-image-edit-2511 model
+            if (model === "replicate-qwen-image-edit-2511") {
                 params.aspectRatio = "match_input_image";
             }
             

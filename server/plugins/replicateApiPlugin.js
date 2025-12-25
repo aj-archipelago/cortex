@@ -210,6 +210,92 @@ class ReplicateApiPlugin extends ModelPlugin {
         };
         break;
       }
+      case "replicate-qwen-image-edit-2511": {
+        const validRatios = ["1:1", "16:9", "9:16", "4:3", "3:4", "match_input_image"];
+        const validOutputFormats = ["webp", "jpg", "png"];
+        
+        const aspectRatio = validRatios.includes(combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio) 
+          ? (combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio) 
+          : "match_input_image";
+        const outputFormat = validOutputFormats.includes(combinedParameters.output_format ?? combinedParameters.outputFormat) 
+          ? (combinedParameters.output_format ?? combinedParameters.outputFormat) 
+          : "webp";
+        const outputQuality = combinedParameters.output_quality ?? combinedParameters.outputQuality ?? 95;
+        const goFast = combinedParameters.go_fast ?? combinedParameters.goFast ?? true;
+        const disableSafetyChecker = combinedParameters.disable_safety_checker ?? combinedParameters.disableSafetyChecker ?? false;
+
+        const collectImages = (candidate, accumulator) => {
+          if (!candidate) return;
+          if (Array.isArray(candidate)) {
+            candidate.forEach((item) => collectImages(item, accumulator));
+            return;
+          }
+          accumulator.push(candidate);
+        };
+
+        const imageCandidates = [];
+        collectImages(combinedParameters.image, imageCandidates);
+        collectImages(combinedParameters.images, imageCandidates);
+        collectImages(combinedParameters.input_image, imageCandidates);
+        collectImages(combinedParameters.input_images, imageCandidates);
+        collectImages(combinedParameters.input_image_1, imageCandidates);
+        collectImages(combinedParameters.input_image_2, imageCandidates);
+        collectImages(combinedParameters.input_image_3, imageCandidates);
+        collectImages(combinedParameters.image_1, imageCandidates);
+        collectImages(combinedParameters.image_2, imageCandidates);
+
+        const normalizeImageEntry = (entry) => {
+          if (!entry) return null;
+          if (typeof entry === "string") {
+            return entry; // Return string directly for qwen-image-edit-2511
+          }
+          if (typeof entry === "object") {
+            if (Array.isArray(entry)) {
+              return null;
+            }
+            if (entry.value) {
+              return entry.value; // Extract value as string
+            }
+            if (entry.url) {
+              return entry.url; // Extract URL as string
+            }
+            if (entry.path) {
+              return entry.path; // Extract path as string
+            }
+          }
+          return null;
+        };
+
+        const normalizedImages = imageCandidates
+          .map((candidate) => normalizeImageEntry(candidate))
+          .filter((candidate) => candidate && typeof candidate === 'string');
+
+        const omitUndefined = (obj) =>
+          Object.fromEntries(
+            Object.entries(obj).filter(([, value]) => value !== undefined && value !== null),
+          );
+
+        const basePayload = omitUndefined({
+          prompt: modelPromptText,
+          go_fast: goFast,
+          aspect_ratio: aspectRatio,
+          output_format: outputFormat,
+          output_quality: Math.max(0, Math.min(100, outputQuality)),
+          disable_safety_checker: disableSafetyChecker,
+          ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) ? { seed: combinedParameters.seed } : {}),
+        });
+
+        // For qwen-image-edit-2511, format images as array of strings (not objects)
+        const inputPayload = {
+          ...basePayload,
+          ...(normalizedImages.length > 0 ? { image: normalizedImages } : {})
+        };
+
+        requestParameters = {
+          input: inputPayload,
+        };
+        break;
+      }
       case "replicate-flux-kontext-pro":
       case "replicate-flux-kontext-max": {
         const validRatios = [
@@ -348,6 +434,125 @@ class ReplicateApiPlugin extends ModelPlugin {
         const inputPayload = {
           ...basePayload,
           ...(normalizedImages.length > 0 ? { image_input: normalizedImages } : {})
+        };
+
+        requestParameters = {
+          input: inputPayload,
+        };
+        break;
+      }
+      case "replicate-flux-2-pro": {
+        const validResolutions = ["match_input_image", "0.5 MP", "1 MP", "2 MP", "4 MP"];
+        const validRatios = [
+          "match_input_image",
+          "custom",
+          "1:1",
+          "16:9",
+          "3:2",
+          "2:3",
+          "4:5",
+          "5:4",
+          "9:16",
+          "3:4",
+          "4:3"
+        ];
+        const validOutputFormats = ["webp", "jpg", "png"];
+
+        // Collect input images from multiple parameter sources
+        const collectImages = (candidate, accumulator) => {
+          if (!candidate) return;
+          if (Array.isArray(candidate)) {
+            candidate.forEach((item) => collectImages(item, accumulator));
+            return;
+          }
+          accumulator.push(candidate);
+        };
+
+        const imageCandidates = [];
+        collectImages(combinedParameters.image, imageCandidates);
+        collectImages(combinedParameters.images, imageCandidates);
+        collectImages(combinedParameters.input_image, imageCandidates);
+        collectImages(combinedParameters.input_images, imageCandidates);
+        collectImages(combinedParameters.input_image_1, imageCandidates);
+        collectImages(combinedParameters.input_image_2, imageCandidates);
+        collectImages(combinedParameters.input_image_3, imageCandidates);
+        collectImages(combinedParameters.image_1, imageCandidates);
+        collectImages(combinedParameters.image_2, imageCandidates);
+
+        const normalizeImageEntry = (entry) => {
+          if (!entry) return null;
+          if (typeof entry === "string") {
+            return entry; // Return the URL string directly
+          }
+          if (typeof entry === "object") {
+            if (Array.isArray(entry)) {
+              return null;
+            }
+            if (entry.value) {
+              return entry.value; // Return the value as a string
+            }
+            if (entry.url) {
+              return entry.url; // Return the URL as a string
+            }
+            if (entry.path) {
+              return entry.path; // Return the path as a string
+            }
+          }
+          return null;
+        };
+
+        const normalizedImages = imageCandidates
+          .map((candidate) => normalizeImageEntry(candidate))
+          .filter((candidate) => candidate && typeof candidate === 'string')
+          .slice(0, 8); // Maximum 8 images
+
+        const aspectRatio = validRatios.includes(combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio) 
+          ? (combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio) 
+          : "1:1";
+        
+        const resolution = validResolutions.includes(combinedParameters.resolution) 
+          ? combinedParameters.resolution 
+          : "1 MP";
+        
+        const outputFormat = validOutputFormats.includes(combinedParameters.output_format ?? combinedParameters.outputFormat) 
+          ? (combinedParameters.output_format ?? combinedParameters.outputFormat) 
+          : "webp";
+        
+        const outputQuality = combinedParameters.output_quality ?? combinedParameters.outputQuality ?? 80;
+        const safetyTolerance = combinedParameters.safety_tolerance ?? combinedParameters.safetyTolerance ?? 2;
+
+        // Validate and round width/height to multiples of 32 if provided
+        let width = combinedParameters.width;
+        let height = combinedParameters.height;
+        
+        if (width !== undefined && width !== null) {
+          width = Math.max(256, Math.min(2048, Math.round(width / 32) * 32));
+        }
+        if (height !== undefined && height !== null) {
+          height = Math.max(256, Math.min(2048, Math.round(height / 32) * 32));
+        }
+
+        const omitUndefined = (obj) =>
+          Object.fromEntries(
+            Object.entries(obj).filter(([, value]) => value !== undefined && value !== null),
+          );
+
+        const basePayload = omitUndefined({
+          prompt: modelPromptText,
+          aspect_ratio: aspectRatio,
+          resolution: resolution,
+          output_format: outputFormat,
+          output_quality: Math.max(0, Math.min(100, outputQuality)),
+          safety_tolerance: Math.max(1, Math.min(5, safetyTolerance)),
+          ...(width !== undefined && width !== null ? { width } : {}),
+          ...(height !== undefined && height !== null ? { height } : {}),
+          ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) ? { seed: combinedParameters.seed } : {}),
+        });
+
+        // Include input_images array if we have images
+        const inputPayload = {
+          ...basePayload,
+          ...(normalizedImages.length > 0 ? { input_images: normalizedImages } : {})
         };
 
         requestParameters = {
