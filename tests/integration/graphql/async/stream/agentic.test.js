@@ -9,7 +9,7 @@ import ws from 'ws';
 // Define models to test - 4.1 as default, include grok 4
 const TEST_MODELS = [
   'oai-gpt41',  // Default 4.1 model
-  'xai-grok-4'  // Grok 4 model
+  'xai-grok-4-fast-reasoning'  // Grok 4 model
 ];
 
 let testServer;
