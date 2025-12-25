@@ -2,6 +2,7 @@ import { fulfillWithTimeout } from '../lib/promiser.js';
 import { PathwayResolver } from './pathwayResolver.js';
 import CortexResponse from '../lib/cortexResponse.js';
 import { withRequestLoggingDisabled } from '../lib/logger.js';
+import { sanitizeBase64 } from '../lib/util.js';
 
 // This resolver uses standard parameters required by Apollo server:
 // (parent, args, contextValue, info)
@@ -41,9 +42,37 @@ const rootResolver = async (parent, args, contextValue, info) => {
     let resultData = pathwayResolver.pathwayResultData ? JSON.stringify(pathwayResolver.pathwayResultData) : null;
     
     const { warnings, errors, previousResult, savedContextId, tool } = pathwayResolver;    
-
-    // Add request parameters back as debug
-    const debug = pathwayResolver.prompts.map(prompt => prompt.debugInfo || '').join('\n').trim();
+    
+    // Add request parameters back as debug - sanitize base64 data before returning
+    const debug = pathwayResolver.prompts.map(prompt => {
+        if (!prompt.debugInfo) return '';
+        try {
+            // Try to parse entire debugInfo as JSON first (for single JSON object)
+            try {
+                const parsed = JSON.parse(prompt.debugInfo);
+                return JSON.stringify(sanitizeBase64(parsed));
+            } catch (e) {
+                // Not a single JSON object, try line-by-line
+                const lines = prompt.debugInfo.split('\n');
+                return lines.map(line => {
+                    const trimmed = line.trim();
+                    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+                        try {
+                            const parsed = JSON.parse(line);
+                            return JSON.stringify(sanitizeBase64(parsed));
+                        } catch (e) {
+                            // Not valid JSON on this line, return as-is
+                            return line;
+                        }
+                    }
+                    return line;
+                }).join('\n');
+            }
+        } catch (e) {
+            // If sanitization fails, return original
+            return prompt.debugInfo;
+        }
+    }).join('\n').trim();
     
     return { 
         debug, 

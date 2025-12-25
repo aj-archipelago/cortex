@@ -594,6 +594,9 @@ class ModelPlugin {
             if (error.response) {
                 logger.error(`Response status: ${error.response.status}`);
                 logger.error(`Response headers: ${JSON.stringify(error.response.headers)}`);
+                if (error.response.data) {
+                    logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
+                }
             }
             if (error.data) {
                 logger.error(`Additional error data: ${JSON.stringify(error.data)}`);

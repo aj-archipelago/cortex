@@ -455,9 +455,27 @@ var config = convict({
                     "Content-Type": "application/json"
                 },
             },
+            "replicate-qwen-image-edit-2511": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/qwen/qwen-image-edit-2511/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
             "replicate-seedream-4": {
                 "type": "REPLICATE-API",
                 "url": "https://api.replicate.com/v1/models/bytedance/seedream-4/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
+            "replicate-flux-2-pro": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-2-pro/predictions",
                 "headers": {
                     "Prefer": "wait",
                     "Authorization": "Token {{REPLICATE_API_KEY}}",

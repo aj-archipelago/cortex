@@ -5,6 +5,64 @@ import logger from "../../lib/logger.js";
 import axios from "axios";
 import mime from "mime-types";
 
+// Helper function to collect images from various parameter sources
+const collectImages = (candidate, accumulator) => {
+  if (!candidate) return;
+  if (Array.isArray(candidate)) {
+    candidate.forEach((item) => collectImages(item, accumulator));
+    return;
+  }
+  accumulator.push(candidate);
+};
+
+// Helper function to normalize image entries to strings
+const normalizeImageEntry = (entry) => {
+  if (!entry) return null;
+  if (typeof entry === "string") {
+    return entry;
+  }
+  if (typeof entry === "object") {
+    if (Array.isArray(entry)) {
+      return null;
+    }
+    if (entry.value) {
+      return entry.value;
+    }
+    if (entry.url) {
+      return entry.url;
+    }
+    if (entry.path) {
+      return entry.path;
+    }
+  }
+  return null;
+};
+
+// Helper function to omit undefined/null values from an object
+const omitUndefined = (obj) =>
+  Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined && value !== null),
+  );
+
+// Helper function to collect and normalize images from combined parameters
+const collectNormalizedImages = (combinedParameters, additionalFields = []) => {
+  const imageCandidates = [];
+  const defaultFields = [
+    'image', 'images', 'input_image', 'input_images',
+    'input_image_1', 'input_image_2', 'input_image_3',
+    'image_1', 'image_2'
+  ];
+  const allFields = [...defaultFields, ...additionalFields];
+  
+  allFields.forEach(field => {
+    collectImages(combinedParameters[field], imageCandidates);
+  });
+
+  return imageCandidates
+    .map((candidate) => normalizeImageEntry(candidate))
+    .filter((candidate) => candidate && typeof candidate === 'string');
+};
+
 class ReplicateApiPlugin extends ModelPlugin {
   constructor(pathway, model) {
     super(pathway, model);
@@ -139,56 +197,7 @@ class ReplicateApiPlugin extends ModelPlugin {
         const goFast = combinedParameters.go_fast ?? combinedParameters.goFast ?? true;
         const disableSafetyChecker = combinedParameters.disable_safety_checker ?? combinedParameters.disableSafetyChecker ?? false;
 
-        const collectImages = (candidate, accumulator) => {
-          if (!candidate) return;
-          if (Array.isArray(candidate)) {
-            candidate.forEach((item) => collectImages(item, accumulator));
-            return;
-          }
-          accumulator.push(candidate);
-        };
-
-        const imageCandidates = [];
-        collectImages(combinedParameters.image, imageCandidates);
-        collectImages(combinedParameters.images, imageCandidates);
-        collectImages(combinedParameters.input_image, imageCandidates);
-        collectImages(combinedParameters.input_images, imageCandidates);
-        collectImages(combinedParameters.input_image_1, imageCandidates);
-        collectImages(combinedParameters.input_image_2, imageCandidates);
-        collectImages(combinedParameters.input_image_3, imageCandidates);
-        collectImages(combinedParameters.image_1, imageCandidates);
-        collectImages(combinedParameters.image_2, imageCandidates);
-
-        const normalizeImageEntry = (entry) => {
-          if (!entry) return null;
-          if (typeof entry === "string") {
-            return entry; // Return the URL string directly
-          }
-          if (typeof entry === "object") {
-            if (Array.isArray(entry)) {
-              return null;
-            }
-            if (entry.value) {
-              return entry.value; // Return the value as a string
-            }
-            if (entry.url) {
-              return entry.url; // Return the URL as a string
-            }
-            if (entry.path) {
-              return entry.path; // Return the path as a string
-            }
-          }
-          return null;
-        };
-
-        const normalizedImages = imageCandidates
-          .map((candidate) => normalizeImageEntry(candidate))
-          .filter((candidate) => candidate && typeof candidate === 'string');
-
-        const omitUndefined = (obj) =>
-          Object.fromEntries(
-            Object.entries(obj).filter(([, value]) => value !== undefined && value !== null),
-          );
+        const normalizedImages = collectNormalizedImages(combinedParameters);
 
         const basePayload = omitUndefined({
           prompt: modelPromptText,
@@ -200,6 +209,43 @@ class ReplicateApiPlugin extends ModelPlugin {
         });
 
         // For qwen-image-edit-plus, always include the image array if we have images
+        const inputPayload = {
+          ...basePayload,
+          ...(normalizedImages.length > 0 ? { image: normalizedImages } : {})
+        };
+
+        requestParameters = {
+          input: inputPayload,
+        };
+        break;
+      }
+      case "replicate-qwen-image-edit-2511": {
+        const validRatios = ["1:1", "16:9", "9:16", "4:3", "3:4", "match_input_image"];
+        const validOutputFormats = ["webp", "jpg", "png"];
+        
+        const aspectRatio = validRatios.includes(combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio) 
+          ? (combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio) 
+          : "match_input_image";
+        const outputFormat = validOutputFormats.includes(combinedParameters.output_format ?? combinedParameters.outputFormat) 
+          ? (combinedParameters.output_format ?? combinedParameters.outputFormat) 
+          : "webp";
+        const outputQuality = combinedParameters.output_quality ?? combinedParameters.outputQuality ?? 95;
+        const goFast = combinedParameters.go_fast ?? combinedParameters.goFast ?? true;
+        const disableSafetyChecker = combinedParameters.disable_safety_checker ?? combinedParameters.disableSafetyChecker ?? false;
+
+        const normalizedImages = collectNormalizedImages(combinedParameters);
+
+        const basePayload = omitUndefined({
+          prompt: modelPromptText,
+          go_fast: goFast,
+          aspect_ratio: aspectRatio,
+          output_format: outputFormat,
+          output_quality: Math.max(0, Math.min(100, outputQuality)),
+          disable_safety_checker: disableSafetyChecker,
+          ...(Number.isInteger(combinedParameters.seed) && combinedParameters.seed > 0 ? { seed: combinedParameters.seed } : {}),
+        });
+
+        // For qwen-image-edit-2511, format images as array of strings (not objects)
         const inputPayload = {
           ...basePayload,
           ...(normalizedImages.length > 0 ? { image: normalizedImages } : {})
@@ -280,58 +326,7 @@ class ReplicateApiPlugin extends ModelPlugin {
         const validRatios = ["1:1", "4:3", "3:4", "16:9", "9:16", "match_input_image"];
         const validSequentialModes = ["disabled", "auto"];
 
-        // Collect input images from multiple parameter sources (same pattern as qwen-image-edit-plus)
-        const collectImages = (candidate, accumulator) => {
-          if (!candidate) return;
-          if (Array.isArray(candidate)) {
-            candidate.forEach((item) => collectImages(item, accumulator));
-            return;
-          }
-          accumulator.push(candidate);
-        };
-
-        const imageCandidates = [];
-        collectImages(combinedParameters.image, imageCandidates);
-        collectImages(combinedParameters.images, imageCandidates);
-        collectImages(combinedParameters.input_image, imageCandidates);
-        collectImages(combinedParameters.input_images, imageCandidates);
-        collectImages(combinedParameters.input_image_1, imageCandidates);
-        collectImages(combinedParameters.input_image_2, imageCandidates);
-        collectImages(combinedParameters.input_image_3, imageCandidates);
-        collectImages(combinedParameters.image_1, imageCandidates);
-        collectImages(combinedParameters.image_2, imageCandidates);
-        collectImages(combinedParameters.imageInput, imageCandidates);
-
-        const normalizeImageEntry = (entry) => {
-          if (!entry) return null;
-          if (typeof entry === "string") {
-            return entry; // Return the URL string directly
-          }
-          if (typeof entry === "object") {
-            if (Array.isArray(entry)) {
-              return null;
-            }
-            if (entry.value) {
-              return entry.value; // Return the value as a string
-            }
-            if (entry.url) {
-              return entry.url; // Return the URL as a string
-            }
-            if (entry.path) {
-              return entry.path; // Return the path as a string
-            }
-          }
-          return null;
-        };
-
-        const normalizedImages = imageCandidates
-          .map((candidate) => normalizeImageEntry(candidate))
-          .filter((candidate) => candidate && typeof candidate === 'string');
-
-        const omitUndefined = (obj) =>
-          Object.fromEntries(
-            Object.entries(obj).filter(([, value]) => value !== undefined && value !== null),
-          );
+        const normalizedImages = collectNormalizedImages(combinedParameters, ['imageInput']);
 
         const basePayload = omitUndefined({
           prompt: modelPromptText,
@@ -341,13 +336,81 @@ class ReplicateApiPlugin extends ModelPlugin {
           max_images: combinedParameters.maxImages || combinedParameters.numberResults || 1,
           aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "4:3",
           sequential_image_generation: validSequentialModes.includes(combinedParameters.sequentialImageGeneration) ? combinedParameters.sequentialImageGeneration : "disabled",
-          ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) && combinedParameters.seed > 0 ? { seed: combinedParameters.seed } : {}),
+          ...(Number.isInteger(combinedParameters.seed) && combinedParameters.seed > 0 ? { seed: combinedParameters.seed } : {}),
         });
 
         // For seedream-4, include the image_input array if we have images
         const inputPayload = {
           ...basePayload,
           ...(normalizedImages.length > 0 ? { image_input: normalizedImages } : {})
+        };
+
+        requestParameters = {
+          input: inputPayload,
+        };
+        break;
+      }
+      case "replicate-flux-2-pro": {
+        const validResolutions = ["match_input_image", "0.5 MP", "1 MP", "2 MP", "4 MP"];
+        const validRatios = [
+          "match_input_image",
+          "custom",
+          "1:1",
+          "16:9",
+          "3:2",
+          "2:3",
+          "4:5",
+          "5:4",
+          "9:16",
+          "3:4",
+          "4:3"
+        ];
+        const validOutputFormats = ["webp", "jpg", "png"];
+
+        const normalizedImages = collectNormalizedImages(combinedParameters).slice(0, 8); // Maximum 8 images
+
+        const aspectRatio = validRatios.includes(combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio) 
+          ? (combinedParameters.aspect_ratio ?? combinedParameters.aspectRatio) 
+          : "1:1";
+        
+        const resolution = validResolutions.includes(combinedParameters.resolution) 
+          ? combinedParameters.resolution 
+          : "1 MP";
+        
+        const outputFormat = validOutputFormats.includes(combinedParameters.output_format ?? combinedParameters.outputFormat) 
+          ? (combinedParameters.output_format ?? combinedParameters.outputFormat) 
+          : "webp";
+        
+        const outputQuality = combinedParameters.output_quality ?? combinedParameters.outputQuality ?? 80;
+        const safetyTolerance = combinedParameters.safety_tolerance ?? combinedParameters.safetyTolerance ?? 2;
+
+        // Validate and round width/height to multiples of 32 if provided
+        let width = combinedParameters.width;
+        let height = combinedParameters.height;
+        
+        if (width !== undefined && width !== null) {
+          width = Math.max(256, Math.min(2048, Math.round(width / 32) * 32));
+        }
+        if (height !== undefined && height !== null) {
+          height = Math.max(256, Math.min(2048, Math.round(height / 32) * 32));
+        }
+
+        const basePayload = omitUndefined({
+          prompt: modelPromptText,
+          aspect_ratio: aspectRatio,
+          resolution: resolution,
+          output_format: outputFormat,
+          output_quality: Math.max(0, Math.min(100, outputQuality)),
+          safety_tolerance: Math.max(1, Math.min(5, safetyTolerance)),
+          ...(width !== undefined && width !== null ? { width } : {}),
+          ...(height !== undefined && height !== null ? { height } : {}),
+          ...(Number.isInteger(combinedParameters.seed) && combinedParameters.seed > 0 ? { seed: combinedParameters.seed } : {}),
+        });
+
+        // Include input_images array if we have images
+        const inputPayload = {
+          ...basePayload,
+          ...(normalizedImages.length > 0 ? { input_images: normalizedImages } : {})
         };
 
         requestParameters = {

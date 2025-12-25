@@ -3,7 +3,7 @@ export default {
 
   enableDuplicateRequests: false,
   inputParameters: {
-    model: "replicate-qwen-image", // Options: "replicate-qwen-image" or "replicate-qwen-image-edit-plus"
+    model: "replicate-qwen-image", // Options: "replicate-qwen-image", "replicate-qwen-image-edit-plus", or "replicate-qwen-image-edit-2511"
     negativePrompt: "",
     width: 1024,
     height: 1024,
