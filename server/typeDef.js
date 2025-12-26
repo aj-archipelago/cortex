@@ -108,7 +108,7 @@ const getGraphQlType = (value) => {
             return {type: '[MultiMessage]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
           }
           // Check if it's AgentContextInput (has contextId and default properties)
-          else if (value[0]?.hasOwnProperty('contextId') && value[0]?.hasOwnProperty('default')) {
+          else if (value[0] && typeof value[0] === 'object' && 'contextId' in value[0] && 'default' in value[0]) {
             return {type: '[AgentContextInput]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
           }
           else {
