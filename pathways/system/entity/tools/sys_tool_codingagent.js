@@ -100,7 +100,7 @@ export default {
                 
                 for (const fileRef of fileReferences) {
                     // Try to resolve each file reference
-                    const resolvedUrl = await resolveFileParameter(fileRef, contextId, contextKey);
+                    const resolvedUrl = await resolveFileParameter(fileRef, contextId, contextKey, { altContextId: args.altContextId });
                     if (resolvedUrl) {
                         resolvedUrls.push(resolvedUrl);
                     } else {

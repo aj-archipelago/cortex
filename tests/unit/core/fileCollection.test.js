@@ -500,41 +500,161 @@ test('addFileToCollection should preserve original displayFilename for converted
     }
 });
 
-test('syncFilesToCollection should determine MIME type from URL, not displayFilename', async t => {
-    const { syncFilesToCollection } = await import('../../../lib/fileUtils.js');
+// Note: Tests that require Redis (adding files to collection) are in integration tests
+// These unit tests only test behavior that doesn't require Redis
+
+test('syncAndStripFilesFromChatHistory should leave all files when no contextId', async t => {
+    const { syncAndStripFilesFromChatHistory } = await import('../../../lib/fileUtils.js');
     
-    // Simulate chat history with converted file
-    const contextId = `test-sync-converted-${Date.now()}`;
     const chatHistory = [
         {
             role: 'user',
             content: [
                 {
-                    type: 'file',
-                    url: 'https://example.com/converted-report.md', // Converted to markdown
-                    gcs: 'gs://bucket/converted-report.md',
-                    hash: 'hash123'
+                    type: 'image_url',
+                    image_url: { url: 'https://example.com/image.jpg' },
+                    hash: 'somehash'
                 }
             ]
         }
     ];
     
+    // No contextId - should leave files in place
+    const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, null, null);
+    
+    t.is(processedHistory[0].content[0].type, 'image_url');
+    t.is(processedHistory[0].content[0].image_url.url, 'https://example.com/image.jpg');
+});
+
+test('syncAndStripFilesFromChatHistory should leave files when collection is empty', async t => {
+    const { syncAndStripFilesFromChatHistory } = await import('../../../lib/fileUtils.js');
+    
+    // Use a unique contextId that won't have any files
+    const contextId = `test-empty-${Date.now()}`;
+    
+    const chatHistory = [
+        {
+            role: 'user',
+            content: [
+                {
+                    type: 'image_url',
+                    image_url: { url: 'https://example.com/image.jpg' },
+                    hash: 'somehash'
+                }
+            ]
+        }
+    ];
+    
+    // Empty collection - files should stay in place (not stripped)
+    const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, contextId, null);
+    
+    t.is(processedHistory[0].content[0].type, 'image_url');
+    t.is(processedHistory[0].content[0].image_url.url, 'https://example.com/image.jpg');
+});
+
+test('syncAndStripFilesFromChatHistory should handle empty chat history', async t => {
+    const { syncAndStripFilesFromChatHistory } = await import('../../../lib/fileUtils.js');
+    
+    const { chatHistory: result1 } = await syncAndStripFilesFromChatHistory([], 'context', null);
+    t.deepEqual(result1, []);
+    
+    const { chatHistory: result2 } = await syncAndStripFilesFromChatHistory(null, 'context', null);
+    t.deepEqual(result2, []);
+});
+
+test('syncAndStripFilesFromChatHistory should preserve non-file content', async t => {
+    const { syncAndStripFilesFromChatHistory } = await import('../../../lib/fileUtils.js');
+    
+    const contextId = `test-preserve-${Date.now()}`;
+    
+    const chatHistory = [
+        {
+            role: 'user',
+            content: [
+                { type: 'text', text: 'Hello world' },
+                {
+                    type: 'image_url',
+                    image_url: { url: 'https://example.com/image.jpg' },
+                    hash: 'somehash'
+                }
+            ]
+        },
+        {
+            role: 'assistant',
+            content: 'I see an image'
+        }
+    ];
+    
+    const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, contextId, null);
+    
+    // Text content should be preserved
+    t.is(processedHistory[0].content[0].type, 'text');
+    t.is(processedHistory[0].content[0].text, 'Hello world');
+    
+    // Image not in collection should be preserved
+    t.is(processedHistory[0].content[1].type, 'image_url');
+    
+    // Assistant message should be preserved
+    t.is(processedHistory[1].role, 'assistant');
+    t.is(processedHistory[1].content, 'I see an image');
+});
+
+test('loadMergedFileCollection should merge collections from contextId and altContextId', async t => {
+    const { loadMergedFileCollection, addFileToCollection, getRedisClient } = await import('../../../lib/fileUtils.js');
+    
+    const contextId = `test-primary-${Date.now()}`;
+    const altContextId = `test-alt-${Date.now()}`;
+    
     try {
-        await syncFilesToCollection(chatHistory, contextId, null);
+        // Add file to primary context
+        await addFileToCollection(contextId, null, 'https://example.com/primary.jpg', null, 'primary.jpg', [], '', 'hash-primary');
         
-        const { loadFileCollection } = await import('../../../lib/fileUtils.js');
-        const collection = await loadFileCollection(contextId, null, false);
-        t.is(collection.length, 1);
+        // Add file to alt context
+        await addFileToCollection(altContextId, null, 'https://example.com/alt.jpg', null, 'alt.jpg', [], '', 'hash-alt');
         
-        // MIME type should be from URL (.md), not from any displayFilename
-        t.is(collection[0].mimeType, 'text/markdown', 'MIME type should be determined from URL');
-        t.is(collection[0].url, 'https://example.com/converted-report.md');
+        // Load just primary - should have 1 file
+        const primaryOnly = await loadMergedFileCollection(contextId, null, null);
+        t.is(primaryOnly.length, 1);
+        t.is(primaryOnly[0].hash, 'hash-primary');
+        
+        // Load merged - should have 2 files
+        const merged = await loadMergedFileCollection(contextId, null, altContextId);
+        t.is(merged.length, 2);
+        t.true(merged.some(f => f.hash === 'hash-primary'));
+        t.true(merged.some(f => f.hash === 'hash-alt'));
     } finally {
-        // Cleanup
-        const { getRedisClient } = await import('../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
         if (redisClient) {
             await redisClient.del(`FileStoreMap:ctx:${contextId}`);
+            await redisClient.del(`FileStoreMap:ctx:${altContextId}`);
+        }
+    }
+});
+
+test('loadMergedFileCollection should dedupe files present in both contexts', async t => {
+    const { loadMergedFileCollection, addFileToCollection, getRedisClient } = await import('../../../lib/fileUtils.js');
+    
+    const contextId = `test-primary-dupe-${Date.now()}`;
+    const altContextId = `test-alt-dupe-${Date.now()}`;
+    
+    try {
+        // Add same file (same hash) to both contexts
+        await addFileToCollection(contextId, null, 'https://example.com/shared.jpg', null, 'shared.jpg', [], '', 'hash-shared');
+        await addFileToCollection(altContextId, null, 'https://example.com/shared.jpg', null, 'shared.jpg', [], '', 'hash-shared');
+        
+        // Add unique file to alt context
+        await addFileToCollection(altContextId, null, 'https://example.com/alt-only.jpg', null, 'alt-only.jpg', [], '', 'hash-alt-only');
+        
+        // Load merged - should have 2 files (deduped shared file)
+        const merged = await loadMergedFileCollection(contextId, null, altContextId);
+        t.is(merged.length, 2);
+        t.true(merged.some(f => f.hash === 'hash-shared'));
+        t.true(merged.some(f => f.hash === 'hash-alt-only'));
+    } finally {
+        const redisClient = await getRedisClient();
+        if (redisClient) {
+            await redisClient.del(`FileStoreMap:ctx:${contextId}`);
+            await redisClient.del(`FileStoreMap:ctx:${altContextId}`);
         }
     }
 });

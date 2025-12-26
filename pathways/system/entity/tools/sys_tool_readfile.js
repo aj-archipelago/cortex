@@ -148,7 +148,7 @@ export default {
                     return JSON.stringify(errorResult);
                 }
                 // Use useCache: false to ensure we get the latest file data (important after edits)
-                const resolvedUrl = await resolveFileParameter(file, contextId, contextKey, { useCache: false });
+                const resolvedUrl = await resolveFileParameter(file, contextId, contextKey, { useCache: false, altContextId: args.altContextId });
                 if (!resolvedUrl) {
                     const errorResult = {
                         success: false,

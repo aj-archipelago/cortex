@@ -128,7 +128,7 @@ export default {
                     throw new Error("contextId is required when using the 'inputImage' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
                 }
                 
-                const resolved = await resolveFileParameter(args.inputImage, args.contextId, args.contextKey, { preferGcs: true });
+                const resolved = await resolveFileParameter(args.inputImage, args.contextId, args.contextKey, { preferGcs: true, altContextId: args.altContextId });
                 if (!resolved) {
                     throw new Error(`File not found: "${args.inputImage}". Use ListFileCollection or SearchFileCollection to find available files.`);
                 }

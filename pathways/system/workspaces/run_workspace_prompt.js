@@ -19,6 +19,7 @@ export default {
         aiName: "Jarvis",
         language: "English",
         model: "oai-gpt41", // Allow user to specify model
+        altContextId: "",
     },
 
     timeout: 600,

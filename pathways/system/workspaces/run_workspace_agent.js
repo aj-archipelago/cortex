@@ -8,6 +8,7 @@ export default {
         model: "oai-gpt41",
         aiStyle: "OpenAI",
         chatHistory: [{role: '', content: []}],
+        altContextId: "",
     },
     timeout: 600,
 

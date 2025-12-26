@@ -1,7 +1,7 @@
 // sys_tool_view_image.js
 // Tool pathway that allows agents to view image files from the file collection
 import logger from '../../../../lib/logger.js';
-import { loadFileCollection, findFileInCollection, ensureShortLivedUrl } from '../../../../lib/fileUtils.js';
+import { loadMergedFileCollection, findFileInCollection, ensureShortLivedUrl } from '../../../../lib/fileUtils.js';
 import { config } from '../../../../config.js';
 
 export default {
@@ -34,15 +34,15 @@ export default {
     },
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { files, contextId, contextKey } = args;
+        const { files, contextId, contextKey, altContextId } = args;
 
         if (!files || !Array.isArray(files) || files.length === 0) {
             throw new Error("Files parameter is required and must be a non-empty array");
         }
 
         try {
-            // Load the file collection
-            const collection = await loadFileCollection(contextId, contextKey, true);
+            // Load the file collection (merged with altContextId if present)
+            const collection = await loadMergedFileCollection(contextId, contextKey, altContextId);
             
             const imageUrls = [];
             const errors = [];

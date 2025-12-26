@@ -1113,46 +1113,67 @@ test('File collection: Permanent files not deleted on remove', async t => {
     }
 });
 
-test('File collection: Sync files from chat history', async t => {
+test('File collection: syncAndStripFilesFromChatHistory only strips collection files', async t => {
     const contextId = createTestContext();
     
     try {
-        const { syncFilesToCollection } = await import('../../../../lib/fileUtils.js');
+        const { syncAndStripFilesFromChatHistory, addFileToCollection } = await import('../../../../lib/fileUtils.js');
         
-        // Create chat history with files
+        // Add one file to collection
+        await addFileToCollection(
+            contextId,
+            null,
+            'https://example.com/in-collection.jpg',
+            'gs://bucket/in-collection.jpg',
+            'in-collection.jpg',
+            [],
+            '',
+            'hash-in-coll'
+        );
+        
+        // Create chat history with two files - one in collection, one not
         const chatHistory = [
             {
                 role: 'user',
                 content: [
                     {
                         type: 'image_url',
-                        image_url: { url: 'https://example.com/synced1.jpg' },
-                        gcs: 'gs://bucket/synced1.jpg',
-                        hash: 'hash1'
+                        image_url: { url: 'https://example.com/in-collection.jpg' },
+                        gcs: 'gs://bucket/in-collection.jpg',
+                        hash: 'hash-in-coll'
                     },
                     {
                         type: 'file',
-                        url: 'https://example.com/synced2.pdf',
-                        gcs: 'gs://bucket/synced2.pdf',
-                        hash: 'hash2'
+                        url: 'https://example.com/external.pdf',
+                        gcs: 'gs://bucket/external.pdf',
+                        hash: 'hash-external'
                     }
                 ]
             }
         ];
         
-        // Sync files to collection
-        await syncFilesToCollection(chatHistory, contextId, null);
+        // Process chat history
+        const { chatHistory: processed, availableFiles } = await syncAndStripFilesFromChatHistory(chatHistory, contextId, null);
         
-        // Verify files were added
+        // Verify only collection file was stripped
+        const content = processed[0].content;
+        t.true(Array.isArray(content));
+        
+        // First file (in collection) should be stripped to placeholder
+        t.is(content[0].type, 'text');
+        t.true(content[0].text.includes('[File:'));
+        t.true(content[0].text.includes('available via file tools'));
+        
+        // Second file (not in collection) should remain as-is
+        t.is(content[1].type, 'file');
+        t.is(content[1].url, 'https://example.com/external.pdf');
+        
+        // Collection should still have only 1 file (no auto-syncing)
         const collection = await loadFileCollection(contextId, null, false);
-        t.is(collection.length, 2);
-        t.true(collection.some(f => f.url === 'https://example.com/synced1.jpg'));
-        t.true(collection.some(f => f.url === 'https://example.com/synced2.pdf'));
+        t.is(collection.length, 1);
         
-        // Sync again (should update lastAccessed, not duplicate)
-        await syncFilesToCollection(chatHistory, contextId, null);
-        const collection2 = await loadFileCollection(contextId, null, false);
-        t.is(collection2.length, 2); // Should still be 2, not 4
+        // Available files should list the collection file
+        t.true(availableFiles.includes('in-collection.jpg'));
     } finally {
         await cleanup(contextId);
     }

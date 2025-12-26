@@ -352,15 +352,14 @@ addFileToCollection(contextId, contextKey, url, gcs, filename, tags, notes, hash
 - Merges with existing CFH data if file with same hash already exists
 - Returns file entry object with `id`
 
-#### Syncing from Chat History
+#### Processing Chat History Files
 ```javascript
-syncFilesToCollection(chatHistory, contextId, contextKey)
+syncAndStripFilesFromChatHistory(chatHistory, contextId, contextKey)
 ```
-- Extracts files from chat history messages
-- Adds/updates files in collection individually (atomic operations)
-- Checks for existing files by URL, GCS, or hash
-- Updates lastAccessed for existing files
-- **Used by**: `getAvailableFiles()` to sync files from conversation
+- Files IN collection: stripped from message (replaced with placeholder), tools can access them
+- Files NOT in collection: left in message as-is (model sees them directly)
+- Updates lastAccessed for collection files
+- **Used by**: `sys_entity_agent` to process incoming chat history
 
 ### File Entry Schema
 
@@ -729,19 +728,20 @@ RemoveFileFromCollection Tool
 
 ## Key Concepts
 
-### 1. Context Scoping (`contextId`)
+### 1. Context Scoping (`contextId` and `altContextId`)
 
-**Purpose**: Per-user/per-context file isolation
+**Purpose**: Per-user/per-context file isolation with optional cross-context reading
 
 **Usage**:
-- **Strongly recommended** for all file operations
-- Passed to all file handler functions
-- Stored in Redis with scoped keys: `<hash>:ctx:<contextId>`
+- **`contextId`**: Primary context for file operations (strongly recommended)
+- **`altContextId`**: Optional secondary context for read-only file access (union)
+- Stored in Redis with scoped keys: `FileStoreMap:ctx:<contextId>`
 
 **Benefits**:
 - Prevents hash collisions between users
 - Enables per-user file management
 - Supports multi-tenant applications
+- `altContextId` allows reading files from a secondary context (e.g., workspace files)
 
 **Example**:
 ```javascript
@@ -753,7 +753,19 @@ await checkHashExists(hash, fileHandlerUrl, null, "user-123");
 
 // Delete with contextId
 await deleteFileByHash(hash, resolver, "user-123");
+
+// Load merged collection (reads from both contexts)
+const collection = await loadMergedFileCollection("user-123", null, "workspace-456");
+
+// Resolve file from either context
+const url = await resolveFileParameter("file.pdf", "user-123", null, { altContextId: "workspace-456" });
 ```
+
+**`altContextId` Behavior**:
+- Files are read from both `contextId` and `altContextId` (union)
+- Writes/updates only go to the context that owns the file
+- Deduplication: if a file exists in both contexts (same hash), primary takes precedence
+- Files from alt context bypass `inCollection` filtering (all files accessible)
 
 ### 2. Permanent Files (`permanent` flag)
 
@@ -938,15 +950,39 @@ Marks request as completed for cleanup.
 Loads file collection from Redis hash map.
 - **Parameters**:
   - `contextId`: Context ID (required)
-  - `contextKey`: Optional encryption key (unused, kept for compatibility)
+  - `contextKey`: Optional encryption key
   - `useCache`: Whether to use cache (default: true)
 - **Returns**: Array of file entries (sorted by lastAccessed, most recent first)
 - **Process**:
   1. Checks in-memory cache (5-second TTL)
   2. Loads from Redis hash map `FileStoreMap:ctx:<contextId>`
-  3. Converts hash map entries to array format
-  4. Updates cache
-- **Used by**: All file collection operations
+  3. Filters by `inCollection` (only returns global files or chat-specific files)
+  4. Converts hash map entries to array format
+  5. Updates cache
+- **Used by**: Primary file collection operations
+
+#### `loadFileCollectionAll(contextId, contextKey)`
+Loads ALL files from a context, bypassing `inCollection` filtering.
+- **Parameters**:
+  - `contextId`: Context ID (required)
+  - `contextKey`: Optional encryption key
+- **Returns**: Array of all file entries (no filtering)
+- **Used by**: `loadMergedFileCollection` when loading alt context files
+
+#### `loadMergedFileCollection(contextId, contextKey, altContextId)`
+Loads merged file collection from primary and optional alternate context.
+- **Parameters**:
+  - `contextId`: Primary context ID (required)
+  - `contextKey`: Optional encryption key
+  - `altContextId`: Optional alternate context ID for union
+- **Returns**: Array of file entries from both contexts (deduplicated by hash/url/gcs)
+- **Process**:
+  1. Loads primary collection via `loadFileCollection()`
+  2. Tags each file with `_contextId` (internal, stripped before returning to callers)
+  3. If `altContextId` provided, loads alt collection via `loadFileCollectionAll()` (bypasses inCollection filter)
+  4. Deduplicates: primary takes precedence if same file exists in both
+  5. Returns merged collection
+- **Used by**: `syncAndStripFilesFromChatHistory`, `getAvailableFiles`, `resolveFileParameter`, file tools
 
 #### `saveFileCollection(contextId, contextKey, collection)`
 Saves file collection to Redis hash map (optimized - only updates changed entries).
@@ -999,19 +1035,22 @@ Adds file to collection via atomic operation.
   5. Merges with existing CFH data if hash already exists
 - **Used by**: WriteFile, Image tools, FileCollection tool
 
-#### `syncFilesToCollection(chatHistory, contextId, contextKey)`
-Syncs files from chat history to file collection.
+#### `syncAndStripFilesFromChatHistory(chatHistory, contextId, contextKey, altContextId)`
+Processes chat history files based on collection membership.
 - **Parameters**:
-  - `chatHistory`: Chat history array to scan
+  - `chatHistory`: Chat history array to process
   - `contextId`: Context ID (required)
   - `contextKey`: Optional encryption key
-- **Returns**: Updated file collection array
+  - `altContextId`: Optional alternate context ID for merged collection
+- **Returns**: `{ chatHistory, availableFiles }` - processed chat history and formatted file list
 - **Process**:
-  1. Extracts files from chat history via `extractFilesFromChatHistory()`
-  2. Checks for existing files by URL, GCS, or hash
-  3. Adds new files or updates lastAccessed for existing files
-  4. Uses atomic operations per file
-- **Used by**: `getAvailableFiles()` to sync files from conversation
+  1. Loads merged file collection (contextId + altContextId)
+  2. For each file in chat history:
+     - If in collection: strip from message, update lastAccessed and inCollection in owning context
+     - If not in collection: leave in message as-is
+  3. Returns processed history and available files string
+  4. Uses atomic operations per file, updating the context that owns each file
+- **Used by**: `sys_entity_agent` to process incoming chat history
 
 ### File Resolution
 
@@ -1021,7 +1060,10 @@ Resolves file parameter to file URL.
   - `fileParam`: File ID, filename, URL, or hash
   - `contextId`: Context ID (required)
   - `contextKey`: Optional encryption key
-  - `options`: Optional options object with `preferGcs` boolean
+  - `options`: Optional options object:
+    - `preferGcs`: Boolean - prefer GCS URL over Azure URL
+    - `useCache`: Boolean - use cache (default: true)
+    - `altContextId`: String - alternate context ID for merged collection lookup
 - **Returns**: File URL string (Azure or GCS) or `null` if not found
 - **Matching** (via `findFileInCollection()`):
   - Exact ID match
@@ -1061,17 +1103,18 @@ Extracts file metadata from chat history messages.
   1. Scans all messages for file content objects
   2. Extracts from `image_url`, `file`, or direct URL objects
   3. Returns normalized format
-- **Used by**: `syncFilesToCollection()`, `getAvailableFiles()`
+- **Used by**: File extraction utilities
 
-#### `getAvailableFiles(chatHistory, contextId, contextKey)`
-Gets formatted list of available files for templates.
+#### `getAvailableFiles(chatHistory, contextId, contextKey, altContextId)`
+Gets formatted list of available files from collection.
 - **Parameters**:
-  - `chatHistory`: Chat history to scan
+  - `chatHistory`: Unused (kept for API compatibility)
   - `contextId`: Context ID (required)
   - `contextKey`: Optional encryption key
+  - `altContextId`: Optional alternate context ID for merged collection
 - **Returns**: Formatted string of available files (last 10 most recent)
 - **Process**:
-  1. Syncs files from chat history via `syncFilesToCollection()`
+  1. Loads merged file collection (contextId + altContextId)
   2. Formats files via `formatFilesForTemplate()`
   3. Returns compact one-line format per file
 - **Used by**: Template rendering to show available files

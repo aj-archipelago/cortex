@@ -64,6 +64,7 @@ export default {
         privateData: false,    
         chatHistory: [{role: '', content: []}],
         contextId: ``,
+        altContextId: ``,  // Optional secondary context for file collection union (reads only)
         chatId: ``,
         language: "English",
         aiName: "Jarvis",
@@ -547,10 +548,11 @@ export default {
             args.chatHistory = args.chatHistory.slice(-20);
         }
 
-        // Sync files from chat history to collection and strip file content
-        // Files are accessible via tools (AnalyzeFile, ReadTextFile, etc.)
+        // Process files in chat history:
+        // - Files in collection (contextId + altContextId): stripped, accessible via tools
+        // - Files not in collection: left in message for model to see directly
         const { chatHistory: strippedHistory, availableFiles } = await syncAndStripFilesFromChatHistory(
-            args.chatHistory, args.contextId, args.contextKey
+            args.chatHistory, args.contextId, args.contextKey, args.altContextId
         );
         args.chatHistory = strippedHistory;
 

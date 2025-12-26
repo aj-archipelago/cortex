@@ -3,19 +3,20 @@
 // File collections are stored in Redis hash maps (FileStoreMap:ctx:<contextId>
 // Returns file collection as JSON array string for backward compatibility with Labeeb
 
-import { loadFileCollection } from '../../../../lib/fileUtils.js';
+import { loadMergedFileCollection } from '../../../../lib/fileUtils.js';
 
 export default {
     inputParameters: {
         contextId: ``,
         contextKey: ``,
+        altContextId: ``,
         useCache: true
     },
     // No format field - returns String directly (like sys_read_memory)
     model: 'oai-gpt4o',
 
     resolver: async (_parent, args, _contextValue, _info) => {
-        const { contextId, contextKey = null, useCache = true } = args;
+        const { contextId, contextKey = null, altContextId = null, useCache = true } = args;
         
         // Validate that contextId is provided
         if (!contextId) {
@@ -23,14 +24,15 @@ export default {
         }
         
         try {
-            // Load file collection from Redis hash maps
-            const collection = await loadFileCollection(contextId, contextKey, useCache);
+            // Load file collection from Redis hash maps (merged with altContextId if present)
+            const collection = await loadMergedFileCollection(contextId, contextKey, altContextId);
             
             // Return as JSON array string for backward compatibility with Labeeb
             // Labeeb expects either: [] or { version: "...", files: [...] }
             // Since we removed versioning, we just return the array directly
-            // Ensure we always return a valid JSON array (empty if no files)
-            const result = Array.isArray(collection) ? collection : [];
+            // Strip internal _contextId before returning
+            const result = (Array.isArray(collection) ? collection : [])
+                .map(({ _contextId, ...file }) => file);
             return JSON.stringify(result);
         } catch (e) {
             // Log error for debugging
