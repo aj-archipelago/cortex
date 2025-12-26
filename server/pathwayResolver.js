@@ -367,14 +367,22 @@ class PathwayResolver {
     }
 
     async executePathway(args) {
-        // Extract contextId and contextKey from agentContext for downstream pathways
-        // This allows pathways that use agentContext to work with legacy pathways that expect contextId/contextKey
+        // Bidirectional context transformation for backward compatibility:
+        // 1. If agentContext provided: extract contextId/contextKey for legacy pathways
+        // 2. If contextId provided without agentContext: create agentContext for new pathways
         if (args.agentContext && Array.isArray(args.agentContext) && args.agentContext.length > 0) {
             const defaultCtx = args.agentContext.find(ctx => ctx.default) || args.agentContext[0];
             if (defaultCtx) {
                 args.contextId = defaultCtx.contextId;
                 args.contextKey = defaultCtx.contextKey || null;
             }
+        } else if (args.contextId && !args.agentContext) {
+            // Backward compat: create agentContext from legacy contextId/contextKey
+            args.agentContext = [{ 
+                contextId: args.contextId, 
+                contextKey: args.contextKey || null, 
+                default: true 
+            }];
         }
         
         if (this.pathway.executePathway && typeof this.pathway.executePathway === 'function') {

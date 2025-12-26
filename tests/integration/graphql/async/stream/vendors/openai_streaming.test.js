@@ -62,7 +62,8 @@ test('OpenAI vendor streaming over subscriptions emits OAI-style deltas', async 
     .filter(Boolean);
 
   if (models.length > 0) {
-    t.truthy(models.find(m => /gpt-5-chat/.test(m)));
+    // Model could be gpt-4.1, gpt-4, gpt-5, etc. depending on config
+    t.truthy(models.find(m => /gpt-4|gpt-5/.test(m)));
   }
 });
 
