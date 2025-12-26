@@ -11,6 +11,8 @@ export default {
     image: "",
     camera_fixed: false,
     seed: -1,
+    generate_audio: false,
+    last_frame_image: "",
   },
 
   timeout: 60 * 30, // 30 minutes

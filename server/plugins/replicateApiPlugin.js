@@ -321,6 +321,24 @@ class ReplicateApiPlugin extends ModelPlugin {
         };
         break;
       }
+      case "replicate-seedance-1.5-pro": {
+        const validRatios = ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "9:21"];
+
+        requestParameters = {
+          input: {
+            prompt: modelPromptText,
+            aspect_ratio: validRatios.includes(combinedParameters.aspectRatio) ? combinedParameters.aspectRatio : "16:9",
+            duration: Math.min(12, Math.max(2, combinedParameters.duration || 5)),
+            fps: 24,
+            camera_fixed: combinedParameters.camera_fixed || false,
+            generate_audio: combinedParameters.generate_audio || false,
+            ...(combinedParameters.seed && Number.isInteger(combinedParameters.seed) && combinedParameters.seed > 0 ? { seed: combinedParameters.seed } : {}),
+            ...(combinedParameters.image ? { image: combinedParameters.image } : {}),
+            ...(combinedParameters.image && combinedParameters.last_frame_image ? { last_frame_image: combinedParameters.last_frame_image } : {}),
+          },
+        };
+        break;
+      }
       case "replicate-seedream-4": {
         const validSizes = ["1K", "2K", "4K", "custom"];
         const validRatios = ["1:1", "4:3", "3:4", "16:9", "9:16", "match_input_image"];
