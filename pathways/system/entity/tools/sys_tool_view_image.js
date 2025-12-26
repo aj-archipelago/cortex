@@ -1,7 +1,7 @@
 // sys_tool_view_image.js
 // Tool pathway that allows agents to view image files from the file collection
 import logger from '../../../../lib/logger.js';
-import { loadFileCollection, findFileInCollection, ensureShortLivedUrl } from '../../../../lib/fileUtils.js';
+import { loadMergedFileCollection, findFileInCollection, ensureShortLivedUrl, getDefaultContext } from '../../../../lib/fileUtils.js';
 import { config } from '../../../../config.js';
 
 export default {
@@ -34,15 +34,19 @@ export default {
     },
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { files, contextId, contextKey } = args;
+        const { files } = args;
 
         if (!files || !Array.isArray(files) || files.length === 0) {
             throw new Error("Files parameter is required and must be a non-empty array");
         }
 
+        if (!args.agentContext || !Array.isArray(args.agentContext) || args.agentContext.length === 0) {
+            throw new Error("agentContext is required");
+        }
+
         try {
-            // Load the file collection
-            const collection = await loadFileCollection(contextId, contextKey, true);
+            // Load the file collection (merged from all agentContext contexts)
+            const collection = await loadMergedFileCollection(args.agentContext);
             
             const imageUrls = [];
             const errors = [];
@@ -70,7 +74,8 @@ export default {
 
                 // Resolve to short-lived URL if possible
                 const fileHandlerUrl = config.get('whisperMediaApiUrl');
-                const fileWithShortLivedUrl = await ensureShortLivedUrl(foundFile, fileHandlerUrl, contextId);
+                const defaultCtx = getDefaultContext(args.agentContext);
+                const fileWithShortLivedUrl = await ensureShortLivedUrl(foundFile, fileHandlerUrl, defaultCtx?.contextId || null);
 
                 // Add to imageUrls array
                 imageUrls.push({

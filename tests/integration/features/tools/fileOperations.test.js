@@ -21,14 +21,17 @@ test.after.always('cleanup', async () => {
     }
 });
 
-// Helper to create a test context
+// Helper to create a test context (returns agentContext array)
 const createTestContext = () => {
     const contextId = `test-fileops-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    return contextId;
+    return {
+        contextId,
+        agentContext: [{ contextId, contextKey: null, default: true }]
+    };
 };
 
 // Helper to clean up test data
-const cleanup = async (contextId, contextKey = null) => {
+const cleanup = async (contextId) => {
     try {
         const { getRedisClient } = await import('../../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
@@ -44,14 +47,14 @@ const cleanup = async (contextId, contextKey = null) => {
 // ========== WriteFile Tests ==========
 
 test('WriteFile: Write and upload text file', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         const content = 'Hello, world!\nThis is a test file.';
         const filename = 'test.txt';
         
         const result = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content,
             filename,
             userMessage: 'Writing test file'
@@ -77,14 +80,14 @@ test('WriteFile: Write and upload text file', async t => {
 });
 
 test('WriteFile: Write JSON file', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         const content = JSON.stringify({ name: 'Test', value: 42 }, null, 2);
         const filename = 'data.json';
         
         const result = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content,
             filename,
             userMessage: 'Writing JSON file'
@@ -110,13 +113,13 @@ test('WriteFile: Write JSON file', async t => {
 // ========== ReadFile Tests ==========
 
 test('ReadFile: Read entire file', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // First write a file
         const content = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content,
             filename: 'readtest.txt',
             userMessage: 'Writing file for read test'
@@ -135,7 +138,7 @@ test('ReadFile: Read entire file', async t => {
         
         // Now read it
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'readtest.txt',
             userMessage: 'Reading entire file'
         });
@@ -151,13 +154,13 @@ test('ReadFile: Read entire file', async t => {
 });
 
 test('ReadFile: Read line range', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // First write a file
         const content = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content,
             filename: 'rangetest.txt',
             userMessage: 'Writing file for range read test'
@@ -175,7 +178,7 @@ test('ReadFile: Read line range', async t => {
         
         // Read lines 2-4
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'rangetest.txt',
             startLine: 2,
             endLine: 4,
@@ -195,7 +198,7 @@ test('ReadFile: Read line range', async t => {
 });
 
 test('ReadFile: Read with line range limit', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write a large file
@@ -203,7 +206,7 @@ test('ReadFile: Read with line range limit', async t => {
         const content = lines.join('\n');
         
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content,
             filename: 'largetest.txt',
             userMessage: 'Writing large file'
@@ -221,7 +224,7 @@ test('ReadFile: Read with line range limit', async t => {
         
         // Read with endLine limit (first 10 lines)
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'largetest.txt',
             startLine: 1,
             endLine: 10,
@@ -241,13 +244,13 @@ test('ReadFile: Read with line range limit', async t => {
 // ========== EditFileByLine Tests ==========
 
 test('EditFileByLine: Replace single line', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'modifytest.txt',
             userMessage: 'Writing file for modify test'
@@ -269,7 +272,7 @@ test('EditFileByLine: Replace single line', async t => {
         
         // Modify line 3
         const modifyResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'modifytest.txt',
             startLine: 3,
             endLine: 3,
@@ -285,7 +288,7 @@ test('EditFileByLine: Replace single line', async t => {
         // Read back to verify
         await new Promise(resolve => setTimeout(resolve, 500));
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: modifyParsed.fileId || 'modifytest.txt',
             userMessage: 'Reading modified file'
         });
@@ -300,13 +303,13 @@ test('EditFileByLine: Replace single line', async t => {
 });
 
 test('EditFileByLine: Replace multiple lines', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'multimodify.txt',
             userMessage: 'Writing file for multi-line modify'
@@ -324,7 +327,7 @@ test('EditFileByLine: Replace multiple lines', async t => {
         
         // Replace lines 2-4 with new content
         const modifyResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'multimodify.txt',
             startLine: 2,
             endLine: 4,
@@ -340,7 +343,7 @@ test('EditFileByLine: Replace multiple lines', async t => {
         // Read back to verify
         await new Promise(resolve => setTimeout(resolve, 500));
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: modifyParsed.fileId || 'multimodify.txt',
             userMessage: 'Reading modified file'
         });
@@ -359,13 +362,13 @@ test('EditFileByLine: Replace multiple lines', async t => {
 });
 
 test('EditFileByLine: Insert content (replace with more lines)', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Line 1\nLine 2\nLine 3';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'inserttest.txt',
             userMessage: 'Writing file for insert test'
@@ -383,7 +386,7 @@ test('EditFileByLine: Insert content (replace with more lines)', async t => {
         
         // Replace line 2 with 3 new lines
         const modifyResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'inserttest.txt',
             startLine: 2,
             endLine: 2,
@@ -400,7 +403,7 @@ test('EditFileByLine: Insert content (replace with more lines)', async t => {
         // Read back to verify
         await new Promise(resolve => setTimeout(resolve, 500));
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: modifyParsed.fileId || 'inserttest.txt',
             userMessage: 'Reading modified file'
         });
@@ -420,13 +423,13 @@ test('EditFileByLine: Insert content (replace with more lines)', async t => {
 });
 
 test('EditFileByLine: Delete content (replace with fewer lines)', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'deletetest.txt',
             userMessage: 'Writing file for delete test'
@@ -444,7 +447,7 @@ test('EditFileByLine: Delete content (replace with fewer lines)', async t => {
         
         // Replace lines 2-4 with a single line
         const modifyResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'deletetest.txt',
             startLine: 2,
             endLine: 4,
@@ -461,7 +464,7 @@ test('EditFileByLine: Delete content (replace with fewer lines)', async t => {
         // Read back to verify
         await new Promise(resolve => setTimeout(resolve, 500));
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: modifyParsed.fileId || 'deletetest.txt',
             userMessage: 'Reading modified file'
         });
@@ -479,11 +482,11 @@ test('EditFileByLine: Delete content (replace with fewer lines)', async t => {
 });
 
 test('EditFileByLine: Error handling - file not found', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         const result = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: 'nonexistent.txt',
             startLine: 1,
             endLine: 1,
@@ -500,12 +503,12 @@ test('EditFileByLine: Error handling - file not found', async t => {
 });
 
 test('EditFileByLine: Error handling - invalid line range', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write a file first
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: 'Line 1\nLine 2',
             filename: 'rangetest.txt',
             userMessage: 'Writing test file'
@@ -523,7 +526,7 @@ test('EditFileByLine: Error handling - invalid line range', async t => {
         
         // Try invalid range (endLine < startLine)
         const result = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'rangetest.txt',
             startLine: 5,
             endLine: 3,
@@ -540,13 +543,13 @@ test('EditFileByLine: Error handling - invalid line range', async t => {
 });
 
 test('EditFileByLine: Works after prior SearchAndReplace edit', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Version: v1\nLine2: alpha\nLine3: bravo\nLine4: charlie';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'smoketest-tools.txt',
             userMessage: 'Writing file for sequential edit test'
@@ -567,7 +570,7 @@ test('EditFileByLine: Works after prior SearchAndReplace edit', async t => {
         
         // First edit: SearchAndReplace (changes hash)
         const searchReplaceResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: fileId,
             oldString: 'Version: v1',
             newString: 'Version: v2',
@@ -585,7 +588,7 @@ test('EditFileByLine: Works after prior SearchAndReplace edit', async t => {
         
         // Second edit: EditFileByLine (should work after hash change)
         const editByLineResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: fileId, // Use same fileId - should resolve correctly after hash change
             startLine: 3,
             endLine: 3,
@@ -601,7 +604,7 @@ test('EditFileByLine: Works after prior SearchAndReplace edit', async t => {
         // Verify final content
         await new Promise(resolve => setTimeout(resolve, 500));
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: fileId,
             userMessage: 'Reading final file content'
         });
@@ -616,13 +619,13 @@ test('EditFileByLine: Works after prior SearchAndReplace edit', async t => {
 });
 
 test('ReadTextFile: Gets fresh content after EditFileByLine', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Line1: alpha\nLine2: bravo\nLine3: charlie';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'read-after-edit.txt',
             userMessage: 'Writing file for read-after-edit test'
@@ -643,7 +646,7 @@ test('ReadTextFile: Gets fresh content after EditFileByLine', async t => {
         
         // Edit the file
         const editResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: fileId,
             startLine: 2,
             endLine: 2,
@@ -659,7 +662,7 @@ test('ReadTextFile: Gets fresh content after EditFileByLine', async t => {
         
         // Read file - should get fresh content (not cached)
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: fileId,
             userMessage: 'Reading file after edit'
         });
@@ -674,12 +677,12 @@ test('ReadTextFile: Gets fresh content after EditFileByLine', async t => {
 });
 
 test('EditFileByLine: Error handling - line out of range', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write a file with 2 lines
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: 'Line 1\nLine 2',
             filename: 'rangetest2.txt',
             userMessage: 'Writing test file'
@@ -697,7 +700,7 @@ test('EditFileByLine: Error handling - line out of range', async t => {
         
         // Try to modify line 10 (doesn't exist)
         const result = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'rangetest2.txt',
             startLine: 10,
             endLine: 10,
@@ -716,13 +719,13 @@ test('EditFileByLine: Error handling - line out of range', async t => {
 // ========== EditFileBySearchAndReplace Tests ==========
 
 test('EditFileBySearchAndReplace: Replace first occurrence', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Hello world\nThis is a test\nHello again';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'searchreplace.txt',
             userMessage: 'Writing file for search replace test'
@@ -740,7 +743,7 @@ test('EditFileBySearchAndReplace: Replace first occurrence', async t => {
         
         // Replace first occurrence of "Hello"
         const modifyResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'searchreplace.txt',
             oldString: 'Hello',
             newString: 'Hi',
@@ -758,7 +761,7 @@ test('EditFileBySearchAndReplace: Replace first occurrence', async t => {
         // Read back to verify
         await new Promise(resolve => setTimeout(resolve, 500));
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: modifyParsed.fileId || 'searchreplace.txt',
             userMessage: 'Reading modified file'
         });
@@ -772,13 +775,13 @@ test('EditFileBySearchAndReplace: Replace first occurrence', async t => {
 });
 
 test('EditFileBySearchAndReplace: Replace all occurrences', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Hello world\nThis is a test\nHello again';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'searchreplaceall.txt',
             userMessage: 'Writing file for search replace all test'
@@ -796,7 +799,7 @@ test('EditFileBySearchAndReplace: Replace all occurrences', async t => {
         
         // Replace all occurrences of "Hello"
         const modifyResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'searchreplaceall.txt',
             oldString: 'Hello',
             newString: 'Hi',
@@ -813,7 +816,7 @@ test('EditFileBySearchAndReplace: Replace all occurrences', async t => {
         // Read back to verify
         await new Promise(resolve => setTimeout(resolve, 500));
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: modifyParsed.fileId || 'searchreplaceall.txt',
             userMessage: 'Reading modified file'
         });
@@ -827,13 +830,13 @@ test('EditFileBySearchAndReplace: Replace all occurrences', async t => {
 });
 
 test('EditFileBySearchAndReplace: Replace multiline string', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Line 1\nLine 2\nLine 3\nLine 2\nLine 4';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'multiline.txt',
             userMessage: 'Writing file for multiline replace test'
@@ -851,7 +854,7 @@ test('EditFileBySearchAndReplace: Replace multiline string', async t => {
         
         // Replace multiline string
         const modifyResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'multiline.txt',
             oldString: 'Line 2\nLine 3',
             newString: 'Replaced 2\nReplaced 3',
@@ -865,7 +868,7 @@ test('EditFileBySearchAndReplace: Replace multiline string', async t => {
         // Read back to verify
         await new Promise(resolve => setTimeout(resolve, 500));
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: modifyParsed.fileId || 'multiline.txt',
             userMessage: 'Reading modified file'
         });
@@ -879,12 +882,12 @@ test('EditFileBySearchAndReplace: Replace multiline string', async t => {
 });
 
 test('EditFileBySearchAndReplace: Error handling - string not found', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write a file
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: 'Line 1\nLine 2',
             filename: 'notfound.txt',
             userMessage: 'Writing test file'
@@ -902,7 +905,7 @@ test('EditFileBySearchAndReplace: Error handling - string not found', async t =>
         
         // Try to replace a string that doesn't exist
         const result = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: writeParsed.fileId || 'notfound.txt',
             oldString: 'This string does not exist',
             newString: 'replacement',
@@ -920,13 +923,13 @@ test('EditFileBySearchAndReplace: Error handling - string not found', async t =>
 // ========== Data Integrity Tests ==========
 
 test('EditFile: Old file preserved if upload fails (data integrity)', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Original content\nLine 2\nLine 3';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'integrity-test.txt',
             userMessage: 'Writing file for integrity test'
@@ -948,7 +951,7 @@ test('EditFile: Old file preserved if upload fails (data integrity)', async t =>
         // Verify original file is readable
         await new Promise(resolve => setTimeout(resolve, 500));
         const readOriginal = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: originalFileId,
             userMessage: 'Reading original file'
         });
@@ -958,7 +961,7 @@ test('EditFile: Old file preserved if upload fails (data integrity)', async t =>
         
         // Edit the file (this should upload first, then delete old file)
         const modifyResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: originalFileId,
             startLine: 1,
             endLine: 1,
@@ -978,7 +981,7 @@ test('EditFile: Old file preserved if upload fails (data integrity)', async t =>
         // Verify new file has correct content
         await new Promise(resolve => setTimeout(resolve, 500));
         const readModified = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: modifyParsed.fileId || originalFileId,
             userMessage: 'Reading modified file'
         });
@@ -989,7 +992,7 @@ test('EditFile: Old file preserved if upload fails (data integrity)', async t =>
         
         // Verify file collection was updated with new URL (proves upload happened first)
         const listResult = await callPathway('sys_tool_file_collection', {
-            contextId,
+            agentContext,
             userMessage: 'List files'
         });
         const listParsed = JSON.parse(listResult);
@@ -1016,13 +1019,13 @@ test('EditFile: Old file preserved if upload fails (data integrity)', async t =>
 // ========== Serialization Tests ==========
 
 test('EditFile: Concurrent edits are serialized (no race conditions)', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file with numbered lines
         const initialContent = 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'serialization-test.txt',
             userMessage: 'Writing file for serialization test'
@@ -1092,7 +1095,7 @@ test('EditFile: Concurrent edits are serialized (no race conditions)', async t =
         
         // Read the final file content
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: fileId,
             userMessage: 'Reading final file after concurrent edits'
         });
@@ -1116,13 +1119,13 @@ test('EditFile: Concurrent edits are serialized (no race conditions)', async t =
 });
 
 test('EditFile: Sequential edits maintain order (serialization verification)', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // Write initial file
         const initialContent = 'Version: 0';
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: initialContent,
             filename: 'order-test.txt',
             userMessage: 'Writing file for order test'
@@ -1184,7 +1187,7 @@ test('EditFile: Sequential edits maintain order (serialization verification)', a
         
         // Read final content
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: fileId,
             userMessage: 'Reading final file'
         });
@@ -1208,12 +1211,12 @@ test('EditFile: Sequential edits maintain order (serialization verification)', a
 // ========== Integration Tests ==========
 
 test('File Operations: Write, Read, Modify workflow', async t => {
-    const contextId = createTestContext();
+    const { contextId, agentContext } = createTestContext();
     
     try {
         // 1. Write a file
         const writeResult = await callPathway('sys_tool_writefile', {
-            contextId,
+            agentContext,
             content: 'Initial content\nLine 2\nLine 3',
             filename: 'workflow.txt',
             userMessage: 'Writing initial file'
@@ -1234,7 +1237,7 @@ test('File Operations: Write, Read, Modify workflow', async t => {
         
         // 2. Read the file
         const readResult = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: fileId,
             userMessage: 'Reading file'
         });
@@ -1247,7 +1250,7 @@ test('File Operations: Write, Read, Modify workflow', async t => {
         
         // 3. Modify the file
         const modifyResult = await callPathway('sys_tool_editfile', {
-            contextId,
+            agentContext,
             file: fileId,
             startLine: 2,
             endLine: 2,
@@ -1262,7 +1265,7 @@ test('File Operations: Write, Read, Modify workflow', async t => {
         
         // 4. Read again to verify modification
         const readResult2 = await callPathway('sys_tool_readfile', {
-            contextId,
+            agentContext,
             file: fileId,
             userMessage: 'Reading modified file'
         });
@@ -1271,6 +1274,53 @@ test('File Operations: Write, Read, Modify workflow', async t => {
         t.is(readParsed2.success, true);
         const lines = readParsed2.content.split('\n');
         t.is(lines[1], 'Modified Line 2');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+// ========== Backward Compatibility Test ==========
+
+test('Backward compat: contextId without agentContext still works', async t => {
+    // Test that passing contextId directly (without agentContext) still works
+    // The pathwayResolver should automatically create agentContext from contextId
+    const contextId = `test-backcompat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    
+    try {
+        const content = 'Backward compatibility test content';
+        const filename = 'backcompat.txt';
+        
+        // Use contextId directly instead of agentContext
+        const result = await callPathway('sys_tool_writefile', {
+            contextId,  // Legacy format - no agentContext
+            content,
+            filename,
+            userMessage: 'Testing backward compatibility'
+        });
+        
+        const parsed = JSON.parse(result);
+        
+        // Skip test if file handler is not configured
+        if (!parsed.success && parsed.error?.includes('WHISPER_MEDIA_API_URL')) {
+            t.log('Test skipped - file handler URL not configured');
+            t.pass();
+            return;
+        }
+        
+        t.is(parsed.success, true, 'Write with legacy contextId should succeed');
+        t.is(parsed.filename, filename);
+        t.truthy(parsed.url);
+        
+        // Also test read with legacy format
+        const readResult = await callPathway('sys_tool_readfile', {
+            contextId,  // Legacy format
+            file: parsed.fileId || filename,
+            userMessage: 'Reading with legacy contextId'
+        });
+        
+        const readParsed = JSON.parse(readResult);
+        t.is(readParsed.success, true, 'Read with legacy contextId should succeed');
+        t.is(readParsed.content, content);
     } finally {
         await cleanup(contextId);
     }

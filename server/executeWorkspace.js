@@ -87,13 +87,56 @@ const executePathwayWithFallback = async (pathway, pathwayArgs, contextValue, in
     if (cortexPathwayName) {
         // Use the specific cortex pathway
         // Transform parameters for cortex pathway
-        // Spread all pathway args first (including contextId, contextKey, etc.), then override specific fields
+        // Spread all pathway args first, then override specific fields
         const cortexArgs = {
-            ...pathwayArgs, // Spread all pathway args (including contextId, contextKey, etc.)
+            ...pathwayArgs, // Spread all pathway args
             model: pathway.model || pathwayArgs.model || "labeeb-agent", // Use pathway model or default
             chatHistory: pathwayArgs.chatHistory ? JSON.parse(JSON.stringify(pathwayArgs.chatHistory)) : [],
             systemPrompt: pathway.systemPrompt || pathwayArgs.systemPrompt
         };
+        
+        // Transform old parameters to new format for run_workspace_agent
+        if (cortexPathwayName === 'run_workspace_agent') {
+            // Remove old aiStyle parameter (no longer used)
+            delete cortexArgs.aiStyle;
+            
+            // Transform context parameters to agentContext array format (only if agentContext not already provided)
+            if (!cortexArgs.agentContext && (cortexArgs.contextId || cortexArgs.contextKey || cortexArgs.altContextId || cortexArgs.altContextKey)) {
+                const agentContext = [];
+                
+                // Add primary context if present
+                if (cortexArgs.contextId) {
+                    agentContext.push({
+                        contextId: cortexArgs.contextId,
+                        contextKey: cortexArgs.contextKey || null,
+                        default: true
+                    });
+                }
+                
+                // Add alternate context if present
+                if (cortexArgs.altContextId) {
+                    agentContext.push({
+                        contextId: cortexArgs.altContextId,
+                        contextKey: cortexArgs.altContextKey || null,
+                        default: false
+                    });
+                }
+                
+                // If we have at least one context, set agentContext and remove old params
+                if (agentContext.length > 0) {
+                    cortexArgs.agentContext = agentContext;
+                    delete cortexArgs.contextId;
+                    delete cortexArgs.contextKey;
+                    delete cortexArgs.altContextId;
+                    delete cortexArgs.altContextKey;
+                }
+            }
+            
+            // Ensure researchMode defaults to false if not provided
+            if (cortexArgs.researchMode === undefined) {
+                cortexArgs.researchMode = false;
+            }
+        }
         
         // If we have text parameter, we need to add it to the chatHistory
         if (pathwayArgs.text) {

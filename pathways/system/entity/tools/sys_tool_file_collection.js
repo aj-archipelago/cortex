@@ -3,7 +3,7 @@
 // Uses Redis hash maps (FileStoreMap:ctx:<contextId>) for storage
 // Supports atomic rename/tag/notes updates via UpdateFileMetadata
 import logger from '../../../../lib/logger.js';
-import { addFileToCollection, loadFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
+import { addFileToCollection, loadFileCollection, loadMergedFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache, getDefaultContext } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -198,7 +198,12 @@ export default {
     ],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { contextId, contextKey } = args;
+        const defaultCtx = getDefaultContext(args.agentContext);
+        if (!defaultCtx) {
+            throw new Error("agentContext with at least one default context is required");
+        }
+        const contextId = defaultCtx.contextId;
+        const contextKey = defaultCtx.contextKey || null;
 
         // Determine which function was called based on which parameters are present
         // Order matters: check most specific operations first
@@ -359,12 +364,12 @@ export default {
                 const safeFilterTags = Array.isArray(filterTags) ? filterTags : [];
                 const queryLower = query.toLowerCase();
                 
-                // Update lastAccessed for matching files directly (atomic operations)
-                const allFiles = await loadFileCollection(contextId, contextKey, false);
+                // Load primary collection for lastAccessed updates (only update files in primary context)
+                const primaryFiles = await loadFileCollection(contextId, contextKey, false);
                 const now = new Date().toISOString();
                 
-                // Find matching files and update lastAccessed directly
-                for (const file of allFiles) {
+                // Find matching files in primary collection and update lastAccessed directly
+                for (const file of primaryFiles) {
                     if (!file.hash) continue;
                     
                     // Fallback to filename if displayFilename is not set (for files uploaded before displayFilename was added)
@@ -387,8 +392,8 @@ export default {
                     }
                 }
                 
-                // Reload collection to get results (after update)
-                const updatedFiles = await loadFileCollection(contextId, contextKey, false);
+                // Load merged collection for search results (includes all agentContext files)
+                const updatedFiles = await loadMergedFileCollection(args.agentContext);
                 
                 // Filter and sort results (for display only, not modifying)
                 let results = updatedFiles.filter(file => {
@@ -560,8 +565,8 @@ export default {
                 // List collection (read-only, no locking needed)
                 const { tags: filterTags = [], sortBy = 'date', limit = 50 } = args;
                 
-                // Use useCache: false to ensure we get the latest file data (important after edits)
-                const collection = await loadFileCollection(contextId, contextKey, false);
+                // Use merged collection to include files from all agentContext contexts
+                const collection = await loadMergedFileCollection(args.agentContext);
                 let results = collection;
 
                 // Filter by tags if provided

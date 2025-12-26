@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadFileCollection, getMimeTypeFromFilename, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache, getActualContentMimeType } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadMergedFileCollection, getDefaultContext, getMimeTypeFromFilename, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache, getActualContentMimeType } from '../../../../lib/fileUtils.js';
 
 // Maximum file size for editing (50MB) - prevents memory blowup on huge files
 const MAX_EDITABLE_FILE_SIZE = 50 * 1024 * 1024;
@@ -145,7 +145,19 @@ export default {
     ],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { file, startLine, endLine, content, oldString, newString, replaceAll = false, contextId, contextKey } = args;
+        const { file, startLine, endLine, content, oldString, newString, replaceAll = false, agentContext } = args;
+        
+        const defaultCtx = getDefaultContext(agentContext);
+        if (!defaultCtx) {
+            const errorResult = {
+                success: false,
+                error: "agentContext with at least one default context is required"
+            };
+            resolver.tool = JSON.stringify({ toolUsed: "EditFile" });
+            return JSON.stringify(errorResult);
+        }
+        const contextId = defaultCtx.contextId;
+        const contextKey = defaultCtx.contextKey || null;
         
         // Determine which tool was called based on parameters
         const isSearchReplace = oldString !== undefined && newString !== undefined;
@@ -162,14 +174,6 @@ export default {
             return JSON.stringify(errorResult);
         }
 
-        if (!contextId) {
-            const errorResult = {
-                success: false,
-                error: "contextId is required for file modification"
-            };
-            resolver.tool = JSON.stringify({ toolUsed: toolName });
-            return JSON.stringify(errorResult);
-        }
 
         // Validate that we have the right parameters for the tool being used
         if (!isSearchReplace && !isEditByLine) {
@@ -243,7 +247,7 @@ export default {
 
         try {
             // Resolve file ID first (needed for serialization)
-            const collection = await loadFileCollection(contextId, contextKey, false);
+            const collection = await loadMergedFileCollection(agentContext);
             const foundFile = findFileInCollection(file, collection);
             
             if (!foundFile) {
@@ -281,7 +285,7 @@ export default {
                     logger.info(`Using cached content for: ${currentFile.displayFilename || file}`);
                 } else {
                     // First edit in session: load collection and download file
-                    const currentCollection = await loadFileCollection(contextId, contextKey, false);
+                    const currentCollection = await loadMergedFileCollection(agentContext);
                     currentFile = findFileInCollection(file, currentCollection);
 
                     if (!currentFile) {
@@ -467,7 +471,7 @@ export default {
             if (editResult._isLastOperation) {
                 // Flush: upload the final content and update metadata
                 const { modifiedContent, currentFile, fileIdToUpdate: initialFileId, filename, mimeType, 
-                        modificationInfo, message, contextId: ctxId, contextKey: ctxKey, resolver: res,
+                        modificationInfo, message, resolver: res,
                         file: fileParam, isEditByLine: isByLine, isSearchReplace: isSR, replaceAll: repAll,
                         startLine: sLine, endLine: eLine } = editResult;
                 
@@ -482,7 +486,7 @@ export default {
                     mimeType,
                     filename,
                     res,
-                    ctxId
+                    contextId
                 );
 
                 if (!uploadResult || !uploadResult.url) {
@@ -490,7 +494,8 @@ export default {
                 }
 
                 // Update the file collection entry directly (atomic operation)
-                const latestCollection = await loadFileCollection(ctxId, ctxKey, false);
+                // Use default context from agentContext for consistency
+                const latestCollection = await loadMergedFileCollection(agentContext);
                 let fileToUpdate = latestCollection.find(f => f.id === fileIdToUpdate);
                 
                 // If not found by ID, try to find by the original file parameter
@@ -512,7 +517,7 @@ export default {
                     const { getRedisClient } = await import('../../../../lib/fileUtils.js');
                     const redisClient = await getRedisClient();
                     if (redisClient) {
-                        const contextMapKey = `FileStoreMap:ctx:${ctxId}`;
+                        const contextMapKey = `FileStoreMap:ctx:${contextId}`;
                         
                         const existingDataStr = await redisClient.hget(contextMapKey, uploadResult.hash);
                         let existingData = {};
@@ -541,21 +546,21 @@ export default {
                             permanent: fileToUpdate.permanent || false
                         };
                         
-                        await writeFileDataToRedis(redisClient, contextMapKey, uploadResult.hash, fileData, ctxKey);
+                        await writeFileDataToRedis(redisClient, contextMapKey, uploadResult.hash, fileData, contextKey);
                         
                         if (oldHashToDelete && oldHashToDelete !== uploadResult.hash) {
                             await redisClient.hdel(contextMapKey, oldHashToDelete);
                         }
                         
-                        invalidateFileCollectionCache(ctxId, ctxKey);
+                        invalidateFileCollectionCache(contextId, contextKey);
                     }
                 } else if (fileToUpdate.hash) {
-                    await updateFileMetadata(ctxId, fileToUpdate.hash, {
+                    await updateFileMetadata(contextId, fileToUpdate.hash, {
                         filename: filename,
                         lastAccessed: new Date().toISOString()
-                    }, ctxKey);
+                    }, contextKey);
                     
-                    invalidateFileCollectionCache(ctxId, ctxKey);
+                    invalidateFileCollectionCache(contextId, contextKey);
                 }
 
                 // Delete old file version (fire-and-forget)
@@ -563,7 +568,7 @@ export default {
                     (async () => {
                         try {
                             logger.info(`Deleting old file version with hash ${oldHashToDelete} (background task)`);
-                            await deleteFileByHash(oldHashToDelete, res, ctxId);
+                            await deleteFileByHash(oldHashToDelete, res, contextId);
                         } catch (cleanupError) {
                             logger.warn(`Failed to cleanup old file version: ${cleanupError.message}`);
                         }
