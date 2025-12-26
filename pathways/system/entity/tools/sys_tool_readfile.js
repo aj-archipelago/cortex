@@ -135,20 +135,20 @@ export default {
             const MAX_CHARS = 100000;
             const MAX_LINES = 1000;
             
-            let { cloudUrl, file, startChar, endChar, startLine, endLine, contextId, contextKey } = args;
+            let { cloudUrl, file, startChar, endChar, startLine, endLine } = args;
             
             // If file parameter is provided, resolve it to a URL using the common utility
             if (file) {
-                if (!contextId) {
+                if (!args.agentContext || !Array.isArray(args.agentContext) || args.agentContext.length === 0) {
                     const errorResult = {
                         success: false,
-                        error: "contextId is required when using the 'file' parameter. Use ListFileCollection or SearchFileCollection to find available files."
+                        error: "agentContext is required when using the 'file' parameter. Use ListFileCollection or SearchFileCollection to find available files."
                     };
                     resolver.tool = JSON.stringify({ toolUsed: "ReadFile" });
                     return JSON.stringify(errorResult);
                 }
                 // Use useCache: false to ensure we get the latest file data (important after edits)
-                const resolvedUrl = await resolveFileParameter(file, contextId, contextKey, { useCache: false, altContextId: args.altContextId });
+                const resolvedUrl = await resolveFileParameter(file, args.agentContext, { useCache: false });
                 if (!resolvedUrl) {
                     const errorResult = {
                         success: false,

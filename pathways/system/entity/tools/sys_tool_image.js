@@ -113,7 +113,7 @@ export default {
                 
                 for (let i = 0; i < imagesToProcess.length; i++) {
                     const imageRef = imagesToProcess[i];
-                    const resolved = await resolveFileParameter(imageRef, args.contextId, args.contextKey, { altContextId: args.altContextId });
+                    const resolved = await resolveFileParameter(imageRef, args.agentContext);
                     if (!resolved) {
                         throw new Error(`File not found: "${imageRef}". Use ListFileCollection or SearchFileCollection to find available files.`);
                     }

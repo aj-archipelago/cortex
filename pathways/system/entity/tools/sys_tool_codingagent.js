@@ -81,12 +81,12 @@ export default {
 
     executePathway: async ({args, resolver}) => {
         try {
-            const { codingTask, userMessage, inputFiles, codingTaskKeywords, contextId, contextKey } = args;
+            const { codingTask, userMessage, inputFiles, codingTaskKeywords } = args;
 
             let taskSuffix = "";
             if (inputFiles) {
-                if (!contextId) {
-                    throw new Error("contextId is required when using the 'inputFiles' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                if (!args.agentContext || !Array.isArray(args.agentContext) || args.agentContext.length === 0) {
+                    throw new Error("agentContext is required when using the 'inputFiles' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
                 }
                 
                 // Resolve file parameters to URLs
@@ -100,7 +100,7 @@ export default {
                 
                 for (const fileRef of fileReferences) {
                     // Try to resolve each file reference
-                    const resolvedUrl = await resolveFileParameter(fileRef, contextId, contextKey, { altContextId: args.altContextId });
+                    const resolvedUrl = await resolveFileParameter(fileRef, args.agentContext);
                     if (resolvedUrl) {
                         resolvedUrls.push(resolvedUrl);
                     } else {

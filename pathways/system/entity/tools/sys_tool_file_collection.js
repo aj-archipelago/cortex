@@ -3,7 +3,7 @@
 // Uses Redis hash maps (FileStoreMap:ctx:<contextId>) for storage
 // Supports atomic rename/tag/notes updates via UpdateFileMetadata
 import logger from '../../../../lib/logger.js';
-import { addFileToCollection, loadFileCollection, loadMergedFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
+import { addFileToCollection, loadFileCollection, loadMergedFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache, getDefaultContext } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -198,7 +198,12 @@ export default {
     ],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { contextId, contextKey } = args;
+        const defaultCtx = getDefaultContext(args.agentContext);
+        if (!defaultCtx) {
+            throw new Error("agentContext with at least one default context is required");
+        }
+        const contextId = defaultCtx.contextId;
+        const contextKey = defaultCtx.contextKey || null;
 
         // Determine which function was called based on which parameters are present
         // Order matters: check most specific operations first
@@ -349,7 +354,7 @@ export default {
 
             } else if (isSearch) {
                 // Search collection
-                const { query, tags: filterTags = [], limit = 20, altContextId } = args;
+                const { query, tags: filterTags = [], limit = 20 } = args;
                 
                 if (!query || typeof query !== 'string') {
                     throw new Error("query is required and must be a string");
@@ -387,8 +392,8 @@ export default {
                     }
                 }
                 
-                // Load merged collection for search results (includes altContextId files)
-                const updatedFiles = await loadMergedFileCollection(contextId, contextKey, altContextId);
+                // Load merged collection for search results (includes all agentContext files)
+                const updatedFiles = await loadMergedFileCollection(args.agentContext);
                 
                 // Filter and sort results (for display only, not modifying)
                 let results = updatedFiles.filter(file => {
@@ -558,10 +563,10 @@ export default {
 
             } else {
                 // List collection (read-only, no locking needed)
-                const { tags: filterTags = [], sortBy = 'date', limit = 50, altContextId } = args;
+                const { tags: filterTags = [], sortBy = 'date', limit = 50 } = args;
                 
-                // Use merged collection to include files from altContextId if present
-                const collection = await loadMergedFileCollection(contextId, contextKey, altContextId);
+                // Use merged collection to include files from all agentContext contexts
+                const collection = await loadMergedFileCollection(args.agentContext);
                 let results = collection;
 
                 // Filter by tags if provided

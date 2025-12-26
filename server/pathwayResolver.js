@@ -367,6 +367,16 @@ class PathwayResolver {
     }
 
     async executePathway(args) {
+        // Extract contextId and contextKey from agentContext for downstream pathways
+        // This allows pathways that use agentContext to work with legacy pathways that expect contextId/contextKey
+        if (args.agentContext && Array.isArray(args.agentContext) && args.agentContext.length > 0) {
+            const defaultCtx = args.agentContext.find(ctx => ctx.default) || args.agentContext[0];
+            if (defaultCtx) {
+                args.contextId = defaultCtx.contextId;
+                args.contextKey = defaultCtx.contextKey || null;
+            }
+        }
+        
         if (this.pathway.executePathway && typeof this.pathway.executePathway === 'function') {
             return await this.pathway.executePathway({ args, runAllPrompts: this.promptAndParse.bind(this), resolver: this });
         }

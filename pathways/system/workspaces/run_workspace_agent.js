@@ -6,9 +6,11 @@ export default {
 
     inputParameters: {
         model: "oai-gpt41",
-        aiStyle: "OpenAI",
         chatHistory: [{role: '', content: []}],
-        altContextId: "",
+        researchMode: false,
+        agentContext: [
+            { contextId: "", contextKey: "", default: true }
+        ]
     },
     timeout: 600,
 

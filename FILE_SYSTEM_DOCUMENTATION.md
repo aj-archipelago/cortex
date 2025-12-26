@@ -728,44 +728,66 @@ RemoveFileFromCollection Tool
 
 ## Key Concepts
 
-### 1. Context Scoping (`contextId` and `altContextId`)
+### 1. Context Scoping (`agentContext`)
 
 **Purpose**: Per-user/per-context file isolation with optional cross-context reading
 
 **Usage**:
-- **`contextId`**: Primary context for file operations (strongly recommended)
-- **`altContextId`**: Optional secondary context for read-only file access (union)
+- **`agentContext`**: Array of context objects, each with:
+  - `contextId`: Context identifier (required)
+  - `contextKey`: Encryption key for this context (optional, `null` for unencrypted)
+  - `default`: Boolean indicating the default context for write operations (required)
 - Stored in Redis with scoped keys: `FileStoreMap:ctx:<contextId>`
 
 **Benefits**:
 - Prevents hash collisions between users
 - Enables per-user file management
 - Supports multi-tenant applications
-- `altContextId` allows reading files from a secondary context (e.g., workspace files)
+- Multiple contexts allow reading files from secondary contexts (e.g., workspace files)
+- Separate encryption keys allow user-encrypted files alongside unencrypted shared workspace files
+- Centralized context management (single parameter instead of multiple)
 
 **Example**:
 ```javascript
-// Upload with contextId
-await uploadFileToCloud(fileBuffer, mimeType, filename, resolver, "user-123");
+// Upload with contextId (from default context)
+const agentContext = [
+    { contextId: "user-123", contextKey: userContextKey, default: true }
+];
+await uploadFileToCloud(fileBuffer, mimeType, filename, resolver, agentContext[0].contextId);
 
 // Check hash with contextId
-await checkHashExists(hash, fileHandlerUrl, null, "user-123");
+await checkHashExists(hash, fileHandlerUrl, null, agentContext[0].contextId);
 
 // Delete with contextId
-await deleteFileByHash(hash, resolver, "user-123");
+await deleteFileByHash(hash, resolver, agentContext[0].contextId);
 
 // Load merged collection (reads from both contexts)
-const collection = await loadMergedFileCollection("user-123", null, "workspace-456");
+// User context is encrypted (userContextKey), workspace is not (null)
+const agentContext = [
+    { contextId: "user-123", contextKey: userContextKey, default: true },
+    { contextId: "workspace-456", contextKey: null, default: false }  // Shared workspace, unencrypted
+];
+const collection = await loadMergedFileCollection(agentContext);
 
-// Resolve file from either context
-const url = await resolveFileParameter("file.pdf", "user-123", null, { altContextId: "workspace-456" });
+// Resolve file from any context in agentContext
+const url = await resolveFileParameter("file.pdf", agentContext);
 ```
 
-**`altContextId` Behavior**:
-- Files are read from both `contextId` and `altContextId` (union)
-- Writes/updates only go to the context that owns the file
-- Deduplication: if a file exists in both contexts (same hash), primary takes precedence
-- Files from alt context bypass `inCollection` filtering (all files accessible)
+**`agentContext` Behavior**:
+- Files are read from all contexts in the array (union)
+- Each context uses its own encryption key (`contextKey`)
+- Shared workspaces typically use `contextKey: null` (unencrypted) since they're shared between users
+- Writes/updates only go to the context marked as `default: true`, using its `contextKey`
+- Deduplication: if a file exists in multiple contexts (same hash), the first context takes precedence
+- Files from non-default contexts bypass `inCollection` filtering (all files accessible)
+- The default context is used for all write operations (uploads, updates, deletions)
+
+**`agentContext` Security Note**:
+- `agentContext` allows reading files from multiple contexts, including files that bypass `inCollection` filtering
+- **Important**: `agentContext` should be treated as a privileged, server-derived value
+- Server-side authorization MUST verify that any contexts in `agentContext` are restricted to trusted, same-tenant contexts (e.g., derived from workspace membership) before use
+- Never accept `agentContext` directly from untrusted client inputs without validation
+- Only the default context should be used for write operations - non-default contexts are read-only
 
 ### 2. Permanent Files (`permanent` flag)
 
@@ -967,21 +989,19 @@ Loads ALL files from a context, bypassing `inCollection` filtering.
   - `contextId`: Context ID (required)
   - `contextKey`: Optional encryption key
 - **Returns**: Array of all file entries (no filtering)
-- **Used by**: `loadMergedFileCollection` when loading alt context files
+- **Used by**: `loadMergedFileCollection` when loading files from all contexts
 
-#### `loadMergedFileCollection(contextId, contextKey, altContextId)`
-Loads merged file collection from primary and optional alternate context.
+#### `loadMergedFileCollection(agentContext)`
+Loads merged file collection from one or more contexts.
 - **Parameters**:
-  - `contextId`: Primary context ID (required)
-  - `contextKey`: Optional encryption key
-  - `altContextId`: Optional alternate context ID for union
-- **Returns**: Array of file entries from both contexts (deduplicated by hash/url/gcs)
+  - `agentContext`: Array of context objects, each with `{ contextId, contextKey, default }` (required)
+- **Returns**: Array of file entries from all contexts (deduplicated by hash/url/gcs)
 - **Process**:
-  1. Loads primary collection via `loadFileCollection()`
+  1. Loads first context collection via `loadFileCollectionAll()` with its `contextKey`
   2. Tags each file with `_contextId` (internal, stripped before returning to callers)
-  3. If `altContextId` provided, loads alt collection via `loadFileCollectionAll()` (bypasses inCollection filter)
-  4. Deduplicates: primary takes precedence if same file exists in both
-  5. Returns merged collection
+  3. For each additional context, loads collection via `loadFileCollectionAll()` with its `contextKey`
+  4. Deduplicates: earlier contexts take precedence if same file exists in multiple
+  5. Returns merged collection (with `_contextId` stripped before returning)
 - **Used by**: `syncAndStripFilesFromChatHistory`, `getAvailableFiles`, `resolveFileParameter`, file tools
 
 #### `saveFileCollection(contextId, contextKey, collection)`
@@ -1035,35 +1055,31 @@ Adds file to collection via atomic operation.
   5. Merges with existing CFH data if hash already exists
 - **Used by**: WriteFile, Image tools, FileCollection tool
 
-#### `syncAndStripFilesFromChatHistory(chatHistory, contextId, contextKey, altContextId)`
+#### `syncAndStripFilesFromChatHistory(chatHistory, agentContext)`
 Processes chat history files based on collection membership.
 - **Parameters**:
   - `chatHistory`: Chat history array to process
-  - `contextId`: Context ID (required)
-  - `contextKey`: Optional encryption key
-  - `altContextId`: Optional alternate context ID for merged collection
+  - `agentContext`: Array of context objects, each with `{ contextId, contextKey, default }` (required)
 - **Returns**: `{ chatHistory, availableFiles }` - processed chat history and formatted file list
 - **Process**:
-  1. Loads merged file collection (contextId + altContextId)
+  1. Loads merged file collection from all contexts in `agentContext`
   2. For each file in chat history:
-     - If in collection: strip from message, update lastAccessed and inCollection in owning context
+     - If in collection: strip from message, update lastAccessed and inCollection in owning context (using that context's key)
      - If not in collection: leave in message as-is
   3. Returns processed history and available files string
-  4. Uses atomic operations per file, updating the context that owns each file
+  4. Uses atomic operations per file, updating the context that owns each file (identified by `_contextId` tag)
 - **Used by**: `sys_entity_agent` to process incoming chat history
 
 ### File Resolution
 
-#### `resolveFileParameter(fileParam, contextId, contextKey, options)`
+#### `resolveFileParameter(fileParam, agentContext, options)`
 Resolves file parameter to file URL.
 - **Parameters**:
   - `fileParam`: File ID, filename, URL, or hash
-  - `contextId`: Context ID (required)
-  - `contextKey`: Optional encryption key
+  - `agentContext`: Array of context objects, each with `{ contextId, contextKey, default }` (required)
   - `options`: Optional options object:
     - `preferGcs`: Boolean - prefer GCS URL over Azure URL
     - `useCache`: Boolean - use cache (default: true)
-    - `altContextId`: String - alternate context ID for merged collection lookup
 - **Returns**: File URL string (Azure or GCS) or `null` if not found
 - **Matching** (via `findFileInCollection()`):
   - Exact ID match
@@ -1071,6 +1087,10 @@ Resolves file parameter to file URL.
   - Exact URL match (Azure or GCS)
   - Exact filename match (case-insensitive, basename comparison)
   - Fuzzy filename match (contains, minimum 4 characters)
+- **Process**:
+  1. Loads merged file collection from all contexts in `agentContext`
+  2. Searches merged collection for matching file
+  3. Returns file URL if found
 - **Used by**: ReadFile, EditFile, and other tools that need file URLs
 
 #### `findFileInCollection(fileParam, collection)`
@@ -1081,17 +1101,17 @@ Finds file in collection array.
 - **Returns**: File entry or `null`
 - **Used by**: `resolveFileParameter`
 
-#### `generateFileMessageContent(fileParam, contextId, contextKey)`
+#### `generateFileMessageContent(fileParam, agentContext)`
 Generates file content for LLM messages.
 - **Parameters**:
   - `fileParam`: File identifier (ID, filename, URL, or hash)
-  - `contextId`: Context ID (required)
-  - `contextKey`: Optional encryption key
+  - `agentContext`: Array of context objects, each with `{ contextId, contextKey, default }` (required)
 - **Returns**: File content object with `type`, `url`, `gcs`, `hash` or `null`
 - **Process**:
-  1. Finds file in collection via `findFileInCollection()`
-  2. Resolves to short-lived URL via `ensureShortLivedUrl()`
-  3. Returns OpenAI-compatible format: `{type: 'image_url', url, gcs, hash}`
+  1. Loads merged file collection from all contexts in `agentContext`
+  2. Finds file in merged collection via `findFileInCollection()`
+  3. Resolves to short-lived URL via `ensureShortLivedUrl()` using default context
+  4. Returns OpenAI-compatible format: `{type: 'image_url', url, gcs, hash}`
 - **Used by**: AnalyzeFile tool to inject files into chat history
 
 #### `extractFilesFromChatHistory(chatHistory)`
@@ -1105,21 +1125,26 @@ Extracts file metadata from chat history messages.
   3. Returns normalized format
 - **Used by**: File extraction utilities
 
-#### `getAvailableFiles(chatHistory, contextId, contextKey, altContextId)`
+#### `getAvailableFiles(chatHistory, agentContext)`
 Gets formatted list of available files from collection.
 - **Parameters**:
   - `chatHistory`: Unused (kept for API compatibility)
-  - `contextId`: Context ID (required)
-  - `contextKey`: Optional encryption key
-  - `altContextId`: Optional alternate context ID for merged collection
+  - `agentContext`: Array of context objects, each with `{ contextId, contextKey, default }` (required)
 - **Returns**: Formatted string of available files (last 10 most recent)
 - **Process**:
-  1. Loads merged file collection (contextId + altContextId)
+  1. Loads merged file collection from all contexts in `agentContext`
   2. Formats files via `formatFilesForTemplate()`
   3. Returns compact one-line format per file
 - **Used by**: Template rendering to show available files
 
 ### Utility Functions
+
+#### `getDefaultContext(agentContext)`
+Helper function to extract the default context from an agentContext array.
+- **Parameters**:
+  - `agentContext`: Array of context objects, each with `{ contextId, contextKey, default }`
+- **Returns**: Context object with `default: true`, or first context if none marked as default, or `null` if array is empty
+- **Used by**: Functions that need to determine which context to use for write operations
 
 #### `computeFileHash(filePath)`
 Computes xxhash64 hash of file.

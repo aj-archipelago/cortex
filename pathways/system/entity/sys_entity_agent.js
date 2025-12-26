@@ -63,8 +63,9 @@ export default {
     inputParameters: {
         privateData: false,    
         chatHistory: [{role: '', content: []}],
-        contextId: ``,
-        altContextId: ``,  // Optional secondary context for file collection union (reads only)
+        agentContext: [
+            { contextId: ``, contextKey: ``, default: true }
+        ],
         chatId: ``,
         language: "English",
         aiName: "Jarvis",
@@ -77,8 +78,7 @@ export default {
         entityId: ``,
         researchMode: false,
         userInfo: '',
-        model: 'oai-gpt41',
-        contextKey: ``
+        model: 'oai-gpt41'
     },
     timeout: 600,
 
@@ -549,10 +549,10 @@ export default {
         }
 
         // Process files in chat history:
-        // - Files in collection (contextId + altContextId): stripped, accessible via tools
+        // - Files in collection (all agentContext contexts): stripped, accessible via tools
         // - Files not in collection: left in message for model to see directly
         const { chatHistory: strippedHistory, availableFiles } = await syncAndStripFilesFromChatHistory(
-            args.chatHistory, args.contextId, args.contextKey, args.altContextId
+            args.chatHistory, args.agentContext
         );
         args.chatHistory = strippedHistory;
 

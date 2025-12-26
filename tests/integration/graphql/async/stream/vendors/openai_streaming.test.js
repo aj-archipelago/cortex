@@ -21,8 +21,8 @@ test.after.always('cleanup', async () => {
 test('OpenAI vendor streaming over subscriptions emits OAI-style deltas', async (t) => {
   const response = await testServer.executeOperation({
     query: `
-      query($text: String!, $chatHistory: [MultiMessage]!, $stream: Boolean, $aiStyle: String) {
-        sys_entity_agent(text: $text, chatHistory: $chatHistory, stream: $stream, aiStyle: $aiStyle) {
+      query($text: String!, $chatHistory: [MultiMessage]!, $stream: Boolean) {
+        sys_entity_agent(text: $text, chatHistory: $chatHistory, stream: $stream) {
           result
         }
       }
@@ -30,8 +30,7 @@ test('OpenAI vendor streaming over subscriptions emits OAI-style deltas', async 
     variables: {
       text: 'Say hi',
       chatHistory: [{ role: 'user', content: ['Say hi'] }],
-      stream: true,
-      aiStyle: 'OpenAI'
+      stream: true
     }
   });
 
