@@ -145,7 +145,7 @@ export default {
     ],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { file, startLine, endLine, content, oldString, newString, replaceAll = false, agentContext } = args;
+        const { file, startLine, endLine, content, oldString, newString, replaceAll = false, agentContext, chatId } = args;
         
         const defaultCtx = getDefaultContext(agentContext);
         if (!defaultCtx) {
@@ -514,7 +514,7 @@ export default {
                 
                 // Write new entry with CFH data (url, gcs, hash) + Cortex metadata
                 if (uploadResult.hash) {
-                    const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+                    const { getRedisClient, addChatIdToInCollection, getInCollectionValue } = await import('../../../../lib/fileUtils.js');
                     const redisClient = await getRedisClient();
                     if (redisClient) {
                         const contextMapKey = `FileStoreMap:ctx:${contextId}`;
@@ -529,6 +529,12 @@ export default {
                             }
                         }
                         
+                        // Merge chatId into existing inCollection (reference counting)
+                        const existingInCollection = fileToUpdate.inCollection || existingData.inCollection;
+                        const updatedInCollection = existingInCollection 
+                            ? addChatIdToInCollection(existingInCollection, chatId)
+                            : getInCollectionValue(chatId);
+                        
                         const fileData = {
                             ...existingData,
                             url: uploadResult.url,
@@ -540,7 +546,7 @@ export default {
                             tags: fileToUpdate.tags || [],
                             notes: fileToUpdate.notes || '',
                             mimeType: fileToUpdate.mimeType || mimeType || null,
-                            inCollection: ['*'],
+                            inCollection: updatedInCollection,
                             addedDate: fileToUpdate.addedDate,
                             lastAccessed: new Date().toISOString(),
                             permanent: fileToUpdate.permanent || false
