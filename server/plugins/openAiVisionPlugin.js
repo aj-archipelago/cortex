@@ -159,7 +159,18 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             let totalUnits;
             messages.forEach((message, index) => {
                 //message.content string or array
-                const content = message.content === undefined ? JSON.stringify(sanitizeBase64(message)) : (Array.isArray(message.content) ? message.content.map(item => JSON.stringify(sanitizeBase64(item))).join(', ') : message.content);
+                let content;
+                if (message.content === undefined) {
+                    content = JSON.stringify(sanitizeBase64(message));
+                } else if (Array.isArray(message.content)) {
+                    // Only stringify objects, not strings (which may already be JSON strings)
+                    content = message.content.map(item => {
+                        const sanitized = sanitizeBase64(item);
+                        return typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
+                    }).join(', ');
+                } else {
+                    content = message.content;
+                }
                 const { length, units } = this.getLength(content);
                 const displayContent = this.shortenContent(content);
 
@@ -177,7 +188,16 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             logger.info(`[chat request contained ${totalLength} ${totalUnits}]`);
         } else {
             const message = messages[0];
-            const content = Array.isArray(message.content) ? message.content.map(item => JSON.stringify(sanitizeBase64(item))).join(', ') : message.content;
+            let content;
+            if (Array.isArray(message.content)) {
+                // Only stringify objects, not strings (which may already be JSON strings)
+                content = message.content.map(item => {
+                    const sanitized = sanitizeBase64(item);
+                    return typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
+                }).join(', ');
+            } else {
+                content = message.content;
+            }
             const { length, units } = this.getLength(content);
             logger.info(`[request sent containing ${length} ${units}]`);
             logger.verbose(`${this.shortenContent(content)}`);

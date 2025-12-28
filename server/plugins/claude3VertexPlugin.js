@@ -576,9 +576,16 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       let totalLength = 0;
       let totalUnits;
       messages.forEach((message, index) => {
-        const content = Array.isArray(message.content)
-          ? message.content.map((item) => JSON.stringify(sanitizeBase64(item))).join(", ")
-          : message.content;
+        let content;
+        if (Array.isArray(message.content)) {
+          // Only stringify objects, not strings (which may already be JSON strings)
+          content = message.content.map((item) => {
+            const sanitized = sanitizeBase64(item);
+            return typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
+          }).join(", ");
+        } else {
+          content = message.content;
+        }
         const { length, units } = this.getLength(content);
         const preview = this.shortenContent(content);
 
@@ -593,9 +600,15 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       logger.info(`[chat request contained ${totalLength} ${totalUnits}]`);
     } else {
       const message = messages[0];
-      const content = Array.isArray(message.content)
-        ? message.content.map((item) => JSON.stringify(item)).join(", ")
-        : message.content;
+      let content;
+      if (Array.isArray(message.content)) {
+        // Only stringify objects, not strings (which may already be JSON strings)
+        content = message.content.map((item) => {
+          return typeof item === 'string' ? item : JSON.stringify(item);
+        }).join(", ");
+      } else {
+        content = message.content;
+      }
       const { length, units } = this.getLength(content);
       logger.info(`[request sent containing ${length} ${units}]`);
       logger.verbose(`${this.shortenContent(content)}`);
