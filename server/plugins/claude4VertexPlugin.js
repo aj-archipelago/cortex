@@ -474,14 +474,19 @@ class Claude4VertexPlugin extends Claude3VertexPlugin {
       let totalLength = 0;
       let totalUnits;
       messages.forEach((message, index) => {
-        const content = Array.isArray(message.content)
-          ? message.content.map((item) => {
-              if (item.type === 'document') {
-                return `{type: document, source: ${JSON.stringify(sanitizeBase64(item.source))}}`;
-              }
-              return JSON.stringify(sanitizeBase64(item));
-            }).join(", ")
-          : message.content;
+        let content;
+        if (Array.isArray(message.content)) {
+          // Only stringify objects, not strings (which may already be JSON strings)
+          content = message.content.map((item) => {
+            if (item.type === 'document') {
+              return `{type: document, source: ${JSON.stringify(sanitizeBase64(item.source))}}`;
+            }
+            const sanitized = sanitizeBase64(item);
+            return typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
+          }).join(", ");
+        } else {
+          content = message.content;
+        }
         const { length, units } = this.getLength(content);
         const preview = this.shortenContent(content);
 
@@ -496,14 +501,19 @@ class Claude4VertexPlugin extends Claude3VertexPlugin {
       logger.info(`[chat request contained ${totalLength} ${totalUnits}]`);
     } else {
       const message = messages[0];
-      const content = Array.isArray(message.content)
-        ? message.content.map((item) => {
-            if (item.type === 'document') {
-              return `{type: document, source: ${JSON.stringify(sanitizeBase64(item.source))}}`;
-            }
-            return JSON.stringify(sanitizeBase64(item));
-          }).join(", ")
-        : message.content;
+      let content;
+      if (Array.isArray(message.content)) {
+        // Only stringify objects, not strings (which may already be JSON strings)
+        content = message.content.map((item) => {
+          if (item.type === 'document') {
+            return `{type: document, source: ${JSON.stringify(sanitizeBase64(item.source))}}`;
+          }
+          const sanitized = sanitizeBase64(item);
+          return typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
+        }).join(", ");
+      } else {
+        content = message.content;
+      }
       const { length, units } = this.getLength(content);
       logger.info(`[request sent containing ${length} ${units}]`);
       logger.verbose(`${this.shortenContent(content)}`);
