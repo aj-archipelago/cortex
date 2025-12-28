@@ -204,6 +204,7 @@ export default {
         }
         const contextId = defaultCtx.contextId;
         const contextKey = defaultCtx.contextKey || null;
+        const chatId = args.chatId || null;
 
         // Determine which function was called based on which parameters are present
         // Order matters: check most specific operations first
@@ -293,7 +294,7 @@ export default {
                 metadataUpdate.lastAccessed = new Date().toISOString();
 
                 // Perform the atomic update
-                const success = await updateFileMetadata(contextId, foundFile.hash, metadataUpdate, contextKey);
+                const success = await updateFileMetadata(contextId, foundFile.hash, metadataUpdate, contextKey, chatId);
                 
                 if (!success) {
                     throw new Error(`Failed to update file metadata for "${file}"`);
@@ -342,7 +343,8 @@ export default {
                     hash,
                     fileUrl,
                     resolver,
-                    permanent
+                    permanent,
+                    chatId
                 );
 
                 resolver.tool = JSON.stringify({ toolUsed: "AddFileToCollection" });
@@ -386,6 +388,7 @@ export default {
                     
                     if (matchesQuery && matchesTags) {
                         // Update lastAccessed directly (atomic operation)
+                        // Don't pass chatId - we're only updating access time, not changing inCollection
                         await updateFileMetadata(contextId, file.hash, {
                             lastAccessed: now
                         }, contextKey);
@@ -449,7 +452,8 @@ export default {
                 });
 
             } else if (isRemove) {
-                // Remove file(s) from collection and delete from cloud storage
+                // Remove file(s) from this chat's collection (reference counting)
+                // Only delete from cloud if no other chats reference the file
                 const { fileIds, fileId } = args;
                 
                 // Normalize input to array
@@ -465,9 +469,9 @@ export default {
                 }
 
                 let notFoundFiles = [];
-                let filesToRemove = [];
+                let filesToProcess = [];
 
-                // Load collection ONCE to find all files and their hashes
+                // Load collection ONCE to find all files and their data
                 // Use useCache: false to get fresh data
                 const collection = await loadFileCollection(contextId, contextKey, false);
                 
@@ -479,12 +483,13 @@ export default {
                     
                     if (foundFile) {
                         // Avoid duplicates (by hash since that's the unique key in Redis)
-                        if (!filesToRemove.some(f => f.hash === foundFile.hash)) {
-                            filesToRemove.push({
+                        if (!filesToProcess.some(f => f.hash === foundFile.hash)) {
+                            filesToProcess.push({
                                 id: foundFile.id,
                                 displayFilename: foundFile.displayFilename || foundFile.filename || null,
                                 hash: foundFile.hash || null,
-                                permanent: foundFile.permanent ?? false
+                                permanent: foundFile.permanent ?? false,
+                                inCollection: foundFile.inCollection || []
                             });
                         }
                     } else {
@@ -492,34 +497,76 @@ export default {
                     }
                 }
 
-                if (filesToRemove.length === 0 && notFoundFiles.length > 0) {
+                if (filesToProcess.length === 0 && notFoundFiles.length > 0) {
                     throw new Error(`No files found matching: ${notFoundFiles.join(', ')}`);
                 }
 
-                // Use the hashes collected from the single collection load
-                // No need to reload - we already have all the info we need
-                const hashesToDelete = filesToRemove.filter(f => f.hash);
-                
-                // Delete entries directly from hash map (atomic operations)
-                const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+                // Import helpers for reference counting
+                const { getRedisClient, removeChatIdFromInCollection } = await import('../../../../lib/fileUtils.js');
                 const redisClient = await getRedisClient();
+                const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+                
+                // Track files that will be fully deleted vs just updated
+                const filesToFullyDelete = [];
+                const filesToUpdate = [];
+                
+                for (const fileInfo of filesToProcess) {
+                    if (!fileInfo.hash) continue;
+                    
+                    // Check if file is global ('*') - global files can't be removed per-chat
+                    const isGlobal = Array.isArray(fileInfo.inCollection) && fileInfo.inCollection.includes('*');
+                    
+                    if (isGlobal) {
+                        // Global file - fully remove it (no reference counting for global files)
+                        filesToFullyDelete.push(fileInfo);
+                    } else if (!chatId) {
+                        // No chatId context - fully remove
+                        filesToFullyDelete.push(fileInfo);
+                    } else {
+                        // Remove this chatId from inCollection
+                        const updatedInCollection = removeChatIdFromInCollection(fileInfo.inCollection, chatId);
+                        
+                        if (updatedInCollection.length === 0) {
+                            // No more references - fully delete
+                            filesToFullyDelete.push(fileInfo);
+                        } else {
+                            // Still has references from other chats - just update inCollection
+                            filesToUpdate.push({ ...fileInfo, updatedInCollection });
+                        }
+                    }
+                }
+                
+                // Update files that still have references (remove this chatId only)
+                for (const fileInfo of filesToUpdate) {
+                    if (redisClient) {
+                        try {
+                            const existingDataStr = await redisClient.hget(contextMapKey, fileInfo.hash);
+                            if (existingDataStr) {
+                                const existingData = JSON.parse(existingDataStr);
+                                existingData.inCollection = fileInfo.updatedInCollection;
+                                await redisClient.hset(contextMapKey, fileInfo.hash, JSON.stringify(existingData));
+                                logger.info(`Removed chatId ${chatId} from file: ${fileInfo.displayFilename} (still referenced by: ${fileInfo.updatedInCollection.join(', ')})`);
+                            }
+                        } catch (e) {
+                            logger.warn(`Failed to update inCollection for file ${fileInfo.hash}: ${e.message}`);
+                        }
+                    }
+                }
+                
+                // Fully delete files with no remaining references
                 if (redisClient) {
-                    const contextMapKey = `FileStoreMap:ctx:${contextId}`;
-                    for (const fileInfo of hashesToDelete) {
+                    for (const fileInfo of filesToFullyDelete) {
                         await redisClient.hdel(contextMapKey, fileInfo.hash);
                     }
                 }
                 
-                // Always invalidate cache immediately so list operations reflect removals
-                // (even if Redis operations failed, cache might be stale)
+                // Always invalidate cache immediately so list operations reflect changes
                 invalidateFileCollectionCache(contextId, contextKey);
 
-                // Delete files from cloud storage ASYNC (fire and forget, but log errors)
-                // We do this after updating collection so user gets fast response and files are "gone" from UI immediately
-                // Use hashes captured inside the lock to ensure we delete the correct files
+                // Delete files from cloud storage ASYNC (only for files with no remaining references)
                 // IMPORTANT: Don't delete permanent files from cloud storage - they should persist
                 (async () => {
-                    for (const fileInfo of hashesToDelete) {
+                    for (const fileInfo of filesToFullyDelete) {
                         // Skip deletion if file is marked as permanent
                         if (fileInfo.permanent) {
                             logger.info(`Skipping cloud deletion for permanent file: ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
@@ -527,7 +574,7 @@ export default {
                         }
                         
                         try {
-                            logger.info(`Deleting file from cloud storage: ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
+                            logger.info(`Deleting file from cloud storage (no remaining references): ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
                             await deleteFileByHash(fileInfo.hash, resolver, contextId);
                         } catch (error) {
                             logger.warn(`Failed to delete file ${fileInfo.displayFilename} (hash: ${fileInfo.hash}) from cloud storage: ${error?.message || String(error)}`);
@@ -535,8 +582,13 @@ export default {
                     }
                 })().catch(err => logger.error(`Async cloud deletion error: ${err}`));
 
-                const removedCount = filesToRemove.length;
-                const removedFiles = filesToRemove;
+                const removedCount = filesToProcess.length;
+                const removedFiles = filesToProcess.map(f => ({
+                    id: f.id,
+                    displayFilename: f.displayFilename,
+                    hash: f.hash,
+                    fullyDeleted: filesToFullyDelete.some(fd => fd.hash === f.hash)
+                }));
 
                 // Get remaining files count after deletion
                 const remainingCollection = await loadFileCollection(contextId, contextKey, false);

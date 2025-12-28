@@ -19,7 +19,7 @@ export default {
     isMutation: true, // Declaratively mark this as a Mutation
 
     resolver: async (_parent, args, _contextValue, _info) => {
-        const { agentContext, hash, displayFilename, tags, notes, mimeType, permanent, inCollection } = args;
+        const { agentContext, hash, displayFilename, tags, notes, mimeType, permanent, inCollection, chatId } = args;
         
         const defaultCtx = getDefaultContext(agentContext);
         if (!defaultCtx) {
@@ -59,12 +59,13 @@ export default {
             }
             // inCollection can be: boolean true/false, or array of chat IDs (e.g., ['*'] for global, ['chat-123'] for specific chat)
             // Will be normalized by updateFileMetadata: true -> ['*'], false -> undefined (removed), array -> as-is
+            // If not provided, will default based on chatId
             if (inCollection !== undefined && inCollection !== null) {
                 metadata.inCollection = inCollection;
             }
             
             // Update metadata (only Cortex-managed fields)
-            const success = await updateFileMetadata(contextId, hash, metadata, contextKey);
+            const success = await updateFileMetadata(contextId, hash, metadata, contextKey, chatId);
             
             if (success) {
                 return JSON.stringify({ 

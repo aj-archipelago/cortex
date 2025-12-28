@@ -16,7 +16,16 @@ export default {
     model: 'oai-gpt4o',
 
     resolver: async (_parent, args, _contextValue, _info) => {
-        const { agentContext } = args;
+        let { agentContext } = args;
+        
+        // Backward compatibility: if contextId is provided without agentContext, create agentContext
+        if ((!agentContext || !Array.isArray(agentContext) || agentContext.length === 0) && args.contextId) {
+            agentContext = [{ 
+                contextId: args.contextId, 
+                contextKey: args.contextKey || null, 
+                default: true 
+            }];
+        }
         
         // Validate that agentContext is provided
         if (!agentContext || !Array.isArray(agentContext) || agentContext.length === 0) {
