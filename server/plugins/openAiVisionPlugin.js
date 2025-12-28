@@ -245,11 +245,14 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             return null;
         }
 
+        // Normalize usage data to standard format
+        const normalizedUsage = this.normalizeUsage(data.usage);
+
         // Create standardized CortexResponse object
         const cortexResponse = new CortexResponse({
             output_text: message.content || "",
             finishReason: choice.finish_reason || 'stop',
-            usage: data.usage || null,
+            usage: normalizedUsage,
             metadata: {
                 model: this.modelName
             }

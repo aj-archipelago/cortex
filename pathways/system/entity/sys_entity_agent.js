@@ -119,7 +119,15 @@ export default {
                 
                 const validToolCalls = tool_calls.filter(tc => tc && tc.function && tc.function.name);
                 
-                const toolResults = await Promise.all(validToolCalls.map(async (toolCall) => {
+                // Limit tool calls to remaining budget to prevent exceeding MAX_TOOL_CALLS
+                const remainingBudget = MAX_TOOL_CALLS - pathwayResolver.toolCallCount;
+                const toolCallsToExecute = validToolCalls.slice(0, remainingBudget);
+                
+                if (validToolCalls.length > remainingBudget) {
+                    logger.warn(`Limiting tool calls: ${validToolCalls.length} requested, but only ${remainingBudget} remaining (${pathwayResolver.toolCallCount}/${MAX_TOOL_CALLS} used). Executing first ${remainingBudget} tool calls.`);
+                }
+                
+                const toolResults = await Promise.all(toolCallsToExecute.map(async (toolCall) => {
                     try {
                         if (!toolCall?.function?.arguments) {
                             throw new Error('Invalid tool call structure: missing function arguments');
@@ -406,6 +414,106 @@ export default {
             }
 
             args.chatHistory = finalMessages;
+
+            // Compress chat history if approaching context window limit
+            if (pathwayResolver.modelExecutor?.plugin?.getModelMaxPromptTokens && 
+                pathwayResolver.modelExecutor?.plugin?.countMessagesTokens) {
+                const maxTokens = pathwayResolver.modelExecutor.plugin.getModelMaxPromptTokens();
+                
+                // Try to use actual usage from the last response if available (most accurate)
+                // Otherwise try countTokensBeforeRequest endpoint, then fall back to estimation
+                let currentTokens;
+                
+                // Construct a minimal cortexRequest for countTokens endpoint if needed
+                // We need to get the URL from the model configuration
+                let mockCortexRequest = null;
+                if (pathwayResolver.modelExecutor?.plugin?.countTokensBeforeRequest) {
+                    // Create a CortexRequest to get the properly constructed URL
+                    const CortexRequest = (await import('../../../lib/cortexRequest.js')).default;
+                    const tempCortexRequest = new CortexRequest({ pathwayResolver });
+                    if (tempCortexRequest.url) {
+                        mockCortexRequest = { url: tempCortexRequest.url };
+                    }
+                }
+                
+                if (message instanceof CortexResponse && message.usage) {
+                    // Use actual prompt tokens from the last API response (most accurate)
+                    currentTokens = await pathwayResolver.modelExecutor.plugin.getPromptTokens(message.usage, null, mockCortexRequest);
+                    // If usage didn't provide prompt tokens, try countTokensBeforeRequest
+                    if (currentTokens === 0 && mockCortexRequest) {
+                        currentTokens = await pathwayResolver.modelExecutor.plugin.countTokensBeforeRequest(finalMessages, mockCortexRequest) || 0;
+                    }
+                    // Final fallback to estimation
+                    if (currentTokens === 0) {
+                        currentTokens = pathwayResolver.modelExecutor.plugin.countMessagesTokens(finalMessages);
+                    }
+                } else {
+                    // No usage available - try countTokensBeforeRequest endpoint first
+                    if (mockCortexRequest) {
+                        currentTokens = await pathwayResolver.modelExecutor.plugin.countTokensBeforeRequest(finalMessages, mockCortexRequest);
+                    }
+                    // Fallback to estimation if countTokensBeforeRequest not available or failed
+                    if (!currentTokens || currentTokens === 0) {
+                        currentTokens = pathwayResolver.modelExecutor.plugin.countMessagesTokens(finalMessages);
+                    }
+                }
+                
+                if (currentTokens > maxTokens * 0.7) {
+                    try {
+                        const systemMessages = finalMessages.filter(m => m.role === 'system');
+                        const nonSystemMessages = finalMessages.filter(m => m.role !== 'system');
+                        
+                        // Build map: tool_call_id -> index of message containing that tool_call
+                        const toolCallIndexMap = new Map();
+                        for (let i = 0; i < nonSystemMessages.length; i++) {
+                            const m = nonSystemMessages[i];
+                            if (m.tool_calls) {
+                                m.tool_calls.forEach(tc => tc.id && toolCallIndexMap.set(tc.id, i));
+                            }
+                        }
+                        
+                        // Find safe split point: start with last 10 msgs, then move back if needed
+                        // to ensure no tool result in toKeep references a tool_call in toCompress
+                        let splitIndex = Math.max(0, nonSystemMessages.length - 10);
+                        
+                        // Keep moving split back until all tool results in toKeep have their calls in toKeep too
+                        let adjusted = true;
+                        while (adjusted && splitIndex > 0) {
+                            adjusted = false;
+                            for (let i = splitIndex; i < nonSystemMessages.length; i++) {
+                                const m = nonSystemMessages[i];
+                                if (m.role === 'tool' && m.tool_call_id) {
+                                    const callIndex = toolCallIndexMap.get(m.tool_call_id);
+                                    if (callIndex !== undefined && callIndex < splitIndex) {
+                                        splitIndex = callIndex;
+                                        adjusted = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        const toCompress = nonSystemMessages.slice(0, splitIndex);
+                        const toKeep = nonSystemMessages.slice(splitIndex);
+                        
+                        if (toCompress.length >= 5) {
+                            const summary = await callPathway('sys_compress_chat_history', {
+                                ...args, chatHistory: toCompress, stream: false
+                            }, pathwayResolver);
+                            
+                            args.chatHistory = [
+                                ...systemMessages,
+                                { role: 'user', content: `[Compressed history:]\n\n${typeof summary === 'string' ? summary : JSON.stringify(summary)}` },
+                                ...toKeep
+                            ];
+                            const newTokens = pathwayResolver.modelExecutor.plugin.countMessagesTokens(args.chatHistory);
+                            logger.info(`Compressed chat history: ${currentTokens} -> ${newTokens} tokens`);
+                        }
+                    } catch (e) {
+                        logger.error(`Compression failed: ${e.message}`);
+                    }
+                }
+            }
 
             // clear any accumulated pathwayResolver errors from the tools
             pathwayResolver.errors = [];

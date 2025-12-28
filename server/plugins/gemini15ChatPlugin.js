@@ -1,6 +1,7 @@
 // gemini15ChatPlugin.js
 import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
+import axios from 'axios';
 
 const mergeResults = (data) => {
     let output = '';
@@ -40,6 +41,96 @@ const mergeResults = (data) => {
 class Gemini15ChatPlugin extends ModelPlugin {
     constructor(pathway, model) {
         super(pathway, model);
+    }
+
+    /**
+     * Normalizes Gemini usage format to standard format.
+     * Gemini format: { promptTokenCount, candidatesTokenCount, totalTokenCount, cachedContentTokenCount }
+     */
+    normalizeUsage(usage) {
+        if (!usage) return null;
+
+        // Gemini format: { promptTokenCount, candidatesTokenCount, totalTokenCount, cachedContentTokenCount }
+        if (usage.promptTokenCount !== undefined) {
+            return {
+                promptTokens: usage.promptTokenCount + (usage.cachedContentTokenCount || 0),
+                completionTokens: usage.candidatesTokenCount || 0,
+                totalTokens: usage.totalTokenCount || (usage.promptTokenCount + (usage.candidatesTokenCount || 0) + (usage.cachedContentTokenCount || 0))
+            };
+        }
+
+        // Already normalized format
+        if (usage.promptTokens !== undefined) {
+            return {
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens || 0,
+                totalTokens: usage.totalTokens || (usage.promptTokens + (usage.completionTokens || 0))
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Counts tokens using Vertex AI countTokens endpoint before making a request.
+     * This provides accurate token counts for Gemini models.
+     * 
+     * @param {Array} messages - Messages in OpenAI format (will be converted to Gemini format)
+     * @param {Object} cortexRequest - Request context containing URL and auth
+     * @returns {Promise<number|null>} Token count, or null if endpoint unavailable
+     */
+    async countTokensBeforeRequest(messages, cortexRequest = null) {
+        if (!cortexRequest || !cortexRequest.url) {
+            return null;
+        }
+
+        try {
+            // Convert messages to Gemini format
+            const geminiMessages = this.convertMessagesToGemini(messages);
+            
+            // Build request payload
+            const requestData = {
+                contents: geminiMessages.modifiedMessages
+            };
+            
+            // Add system instruction if present
+            if (geminiMessages.system && geminiMessages.system.parts && geminiMessages.system.parts.length > 0) {
+                requestData.systemInstruction = {
+                    parts: geminiMessages.system.parts
+                };
+            }
+
+            // Extract base URL (remove any existing suffix like :generateContent)
+            const baseUrl = cortexRequest.url.split(':')[0];
+            const countTokensUrl = `${baseUrl}:countTokens`;
+
+            // Get auth token
+            const gcpAuthTokenHelper = this.config.get('gcpAuthTokenHelper');
+            if (!gcpAuthTokenHelper) {
+                return null;
+            }
+
+            const authToken = await gcpAuthTokenHelper.getAccessToken();
+            
+            // Make request to countTokens endpoint
+            const response = await axios.post(countTokensUrl, requestData, {
+                headers: {
+                    'Authorization': `Bearer ${authToken}`,
+                    'Content-Type': 'application/json; charset=utf-8'
+                }
+            });
+
+            // Return totalTokens from response
+            if (response.data && response.data.totalTokens !== undefined) {
+                return response.data.totalTokens;
+            }
+
+            return null;
+        } catch (error) {
+            // Log but don't throw - fallback to estimation
+            logger.debug(`countTokensBeforeRequest failed: ${error.message}`);
+            return null;
+        }
     }
 
     // This code converts either OpenAI or PaLM messages to the Gemini messages format

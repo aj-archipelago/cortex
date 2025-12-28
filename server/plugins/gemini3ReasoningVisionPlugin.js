@@ -237,11 +237,14 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
                     // Create new CortexResponse with thoughts
                     // Preserve the baseResponse text if it's a string
                     const outputText = typeof baseResponse === 'string' ? baseResponse : '';
+                    // Normalize usage data to standard format
+                    const normalizedUsage = this.normalizeUsage(data?.usageMetadata);
+
                     return new CortexResponse({
                         output_text: outputText,
                         thoughts: thoughtSummaries,
                         finishReason: data?.candidates?.[0]?.finishReason === 'STOP' ? 'stop' : 'length',
-                        usage: data?.usageMetadata || null,
+                        usage: normalizedUsage,
                         metadata: { model: this.modelName }
                     });
                 }

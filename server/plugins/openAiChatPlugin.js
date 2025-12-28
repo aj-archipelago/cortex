@@ -2,10 +2,131 @@
 import ModelPlugin from './modelPlugin.js';
 import logger from '../../lib/logger.js';
 import CortexResponse from '../../lib/cortexResponse.js';
+import { encoding_for_model } from '@dqbd/tiktoken';
 
 class OpenAIChatPlugin extends ModelPlugin {
     constructor(pathway, model) {
         super(pathway, model);
+    }
+
+    /**
+     * Normalizes OpenAI usage format to standard format.
+     * OpenAI format: { prompt_tokens, completion_tokens, total_tokens }
+     */
+    normalizeUsage(usage) {
+        if (!usage) return null;
+
+        // OpenAI format: { prompt_tokens, completion_tokens, total_tokens }
+        if (usage.prompt_tokens !== undefined) {
+            return {
+                promptTokens: usage.prompt_tokens,
+                completionTokens: usage.completion_tokens || 0,
+                totalTokens: usage.total_tokens || (usage.prompt_tokens + (usage.completion_tokens || 0))
+            };
+        }
+
+        // Already normalized format
+        if (usage.promptTokens !== undefined) {
+            return {
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens || 0,
+                totalTokens: usage.totalTokens || (usage.promptTokens + (usage.completionTokens || 0))
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Counts tokens using tiktoken library for accurate OpenAI token counting.
+     * This provides accurate token counts for OpenAI models using the model-specific tokenizer.
+     * 
+     * @param {Array} messages - Messages in OpenAI format
+     * @param {Object} cortexRequest - Request context (not used for OpenAI, but kept for interface consistency)
+     * @returns {Promise<number|null>} Token count, or null if counting fails
+     */
+    async countTokensBeforeRequest(messages, cortexRequest = null) {
+        if (!messages || !Array.isArray(messages) || messages.length === 0) {
+            return 0;
+        }
+
+        try {
+            // Get the model name - try modelName first, then model.name
+            const modelName = this.modelName || this.model?.name || 'gpt-4o';
+            
+            // Get the appropriate encoder for this model
+            // tiktoken will fall back to cl100k_base if model not recognized
+            let encoder;
+            try {
+                encoder = encoding_for_model(modelName);
+            } catch (error) {
+                // If model not recognized, use cl100k_base (used by most OpenAI models)
+                logger.debug(`Model ${modelName} not recognized by tiktoken, using cl100k_base encoder`);
+                const { get_encoding } = await import('@dqbd/tiktoken');
+                encoder = get_encoding('cl100k_base');
+            }
+
+            let totalTokens = 0;
+
+            // Count tokens according to OpenAI's message format
+            // See: https://github.com/openai/openai-python/blob/main/src/openai/lib/encoding.py
+            for (const message of messages) {
+                // Per-message overhead: <|im_start|>role\ncontent<|im_end|>\n
+                // This is typically 4 tokens per message
+                totalTokens += 4;
+
+                // Count role tokens
+                const role = message.role || '';
+                if (role) {
+                    totalTokens += encoder.encode(role).length;
+                }
+
+                // Count content tokens
+                if (typeof message.content === 'string') {
+                    totalTokens += encoder.encode(message.content).length;
+                } else if (Array.isArray(message.content)) {
+                    // Handle multimodal content
+                    for (const item of message.content) {
+                        if (typeof item === 'string') {
+                            totalTokens += encoder.encode(item).length;
+                        } else if (item.type === 'text') {
+                            totalTokens += encoder.encode(item.text || '').length;
+                        } else if (item.type === 'image_url') {
+                            // For vision models, images are encoded differently
+                            // Base64 images: ~85 tokens for 512x512, scales with resolution
+                            // For now, use a reasonable estimate
+                            // OpenAI's actual encoding is more complex (base64 + metadata)
+                            totalTokens += 170; // Conservative estimate for high-res images
+                        }
+                    }
+                }
+
+                // Count tool_calls if present
+                if (message.tool_calls && Array.isArray(message.tool_calls)) {
+                    for (const toolCall of message.tool_calls) {
+                        // Tool call overhead: function name, arguments, etc.
+                        totalTokens += 4; // Base overhead
+                        if (toolCall.function) {
+                            if (toolCall.function.name) {
+                                totalTokens += encoder.encode(toolCall.function.name).length;
+                            }
+                            if (toolCall.function.arguments) {
+                                totalTokens += encoder.encode(toolCall.function.arguments).length;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Add final <|im_start|>assistant<|im_end|> overhead (typically 2 tokens)
+            totalTokens += 2;
+
+            return totalTokens;
+        } catch (error) {
+            // Log but don't throw - fallback to estimation
+            logger.debug(`countTokensBeforeRequest failed for OpenAI: ${error.message}`);
+            return null;
+        }
     }
 
     // convert to OpenAI messages array format if necessary
@@ -116,11 +237,14 @@ class OpenAIChatPlugin extends ModelPlugin {
             return null;
         }
 
+        // Normalize usage data to standard format (plugin handles its own format)
+        const normalizedUsage = this.normalizeUsage(data.usage);
+
         // Create standardized CortexResponse object
         const cortexResponse = new CortexResponse({
             output_text: message.content || "",
             finishReason: choice.finish_reason || 'stop',
-            usage: data.usage || null,
+            usage: normalizedUsage,
             metadata: {
                 model: this.modelName
             }
