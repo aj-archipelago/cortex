@@ -452,7 +452,11 @@ export default {
         
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-        const { useMemory: entityUseMemory = true, name: entityName, instructions: entityInstructions } = entityConfig || {};
+        const { name: entityName, instructions: entityInstructions } = entityConfig || {};
+        
+        // Determine useMemory: entityConfig.useMemory === false is a hard disable (entity can't use memory)
+        // Otherwise args.useMemory can disable it, default true
+        args.useMemory = entityConfig?.useMemory === false ? false : (args.useMemory ?? true);
 
         // Initialize chat history if needed
         if (!args.chatHistory || args.chatHistory.length === 0) {
@@ -488,7 +492,7 @@ export default {
 
         // Kick off the memory lookup required pathway in parallel - this takes like 500ms so we want to start it early
         let memoryLookupRequiredPromise = null;
-        if (entityUseMemory) {
+        if (args.useMemory) {
             const chatHistoryLastTurn = args.chatHistory.slice(-2);
             const chatHistorySizeOk = (JSON.stringify(chatHistoryLastTurn).length < 5000);
             if (chatHistorySizeOk) {
@@ -512,7 +516,6 @@ export default {
             entityId,
             entityTools,
             entityToolsOpenAiFormat,
-            entityUseMemory,
             entityInstructions,
             voiceResponse,
             aiMemorySelfModify,
@@ -524,7 +527,7 @@ export default {
 
         const promptPrefix = '';
 
-        const memoryTemplates = entityUseMemory ? 
+        const memoryTemplates = args.useMemory ? 
             `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_CONTEXT}}\n\n` : '';
 
         const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n`;
@@ -560,7 +563,7 @@ export default {
         const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
       
         // Asynchronously manage memory for this context
-        if (args.aiMemorySelfModify && entityUseMemory) {
+        if (args.aiMemorySelfModify && args.useMemory) {
             callPathway('sys_memory_manager', {  ...args, chatHistory: truncatedChatHistory, stream: false })    
             .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
         }

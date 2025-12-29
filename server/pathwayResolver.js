@@ -404,38 +404,45 @@ class PathwayResolver {
         }
 
         // Get saved context from contextId or change contextId if needed
-        const { contextId } = args;
+        const { contextId, useMemory } = args;
         this.savedContextId = contextId ? contextId : uuidv4();
+        
+        // Check if memory is enabled (default true for backward compatibility)
+        const memoryEnabled = useMemory !== false;
         
         const loadMemory = async () => {
             try {
-                // Load saved context and core memory if it exists
-                const [savedContext, memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
-                    (getvWithDoubleDecryption && await getvWithDoubleDecryption(this.savedContextId, this.args?.contextKey)) || {},
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1, stripMetadata: true, contextKey: this.args?.contextKey }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1, stripMetadata: true, contextKey: this.args?.contextKey }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryTopics', priority: 0, numResults: 10, contextKey: this.args?.contextKey }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1, stripMetadata: true, contextKey: this.args?.contextKey }),
-                    callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryContext', priority: 0, contextKey: this.args?.contextKey }),
-                ]).catch(error => {
-                    this.logError(`Failed to load memory: ${error.message}`);
-                    return [{},'','','','',''];
-                });
+                // Always load savedContext (legacy feature)
+                this.savedContext = (getvWithDoubleDecryption && await getvWithDoubleDecryption(this.savedContextId, this.args?.contextKey)) || {};
+                this.initialState = { savedContext: this.savedContext };
+                
+                // Only load memory* sections if memory is enabled
+                if (memoryEnabled) {
+                    const [memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
+                        callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memorySelf', priority: 1, stripMetadata: true, contextKey: this.args?.contextKey }),
+                        callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryDirectives', priority: 1, stripMetadata: true, contextKey: this.args?.contextKey }),
+                        callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryTopics', priority: 0, numResults: 10, contextKey: this.args?.contextKey }),
+                        callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryUser', priority: 1, stripMetadata: true, contextKey: this.args?.contextKey }),
+                        callPathway('sys_read_memory', { contextId: this.savedContextId, section: 'memoryContext', priority: 0, contextKey: this.args?.contextKey }),
+                    ]).catch(error => {
+                        this.logError(`Failed to load memory: ${error.message}`);
+                        return ['','','','',''];
+                    });
 
-                this.savedContext = savedContext;
-                this.memorySelf = memorySelf || '';
-                this.memoryDirectives = memoryDirectives || '';
-                this.memoryTopics = memoryTopics || '';
-                this.memoryUser = memoryUser || '';
-                this.memoryContext = memoryContext || '';
-
-                // Store initial state for comparison
-                this.initialState = {
-                    savedContext: this.savedContext,
-                };
+                    this.memorySelf = memorySelf || '';
+                    this.memoryDirectives = memoryDirectives || '';
+                    this.memoryTopics = memoryTopics || '';
+                    this.memoryUser = memoryUser || '';
+                    this.memoryContext = memoryContext || '';
+                } else {
+                    this.memorySelf = '';
+                    this.memoryDirectives = '';
+                    this.memoryTopics = '';
+                    this.memoryUser = '';
+                    this.memoryContext = '';
+                }
             } catch (error) {
                 this.logError(`Error in loadMemory: ${error.message}`);
-                // Set default values in case of error
                 this.savedContext = {};
                 this.memorySelf = '';
                 this.memoryDirectives = '';
@@ -447,6 +454,7 @@ class PathwayResolver {
         };
 
         const saveChangedMemory = async () => {
+            // Always save savedContext (legacy feature, not governed by useMemory)
             this.savedContextId = this.savedContextId || uuidv4();
             
             const currentState = {
