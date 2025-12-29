@@ -358,10 +358,13 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
 
             // Check for safety blocks
             if (safetyRatings?.some(rating => rating.blocked)) {
+                // Normalize usage data to standard format
+                const normalizedUsage = this.normalizeUsage(data.usageMetadata);
+
                 const cortexResponse = new CortexResponse({
                     output_text: "\n\n*** Response blocked due to safety ratings ***",
                     finishReason: "content_filter",
-                    usage: data.usageMetadata || null,
+                    usage: normalizedUsage,
                     metadata: { model: this.modelName }
                 });
                 return cortexResponse;
@@ -381,11 +384,14 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     }
                 }
 
+                // Normalize usage data to standard format
+                const normalizedUsage = this.normalizeUsage(data.usageMetadata);
+
                 // Create CortexResponse object
                 const cortexResponse = new CortexResponse({
                     output_text: textContent,
                     finishReason: toolCalls.length > 0 ? "tool_calls" : (finishReason === "STOP" ? "stop" : "length"),
-                    usage: data.usageMetadata || null,
+                    usage: normalizedUsage,
                     metadata: { model: this.modelName }
                 });
 

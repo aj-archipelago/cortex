@@ -120,6 +120,98 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     this.contentBuffer = ''; // Initialize content buffer
     this.hadToolCalls = false; // Track if this stream had tool calls
   }
+
+  /**
+   * Normalizes Claude usage format to standard format.
+   * Claude format: { input_tokens, output_tokens }
+   */
+  normalizeUsage(usage) {
+    if (!usage) return null;
+
+    // Claude format: { input_tokens, output_tokens }
+    if (usage.input_tokens !== undefined) {
+      return {
+        promptTokens: usage.input_tokens,
+        completionTokens: usage.output_tokens || 0,
+        totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0)
+      };
+    }
+
+    // Already normalized format
+    if (usage.promptTokens !== undefined) {
+      return {
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens || 0,
+        totalTokens: usage.totalTokens || (usage.promptTokens + (usage.completionTokens || 0))
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Counts tokens using Claude Vertex AI count-tokens endpoint before making a request.
+   * This provides accurate token counts for Claude models.
+   * 
+   * @param {Array} messages - Messages in OpenAI format (will be converted to Claude format)
+   * @param {Object} cortexRequest - Request context containing URL and auth
+   * @returns {Promise<number|null>} Token count, or null if endpoint unavailable
+   */
+  async countTokensBeforeRequest(messages, cortexRequest = null) {
+    if (!cortexRequest || !cortexRequest.url) {
+      return null;
+    }
+
+    try {
+      // Convert messages to Claude format
+      const { system, modifiedMessages } = await this.convertMessagesToClaudeVertex(messages);
+      
+      // Build request payload for count-tokens endpoint
+      const requestData = {
+        messages: modifiedMessages
+      };
+      
+      // Add system instruction if present
+      if (system) {
+        requestData.system = system;
+      }
+
+      // Extract base URL and construct count-tokens endpoint
+      // Base URL format: https://LOCATION-aiplatform.googleapis.com/v1/projects/PROJECT_ID/locations/LOCATION/publishers/anthropic/models/MODEL_ID
+      // Count tokens endpoint: .../publishers/anthropic/models/count-tokens:rawPredict
+      // Remove any existing suffix (like :rawPredict)
+      const baseUrl = cortexRequest.url.split(':')[0];
+      // Replace the model name with "count-tokens" in the path
+      const countTokensUrl = baseUrl.replace(/\/models\/[^\/]+$/, '/models/count-tokens:rawPredict');
+
+      // Get auth token
+      const gcpAuthTokenHelper = this.config.get('gcpAuthTokenHelper');
+      if (!gcpAuthTokenHelper) {
+        return null;
+      }
+
+      const authToken = await gcpAuthTokenHelper.getAccessToken();
+      
+      // Make request to count-tokens endpoint
+      const response = await axios.post(countTokensUrl, requestData, {
+        headers: {
+          'Authorization': `Bearer ${authToken}`,
+          'Content-Type': 'application/json; charset=utf-8'
+        }
+      });
+
+      // Return input_tokens from response
+      if (response.data && response.data.input_tokens !== undefined) {
+        return response.data.input_tokens;
+      }
+
+      return null;
+    } catch (error) {
+      // Log but don't throw - fallback to estimation
+      logger.debug(`countTokensBeforeRequest failed for Claude: ${error.message}`);
+      return null;
+    }
+  }
   
   // Override tryParseMessages to add Claude-specific content types (tool_use, tool_result)
   async tryParseMessages(messages) {
@@ -285,11 +377,14 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     if (content && Array.isArray(content)) {
       const toolUses = content.filter(item => item.type === "tool_use");
       if (toolUses.length > 0) {
+        // Normalize usage data to standard format
+        const normalizedUsage = this.normalizeUsage(usage);
+
         // Create standardized CortexResponse object for tool calls
         const cortexResponse = new CortexResponse({
           output_text: "",
           finishReason: "tool_calls",
-          usage: usage || null,
+          usage: normalizedUsage,
           metadata: {
             model: this.modelName
           }
@@ -311,11 +406,14 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       // Handle regular text responses
       const textContent = content.find(item => item.type === "text");
       if (textContent) {
+        // Normalize usage data to standard format
+        const normalizedUsage = this.normalizeUsage(usage);
+
         // Create standardized CortexResponse object for text responses
         const cortexResponse = new CortexResponse({
           output_text: textContent.text || "",
           finishReason: stop_reason === "tool_use" ? "tool_calls" : "stop",
-          usage: usage || null,
+          usage: normalizedUsage,
           metadata: {
             model: this.modelName
           }

@@ -397,6 +397,89 @@ class ModelPlugin {
         return this.promptParameters.inputParameters?.tokenRatio ?? this.promptParameters.tokenRatio ?? DEFAULT_PROMPT_TOKEN_RATIO;
     }
 
+    /**
+     * Normalizes usage data from the provider's format to a standard format.
+     * Each plugin should override this method to handle its own provider's format.
+     * 
+     * Standard format:
+     * {
+     *   promptTokens: number,
+     *   completionTokens: number,
+     *   totalTokens: number
+     * }
+     * 
+     * @param {Object|null} usage - Raw usage data from API response
+     * @returns {Object|null} Normalized usage object or null if no usage data
+     */
+    normalizeUsage(usage) {
+        // Base implementation: return as-is if already in standard format, otherwise null
+        if (!usage) return null;
+        
+        // Check if already in standard format
+        if (usage.promptTokens !== undefined) {
+            return {
+                promptTokens: usage.promptTokens,
+                completionTokens: usage.completionTokens || 0,
+                totalTokens: usage.totalTokens || (usage.promptTokens + (usage.completionTokens || 0))
+            };
+        }
+        
+        // Unknown format - plugins should override this method
+        return null;
+    }
+
+    /**
+     * Counts tokens before making a request using provider's count tokens endpoint.
+     * Plugins can override this to use their provider's count tokens API.
+     * 
+     * @param {Array} messages - Messages to count tokens for
+     * @param {Object} cortexRequest - Request context (may contain URL, auth, etc.)
+     * @returns {Promise<number|null>} Token count, or null if not supported/available
+     */
+    async countTokensBeforeRequest(messages, cortexRequest = null) {
+        // Base implementation: not supported, return null to trigger fallback
+        return null;
+    }
+
+    /**
+     * Gets the prompt token count from usage data, with fallback to estimation.
+     * This method should be used for accurate token counting when available.
+     * 
+     * Priority:
+     * 1. Actual usage from API response (most accurate)
+     * 2. Count tokens endpoint (if available)
+     * 3. Estimation via countMessagesTokens (fallback)
+     * 
+     * @param {Object|null} usage - Raw usage data (will be normalized by plugin)
+     * @param {Array} messages - Messages to estimate tokens for if usage is not available
+     * @param {Object} cortexRequest - Request context for countTokensBeforeRequest
+     * @returns {Promise<number>} Token count
+     */
+    async getPromptTokens(usage, messages = null, cortexRequest = null) {
+        // Try to use actual usage data first (most accurate)
+        if (usage) {
+            const normalized = this.normalizeUsage(usage);
+            if (normalized && normalized.promptTokens !== undefined) {
+                return normalized.promptTokens;
+            }
+        }
+
+        // Try count tokens endpoint if available (more accurate than estimation)
+        if (messages && cortexRequest) {
+            const countTokens = await this.countTokensBeforeRequest(messages, cortexRequest);
+            if (countTokens !== null && countTokens > 0) {
+                return countTokens;
+            }
+        }
+
+        // Fallback to estimation if usage not available
+        if (messages) {
+            return this.countMessagesTokens(messages);
+        }
+
+        return 0;
+    }
+
     getModelPrompt(prompt, parameters) {
         if (typeof(prompt) === 'function') {
             return prompt(parameters);

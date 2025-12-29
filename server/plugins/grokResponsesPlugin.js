@@ -296,10 +296,13 @@ class GrokResponsesPlugin extends OpenAIVisionPlugin {
         const choice = choices[0];
         const message = choice.message;
 
+        // Normalize usage data to standard format
+        const normalizedUsage = this.normalizeUsage(data.usage);
+
         const cortexResponse = new CortexResponse({
             output_text: message.content || "",
             finishReason: choice.finish_reason || 'stop',
-            usage: data.usage || null,
+            usage: normalizedUsage,
             metadata: {
                 model: this.modelName
             }
@@ -346,10 +349,13 @@ class GrokResponsesPlugin extends OpenAIVisionPlugin {
             }
         }
 
+        // Normalize usage data to standard format
+        const normalizedUsage = this.normalizeUsage(data.usage);
+
         const cortexResponse = new CortexResponse({
             output_text: outputText,
             finishReason: data.status || 'completed',
-            usage: data.usage || null,
+            usage: normalizedUsage,
             metadata: {
                 model: this.modelName,
                 id: data.id
