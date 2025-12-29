@@ -493,30 +493,265 @@ export default {
                             }
                         }
                         
-                        const toCompress = nonSystemMessages.slice(0, splitIndex);
-                        const toKeep = nonSystemMessages.slice(splitIndex);
+                        let messagesToSummarize = nonSystemMessages.slice(0, splitIndex);
+                        let messagesToKeep = nonSystemMessages.slice(splitIndex);
                         
-                        if (toCompress.length >= 5) {
-                            const summary = await callPathway('sys_compress_chat_history', {
-                                ...args, chatHistory: toCompress, stream: false
+                        // CRITICAL SAFETY CHECK: Ensure messagesToKeep doesn't start with a tool result
+                        // without its corresponding tool call. If it does, we need to move the split point back.
+                        while (messagesToKeep.length > 0 && messagesToKeep[0].role === 'tool' && messagesToKeep[0].tool_call_id) {
+                            const firstToolResult = messagesToKeep[0];
+                            const callIndex = toolCallIndexMap.get(firstToolResult.tool_call_id);
+                            
+                            // If the tool call is in messagesToSummarize, we need to move it to messagesToKeep
+                            if (callIndex !== undefined && callIndex < splitIndex) {
+                                // Move the split point back to include the tool call
+                                splitIndex = callIndex;
+                                messagesToSummarize = nonSystemMessages.slice(0, splitIndex);
+                                messagesToKeep = nonSystemMessages.slice(splitIndex);
+                                
+                                // Re-check the first message in messagesToKeep
+                                continue;
+                            }
+                            
+                            // If the tool call is already in messagesToKeep, we're good
+                            if (callIndex !== undefined && callIndex >= splitIndex) {
+                                break;
+                            }
+                            
+                            // If we can't find the tool call, log a warning and skip this tool result
+                            logger.warn(`Tool result ${firstToolResult.tool_call_id} has no corresponding tool call - skipping from messagesToKeep`);
+                            messagesToKeep = messagesToKeep.slice(1);
+                        }
+                        
+                        // Extract only research-related messages (tool calls and tool results)
+                        // Also preserve the original user query if it's in the section to summarize
+                        const researchMessages = [];
+                        let originalUserQuery = null;
+                        
+                        for (const msg of messagesToSummarize) {
+                            // Preserve the first user message as the original research question
+                            if (msg.role === 'user' && !originalUserQuery) {
+                                const content = typeof msg.content === 'string' ? msg.content : 
+                                              (Array.isArray(msg.content) ? msg.content.find(item => item.type === 'text')?.text : '') || '';
+                                if (content && !content.startsWith('[system message') && !content.startsWith('[Research Summary:')) {
+                                    originalUserQuery = content;
+                                }
+                            }
+                            
+                            // Include tool calls and tool results (research data)
+                            if (msg.tool_calls && msg.tool_calls.length > 0) {
+                                researchMessages.push(msg);
+                            } else if (msg.role === 'tool' && msg.tool_call_id) {
+                                researchMessages.push(msg);
+                            }
+                        }
+                        
+                        // Only summarize if we have research data to summarize
+                        if (researchMessages.length >= 3) {
+                            const researchSummary = await callPathway('sys_summarize_research', {
+                                ...args, chatHistory: researchMessages, stream: false
                             }, pathwayResolver);
                             
-                            args.chatHistory = [
-                                ...systemMessages,
-                                { role: 'user', content: `[Compressed history:]\n\n${typeof summary === 'string' ? summary : JSON.stringify(summary)}` },
-                                ...toKeep
-                            ];
+                            // Construct clear message explaining what was done
+                            const summaryText = typeof researchSummary === 'string' ? researchSummary : JSON.stringify(researchSummary);
+                            const toolCallCount = researchMessages.filter(m => m.tool_calls).length;
+                            const toolResultCount = researchMessages.filter(m => m.role === 'tool').length;
+                            const summaryMessage = `[Research Summary: The following synthesizes ${toolCallCount} research tool calls and ${toolResultCount} tool results from earlier in this conversation. The raw tool output has been replaced with this summary to save context space, but all key findings, data, URLs, and citations have been preserved. Use this summary as the source of information for the research that was conducted.]\n\n${summaryText}`;
+                            
+                            // CRITICAL: Final validation - ensure messagesToKeep doesn't contain orphaned tool results
+                            // This is a last safety check before reconstruction
+                            const validatedMessagesToKeep = [];
+                            const toolCallsInKeep = new Set(); // Track tool call IDs that exist in messagesToKeep
+                            
+                            // First pass: collect all tool call IDs from messagesToKeep
+                            for (const msg of messagesToKeep) {
+                                if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+                                    for (const tc of msg.tool_calls) {
+                                        if (tc.id) {
+                                            toolCallsInKeep.add(tc.id);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Second pass: only include tool results that have their tool calls in messagesToKeep
+                            for (const msg of messagesToKeep) {
+                                if (msg.role === 'tool' && msg.tool_call_id) {
+                                    if (!toolCallsInKeep.has(msg.tool_call_id)) {
+                                        // Tool call was in messagesToSummarize - this is an orphaned tool result
+                                        logger.warn(`Skipping orphaned tool result ${msg.tool_call_id} - its tool call was summarized`);
+                                        continue;
+                                    }
+                                }
+                                validatedMessagesToKeep.push(msg);
+                            }
+                            
+                            // Reconstruct chat history:
+                            // 1. System messages
+                            // 2. Original user query (if we found one in the summarized section)
+                            // 3. Research summary
+                            // 4. Recent messages to keep (validated)
+                            const reconstructedHistory = [...systemMessages];
+                            
+                            if (originalUserQuery) {
+                                reconstructedHistory.push({ role: 'user', content: originalUserQuery });
+                            }
+                            
+                            reconstructedHistory.push({ role: 'user', content: summaryMessage });
+                            reconstructedHistory.push(...validatedMessagesToKeep);
+                            
+                            args.chatHistory = reconstructedHistory;
                             const newTokens = pathwayResolver.modelExecutor.plugin.countMessagesTokens(args.chatHistory);
-                            logger.info(`Compressed chat history: ${currentTokens} -> ${newTokens} tokens`);
+                            logger.info(`Summarized research: ${currentTokens} -> ${newTokens} tokens (${researchMessages.length} tool calls/results synthesized)`);
+                        } else {
+                            // Not enough research data to summarize - log and continue
+                            logger.debug(`Not enough research data to summarize (${researchMessages.length} tool calls/results found, need at least 3)`);
                         }
                     } catch (e) {
-                        logger.error(`Compression failed: ${e.message}`);
+                        logger.error(`Research summarization failed: ${e.message}`);
                     }
                 }
             }
 
             // clear any accumulated pathwayResolver errors from the tools
             pathwayResolver.errors = [];
+
+            // PRE-REQUEST TOKEN CHECK: Compress if needed before making the model request
+            // This prevents hitting token limits during the request
+            if (pathwayResolver.modelExecutor?.plugin?.getModelMaxPromptTokens && 
+                pathwayResolver.modelExecutor?.plugin?.countMessagesTokens) {
+                const maxTokens = pathwayResolver.modelExecutor.plugin.getModelMaxPromptTokens();
+                let preRequestTokens = pathwayResolver.modelExecutor.plugin.countMessagesTokens(args.chatHistory || []);
+                
+                // Construct a minimal cortexRequest for countTokens endpoint if needed
+                let mockCortexRequest = null;
+                if (pathwayResolver.modelExecutor?.plugin?.countTokensBeforeRequest) {
+                    try {
+                        const CortexRequest = (await import('../../../lib/cortexRequest.js')).default;
+                        const tempCortexRequest = new CortexRequest({ pathwayResolver });
+                        if (tempCortexRequest.url) {
+                            mockCortexRequest = { url: tempCortexRequest.url };
+                            // Try to get accurate token count before request
+                            const accurateTokens = await pathwayResolver.modelExecutor.plugin.countTokensBeforeRequest(args.chatHistory || [], mockCortexRequest);
+                            if (accurateTokens !== null && accurateTokens > 0) {
+                                preRequestTokens = accurateTokens;
+                            }
+                        }
+                    } catch (e) {
+                        // Fallback to estimation if countTokensBeforeRequest fails
+                        logger.debug(`Pre-request countTokensBeforeRequest failed: ${e.message}`);
+                    }
+                }
+                
+                // If we're approaching the limit (80% threshold for pre-request check, more aggressive than post-tool 70%)
+                // or if we're already over, compress immediately
+                if (preRequestTokens > maxTokens * 0.8 || preRequestTokens >= maxTokens) {
+                    logger.warn(`Pre-request token check: ${preRequestTokens} tokens (${((preRequestTokens/maxTokens)*100).toFixed(1)}% of ${maxTokens} limit) - compressing before request`);
+                    
+                    // Use the same compression logic as the post-tool check
+                    try {
+                        const systemMessages = (args.chatHistory || []).filter(m => m.role === 'system');
+                        const nonSystemMessages = (args.chatHistory || []).filter(m => m.role !== 'system');
+                        
+                        // Build map: tool_call_id -> index of message containing that tool_call
+                        const toolCallIndexMap = new Map();
+                        for (let i = 0; i < nonSystemMessages.length; i++) {
+                            const m = nonSystemMessages[i];
+                            if (m.tool_calls) {
+                                m.tool_calls.forEach(tc => tc.id && toolCallIndexMap.set(tc.id, i));
+                            }
+                        }
+                        
+                        // Find safe split point: start with last 10 msgs, then move back if needed
+                        let splitIndex = Math.max(0, nonSystemMessages.length - 10);
+                        
+                        // Keep moving split back until all tool results in toKeep have their calls in toKeep too
+                        let adjusted = true;
+                        while (adjusted && splitIndex > 0) {
+                            adjusted = false;
+                            for (let i = splitIndex; i < nonSystemMessages.length; i++) {
+                                const m = nonSystemMessages[i];
+                                if (m.role === 'tool' && typeof m.tool_call_id === 'string') {
+                                    const callIndex = toolCallIndexMap.get(m.tool_call_id);
+                                    if (callIndex !== undefined && callIndex < splitIndex) {
+                                        splitIndex = callIndex;
+                                        adjusted = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        let messagesToSummarize = nonSystemMessages.slice(0, splitIndex);
+                        let messagesToKeep = nonSystemMessages.slice(splitIndex);
+                        
+                        // Extract research messages
+                        const researchMessages = [];
+                        let originalUserQuery = null;
+                        
+                        for (const msg of messagesToSummarize) {
+                            if (msg.role === 'user' && !originalUserQuery) {
+                                const content = typeof msg.content === 'string' ? msg.content : 
+                                              (Array.isArray(msg.content) ? msg.content.find(item => item.type === 'text')?.text : '') || '';
+                                if (content && !content.startsWith('[system message') && !content.startsWith('[Research Summary:')) {
+                                    originalUserQuery = content;
+                                }
+                            }
+                            
+                            if (msg.tool_calls && msg.tool_calls.length > 0) {
+                                researchMessages.push(msg);
+                            } else if (msg.role === 'tool' && msg.tool_call_id) {
+                                researchMessages.push(msg);
+                            }
+                        }
+                        
+                        // Only summarize if we have research data
+                        if (researchMessages.length >= 3) {
+                            const researchSummary = await callPathway('sys_summarize_research', {
+                                ...args, chatHistory: researchMessages, stream: false
+                            }, pathwayResolver);
+                            
+                            const summaryText = typeof researchSummary === 'string' ? researchSummary : JSON.stringify(researchSummary);
+                            const toolCallCount = researchMessages.filter(m => m.tool_calls).length;
+                            const toolResultCount = researchMessages.filter(m => m.role === 'tool').length;
+                            const summaryMessage = `[Research Summary: The following synthesizes ${toolCallCount} research tool calls and ${toolResultCount} tool results from earlier in this conversation. The raw tool output has been replaced with this summary to save context space, but all key findings, data, URLs, and citations have been preserved. Use this summary as the source of information for the research that was conducted.]\n\n${summaryText}`;
+                            
+                            // Validate messagesToKeep - remove orphaned tool results
+                            const toolCallsInKeep = new Set();
+                            for (const msg of messagesToKeep) {
+                                if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+                                    for (const tc of msg.tool_calls) {
+                                        if (tc.id) toolCallsInKeep.add(tc.id);
+                                    }
+                                }
+                            }
+                            
+                            messagesToKeep = messagesToKeep.filter(msg => {
+                                if (msg.role === 'tool' && msg.tool_call_id) {
+                                    return toolCallsInKeep.has(msg.tool_call_id);
+                                }
+                                return true;
+                            });
+                            
+                            // Reconstruct
+                            const reconstructedHistory = [...systemMessages];
+                            if (originalUserQuery) {
+                                reconstructedHistory.push({ role: 'user', content: originalUserQuery });
+                            }
+                            reconstructedHistory.push({ role: 'user', content: summaryMessage });
+                            reconstructedHistory.push(...messagesToKeep);
+                            
+                            args.chatHistory = reconstructedHistory;
+                            const newTokens = mockCortexRequest 
+                                ? (await pathwayResolver.modelExecutor.plugin.countTokensBeforeRequest(args.chatHistory, mockCortexRequest) || pathwayResolver.modelExecutor.plugin.countMessagesTokens(args.chatHistory))
+                                : pathwayResolver.modelExecutor.plugin.countMessagesTokens(args.chatHistory);
+                            logger.info(`Pre-request compression: ${preRequestTokens} -> ${newTokens} tokens (${researchMessages.length} tool calls/results synthesized)`);
+                        }
+                    } catch (e) {
+                        logger.error(`Pre-request compression failed: ${e.message}`);
+                    }
+                }
+            }
 
             // Add a line break to avoid running output together
             await say(pathwayResolver.rootRequestId || pathwayResolver.requestId, `\n`, 1000, false, false);
@@ -560,7 +795,11 @@ export default {
         
         const entityConfig = loadEntityConfig(entityId);
         const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-        const { useMemory: entityUseMemory = true, name: entityName, instructions: entityInstructions } = entityConfig || {};
+        const { name: entityName, instructions: entityInstructions } = entityConfig || {};
+        
+        // Determine useMemory: entityConfig.useMemory === false is a hard disable (entity can't use memory)
+        // Otherwise args.useMemory can disable it, default true
+        args.useMemory = entityConfig?.useMemory === false ? false : (args.useMemory ?? true);
 
         // Initialize chat history if needed
         if (!args.chatHistory || args.chatHistory.length === 0) {
@@ -596,7 +835,7 @@ export default {
 
         // Kick off the memory lookup required pathway in parallel - this takes like 500ms so we want to start it early
         let memoryLookupRequiredPromise = null;
-        if (entityUseMemory) {
+        if (args.useMemory) {
             const chatHistoryLastTurn = args.chatHistory.slice(-2);
             const chatHistorySizeOk = (JSON.stringify(chatHistoryLastTurn).length < 5000);
             if (chatHistorySizeOk) {
@@ -620,7 +859,6 @@ export default {
             entityId,
             entityTools,
             entityToolsOpenAiFormat,
-            entityUseMemory,
             entityInstructions,
             voiceResponse,
             aiMemorySelfModify,
@@ -632,7 +870,7 @@ export default {
 
         const promptPrefix = '';
 
-        const memoryTemplates = entityUseMemory ? 
+        const memoryTemplates = args.useMemory ? 
             `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_CONTEXT}}\n\n` : '';
 
         const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n`;
@@ -668,7 +906,7 @@ export default {
         const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
       
         // Asynchronously manage memory for this context
-        if (args.aiMemorySelfModify && entityUseMemory) {
+        if (args.aiMemorySelfModify && args.useMemory) {
             callPathway('sys_memory_manager', {  ...args, chatHistory: truncatedChatHistory, stream: false })    
             .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
         }

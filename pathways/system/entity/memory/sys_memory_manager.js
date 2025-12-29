@@ -26,6 +26,10 @@ export default {
     timeout: 300,
     executePathway: async ({args, resolver}) => {
         try {
+            // Skip if memory is disabled
+            if (args.useMemory === false) {
+                return "";
+            }
 
             args = { ...args, ...config.get('entityConstants') };
             let parsedMemory;
