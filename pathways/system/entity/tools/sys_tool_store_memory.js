@@ -52,8 +52,7 @@ export default {
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
         // Check if memory is enabled for this entity
-        const useMemory = args.entityUseMemory !== undefined ? args.entityUseMemory : args.useMemory;
-        if (useMemory === false) {
+        if (args.useMemory === false) {
             return JSON.stringify({ 
                 error: 'Memory storage is disabled for this entity. Cannot store memories when useMemory is false.' 
             });
