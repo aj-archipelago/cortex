@@ -60,6 +60,7 @@ export default {
     useInputChunking: false,
     enableDuplicateRequests: false,
     useSingleTokenStream: false,
+    manageTokenLength: false, // Agentic models handle context management themselves
     inputParameters: {
         privateData: false,    
         chatHistory: [{role: '', content: []}],
