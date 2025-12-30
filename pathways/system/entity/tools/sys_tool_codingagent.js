@@ -3,7 +3,7 @@
 
 import { QueueServiceClient } from '@azure/storage-queue';
 import logger from '../../../../lib/logger.js';
-import { resolveFileParameter, getDefaultContext } from '../../../../lib/fileUtils.js';
+import { resolveFileParameter } from '../../../../lib/fileUtils.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
@@ -81,16 +81,10 @@ export default {
 
     executePathway: async ({args, resolver}) => {
         try {
-            const { codingTask, userMessage, inputFiles, codingTaskKeywords } = args;
+            const { codingTask, userMessage, inputFiles, codingTaskKeywords, contextId } = args;
 
-            // Extract contextId from agentContext or args
-            let contextId = args.contextId;
-            if (!contextId && args.agentContext) {
-                const defaultCtx = getDefaultContext(args.agentContext);
-                if (defaultCtx) {
-                    contextId = defaultCtx.contextId;
-                }
-            }
+            // pathwayResolver.executePathway should have already extracted contextId from agentContext,
+            // but validate it's present as a safety check
             if (!contextId) {
                 throw new Error("contextId is required. It should be provided via agentContext or contextId parameter.");
             }
