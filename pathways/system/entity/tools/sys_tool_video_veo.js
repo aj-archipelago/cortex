@@ -124,8 +124,8 @@ export default {
             // Veo requires GCS URLs for input images
             let imageParam = undefined;
             if (args.inputImage) {
-                if (!args.contextId) {
-                    throw new Error("contextId is required when using the 'inputImage' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                if (!args.agentContext || !Array.isArray(args.agentContext) || args.agentContext.length === 0) {
+                    throw new Error("agentContext is required when using the 'inputImage' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
                 }
                 
                 const resolved = await resolveFileParameter(args.inputImage, args.agentContext, { preferGcs: true });
@@ -323,11 +323,27 @@ export default {
                 }
             }
             
-            // Return the URLs of the uploaded videos as text in the result
+            // Return the URLs of the uploaded videos in structured format
             if (uploadedVideos.length > 0) {
                 const successfulVideos = uploadedVideos.filter(v => v.url);
                 if (successfulVideos.length > 0) {
-                    // Return video info in the same format as availableFiles
+                    // Build imageUrls array in the format expected by pathwayTools.js for toolImages injection
+                    // Videos can use image_url type since they can be displayed with markdown image syntax
+                    const imageUrls = successfulVideos.map((vid) => {
+                        const url = vid.fileEntry?.url || vid.url;
+                        const gcs = vid.fileEntry?.gcs || vid.gcs;
+                        const hash = vid.fileEntry?.hash || vid.hash;
+                        
+                        return {
+                            type: "image_url",
+                            url: url,
+                            gcs: gcs || null,
+                            image_url: { url: url },
+                            hash: hash || null
+                        };
+                    });
+                    
+                    // Return video info in the same format as availableFiles for the text message
                     // Format: hash | filename | url | date | tags
                     const videoList = successfulVideos.map((vid) => {
                         if (vid.fileEntry) {
@@ -345,8 +361,17 @@ export default {
                     }).join('\n');
                     
                     const count = successfulVideos.length;
-                    // Note: The UI supports displaying videos using markdown image syntax
-                    return `Video generation successful. Generated ${count} video${count > 1 ? 's' : ''}. Videos can be displayed using markdown image syntax, e.g. ![video](url)\n${videoList}`;
+                    
+                    // Make the success message very explicit so the agent knows files were created and added to collection
+                    // This format matches availableFiles so the agent can reference them by hash/filename
+                    const message = `Video generation completed successfully. ${count} video${count > 1 ? 's have' : ' has'} been generated, uploaded to cloud storage, and added to your file collection. The video${count > 1 ? 's are' : ' is'} now available in your file collection:\n\n${videoList}\n\nYou can reference these videos by their hash, filename, or URL in future tool calls. Videos can be displayed using markdown image syntax, e.g. ![video](url)`;
+                    
+                    // Return JSON object with imageUrls (kept for backward compatibility, but explicit message should prevent looping)
+                    return JSON.stringify({
+                        success: true,
+                        message: message,
+                        imageUrls: imageUrls
+                    });
                 } else {
                     // All videos failed to upload
                     const errors = uploadedVideos.map(v => v.error).filter(Boolean);

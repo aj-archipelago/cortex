@@ -163,7 +163,23 @@ export default {
             
             // Generate file message content if provided
             if (args.file) {
-                const fileContent = await generateFileMessageContent(args.file, args.contextId, args.contextKey);
+                // Use agentContext if available, otherwise fall back to creating it from contextId/contextKey
+                const agentContext = args.agentContext || (args.contextId ? [{
+                    contextId: args.contextId,
+                    contextKey: args.contextKey || null,
+                    default: true
+                }] : null);
+                
+                if (!agentContext || !Array.isArray(agentContext) || agentContext.length === 0) {
+                    const errorMessage = `File not found: "${args.file}". agentContext is required to look up files in the collection.`;
+                    resolver.tool = JSON.stringify({ toolUsed: "vision" });
+                    return JSON.stringify({ 
+                        error: errorMessage,
+                        recoveryMessage: "The file was not found. Please verify the file exists in the collection or provide a valid file reference."
+                    });
+                }
+                
+                const fileContent = await generateFileMessageContent(args.file, agentContext);
                 if (!fileContent) {
                     const errorMessage = `File not found: "${args.file}". Use ListFileCollection or SearchFileCollection to find available files.`;
                     resolver.tool = JSON.stringify({ toolUsed: "vision" });
