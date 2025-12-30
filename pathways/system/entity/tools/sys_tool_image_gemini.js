@@ -90,6 +90,7 @@ export default {
     }],
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
+        const chatId = args.chatId || null;
 
         try {   
             let model = "gemini-flash-25-image";
@@ -203,7 +204,8 @@ export default {
                                         imageHash,
                                         null,
                                         pathwayResolver,
-                                        true // permanent => retention=permanent
+                                        true, // permanent => retention=permanent
+                                        chatId
                                     );
                                     
                                     // Use the file entry data for the return message

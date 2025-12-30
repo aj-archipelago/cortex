@@ -88,6 +88,7 @@ export default {
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
+        const chatId = args.chatId || null;
 
         try {   
             let model = "replicate-seedream-4";
@@ -219,7 +220,8 @@ export default {
                                             uploadedHash,
                                             null, // fileUrl - not needed since we already uploaded
                                             pathwayResolver,
-                                            true // permanent => retention=permanent
+                                            true, // permanent => retention=permanent
+                                            chatId
                                         );
                                         
                                         // Use the file entry data for the return message
