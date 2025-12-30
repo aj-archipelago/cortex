@@ -3,7 +3,7 @@
 
 import { QueueServiceClient } from '@azure/storage-queue';
 import logger from '../../../../lib/logger.js';
-import { resolveFileParameter } from '../../../../lib/fileUtils.js';
+import { resolveFileParameter, getDefaultContext } from '../../../../lib/fileUtils.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
@@ -83,17 +83,27 @@ export default {
         try {
             const { codingTask, userMessage, inputFiles, codingTaskKeywords } = args;
 
+            // Extract contextId from agentContext or args
+            let contextId = args.contextId;
+            if (!contextId && args.agentContext) {
+                const defaultCtx = getDefaultContext(args.agentContext);
+                if (defaultCtx) {
+                    contextId = defaultCtx.contextId;
+                }
+            }
+            if (!contextId) {
+                throw new Error("contextId is required. It should be provided via agentContext or contextId parameter.");
+            }
+
             let taskSuffix = "";
-            if (inputFiles) {
+            if (inputFiles && Array.isArray(inputFiles) && inputFiles.length > 0) {
                 if (!args.agentContext || !Array.isArray(args.agentContext) || args.agentContext.length === 0) {
                     throw new Error("agentContext is required when using the 'inputFiles' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
                 }
                 
                 // Resolve file parameters to URLs
                 // inputFiles is an array of strings (file hashes or filenames)
-                const fileReferences = Array.isArray(inputFiles) 
-                    ? inputFiles.map(ref => String(ref).trim()).filter(ref => ref.length > 0)
-                    : [];
+                const fileReferences = inputFiles.map(ref => String(ref).trim()).filter(ref => ref.length > 0);
                 
                 const resolvedUrls = [];
                 const failedFiles = [];
@@ -142,8 +152,15 @@ export default {
             const statusMessage = "⚠️ **Task Status**: The coding task has been started and is now running in the background. Don't make up any information about the task or task results - just say that it has been started and is running. The user will be able to see the progress and results of the task, but you will not receive the response. No further action is required from you or the user.";         
             return statusMessage;
         } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
             logger.error(`Error in coding agent tool: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
-            throw error;
+            
+            // Return error as JSON string instead of throwing, so it can be properly detected by the tool execution layer
+            resolver.tool = JSON.stringify({ toolUsed: "coding" });
+            return JSON.stringify({ 
+                error: errorMessage,
+                recoveryMessage: "The coding task could not be started. Please check that all required parameters are provided and try again."
+            });
         }
     }
 }; 
