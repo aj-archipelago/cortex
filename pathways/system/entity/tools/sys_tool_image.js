@@ -88,6 +88,7 @@ export default {
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
+        const chatId = args.chatId || null;
 
         try {   
             let model = "replicate-seedream-4";
@@ -104,8 +105,8 @@ export default {
             // Fail early if any provided image cannot be resolved
             const resolvedInputImages = [];
             if (args.inputImages && Array.isArray(args.inputImages)) {
-                if (!args.contextId) {
-                    throw new Error("contextId is required when using the 'inputImages' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                if (!args.agentContext || !Array.isArray(args.agentContext) || args.agentContext.length === 0) {
+                    throw new Error("agentContext is required when using the 'inputImages' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
                 }
                 
                 // Limit to 3 images maximum
@@ -175,13 +176,13 @@ export default {
                                 const uploadedGcs = uploadResult.gcs || null;
                                 const uploadedHash = uploadResult.hash || null;
                                 
-                                uploadedImages.push({
+                                const imageData = {
                                     type: 'image',
                                     url: uploadedUrl,
                                     gcs: uploadedGcs,
                                     hash: uploadedHash,
                                     mimeType: mimeType
-                                });
+                                };
                                 
                                 // Add uploaded image to file collection if contextId is available
                                 if (args.contextId && uploadedUrl) {
@@ -205,8 +206,8 @@ export default {
                                         const providedTags = Array.isArray(args.tags) ? args.tags : [];
                                         const allTags = [...defaultTags, ...providedTags.filter(tag => !defaultTags.includes(tag))];
                                         
-                                        // Use the centralized utility function to add to collection
-                                        await addFileToCollection(
+                                        // Use the centralized utility function to add to collection - capture returned entry
+                                        const fileEntry = await addFileToCollection(
                                             args.contextId,
                                             args.contextKey || '',
                                             uploadedUrl,
@@ -219,13 +220,19 @@ export default {
                                             uploadedHash,
                                             null, // fileUrl - not needed since we already uploaded
                                             pathwayResolver,
-                                            true // permanent => retention=permanent
+                                            true, // permanent => retention=permanent
+                                            chatId
                                         );
+                                        
+                                        // Use the file entry data for the return message
+                                        imageData.fileEntry = fileEntry;
                                     } catch (collectionError) {
                                         // Log but don't fail - file collection is optional
                                         pathwayResolver.logWarning(`Failed to add image to file collection: ${collectionError.message}`);
                                     }
                                 }
+                                
+                                uploadedImages.push(imageData);
                             } catch (uploadError) {
                                 pathwayResolver.logError(`Failed to upload image from Replicate: ${uploadError.message}`);
                                 // Keep original URL as fallback
@@ -241,11 +248,59 @@ export default {
                         }
                     }
                     
-                    // Return the URLs of the uploaded images as text in the result
+                    // Return the URLs of the uploaded images in structured format
                     // Replace the result with uploaded cloud URLs (not the original Replicate URLs)
                     if (uploadedImages.length > 0) {
-                        const imageUrls = uploadedImages.map(image => image.url || image).filter(Boolean);
-                        result = imageUrls.join('\n');
+                        const successfulImages = uploadedImages.filter(img => img.url);
+                        if (successfulImages.length > 0) {
+                            // Build imageUrls array in the format expected by pathwayTools.js for toolImages injection
+                            // This format matches ViewImages tool so images get properly injected into chat history
+                            const imageUrls = successfulImages.map((img) => {
+                                const url = img.fileEntry?.url || img.url;
+                                const gcs = img.fileEntry?.gcs || img.gcs;
+                                const hash = img.fileEntry?.hash || img.hash;
+                                
+                                return {
+                                    type: "image_url",
+                                    url: url,
+                                    gcs: gcs || null,
+                                    image_url: { url: url },
+                                    hash: hash || null
+                                };
+                            });
+                            
+                            // Return image info in the same format as availableFiles for the text message
+                            // Format: hash | filename | url | date | tags
+                            const imageList = successfulImages.map((img) => {
+                                if (img.fileEntry) {
+                                    // Use the file entry data from addFileToCollection
+                                    const fe = img.fileEntry;
+                                    const dateStr = fe.addedDate 
+                                        ? new Date(fe.addedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                        : '';
+                                    const tagsStr = Array.isArray(fe.tags) ? fe.tags.join(',') : '';
+                                    return `${fe.hash || ''} | ${fe.displayFilename || ''} | ${fe.url || img.url} | ${dateStr} | ${tagsStr}`;
+                                } else {
+                                    // Fallback if file collection wasn't available
+                                    return `${img.hash || 'unknown'} | | ${img.url} | |`;
+                                }
+                            }).join('\n');
+                            
+                            const count = successfulImages.length;
+                            const isModification = args.inputImages && Array.isArray(args.inputImages) && args.inputImages.length > 0;
+                            
+                            // Make the success message very explicit so the agent knows files were created and added to collection
+                            // This format matches availableFiles so the agent can reference them by hash/filename
+                            const action = isModification ? 'Image modification' : 'Image generation';
+                            const message = `${action} completed successfully. ${count} image${count > 1 ? 's have' : ' has'} been generated, uploaded to cloud storage, and added to your file collection. The image${count > 1 ? 's are' : ' is'} now available in your file collection:\n\n${imageList}\n\nYou can reference these images by their hash, filename, or URL in future tool calls.`;
+                            
+                            // Return JSON object with imageUrls (kept for backward compatibility, but explicit message should prevent looping)
+                            result = JSON.stringify({
+                                success: true,
+                                message: message,
+                                imageUrls: imageUrls
+                            });
+                        }
                     }
                 }
             }

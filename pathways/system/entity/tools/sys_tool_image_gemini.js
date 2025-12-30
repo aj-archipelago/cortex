@@ -90,6 +90,7 @@ export default {
     }],
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
+        const chatId = args.chatId || null;
 
         try {   
             let model = "gemini-flash-25-image";
@@ -100,8 +101,8 @@ export default {
             // Fail early if any provided image cannot be resolved
             const resolvedInputImages = [];
             if (args.inputImages && Array.isArray(args.inputImages)) {
-                if (!args.contextId) {
-                    throw new Error("contextId is required when using the 'inputImages' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                if (!args.agentContext || !Array.isArray(args.agentContext) || args.agentContext.length === 0) {
+                    throw new Error("agentContext is required when using the 'inputImages' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
                 }
                 
                 // Limit to 3 images maximum
@@ -203,7 +204,8 @@ export default {
                                         imageHash,
                                         null,
                                         pathwayResolver,
-                                        true // permanent => retention=permanent
+                                        true, // permanent => retention=permanent
+                                        chatId
                                     );
                                     
                                     // Use the file entry data for the return message
@@ -229,7 +231,23 @@ export default {
                 // Check if we successfully uploaded any images
                 const successfulImages = uploadedImages.filter(img => img.url);
                 if (successfulImages.length > 0) {
-                    // Return image info in the same format as availableFiles
+                    // Build imageUrls array in the format expected by pathwayTools.js for toolImages injection
+                    // This format matches ViewImages tool so images get properly injected into chat history
+                    const imageUrls = successfulImages.map((img) => {
+                        const url = img.fileEntry?.url || img.url;
+                        const gcs = img.fileEntry?.gcs || img.gcs;
+                        const hash = img.fileEntry?.hash || img.hash;
+                        
+                        return {
+                            type: "image_url",
+                            url: url,
+                            gcs: gcs || null,
+                            image_url: { url: url },
+                            hash: hash || null
+                        };
+                    });
+                    
+                    // Return image info in the same format as availableFiles for the text message
                     // Format: hash | filename | url | date | tags
                     const imageList = successfulImages.map((img) => {
                         if (img.fileEntry) {
@@ -247,7 +265,17 @@ export default {
                     }).join('\n');
                     
                     const count = successfulImages.length;
-                    return `Image generation successful. Generated ${count} image${count > 1 ? 's' : ''}:\n${imageList}`;
+                    
+                    // Make the success message very explicit so the agent knows files were created and added to collection
+                    // This format matches availableFiles so the agent can reference them by hash/filename
+                    const message = `Image generation completed successfully. ${count} image${count > 1 ? 's have' : ' has'} been generated, uploaded to cloud storage, and added to your file collection. The image${count > 1 ? 's are' : ' is'} now available in your file collection:\n\n${imageList}\n\nYou can reference these images by their hash, filename, or URL in future tool calls.`;
+                    
+                    // Return JSON object with imageUrls (kept for backward compatibility, but explicit message should prevent looping)
+                    return JSON.stringify({
+                        success: true,
+                        message: message,
+                        imageUrls: imageUrls
+                    });
                 } else {
                     throw new Error('Image generation failed: Images were generated but could not be uploaded to storage');
                 }

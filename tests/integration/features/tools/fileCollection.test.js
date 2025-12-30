@@ -1996,6 +1996,94 @@ test('Analyzer tool: Returns error JSON format when file not found', async t => 
     }
 });
 
+test('Analyzer tool: Works with legacy contextId/contextKey parameters (backward compatibility)', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // First add a file to the collection
+        await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            url: 'https://example.com/test-document.pdf',
+            filename: 'test-document.pdf',
+            userMessage: 'Add test file for analyzer'
+        });
+        
+        // Get the file ID from the collection
+        const collection = await loadFileCollection(contextId, null, false);
+        const fileId = collection[0].id;
+        
+        // Test analyzer tool with legacy contextId/contextKey (without agentContext)
+        // This tests that the tool correctly handles backward compatibility
+        const result = await callPathway('sys_tool_analyzefile', {
+            contextId,  // Legacy format - no agentContext
+            contextKey: null,
+            file: fileId,
+            detailedInstructions: 'What is this file?',
+            userMessage: 'Testing backward compatibility'
+        });
+        
+        t.truthy(result, 'Should have a result');
+        
+        // The result should be a string (not an error JSON)
+        // If it's an error, it should be properly formatted
+        let parsedResult;
+        try {
+            parsedResult = JSON.parse(result);
+            // If it parsed as JSON, check if it's an error
+            if (parsedResult.error) {
+                t.fail(`Tool returned error when it should have worked: ${parsedResult.error}`);
+            }
+        } catch (error) {
+            // If it doesn't parse as JSON, that's fine - it's likely the model response
+            t.truthy(typeof result === 'string', 'Result should be a string');
+        }
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('Analyzer tool: File resolution works with agentContext', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        // Add a file to the collection
+        await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            url: 'https://example.com/test-file.pdf',
+            filename: 'test-file.pdf',
+            userMessage: 'Add test file'
+        });
+        
+        // Get the file ID from the collection
+        const collection = await loadFileCollection(contextId, null, false);
+        const fileId = collection[0].id;
+        
+        // Test analyzer tool with agentContext (modern format)
+        const result = await callPathway('sys_tool_analyzefile', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            file: fileId,
+            detailedInstructions: 'What is this file?',
+            userMessage: 'Testing with agentContext'
+        });
+        
+        t.truthy(result, 'Should have a result');
+        
+        // The result should not be an error
+        let parsedResult;
+        try {
+            parsedResult = JSON.parse(result);
+            if (parsedResult.error) {
+                t.fail(`Tool returned error: ${parsedResult.error}`);
+            }
+        } catch (error) {
+            // If it doesn't parse as JSON, that's fine - it's likely the model response
+            t.truthy(typeof result === 'string', 'Result should be a string');
+        }
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
 // ============================================
 // Converted Files Tests (displayFilename != URL extension)
 // ============================================
