@@ -80,6 +80,7 @@ const resolveAndAddFileContent = async (pathways, pathwayArgs, requestId, config
 
 // Helper function to execute pathway with cortex pathway name or fallback to legacy
 const executePathwayWithFallback = async (pathway, pathwayArgs, contextValue, info, requestId, originalPrompt = null, config) => {
+    // Extract cortexPathwayName from originalPrompt (could be original object or transformed Prompt object)
     const cortexPathwayName = (originalPrompt && typeof originalPrompt === 'object' && originalPrompt.cortexPathwayName) 
         ? originalPrompt.cortexPathwayName 
         : null;
@@ -99,6 +100,12 @@ const executePathwayWithFallback = async (pathway, pathwayArgs, contextValue, in
         if (cortexPathwayName === 'run_workspace_agent') {
             // Remove old aiStyle parameter (no longer used)
             delete cortexArgs.aiStyle;
+            
+            // Extract researchMode from originalPrompt if not already in pathwayArgs
+            // originalPrompt could be the original object from JSON or a transformed Prompt object
+            if (originalPrompt && typeof originalPrompt === 'object' && originalPrompt.researchMode !== undefined) {
+                cortexArgs.researchMode = originalPrompt.researchMode;
+            }
             
             // Transform context parameters to agentContext array format (only if agentContext not already provided)
             if (!cortexArgs.agentContext && (cortexArgs.contextId || cortexArgs.contextKey || cortexArgs.altContextId || cortexArgs.altContextKey)) {
