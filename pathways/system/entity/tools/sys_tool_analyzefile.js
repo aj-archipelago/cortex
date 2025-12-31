@@ -42,9 +42,12 @@ export default {
                         type: "string",
                         description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
                     },
-                    file: {
-                        type: "string",
-                        description: "Optional: The file to analyze (from ListFileCollection or SearchFileCollection): can be the hash, the filename, the URL, or the GCS URL. You can find available files in the availableFiles section."
+                    files: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        },
+                        description: "Array of files to analyze (from ListFileCollection or SearchFileCollection): each can be the hash, the filename, the URL, or the GCS URL. You can find available files in the availableFiles section."
                     },
                     userMessage: {
                         type: "string",
@@ -115,9 +118,12 @@ export default {
                         type: "string",
                         description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
                     },
-                    file: {
-                        type: "string",
-                        description: "Optional: The file to analyze (from ListFileCollection or SearchFileCollection): can be the hash, the filename, the URL, or the GCS URL. You can find available files in the availableFiles section."
+                    files: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        },
+                        description: "Array of files to analyze (from ListFileCollection or SearchFileCollection): each can be the hash, the filename, the URL, or the GCS URL. You can find available files in the availableFiles section."
                     },
                     userMessage: {
                         type: "string",
@@ -143,7 +149,7 @@ export default {
                     },
                     file: {
                         type: "string",
-                        description: "Optional: The file to analyze. Can be: (1) A YouTube URL (youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., youtube.com/embed/...), (2) A direct video/audio file URL, (3) A file from the collection (hash, filename, URL, or GCS URL from ListFileCollection or SearchFileCollection). You can find available files in the availableFiles section."
+                        description: "The file to analyze. Can be: (1) A YouTube URL (youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., youtube.com/embed/...), (2) A direct video/audio file URL, (3) A file from the collection (hash, filename, URL, or GCS URL from ListFileCollection or SearchFileCollection). You can find available files in the availableFiles section."
                     },
                     userMessage: {
                         type: "string",
@@ -162,7 +168,7 @@ export default {
             const cleanChatHistory = [];
             
             // Generate file message content if provided
-            if (args.file) {
+            if (args.files && Array.isArray(args.files) && args.files.length > 0) {
                 // Use agentContext if available, otherwise fall back to creating it from contextId/contextKey
                 const agentContext = args.agentContext || (args.contextId ? [{
                     contextId: args.contextId,
@@ -171,33 +177,48 @@ export default {
                 }] : null);
                 
                 if (!agentContext || !Array.isArray(agentContext) || agentContext.length === 0) {
-                    const errorMessage = `File not found: "${args.file}". agentContext is required to look up files in the collection.`;
+                    const errorMessage = `Files not found: agentContext is required to look up files in the collection.`;
                     resolver.tool = JSON.stringify({ toolUsed: "vision" });
                     return JSON.stringify({ 
                         error: errorMessage,
-                        recoveryMessage: "The file was not found. Please verify the file exists in the collection or provide a valid file reference."
+                        recoveryMessage: "The files were not found. Please verify the files exist in the collection or provide valid file references."
                     });
                 }
                 
-                const fileContent = await generateFileMessageContent(args.file, agentContext);
-                if (!fileContent) {
-                    const errorMessage = `File not found: "${args.file}". Use ListFileCollection or SearchFileCollection to find available files.`;
+                // Process all files
+                const fileContents = [];
+                const errors = [];
+                
+                for (const fileParam of args.files) {
+                    const fileContent = await generateFileMessageContent(fileParam, agentContext);
+                    if (!fileContent) {
+                        errors.push(`File not found: "${fileParam}"`);
+                        continue;
+                    }
+                    fileContents.push(fileContent);
+                }
+                
+                // If no files were found, return error
+                if (fileContents.length === 0) {
+                    const errorMessage = errors.length > 0 
+                        ? errors.join('; ')
+                        : 'No files found. Use ListFileCollection or SearchFileCollection to find available files.';
                     resolver.tool = JSON.stringify({ toolUsed: "vision" });
                     return JSON.stringify({ 
                         error: errorMessage,
-                        recoveryMessage: "The file was not found. Please verify the file exists in the collection or provide a valid file reference."
+                        recoveryMessage: "The files were not found. Please verify the files exist in the collection or provide valid file references."
                     });
                 }
                 
-                // Combine file and instructions in the same message so Gemini sees both together
-                const messageContent = [fileContent];
+                // Combine files and instructions in the same message so Gemini sees both together
+                const messageContent = [...fileContents];
                 if (args.detailedInstructions) {
                     messageContent.push({type: 'text', text: args.detailedInstructions});
                 }
                 
                 cleanChatHistory.push({role: "user", content: messageContent});
             } else if (args.detailedInstructions) {
-                // No file, just add instructions
+                // No files, just add instructions
                 cleanChatHistory.push({role: "user", content: args.detailedInstructions});
             }
             

@@ -3,7 +3,7 @@
 // Uses Redis hash maps (FileStoreMap:ctx:<contextId>) for storage
 // Supports atomic rename/tag/notes updates via UpdateFileMetadata
 import logger from '../../../../lib/logger.js';
-import { addFileToCollection, loadFileCollection, loadFileCollectionAll, loadMergedFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
+import { addFileToCollection, loadFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -14,7 +14,7 @@ export default {
             icon: "📁",
             function: {
                 name: "AddFileToCollection",
-                description: "Add a file to your persistent file collection. This tool can upload a file from a URL to cloud storage (checking for duplicates by hash) and then store it in your collection with metadata. You can also add files that are already in cloud storage by providing the cloud URL directly.",
+                description: "Add a file to the file collection for this chat. This tool can upload a file from a URL to cloud storage (checking for duplicates by hash) and then store it in your collection with metadata so it can be used to download files from the internet.",
                 parameters: {
                     type: "object",
                     properties: {
@@ -71,7 +71,7 @@ export default {
                     properties: {
                         query: {
                             type: "string",
-                            description: "Search query - can search by filename, tags, or notes content"
+                            description: "Search query - can search by filename, tags, or notes content. Note: This is a simple substring search (case-insensitive). Operators like | (OR), & (AND), NOT, or quoted phrases are NOT supported. The query will match if it appears anywhere in the filename, tags, or notes."
                         },
                         tags: {
                             type: "array",
@@ -84,7 +84,7 @@ export default {
                         },
                         includeAllChats: {
                             type: "boolean",
-                            description: "Optional: Only use true if you need to search across all chats. Default (false) searches only the current chat, which is usually what you want."
+                            description: "Optional: Set to true if the file you want may be in a different chat than the current chat."
                         },
                         userMessage: {
                             type: "string",
@@ -120,7 +120,7 @@ export default {
                         },
                         includeAllChats: {
                             type: "boolean",
-                            description: "Optional: Only use true if you need to list files from all chats. Default (false) lists only the current chat, which is usually what you want."
+                            description: "Optional: Set to true if the file you want may be in a different chat than the current chat."
                         },
                         userMessage: {
                             type: "string",
@@ -240,9 +240,9 @@ export default {
                 }
 
                 // Load collection and find the file
-                // Use loadFileCollectionAll to find files regardless of inCollection status
+                // Use loadFileCollection without chatIds to find files regardless of inCollection status
                 // This ensures files can be updated even if they're chat-specific
-                const collection = await loadFileCollectionAll(contextId, contextKey);
+                const collection = await loadFileCollection({ contextId, contextKey, default: true });
                 const foundFile = findFileInCollection(file, collection);
                 
                 if (!foundFile) {
@@ -382,7 +382,10 @@ export default {
                 const filterChatId = includeAllChats ? null : chatId;
                 
                 // Load primary collection for lastAccessed updates (only update files in primary context)
-                const primaryFiles = await loadFileCollection(contextId, contextKey, false, filterChatId);
+                const primaryFiles = await loadFileCollection(
+                    { contextId, contextKey, default: true }, 
+                    { chatIds: filterChatId ? [filterChatId] : null, useCache: false }
+                );
                 const now = new Date().toISOString();
                 
                 // Find matching files in primary collection and update lastAccessed directly
@@ -410,10 +413,12 @@ export default {
                     }
                 }
                 
-                // Load merged collection for search results (includes all agentContext files)
+                // Load collection for search results (includes all agentContext files)
                 // Filter by chatId if includeAllChats is false and chatId is available
-                // loadMergedFileCollection now handles inCollection filtering centrally
-                const updatedFiles = await loadMergedFileCollection(args.agentContext, filterChatId);
+                const updatedFiles = await loadFileCollection(
+                    args.agentContext, 
+                    { chatIds: filterChatId ? [filterChatId] : null }
+                );
                 
                 // Filter and sort results (for display only, not modifying)
                 let results = updatedFiles.filter(file => {
@@ -511,8 +516,8 @@ export default {
 
                 // Load collection ONCE to find all files and their data
                 // Do NOT filter by chatId - remove should be able to delete files from any chat
-                // Use merged collection to include files from all agentContext contexts
-                const collection = await loadMergedFileCollection(args.agentContext, null);
+                // Use loadFileCollection without chatIds to get all files from all contexts
+                const collection = await loadFileCollection(args.agentContext);
                 
                 // Resolve all files and collect their info in a single pass
                 for (const target of targetFiles) {
@@ -638,7 +643,7 @@ export default {
                 }));
 
                 // Get remaining files count after deletion
-                const remainingCollection = await loadFileCollection(contextId, contextKey, false);
+                const remainingCollection = await loadFileCollection({ contextId, contextKey, default: true }, { useCache: false });
                 const remainingCount = remainingCollection.length;
 
                 // Build result message
@@ -667,10 +672,12 @@ export default {
                 // Determine which chatId to use for filtering (null if includeAllChats is true)
                 const filterChatId = includeAllChats ? null : chatId;
                 
-                // Use merged collection to include files from all agentContext contexts
+                // Use loadFileCollection to include files from all agentContext contexts
                 // Filter by chatId if includeAllChats is false and chatId is available
-                // loadMergedFileCollection now handles inCollection filtering centrally
-                const collection = await loadMergedFileCollection(args.agentContext, filterChatId);
+                const collection = await loadFileCollection(
+                    args.agentContext, 
+                    { chatIds: filterChatId ? [filterChatId] : null }
+                );
                 let results = collection;
 
                 // Filter by tags if provided

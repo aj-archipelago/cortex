@@ -73,7 +73,7 @@ test('WriteFile: Write and upload text file', async t => {
         t.true(parsed.message.includes('written') && parsed.message.includes('uploaded'));
         
         // Verify it was added to file collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1);
         // Use displayFilename (user-friendly name) with fallback to filename (CFH-managed)
         t.is(collection[0].displayFilename || collection[0].filename, filename);
@@ -118,7 +118,7 @@ test('WriteFile: Write JSON file with tags and notes', async t => {
         t.is(parsed.size, Buffer.byteLength(content, 'utf8'));
         
         // Verify it was added to file collection with metadata
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1);
         // Use displayFilename (user-friendly name) with fallback to filename (CFH-managed)
         t.is(collection[0].displayFilename || collection[0].filename, filename);
@@ -231,7 +231,7 @@ test('WriteFile: Different file types and MIME types', async t => {
         }
         
         // Verify all files were added
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, successCount);
     } finally {
         await cleanup(contextId);
@@ -315,7 +315,7 @@ test('WriteFile: Duplicate content (same hash)', async t => {
         
         // Both files with same hash should result in one entry (same content, CFH will find it)
         // The second file will update the existing entry with the new displayFilename
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1); // Same hash = one entry
         t.is(collection[0].hash, firstHash); // Same hash
         // The displayFilename should be from the most recent write
