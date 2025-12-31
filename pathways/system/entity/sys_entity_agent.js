@@ -601,8 +601,27 @@ export default {
             new Prompt({ messages: promptMessages }),
         ];
 
-        // Use 'high' reasoning effort in research mode for thorough analysis, 'none' in normal mode for faster responses
-        const reasoningEffort = researchMode ? 'high' : 'low';
+        // set the style model if applicable
+        const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI, AI_STYLE_ANTHROPIC_RESEARCH, AI_STYLE_OPENAI_RESEARCH, AI_STYLE_OPENAI_LEGACY, AI_STYLE_OPENAI_LEGACY_RESEARCH, AI_STYLE_XAI, AI_STYLE_XAI_RESEARCH, AI_STYLE_GOOGLE, AI_STYLE_GOOGLE_RESEARCH, AI_STYLE_OPENAI_PREVIEW, AI_STYLE_OPENAI_PREVIEW_RESEARCH } = args;
+
+        // Create a mapping of AI styles to their corresponding models
+        const styleModelMap = {
+            "Anthropic": { normal: AI_STYLE_ANTHROPIC, research: AI_STYLE_ANTHROPIC_RESEARCH },
+            "OpenAI_Preview": { normal: AI_STYLE_OPENAI_PREVIEW, research: AI_STYLE_OPENAI_PREVIEW_RESEARCH },
+            "OpenAI": { normal: AI_STYLE_OPENAI, research: AI_STYLE_OPENAI_RESEARCH },
+            "OpenAI_Legacy": { normal: AI_STYLE_OPENAI_LEGACY, research: AI_STYLE_OPENAI_LEGACY_RESEARCH },
+            "XAI": { normal: AI_STYLE_XAI, research: AI_STYLE_XAI_RESEARCH },
+            "Google": { normal: AI_STYLE_GOOGLE, research: AI_STYLE_GOOGLE_RESEARCH }
+        };
+
+        // Get the appropriate model based on AI style and research mode
+        const styleConfig = styleModelMap[aiStyle] || styleModelMap["OpenAI"]; // Default to OpenAI
+        const styleModel = researchMode ? styleConfig.research : styleConfig.normal;
+        // Use 'high' reasoning effort in research mode for thorough analysis, 'medium' in normal mode for faster responses
+        const reasoningEffort = researchMode ? 'high' : 'medium';
+        
+        // Use the model from args if provided, otherwise use the style-based model
+        const finalModel = args.model || styleModel;
 
         // Limit the chat history to 20 messages to speed up processing
         if (args.messages && args.messages.length > 0) {
@@ -658,6 +677,7 @@ export default {
 
             let response = await runAllPrompts({
                 ...args,
+                modelOverride: finalModel,
                 chatHistory: currentMessages,
                 availableFiles,
                 reasoningEffort,
