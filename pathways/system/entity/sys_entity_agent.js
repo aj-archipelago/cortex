@@ -474,6 +474,9 @@ export default {
         const styleConfig = styleModelMap[aiStyle] || styleModelMap["OpenAI"]; // Default to OpenAI
         const styleModel = researchMode ? styleConfig.research : styleConfig.normal;
         const reasoningEffort = researchMode ? 'high' : 'medium';
+        
+        // Use the model from args if provided, otherwise use the style-based model
+        const finalModel = args.model || styleModel;
 
         // Limit the chat history to 20 messages to speed up processing
         if (args.messages && args.messages.length > 0) {
@@ -528,7 +531,7 @@ export default {
 
             let response = await runAllPrompts({
                 ...args,
-                modelOverride: styleModel,
+                modelOverride: finalModel,
                 chatHistory: currentMessages,
                 availableFiles,
                 reasoningEffort,
