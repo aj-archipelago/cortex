@@ -1,7 +1,7 @@
 // sys_tool_view_image.js
 // Tool pathway that allows agents to view image files from the file collection
 import logger from '../../../../lib/logger.js';
-import { loadMergedFileCollection, findFileInCollection, ensureShortLivedUrl, getDefaultContext } from '../../../../lib/fileUtils.js';
+import { loadMergedFileCollection, findFileInCollection, ensureShortLivedUrl } from '../../../../lib/fileUtils.js';
 import { config } from '../../../../config.js';
 
 export default {
@@ -74,8 +74,7 @@ export default {
 
                 // Resolve to short-lived URL if possible
                 const fileHandlerUrl = config.get('whisperMediaApiUrl');
-                const defaultCtx = getDefaultContext(args.agentContext);
-                const fileWithShortLivedUrl = await ensureShortLivedUrl(foundFile, fileHandlerUrl, defaultCtx?.contextId || null);
+                const fileWithShortLivedUrl = await ensureShortLivedUrl(foundFile, fileHandlerUrl, args.contextId || null);
 
                 // Add to imageUrls array
                 imageUrls.push({

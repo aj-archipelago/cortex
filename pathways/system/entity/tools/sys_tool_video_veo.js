@@ -1,7 +1,7 @@
 // sys_tool_video_veo.js
 // Entity tool that generates videos using Google Veo 3.1 Fast for the entity to show to the user
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { uploadFileToCloud, addFileToCollection, resolveFileParameter } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, addFileToCollection, resolveFileParameter, buildFileCreationResponse } from '../../../../lib/fileUtils.js';
 import { config } from '../../../../config.js';
 import axios from 'axios';
 
@@ -345,34 +345,10 @@ export default {
                         };
                     });
                     
-                    // Return video info in the same format as availableFiles for the text message
-                    // Format: hash | filename | url | date | tags
-                    const videoList = successfulVideos.map((vid) => {
-                        if (vid.fileEntry) {
-                            // Use the file entry data from addFileToCollection
-                            const fe = vid.fileEntry;
-                            const dateStr = fe.addedDate 
-                                ? new Date(fe.addedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                                : '';
-                            const tagsStr = Array.isArray(fe.tags) ? fe.tags.join(',') : '';
-                            return `${fe.hash || ''} | ${fe.displayFilename || ''} | ${fe.url || vid.url} | ${dateStr} | ${tagsStr}`;
-                        } else {
-                            // Fallback if file collection wasn't available
-                            return `${vid.hash || 'unknown'} | | ${vid.url} | |`;
-                        }
-                    }).join('\n');
-                    
-                    const count = successfulVideos.length;
-                    
-                    // Make the success message very explicit so the agent knows files were created and added to collection
-                    // This format matches availableFiles so the agent can reference them by hash/filename
-                    const message = `Video generation completed successfully. ${count} video${count > 1 ? 's have' : ' has'} been generated, uploaded to cloud storage, and added to your file collection. The video${count > 1 ? 's are' : ' is'} now available in your file collection:\n\n${videoList}\n\nYou can reference these videos by their hash, filename, or URL in future tool calls. Videos can be displayed using markdown image syntax, e.g. ![video](url)`;
-                    
-                    // Return JSON object with imageUrls (kept for backward compatibility, but explicit message should prevent looping)
-                    return JSON.stringify({
-                        success: true,
-                        message: message,
-                        imageUrls: imageUrls
+                    return buildFileCreationResponse(successfulVideos, {
+                        mediaType: 'video',
+                        action: 'Video generation',
+                        legacyUrls: imageUrls
                     });
                 } else {
                     // All videos failed to upload

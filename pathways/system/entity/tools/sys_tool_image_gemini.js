@@ -1,7 +1,7 @@
 // sys_tool_image_gemini.js
 // Entity tool that creates and modifies images for the entity to show to the user
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { uploadImageToCloud, addFileToCollection, resolveFileParameter } from '../../../../lib/fileUtils.js';
+import { uploadImageToCloud, addFileToCollection, resolveFileParameter, buildFileCreationResponse } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -247,34 +247,10 @@ export default {
                         };
                     });
                     
-                    // Return image info in the same format as availableFiles for the text message
-                    // Format: hash | filename | url | date | tags
-                    const imageList = successfulImages.map((img) => {
-                        if (img.fileEntry) {
-                            // Use the file entry data from addFileToCollection
-                            const fe = img.fileEntry;
-                            const dateStr = fe.addedDate 
-                                ? new Date(fe.addedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                                : '';
-                            const tagsStr = Array.isArray(fe.tags) ? fe.tags.join(',') : '';
-                            return `${fe.hash || ''} | ${fe.displayFilename || ''} | ${fe.url || img.url} | ${dateStr} | ${tagsStr}`;
-                        } else {
-                            // Fallback if file collection wasn't available
-                            return `${img.hash || 'unknown'} | | ${img.url} | |`;
-                        }
-                    }).join('\n');
-                    
-                    const count = successfulImages.length;
-                    
-                    // Make the success message very explicit so the agent knows files were created and added to collection
-                    // This format matches availableFiles so the agent can reference them by hash/filename
-                    const message = `Image generation completed successfully. ${count} image${count > 1 ? 's have' : ' has'} been generated, uploaded to cloud storage, and added to your file collection. The image${count > 1 ? 's are' : ' is'} now available in your file collection:\n\n${imageList}\n\nYou can reference these images by their hash, filename, or URL in future tool calls.`;
-                    
-                    // Return JSON object with imageUrls (kept for backward compatibility, but explicit message should prevent looping)
-                    return JSON.stringify({
-                        success: true,
-                        message: message,
-                        imageUrls: imageUrls
+                    return buildFileCreationResponse(successfulImages, {
+                        mediaType: 'image',
+                        action: 'Image generation',
+                        legacyUrls: imageUrls
                     });
                 } else {
                     throw new Error('Image generation failed: Images were generated but could not be uploaded to storage');

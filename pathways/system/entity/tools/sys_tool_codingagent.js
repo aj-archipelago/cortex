@@ -83,8 +83,6 @@ export default {
         try {
             const { codingTask, userMessage, inputFiles, codingTaskKeywords, contextId } = args;
 
-            // pathwayResolver.executePathway should have already extracted contextId from agentContext,
-            // but validate it's present as a safety check
             if (!contextId) {
                 throw new Error("contextId is required. It should be provided via agentContext or contextId parameter.");
             }

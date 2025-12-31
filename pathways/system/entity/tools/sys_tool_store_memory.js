@@ -58,8 +58,6 @@ export default {
             });
         }
 
-        // pathwayResolver.executePathway should have already extracted contextId from agentContext,
-        // but validate it's present as a safety check
         const { contextId, contextKey } = args;
         if (!contextId) {
             return JSON.stringify({ 

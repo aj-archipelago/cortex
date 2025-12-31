@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadMergedFileCollection, getDefaultContext, getMimeTypeFromFilename, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache, getActualContentMimeType } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadMergedFileCollection, getMimeTypeFromFilename, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache, getActualContentMimeType } from '../../../../lib/fileUtils.js';
 
 // Maximum file size for editing (50MB) - prevents memory blowup on huge files
 const MAX_EDITABLE_FILE_SIZE = 50 * 1024 * 1024;
@@ -147,17 +147,15 @@ export default {
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const { file, startLine, endLine, content, oldString, newString, replaceAll = false, agentContext, chatId } = args;
         
-        const defaultCtx = getDefaultContext(agentContext);
-        if (!defaultCtx) {
+        const { contextId, contextKey } = args;
+        if (!contextId) {
             const errorResult = {
                 success: false,
-                error: "agentContext with at least one default context is required"
+                error: "contextId is required. It should be provided via agentContext or contextId parameter."
             };
             resolver.tool = JSON.stringify({ toolUsed: "EditFile" });
             return JSON.stringify(errorResult);
         }
-        const contextId = defaultCtx.contextId;
-        const contextKey = defaultCtx.contextKey || null;
         
         // Determine which tool was called based on parameters
         const isSearchReplace = oldString !== undefined && newString !== undefined;
