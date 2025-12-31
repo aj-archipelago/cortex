@@ -147,9 +147,12 @@ export default {
                         type: "string",
                         description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
                     },
-                    file: {
-                        type: "string",
-                        description: "The file to analyze. Can be: (1) A YouTube URL (youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., youtube.com/embed/...), (2) A direct video/audio file URL, (3) A file from the collection (hash, filename, URL, or GCS URL from ListFileCollection or SearchFileCollection). You can find available files in the availableFiles section."
+                    files: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        },
+                        description: "Array of files to analyze. Each can be: (1) A YouTube URL (youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., youtube.com/embed/...), (2) A direct video/audio file URL, (3) A file from the collection (hash, filename, URL, or GCS URL from ListFileCollection or SearchFileCollection). You can find available files in the availableFiles section."
                     },
                     userMessage: {
                         type: "string",
@@ -168,7 +171,12 @@ export default {
             const cleanChatHistory = [];
             
             // Generate file message content if provided
-            if (args.files && Array.isArray(args.files) && args.files.length > 0) {
+            // Support both 'files' array and legacy 'file' parameter for backward compatibility
+            const filesToProcess = args.files && Array.isArray(args.files) && args.files.length > 0
+                ? args.files
+                : (args.file ? [args.file] : []);
+            
+            if (filesToProcess.length > 0) {
                 // Use agentContext if available, otherwise fall back to creating it from contextId/contextKey
                 const agentContext = args.agentContext || (args.contextId ? [{
                     contextId: args.contextId,
@@ -189,7 +197,7 @@ export default {
                 const fileContents = [];
                 const errors = [];
                 
-                for (const fileParam of args.files) {
+                for (const fileParam of filesToProcess) {
                     const fileContent = await generateFileMessageContent(fileParam, agentContext);
                     if (!fileContent) {
                         errors.push(`File not found: "${fileParam}"`);

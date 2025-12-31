@@ -1086,7 +1086,7 @@ test('File collection: syncAndStripFilesFromChatHistory only strips collection f
         ];
         
         // Process chat history
-        const { chatHistory: processed, availableFiles } = await syncAndStripFilesFromChatHistory(chatHistory, createAgentContext(contextId));
+        const { chatHistory: processed } = await syncAndStripFilesFromChatHistory(chatHistory, createAgentContext(contextId));
         
         // Verify only collection file was stripped
         const content = processed[0].content;
@@ -1221,7 +1221,7 @@ test('File collection: syncAndStripFilesFromChatHistory finds and syncs files wi
         ];
         
         // Process chat history - should find all 3 files and sync them
-        const { chatHistory: processed, availableFiles } = await syncAndStripFilesFromChatHistory(
+        const { chatHistory: processed } = await syncAndStripFilesFromChatHistory(
             chatHistory, 
             createAgentContext(contextId),
             chatId
@@ -2229,7 +2229,7 @@ test('Analyzer tool: Returns error JSON format when file not found', async t => 
     try {
         const result = await callPathway('sys_tool_analyzefile', {
             agentContext: [{ contextId, contextKey: null, default: true }],
-            file: 'non-existent-file.jpg',
+            files: ['non-existent-file.jpg'],
             detailedInstructions: 'Analyze this file',
             userMessage: 'Testing error handling'
         });
@@ -2276,7 +2276,7 @@ test('Analyzer tool: Works with legacy contextId/contextKey parameters (backward
         const result = await callPathway('sys_tool_analyzefile', {
             contextId,  // Legacy format - no agentContext
             contextKey: null,
-            file: fileId,
+            files: [fileId],
             detailedInstructions: 'What is this file?',
             userMessage: 'Testing backward compatibility'
         });
@@ -2320,7 +2320,7 @@ test('Analyzer tool: File resolution works with agentContext', async t => {
         // Test analyzer tool with agentContext (modern format)
         const result = await callPathway('sys_tool_analyzefile', {
             agentContext: [{ contextId, contextKey: null, default: true }],
-            file: fileId,
+            files: [fileId],
             detailedInstructions: 'What is this file?',
             userMessage: 'Testing with agentContext'
         });
@@ -3262,8 +3262,7 @@ test('File collection: SearchFileCollection with compound context (user + worksp
     const chatId = `test-chat-${Date.now()}`;
     
     try {
-        const { addFileToCollection, getRedisClient } = await import('../../../../lib/fileUtils.js');
-        const redisClient = await getRedisClient();
+        const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
         
         // Add files to user context
         await addFileToCollection(userContextId, null, 'https://example.com/user-doc.pdf', null, 'User Document.pdf', ['personal'], 'Personal document', 'hash-user-doc', null, null, false, chatId);
