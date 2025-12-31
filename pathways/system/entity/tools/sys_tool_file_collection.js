@@ -3,7 +3,7 @@
 // Uses Redis hash maps (FileStoreMap:ctx:<contextId>) for storage
 // Supports atomic rename/tag/notes updates via UpdateFileMetadata
 import logger from '../../../../lib/logger.js';
-import { addFileToCollection, loadFileCollection, loadMergedFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
+import { addFileToCollection, loadFileCollection, loadFileCollectionAll, loadMergedFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -240,7 +240,9 @@ export default {
                 }
 
                 // Load collection and find the file
-                const collection = await loadFileCollection(contextId, contextKey, false);
+                // Use loadFileCollectionAll to find files regardless of inCollection status
+                // This ensures files can be updated even if they're chat-specific
+                const collection = await loadFileCollectionAll(contextId, contextKey);
                 const foundFile = findFileInCollection(file, collection);
                 
                 if (!foundFile) {
