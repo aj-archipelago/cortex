@@ -57,7 +57,7 @@ export default {
     },
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { content, filename, tags = [], notes = '', contextId, contextKey } = args;
+        const { content, filename, tags = [], notes = '', contextId, contextKey, chatId } = args;
         
         // Validate inputs and return JSON error if invalid
         if (content === undefined || content === null) {
@@ -176,7 +176,8 @@ export default {
                         uploadResult.hash || null,
                         null, // fileUrl - not needed since we already uploaded
                         resolver,
-                        true // permanent => retention=permanent
+                        true, // permanent => retention=permanent
+                        chatId || null
                     );
                 } catch (collectionError) {
                     // Log but don't fail - file collection is optional
@@ -185,6 +186,19 @@ export default {
             }
 
             const fileSize = Buffer.byteLength(content, 'utf8');
+            
+            // Create explicit success message that clearly indicates completion and file collection status
+            // This format matches image generation tools to prevent agent loops
+            let message;
+            if (fileEntry) {
+                // File was added to collection - provide explicit completion message with reference info
+                const fileRef = fileEntry.hash || fileEntry.id || filename;
+                message = `File creation completed successfully. The file "${filename}" (${formatFileSize(fileSize)}) has been written, uploaded to cloud storage, and added to your file collection. The file is now available in your file collection and can be referenced by its hash (${fileEntry.hash || 'N/A'}), filename (${filename}), fileId (${fileEntry.id || 'N/A'}), or URL in future tool calls.`;
+            } else {
+                // File was uploaded but not added to collection (no contextId provided)
+                message = `File "${filename}" written and uploaded successfully (${formatFileSize(fileSize)}). File URL: ${uploadResult.url}`;
+            }
+            
             const result = {
                 success: true,
                 filename: filename,
@@ -194,7 +208,7 @@ export default {
                 fileId: fileEntry?.id || null,
                 size: fileSize,
                 sizeFormatted: formatFileSize(fileSize),
-                message: `File "${filename}" written and uploaded successfully (${formatFileSize(fileSize)})`
+                message: message
             };
 
             resolver.tool = JSON.stringify({ toolUsed: "WriteFile" });

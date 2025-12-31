@@ -73,7 +73,7 @@ test('WriteFile: Write and upload text file', async t => {
         t.is(parsed.filename, filename);
         t.truthy(parsed.url);
         t.is(parsed.size, Buffer.byteLength(content, 'utf8'));
-        t.true(parsed.message.includes('written and uploaded successfully'));
+        t.true(parsed.message.includes('written') && parsed.message.includes('uploaded'));
     } finally {
         await cleanup(contextId);
     }

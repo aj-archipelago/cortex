@@ -2389,3 +2389,324 @@ test('loadMergedFileCollection should dedupe files present in both contexts', as
         }
     }
 });
+
+test('File collection: SearchFileCollection filters by chatId by default', async t => {
+    const contextId = createTestContext();
+    const chatId1 = 'chat-1';
+    const chatId2 = 'chat-2';
+    
+    try {
+        const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Add file to chat-1
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        
+        // Add file to chat-2
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        
+        // Add global file (no chatId)
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        
+        // Search from chat-1 - should only see chat-1 file and global file
+        const result1 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'file',
+            userMessage: 'Search from chat-1'
+        });
+        
+        const parsed1 = JSON.parse(result1);
+        t.is(parsed1.success, true);
+        t.is(parsed1.count, 2, 'Should find chat-1 file and global file');
+        const filenames1 = parsed1.files.map(f => f.displayFilename);
+        t.true(filenames1.includes('chat1-file.pdf'), 'Should include chat-1 file');
+        t.true(filenames1.includes('global-file.pdf'), 'Should include global file');
+        t.false(filenames1.includes('chat2-file.pdf'), 'Should not include chat-2 file');
+        
+        // Search from chat-2 - should only see chat-2 file and global file
+        const result2 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId2,
+            query: 'file',
+            userMessage: 'Search from chat-2'
+        });
+        
+        const parsed2 = JSON.parse(result2);
+        t.is(parsed2.success, true);
+        t.is(parsed2.count, 2, 'Should find chat-2 file and global file');
+        const filenames2 = parsed2.files.map(f => f.displayFilename);
+        t.true(filenames2.includes('chat2-file.pdf'), 'Should include chat-2 file');
+        t.true(filenames2.includes('global-file.pdf'), 'Should include global file');
+        t.false(filenames2.includes('chat1-file.pdf'), 'Should not include chat-1 file');
+        
+        // Search without chatId - should see all files (no filtering when chatId not provided)
+        const result3 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            query: 'file',
+            userMessage: 'Search without chatId'
+        });
+        
+        const parsed3 = JSON.parse(result3);
+        t.is(parsed3.success, true);
+        t.is(parsed3.count, 3, 'Should find all files when chatId not provided');
+        const filenames3 = parsed3.files.map(f => f.displayFilename);
+        t.true(filenames3.includes('chat1-file.pdf'), 'Should include chat-1 file');
+        t.true(filenames3.includes('chat2-file.pdf'), 'Should include chat-2 file');
+        t.true(filenames3.includes('global-file.pdf'), 'Should include global file');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: SearchFileCollection with includeAllChats=true shows all files', async t => {
+    const contextId = createTestContext();
+    const chatId1 = 'chat-1';
+    const chatId2 = 'chat-2';
+    
+    try {
+        const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Add file to chat-1
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        
+        // Add file to chat-2
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        
+        // Add global file
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        
+        // Search from chat-1 with includeAllChats=true - should see all files
+        const result = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'file',
+            includeAllChats: true,
+            userMessage: 'Search all chats from chat-1'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, true);
+        t.is(parsed.count, 3, 'Should find all files from all chats');
+        const filenames = parsed.files.map(f => f.displayFilename);
+        t.true(filenames.includes('chat1-file.pdf'), 'Should include chat-1 file');
+        t.true(filenames.includes('chat2-file.pdf'), 'Should include chat-2 file');
+        t.true(filenames.includes('global-file.pdf'), 'Should include global file');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: ListFileCollection filters by chatId by default', async t => {
+    const contextId = createTestContext();
+    const chatId1 = 'chat-1';
+    const chatId2 = 'chat-2';
+    
+    try {
+        const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Add file to chat-1
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        
+        // Add file to chat-2
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        
+        // Add global file
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        
+        // List from chat-1 - should only see chat-1 file and global file
+        const result1 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            userMessage: 'List files from chat-1'
+        });
+        
+        const parsed1 = JSON.parse(result1);
+        t.is(parsed1.success, true);
+        t.is(parsed1.count, 2, 'Should find chat-1 file and global file');
+        t.is(parsed1.totalFiles, 2, 'Total should match count');
+        const filenames1 = parsed1.files.map(f => f.displayFilename);
+        t.true(filenames1.includes('chat1-file.pdf'), 'Should include chat-1 file');
+        t.true(filenames1.includes('global-file.pdf'), 'Should include global file');
+        t.false(filenames1.includes('chat2-file.pdf'), 'Should not include chat-2 file');
+        
+        // List from chat-2 - should only see chat-2 file and global file
+        const result2 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId2,
+            userMessage: 'List files from chat-2'
+        });
+        
+        const parsed2 = JSON.parse(result2);
+        t.is(parsed2.success, true);
+        t.is(parsed2.count, 2, 'Should find chat-2 file and global file');
+        const filenames2 = parsed2.files.map(f => f.displayFilename);
+        t.true(filenames2.includes('chat2-file.pdf'), 'Should include chat-2 file');
+        t.true(filenames2.includes('global-file.pdf'), 'Should include global file');
+        t.false(filenames2.includes('chat1-file.pdf'), 'Should not include chat-1 file');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: ListFileCollection with includeAllChats=true shows all files', async t => {
+    const contextId = createTestContext();
+    const chatId1 = 'chat-1';
+    const chatId2 = 'chat-2';
+    
+    try {
+        const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Add file to chat-1
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        
+        // Add file to chat-2
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        
+        // Add global file
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        
+        // List from chat-1 with includeAllChats=true - should see all files
+        const result = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            includeAllChats: true,
+            userMessage: 'List all files from chat-1'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, true);
+        t.is(parsed.count, 3, 'Should find all files from all chats');
+        t.is(parsed.totalFiles, 3, 'Total should match count');
+        const filenames = parsed.files.map(f => f.displayFilename);
+        t.true(filenames.includes('chat1-file.pdf'), 'Should include chat-1 file');
+        t.true(filenames.includes('chat2-file.pdf'), 'Should include chat-2 file');
+        t.true(filenames.includes('global-file.pdf'), 'Should include global file');
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: RemoveFileFromCollection can remove files from any chat', async t => {
+    const contextId = createTestContext();
+    const chatId1 = 'chat-1';
+    const chatId2 = 'chat-2';
+    
+    try {
+        const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Add file to chat-1
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        
+        // Add file to chat-2
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        
+        // Add global file
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        
+        // Search from chat-1 to get the file ID for chat-2's file
+        const searchResult = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'chat2',
+            includeAllChats: true,
+            userMessage: 'Search all chats to find chat-2 file'
+        });
+        const searchParsed = JSON.parse(searchResult);
+        t.is(searchParsed.success, true);
+        const chat2File = searchParsed.files.find(f => f.displayFilename === 'chat2-file.pdf');
+        t.truthy(chat2File, 'Should find chat-2 file when searching all chats');
+        const chat2FileId = chat2File.id || chat2File.hash || chat2File.url;
+        
+        // Remove chat-2's file from chat-1 context (cross-chat removal)
+        const removeResult = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1, // Calling from chat-1
+            fileIds: [chat2FileId],
+            userMessage: 'Remove chat-2 file from chat-1'
+        });
+        
+        const removeParsed = JSON.parse(removeResult);
+        t.is(removeParsed.success, true);
+        t.is(removeParsed.removedCount, 1);
+        t.is(removeParsed.removedFiles.length, 1);
+        t.is(removeParsed.removedFiles[0].displayFilename, 'chat2-file.pdf');
+        
+        // Verify chat-2 file is gone (search from chat-2)
+        const verifyResult = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId2,
+            userMessage: 'List files from chat-2'
+        });
+        const verifyParsed = JSON.parse(verifyResult);
+        t.is(verifyParsed.success, true);
+        t.is(verifyParsed.count, 1, 'Should only have global file left');
+        t.true(verifyParsed.files.some(f => f.displayFilename === 'global-file.pdf'));
+        t.false(verifyParsed.files.some(f => f.displayFilename === 'chat2-file.pdf'));
+        
+        // Verify chat-1 file is still there
+        const chat1Result = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            userMessage: 'List files from chat-1'
+        });
+        const chat1Parsed = JSON.parse(chat1Result);
+        t.is(chat1Parsed.success, true);
+        t.is(chat1Parsed.count, 2, 'Should have chat-1 file and global file');
+        t.true(chat1Parsed.files.some(f => f.displayFilename === 'chat1-file.pdf'));
+        t.true(chat1Parsed.files.some(f => f.displayFilename === 'global-file.pdf'));
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: SearchFileCollection normalizes separators (space/dash/underscore matching)', async t => {
+    const contextId = createTestContext();
+    
+    try {
+        const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Add files with different separator conventions
+        await addFileToCollection(contextId, null, 'https://example.com/news-corp-report.pdf', null, 'News-Corp-Report.pdf', [], '', 'hash-dashes', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/news_corp_annual.pdf', null, 'News_Corp_Annual.pdf', [], '', 'hash-underscores', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/unrelated.pdf', null, 'Unrelated-File.pdf', [], '', 'hash-unrelated', null, null, false, null);
+        
+        // Search with space: "News Corp" should match both "News-Corp" and "News_Corp"
+        const result = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            query: 'News Corp',
+            userMessage: 'Search with spaces'
+        });
+        
+        const parsed = JSON.parse(result);
+        t.is(parsed.success, true);
+        t.is(parsed.count, 2, 'Should find both files with different separators');
+        const filenames = parsed.files.map(f => f.displayFilename);
+        t.true(filenames.includes('News-Corp-Report.pdf'), 'Should match dash-separated');
+        t.true(filenames.includes('News_Corp_Annual.pdf'), 'Should match underscore-separated');
+        t.false(filenames.includes('Unrelated-File.pdf'), 'Should not match unrelated file');
+        
+        // Search with dash: "News-Corp" should also match both
+        const result2 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            query: 'News-Corp',
+            userMessage: 'Search with dashes'
+        });
+        
+        const parsed2 = JSON.parse(result2);
+        t.is(parsed2.success, true);
+        t.is(parsed2.count, 2, 'Dash search should also find both');
+        
+        // Search with underscore: "News_Corp" should also match both
+        const result3 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            query: 'News_Corp',
+            userMessage: 'Search with underscores'
+        });
+        
+        const parsed3 = JSON.parse(result3);
+        t.is(parsed3.success, true);
+        t.is(parsed3.count, 2, 'Underscore search should also find both');
+    } finally {
+        await cleanup(contextId);
+    }
+});
