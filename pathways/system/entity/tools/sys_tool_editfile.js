@@ -2,7 +2,7 @@
 // Entity tool that modifies existing files by replacing line ranges or exact string matches
 import logger from '../../../../lib/logger.js';
 import { axios } from '../../../../lib/requestExecutor.js';
-import { uploadFileToCloud, findFileInCollection, loadMergedFileCollection, getMimeTypeFromFilename, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache, getActualContentMimeType } from '../../../../lib/fileUtils.js';
+import { uploadFileToCloud, findFileInCollection, loadFileCollection, getMimeTypeFromFilename, deleteFileByHash, isTextMimeType, updateFileMetadata, writeFileDataToRedis, invalidateFileCollectionCache, getActualContentMimeType } from '../../../../lib/fileUtils.js';
 
 // Maximum file size for editing (50MB) - prevents memory blowup on huge files
 const MAX_EDITABLE_FILE_SIZE = 50 * 1024 * 1024;
@@ -245,7 +245,7 @@ export default {
 
         try {
             // Resolve file ID first (needed for serialization)
-            const collection = await loadMergedFileCollection(agentContext);
+            const collection = await loadFileCollection(agentContext);
             const foundFile = findFileInCollection(file, collection);
             
             if (!foundFile) {
@@ -283,7 +283,7 @@ export default {
                     logger.info(`Using cached content for: ${currentFile.displayFilename || file}`);
                 } else {
                     // First edit in session: load collection and download file
-                    const currentCollection = await loadMergedFileCollection(agentContext);
+                    const currentCollection = await loadFileCollection(agentContext);
                     currentFile = findFileInCollection(file, currentCollection);
 
                     if (!currentFile) {
@@ -493,7 +493,7 @@ export default {
 
                 // Update the file collection entry directly (atomic operation)
                 // Use default context from agentContext for consistency
-                const latestCollection = await loadMergedFileCollection(agentContext);
+                const latestCollection = await loadFileCollection(agentContext);
                 let fileToUpdate = latestCollection.find(f => f.id === fileIdToUpdate);
                 
                 // If not found by ID, try to find by the original file parameter

@@ -4,7 +4,7 @@
 import test from 'ava';
 import serverFactory from '../../../../index.js';
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { generateFileMessageContent, resolveFileParameter, loadFileCollection, syncAndStripFilesFromChatHistory, loadMergedFileCollection } from '../../../../lib/fileUtils.js';
+import { generateFileMessageContent, resolveFileParameter, loadFileCollection, syncAndStripFilesFromChatHistory } from '../../../../lib/fileUtils.js';
 
 // Helper to create agentContext from contextId/contextKey
 const createAgentContext = (contextId, contextKey = null) => [{ contextId, contextKey, default: true }];
@@ -65,7 +65,7 @@ test('File collection: Add file to collection', async t => {
         t.true(parsed.message.includes('test.jpg'));
         
         // Verify it was saved to Redis hash map
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1);
         t.is(collection[0].displayFilename, 'test.jpg');
         t.is(collection[0].url, 'https://example.com/test.jpg');
@@ -489,7 +489,7 @@ test('generateFileMessageContent should find file by ID', async t => {
         });
         
         // Get the file ID from the collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const fileId = collection[0].id;
         
         // Normalize by ID
@@ -580,7 +580,7 @@ test('generateFileMessageContent should detect image type', async t => {
             userMessage: 'Add image'
         });
         
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const fileId = collection[0].id;
         
         const result = await generateFileMessageContent(fileId, createAgentContext(contextId));
@@ -880,7 +880,7 @@ test('File collection: Update file metadata', async t => {
         const fileId = addParsed.fileId;
         
         // Get the hash from the collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === fileId);
         t.truthy(file);
         const hash = file.hash;
@@ -897,7 +897,7 @@ test('File collection: Update file metadata', async t => {
         t.is(success, true);
         
         // Verify metadata was updated
-        const updatedCollection = await loadFileCollection(contextId, null, false);
+        const updatedCollection = await loadFileCollection(contextId, { useCache: false });
         const updatedFile = updatedCollection.find(f => f.id === fileId);
         t.truthy(updatedFile);
         t.is(updatedFile.displayFilename, 'renamed.pdf');
@@ -930,7 +930,7 @@ test('updateFileMetadata should allow updating inCollection', async (t) => {
         const fileId = addParsed.fileId;
         
         // Get the hash from the collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === fileId);
         t.truthy(file);
         const hash = file.hash;
@@ -946,13 +946,16 @@ test('updateFileMetadata should allow updating inCollection', async (t) => {
         t.is(success1, true);
         
         // Verify file is now only in chat-123 (not global)
-        const collection1 = await loadFileCollection(contextId, null, false);
+        // With new unified loadFileCollection, loading without chatIds returns ALL files
+        // So we need to check that the file's inCollection is ['chat-123'] not ['*']
+        const collection1 = await loadFileCollection(contextId, { useCache: false });
         const file1 = collection1.find(f => f.id === fileId);
-        // Should not appear in global collection
-        t.falsy(file1);
+        // File should still appear (all files are returned), but inCollection should be ['chat-123']
+        t.truthy(file1);
+        t.deepEqual(file1.inCollection, ['chat-123'], 'File should be in chat-123 collection, not global');
         
         // Should appear when filtering by chat-123
-        const collection2 = await loadFileCollection(contextId, null, false, 'chat-123');
+        const collection2 = await loadFileCollection(contextId, { chatIds: ['chat-123'], useCache: false });
         const file2 = collection2.find(f => f.id === fileId);
         t.truthy(file2);
         
@@ -963,25 +966,34 @@ test('updateFileMetadata should allow updating inCollection', async (t) => {
         t.is(success2, true);
         
         // Verify file is back in global collection
-        const collection3 = await loadFileCollection(contextId, null, false);
+        const collection3 = await loadFileCollection(contextId, { useCache: false });
         const file3 = collection3.find(f => f.id === fileId);
         t.truthy(file3);
+        // Verify it's global
+        t.true(
+            file3.inCollection === true || 
+            (Array.isArray(file3.inCollection) && file3.inCollection.includes('*')),
+            'File should be global'
+        );
         
         // Update inCollection to false (remove from collection)
+        // false is normalized to undefined, which means "not in collection"
         const success3 = await updateFileMetadata(contextId, hash, {
             inCollection: false
         });
         t.is(success3, true);
         
-        // Verify file is no longer in collection
-        const collection4 = await loadFileCollection(contextId, null, false);
+        // Verify file still exists but inCollection is undefined (not in collection)
+        // When loading without chatIds, undefined files are included (Labeeb uploads, etc.)
+        const collection4 = await loadFileCollection(contextId, { useCache: false });
         const file4 = collection4.find(f => f.id === fileId);
-        t.falsy(file4);
+        t.truthy(file4, 'File should still exist (false → undefined, treated same as Labeeb uploads)');
+        t.falsy(file4.inCollection, 'File should have undefined inCollection (not in collection)');
         
-        // Also not in chat-specific collection
-        const collection5 = await loadFileCollection(contextId, null, false, 'chat-123');
+        // Not in chat-specific collection (undefined files don't match any chatId)
+        const collection5 = await loadFileCollection(contextId, { chatIds: ['chat-123'], useCache: false });
         const file5 = collection5.find(f => f.id === fileId);
-        t.falsy(file5);
+        t.falsy(file5, 'File should not appear when filtering by chatId (undefined = not in collection)');
     } finally {
         await cleanup(contextId);
     }
@@ -1004,7 +1016,7 @@ test('File collection: Permanent files not deleted on remove', async t => {
         const fileId = addParsed.fileId;
         
         // Mark as permanent
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === fileId);
         const { updateFileMetadata } = await import('../../../../lib/fileUtils.js');
         await updateFileMetadata(contextId, file.hash, { permanent: true });
@@ -1074,7 +1086,7 @@ test('File collection: syncAndStripFilesFromChatHistory only strips collection f
         ];
         
         // Process chat history
-        const { chatHistory: processed, availableFiles } = await syncAndStripFilesFromChatHistory(chatHistory, createAgentContext(contextId));
+        const { chatHistory: processed } = await syncAndStripFilesFromChatHistory(chatHistory, createAgentContext(contextId));
         
         // Verify only collection file was stripped
         const content = processed[0].content;
@@ -1090,11 +1102,181 @@ test('File collection: syncAndStripFilesFromChatHistory only strips collection f
         t.is(content[1].url, 'https://example.com/external.pdf');
         
         // Collection should still have only 1 file (no auto-syncing)
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1);
         
         // Available files should list the collection file
         t.true(availableFiles.includes('in-collection.jpg'));
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: syncAndStripFilesFromChatHistory finds and syncs files without inCollection (Labeeb uploads)', async t => {
+    const contextId = createTestContext();
+    const chatId = `test-chat-${Date.now()}`;
+    
+    try {
+        const { syncAndStripFilesFromChatHistory, writeFileDataToRedis, getRedisClient, loadFileCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Create 3 files directly in Redis without inCollection set (simulating Labeeb uploads)
+        const redisClient = await getRedisClient();
+        t.truthy(redisClient, 'Redis client should be available');
+        
+        const contextMapKey = `FileStoreMap:ctx:${contextId}`;
+        
+        const file1 = {
+            url: 'https://example.com/labeeb-file-1.txt',
+            gcs: 'gs://bucket/labeeb-file-1.txt',
+            hash: 'hash-labeeb-1',
+            filename: 'labeeb-file-1.txt',
+            displayFilename: 'labeeb-file-1.txt',
+            mimeType: 'text/plain',
+            addedDate: new Date().toISOString(),
+            lastAccessed: new Date().toISOString(),
+            permanent: false,
+            tags: [],
+            notes: ''
+            // Note: inCollection is NOT set
+        };
+        
+        const file2 = {
+            url: 'https://example.com/labeeb-file-2.txt',
+            gcs: 'gs://bucket/labeeb-file-2.txt',
+            hash: 'hash-labeeb-2',
+            filename: 'labeeb-file-2.txt',
+            displayFilename: 'labeeb-file-2.txt',
+            mimeType: 'text/plain',
+            addedDate: new Date().toISOString(),
+            lastAccessed: new Date().toISOString(),
+            permanent: false,
+            tags: [],
+            notes: ''
+            // Note: inCollection is NOT set
+        };
+        
+        const file3 = {
+            url: 'https://example.com/labeeb-file-3.txt',
+            gcs: 'gs://bucket/labeeb-file-3.txt',
+            hash: 'hash-labeeb-3',
+            filename: 'labeeb-file-3.txt',
+            displayFilename: 'labeeb-file-3.txt',
+            mimeType: 'text/plain',
+            addedDate: new Date().toISOString(),
+            lastAccessed: new Date().toISOString(),
+            permanent: false,
+            tags: [],
+            notes: ''
+            // Note: inCollection is NOT set
+        };
+        
+        // Write files directly to Redis (without inCollection)
+        await writeFileDataToRedis(redisClient, contextMapKey, file1.hash, file1, null);
+        await writeFileDataToRedis(redisClient, contextMapKey, file2.hash, file2, null);
+        await writeFileDataToRedis(redisClient, contextMapKey, file3.hash, file3, null);
+        
+        // Verify files exist but don't have inCollection set
+        const allFilesBefore = await loadFileCollection(contextId);
+        const file1Before = allFilesBefore.find(f => f.hash === file1.hash);
+        const file2Before = allFilesBefore.find(f => f.hash === file2.hash);
+        const file3Before = allFilesBefore.find(f => f.hash === file3.hash);
+        
+        t.truthy(file1Before, 'File 1 should exist in Redis');
+        t.truthy(file2Before, 'File 2 should exist in Redis');
+        t.truthy(file3Before, 'File 3 should exist in Redis');
+        
+        t.falsy(file1Before.inCollection, 'File 1 should not have inCollection set');
+        t.falsy(file2Before.inCollection, 'File 2 should not have inCollection set');
+        t.falsy(file3Before.inCollection, 'File 3 should not have inCollection set');
+        
+        // Create chat history with all 3 files
+        const chatHistory = [
+            {
+                role: 'user',
+                content: [
+                    {
+                        type: 'file',
+                        url: file1.url,
+                        gcs: file1.gcs,
+                        hash: file1.hash
+                    },
+                    {
+                        type: 'file',
+                        url: file2.url,
+                        gcs: file2.gcs,
+                        hash: file2.hash
+                    },
+                    {
+                        type: 'file',
+                        url: file3.url,
+                        gcs: file3.gcs,
+                        hash: file3.hash
+                    },
+                    {
+                        type: 'text',
+                        text: 'Test message'
+                    }
+                ]
+            }
+        ];
+        
+        // Process chat history - should find all 3 files and sync them
+        const { chatHistory: processed } = await syncAndStripFilesFromChatHistory(
+            chatHistory, 
+            createAgentContext(contextId),
+            chatId
+        );
+        
+        // Verify all 3 files were stripped (found and synced)
+        const content = processed[0].content;
+        t.true(Array.isArray(content), 'Content should be an array');
+        
+        // All 3 files should be stripped to placeholders
+        const filePlaceholders = content.filter(item => 
+            item.type === 'text' && item.text && item.text.includes('[File:') && item.text.includes('available via file tools')
+        );
+        t.is(filePlaceholders.length, 3, 'All 3 files should be stripped to placeholders');
+        
+        // Text message should remain
+        const textMessages = content.filter(item => item.type === 'text' && !item.text.includes('[File:'));
+        t.is(textMessages.length, 1, 'Text message should remain');
+        
+        // Wait a bit for async updates to complete
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Verify files now have inCollection set
+        const allFilesAfter = await loadFileCollection(contextId);
+        const file1After = allFilesAfter.find(f => f.hash === file1.hash);
+        const file2After = allFilesAfter.find(f => f.hash === file2.hash);
+        const file3After = allFilesAfter.find(f => f.hash === file3.hash);
+        
+        t.truthy(file1After, 'File 1 should still exist after sync');
+        t.truthy(file2After, 'File 2 should still exist after sync');
+        t.truthy(file3After, 'File 3 should still exist after sync');
+        
+        // All files should now have inCollection set
+        t.truthy(file1After.inCollection, 'File 1 should have inCollection set after sync');
+        t.truthy(file2After.inCollection, 'File 2 should have inCollection set after sync');
+        t.truthy(file3After.inCollection, 'File 3 should have inCollection set after sync');
+        
+        // Verify inCollection includes chatId or is global
+        const hasChatId = (inCollection) => {
+            if (inCollection === true) return true; // Global
+            if (Array.isArray(inCollection)) {
+                return inCollection.includes('*') || inCollection.includes(chatId);
+            }
+            return false;
+        };
+        
+        t.true(hasChatId(file1After.inCollection), 'File 1 inCollection should include chatId or be global');
+        t.true(hasChatId(file2After.inCollection), 'File 2 inCollection should include chatId or be global');
+        t.true(hasChatId(file3After.inCollection), 'File 3 inCollection should include chatId or be global');
+        
+        // Verify lastAccessed was updated
+        t.truthy(file1After.lastAccessed, 'File 1 should have lastAccessed updated');
+        t.truthy(file2After.lastAccessed, 'File 2 should have lastAccessed updated');
+        t.truthy(file3After.lastAccessed, 'File 3 should have lastAccessed updated');
+        
     } finally {
         await cleanup(contextId);
     }
@@ -1135,7 +1317,7 @@ test('File collection: UpdateFileMetadata tool - Rename file', async t => {
         t.true(updateParsed.message.includes('renamed to "new-name.pdf"'));
         
         // Verify rename persisted
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const updatedFile = collection.find(f => f.id === originalFileId);
         t.truthy(updatedFile);
         t.is(updatedFile.displayFilename, 'new-name.pdf');
@@ -1174,7 +1356,7 @@ test('File collection: UpdateFileMetadata tool - Replace all tags', async t => {
         t.is(updateParsed.success, true);
         
         // Verify tags were replaced
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === addParsed.fileId);
         t.deepEqual(file.tags, ['new', 'replaced', 'tags']);
     } finally {
@@ -1210,7 +1392,7 @@ test('File collection: UpdateFileMetadata tool - Add tags', async t => {
         t.is(updateParsed.success, true);
         
         // Verify tags were added (should contain both old and new)
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === addParsed.fileId);
         t.is(file.tags.length, 4);
         t.true(file.tags.includes('existing'));
@@ -1250,7 +1432,7 @@ test('File collection: UpdateFileMetadata tool - Remove tags', async t => {
         t.is(updateParsed.success, true);
         
         // Verify tags were removed
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === addParsed.fileId);
         t.is(file.tags.length, 2);
         t.true(file.tags.includes('keep'));
@@ -1291,7 +1473,7 @@ test('File collection: UpdateFileMetadata tool - Add and remove tags together', 
         t.is(updateParsed.success, true);
         
         // Verify tags were updated correctly
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === addParsed.fileId);
         t.is(file.tags.length, 4);
         t.true(file.tags.includes('old1'));
@@ -1332,7 +1514,7 @@ test('File collection: UpdateFileMetadata tool - Update notes', async t => {
         t.is(updateParsed.success, true);
         
         // Verify notes were updated
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === addParsed.fileId);
         t.is(file.notes, 'Updated notes with more detail');
     } finally {
@@ -1367,7 +1549,7 @@ test('File collection: UpdateFileMetadata tool - Update permanent flag', async t
         t.is(updateParsed.success, true);
         
         // Verify permanent flag was set
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === addParsed.fileId);
         t.is(file.permanent, true);
     } finally {
@@ -1412,7 +1594,7 @@ test('File collection: UpdateFileMetadata tool - Combined updates', async t => {
         t.true(updateParsed.message.includes('permanent'));
         
         // Verify all updates persisted
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === originalFileId);
         t.is(file.displayFilename, 'renamed-and-tagged.pdf');
         t.deepEqual(file.tags, ['new', 'tags']);
@@ -1472,7 +1654,7 @@ test('File collection: UpdateFileMetadata tool - Find file by ID', async t => {
         t.is(updateParsed.success, true);
         
         // Verify update worked
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === fileId);
         t.is(file.displayFilename, 'renamed-by-id.pdf');
     } finally {
@@ -1513,7 +1695,7 @@ test('File collection: addFileToCollection returns correct ID for existing files
         t.is(addParsed2.fileId, firstFileId, 'Second add should return same ID as first');
         
         // Verify only one entry exists (not duplicated)
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1);
         
         // Verify metadata was merged (tags from second add, but same ID)
@@ -1521,6 +1703,83 @@ test('File collection: addFileToCollection returns correct ID for existing files
         t.is(file.id, firstFileId);
         t.deepEqual(file.tags, ['second']); // New tags replaced old ones
         t.is(file.displayFilename, 'second.pdf'); // New filename
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: AddFileToCollection adds same file to multiple chats without creating duplicates', async t => {
+    const contextId = createTestContext();
+    const chatId1 = `test-chat-1-${Date.now()}`;
+    const chatId2 = `test-chat-2-${Date.now()}`;
+    
+    try {
+        // Add file to chat-1
+        const addResult1 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            url: 'https://example.com/shared-file.pdf',
+            filename: 'shared-file.pdf',
+            tags: ['shared'],
+            userMessage: 'Add file to chat-1',
+            chatId: chatId1
+        });
+        
+        const addParsed1 = JSON.parse(addResult1);
+        t.is(addParsed1.success, true);
+        const fileId1 = addParsed1.fileId;
+        
+        // Add same file (same URL = same hash) to chat-2
+        const addResult2 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            url: 'https://example.com/shared-file.pdf',
+            filename: 'shared-file.pdf',
+            tags: ['shared'],
+            userMessage: 'Add same file to chat-2',
+            chatId: chatId2
+        });
+        
+        const addParsed2 = JSON.parse(addResult2);
+        t.is(addParsed2.success, true);
+        
+        // Should return the same file ID (no duplicate created)
+        t.is(addParsed2.fileId, fileId1, 'Second add should return same ID (no duplicate)');
+        
+        // Verify only one file entry exists (match by URL since hash is computed from URL)
+        const allFiles = await loadFileCollection(contextId, { useCache: false });
+        const matchingFiles = allFiles.filter(f => f.url === 'https://example.com/shared-file.pdf');
+        t.is(matchingFiles.length, 1, 'Should have only one file entry (no duplicate)');
+        
+        const file = matchingFiles[0];
+        t.is(file.id, fileId1, 'File ID should match');
+        
+        // Verify inCollection contains both chatIds (reference counting)
+        t.truthy(file.inCollection, 'File should have inCollection set');
+        
+        if (Array.isArray(file.inCollection)) {
+            // Both chatIds should be in the array
+            t.true(
+                file.inCollection.includes(chatId1) && file.inCollection.includes(chatId2),
+                `inCollection should contain both chatIds: ${JSON.stringify(file.inCollection)}`
+            );
+        } else if (file.inCollection === true) {
+            // If it's global (true), that's also valid (one chat might have been global)
+            t.pass('File is global (inCollection=true), which is valid');
+        } else {
+            t.fail(`Unexpected inCollection value: ${JSON.stringify(file.inCollection)}`);
+        }
+        
+        // Verify file appears in both chats' collections when filtered
+        const chat1Files = await loadFileCollection(contextId, { chatIds: [chatId1], useCache: false });
+        const fileInChat1 = chat1Files.find(f => f.id === fileId1);
+        t.truthy(fileInChat1, 'File should appear in chat-1 collection');
+        
+        const chat2Files = await loadFileCollection(contextId, { chatIds: [chatId2], useCache: false });
+        const fileInChat2 = chat2Files.find(f => f.id === fileId1);
+        t.truthy(fileInChat2, 'File should appear in chat-2 collection');
+        
+        // Verify it's the same file object (same ID)
+        t.is(fileInChat1.id, fileInChat2.id, 'Both chats should reference the same file');
+        
     } finally {
         await cleanup(contextId);
     }
@@ -1552,7 +1811,7 @@ test('File collection encryption: Encrypt tags and notes with contextKey', async
         const { getRedisClient } = await import('../../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
         const contextMapKey = `FileStoreMap:ctx:${contextId}`;
-        const collection = await loadFileCollection(contextId, contextKey, false);
+        const collection = await loadFileCollection({ contextId, contextKey, default: true }, { useCache: false });
         const file = collection.find(f => f.id === parsed.fileId);
         t.truthy(file);
         
@@ -1601,7 +1860,7 @@ test('File collection encryption: Empty tags and notes are not encrypted', async
         const { getRedisClient } = await import('../../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
         const contextMapKey = `FileStoreMap:ctx:${contextId}`;
-        const collection = await loadFileCollection(contextId, contextKey, false);
+        const collection = await loadFileCollection({ contextId, contextKey, default: true }, { useCache: false });
         const file = collection.find(f => f.id === parsed.fileId);
         t.truthy(file);
         
@@ -1641,7 +1900,7 @@ test('File collection encryption: Decryption fails with wrong contextKey', async
         t.is(parsed.success, true);
         
         // Try to load with wrong key
-        const collection = await loadFileCollection(contextId, wrongKey, false);
+        const collection = await loadFileCollection({ contextId, contextKey: wrongKey, default: true }, { useCache: false });
         const file = collection.find(f => f.id === parsed.fileId);
         t.truthy(file);
         
@@ -1691,7 +1950,7 @@ test('File collection encryption: Migration from unencrypted to encrypted', asyn
         const { getRedisClient } = await import('../../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
         const contextMapKey = `FileStoreMap:ctx:${contextId}`;
-        const collection1 = await loadFileCollection(contextId, null, false);
+        const collection1 = await loadFileCollection(contextId, { useCache: false });
         const file1 = collection1.find(f => f.id === parsed1.fileId);
         t.truthy(file1);
         
@@ -1721,7 +1980,7 @@ test('File collection encryption: Migration from unencrypted to encrypted', asyn
         t.true(rawData2.notes.includes(':'), 'Encrypted notes should contain IV separator');
         
         // Verify decryption works
-        const collection2 = await loadFileCollection(contextId, contextKey, false);
+        const collection2 = await loadFileCollection({ contextId, contextKey, default: true }, { useCache: false });
         const file2 = collection2.find(f => f.id === parsed1.fileId);
         t.deepEqual(file2.tags, ['encrypted'], 'Tags should be decrypted correctly');
         t.is(file2.notes, 'Encrypted notes', 'Notes should be decrypted correctly');
@@ -1753,7 +2012,7 @@ test('File collection encryption: Core fields are never encrypted', async t => {
         const { getRedisClient } = await import('../../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
         const contextMapKey = `FileStoreMap:ctx:${contextId}`;
-        const collection = await loadFileCollection(contextId, contextKey, false);
+        const collection = await loadFileCollection({ contextId, contextKey, default: true }, { useCache: false });
         const file = collection.find(f => f.id === parsed.fileId);
         t.truthy(file);
         
@@ -1795,7 +2054,7 @@ test('File collection encryption: Works without contextKey (no encryption)', asy
         const { getRedisClient } = await import('../../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
         const contextMapKey = `FileStoreMap:ctx:${contextId}`;
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection.find(f => f.id === parsed.fileId);
         t.truthy(file);
         
@@ -1849,7 +2108,7 @@ test('File collection: YouTube URLs are rejected (cannot be added to collection)
         }
         
         // Verify it was NOT added to collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 0);
     } catch (error) {
         // If callPathway throws, verify the error message
@@ -1859,7 +2118,7 @@ test('File collection: YouTube URLs are rejected (cannot be added to collection)
         );
         
         // Verify it was NOT added to collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 0);
     } finally {
         await cleanup(contextId);
@@ -1886,11 +2145,11 @@ test('File collection: YouTube Shorts URLs are rejected', async t => {
             t.true(result.includes('YouTube URLs cannot be added'));
         }
         
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 0);
     } catch (error) {
         t.true(error.message.includes('YouTube URLs cannot be added'));
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 0);
     } finally {
         await cleanup(contextId);
@@ -1917,11 +2176,11 @@ test('File collection: youtu.be URLs are rejected', async t => {
             t.true(result.includes('YouTube URLs cannot be added'));
         }
         
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 0);
     } catch (error) {
         t.true(error.message.includes('YouTube URLs cannot be added'));
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 0);
     } finally {
         await cleanup(contextId);
@@ -1943,7 +2202,7 @@ test('generateFileMessageContent: Accepts direct YouTube URL without collection'
         t.falsy(fileContent.hash);
         
         // Verify it's not in the collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 0);
     } finally {
         await cleanup(contextId);
@@ -1970,7 +2229,7 @@ test('Analyzer tool: Returns error JSON format when file not found', async t => 
     try {
         const result = await callPathway('sys_tool_analyzefile', {
             agentContext: [{ contextId, contextKey: null, default: true }],
-            file: 'non-existent-file.jpg',
+            files: ['non-existent-file.jpg'],
             detailedInstructions: 'Analyze this file',
             userMessage: 'Testing error handling'
         });
@@ -2009,7 +2268,7 @@ test('Analyzer tool: Works with legacy contextId/contextKey parameters (backward
         });
         
         // Get the file ID from the collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const fileId = collection[0].id;
         
         // Test analyzer tool with legacy contextId/contextKey (without agentContext)
@@ -2017,7 +2276,7 @@ test('Analyzer tool: Works with legacy contextId/contextKey parameters (backward
         const result = await callPathway('sys_tool_analyzefile', {
             contextId,  // Legacy format - no agentContext
             contextKey: null,
-            file: fileId,
+            files: [fileId],
             detailedInstructions: 'What is this file?',
             userMessage: 'Testing backward compatibility'
         });
@@ -2055,13 +2314,13 @@ test('Analyzer tool: File resolution works with agentContext', async t => {
         });
         
         // Get the file ID from the collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const fileId = collection[0].id;
         
         // Test analyzer tool with agentContext (modern format)
         const result = await callPathway('sys_tool_analyzefile', {
             agentContext: [{ contextId, contextKey: null, default: true }],
-            file: fileId,
+            files: [fileId],
             detailedInstructions: 'What is this file?',
             userMessage: 'Testing with agentContext'
         });
@@ -2106,7 +2365,7 @@ test('Converted files: displayFilename .docx but URL .md - MIME type from URL', 
         t.is(addParsed.success, true);
         
         // Verify file was stored correctly
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1);
         
         const file = collection[0];
@@ -2137,7 +2396,7 @@ test('Converted files: EditFile should use URL MIME type, not displayFilename', 
         t.is(addParsed.success, true);
         
         // Verify the file has correct MIME type from URL
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection[0];
         t.is(file.mimeType, 'text/markdown', 'MIME type should be from URL');
         t.is(file.displayFilename, 'report.docx', 'displayFilename should be original');
@@ -2170,7 +2429,7 @@ test('Converted files: ReadFile should accept text files based on URL, not displ
         t.is(addParsed.success, true);
         
         // Verify file setup
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         const file = collection[0];
         t.is(file.displayFilename, 'document.docx');
         t.is(file.mimeType, 'text/markdown');
@@ -2219,7 +2478,7 @@ test('Converted files: Multiple converted files with different extensions', asyn
         });
         
         // Verify all files have correct MIME types from URLs
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 3);
         
         const doc1 = collection.find(f => f.displayFilename === 'document1.docx');
@@ -2277,7 +2536,7 @@ test('Converted files: loadFileCollection should use converted values as primary
         await writeFileDataToRedis(redisClient, contextMapKey, hash, fileData, null);
         
         // Load the collection
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1);
         
         const file = collection[0];
@@ -2324,8 +2583,8 @@ test('Converted files: loadFileCollection should use converted values as primary
     }
 });
 
-test('loadMergedFileCollection should merge collections from contextId and altContextId', async t => {
-    const { loadMergedFileCollection, addFileToCollection, getRedisClient } = await import('../../../../lib/fileUtils.js');
+test('loadFileCollection should merge collections from multiple contexts', async t => {
+    const { loadFileCollection, addFileToCollection, getRedisClient } = await import('../../../../lib/fileUtils.js');
     
     const contextId = `test-primary-${Date.now()}`;
     const altContextId = `test-alt-${Date.now()}`;
@@ -2338,12 +2597,12 @@ test('loadMergedFileCollection should merge collections from contextId and altCo
         await addFileToCollection(altContextId, null, 'https://example.com/alt.jpg', null, 'alt.jpg', [], '', 'hash-alt');
         
         // Load just primary - should have 1 file
-        const primaryOnly = await loadMergedFileCollection([{ contextId, contextKey: null, default: true }]);
+        const primaryOnly = await loadFileCollection([{ contextId, contextKey: null, default: true }]);
         t.is(primaryOnly.length, 1);
         t.is(primaryOnly[0].hash, 'hash-primary');
         
-        // Load merged - should have 2 files (both contexts unencrypted)
-        const merged = await loadMergedFileCollection([
+        // Load from both contexts - should have 2 files (both contexts unencrypted)
+        const merged = await loadFileCollection([
             { contextId, contextKey: null, default: true },
             { contextId: altContextId, contextKey: null, default: false }
         ]);
@@ -2359,8 +2618,8 @@ test('loadMergedFileCollection should merge collections from contextId and altCo
     }
 });
 
-test('loadMergedFileCollection should dedupe files present in both contexts', async t => {
-    const { loadMergedFileCollection, addFileToCollection, getRedisClient } = await import('../../../../lib/fileUtils.js');
+test('loadFileCollection should dedupe files present in both contexts', async t => {
+    const { loadFileCollection, addFileToCollection, getRedisClient } = await import('../../../../lib/fileUtils.js');
     
     const contextId = `test-primary-dupe-${Date.now()}`;
     const altContextId = `test-alt-dupe-${Date.now()}`;
@@ -2373,8 +2632,8 @@ test('loadMergedFileCollection should dedupe files present in both contexts', as
         // Add unique file to alt context
         await addFileToCollection(altContextId, null, 'https://example.com/alt-only.jpg', null, 'alt-only.jpg', [], '', 'hash-alt-only');
         
-        // Load merged - should have 2 files (deduped shared file, both contexts unencrypted)
-        const merged = await loadMergedFileCollection([
+        // Load from both contexts - should have 2 files (deduped shared file, both contexts unencrypted)
+        const merged = await loadFileCollection([
             { contextId, contextKey: null, default: true },
             { contextId: altContextId, contextKey: null, default: false }
         ]);
@@ -2708,5 +2967,379 @@ test('File collection: SearchFileCollection normalizes separators (space/dash/un
         t.is(parsed3.count, 2, 'Underscore search should also find both');
     } finally {
         await cleanup(contextId);
+    }
+});
+
+test('File collection: SearchFileCollection comprehensive test - all search permutations', async t => {
+    const contextId = createTestContext();
+    const chatId1 = `test-chat-1-${Date.now()}`;
+    const chatId2 = `test-chat-2-${Date.now()}`;
+    
+    try {
+        const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Setup: Create files in different chats with various metadata
+        // Chat-1 files
+        await addFileToCollection(contextId, null, 'https://example.com/report-2024.pdf', null, 'Annual Report 2024.pdf', ['finance', 'annual'], 'Year-end financial report', 'hash-report-2024', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/budget.xlsx', null, 'Budget Q1.xlsx', ['finance', 'budget'], 'First quarter budget', 'hash-budget-q1', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/meeting-notes.txt', null, 'Meeting Notes.txt', ['meetings'], 'Team meeting notes', 'hash-meeting-notes', null, null, false, chatId1);
+        
+        // Chat-2 files
+        await addFileToCollection(contextId, null, 'https://example.com/presentation.pdf', null, 'Product Presentation.pdf', ['product', 'sales'], 'Product launch presentation', 'hash-presentation', null, null, false, chatId2);
+        await addFileToCollection(contextId, null, 'https://example.com/roadmap.xlsx', null, 'Product Roadmap.xlsx', ['product', 'planning'], 'Product roadmap for 2024', 'hash-roadmap', null, null, false, chatId2);
+        
+        // Global files (no chatId)
+        await addFileToCollection(contextId, null, 'https://example.com/company-policy.pdf', null, 'Company Policy.pdf', ['policy', 'hr'], 'Company-wide policies', 'hash-policy', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/employee-handbook.pdf', null, 'Employee Handbook.pdf', ['hr', 'handbook'], 'Employee handbook', 'hash-handbook', null, null, false, null);
+        
+        // Shared file (same file in both chats)
+        await addFileToCollection(contextId, null, 'https://example.com/shared-doc.pdf', null, 'Shared Document.pdf', ['shared'], 'Document shared across chats', 'hash-shared', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/shared-doc.pdf', null, 'Shared Document.pdf', ['shared'], 'Document shared across chats', 'hash-shared', null, null, false, chatId2);
+        
+        // Test 1: Search by filename (partial match) within chat-1
+        const result1 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'Report',
+            userMessage: 'Search for Report in chat-1'
+        });
+        const parsed1 = JSON.parse(result1);
+        t.is(parsed1.success, true);
+        t.is(parsed1.count, 1, 'Should find 1 file in chat-1');
+        t.is(parsed1.files[0].displayFilename, 'Annual Report 2024.pdf');
+        
+        // Test 2: Search by filename (partial match) across all chats
+        const result2 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'Report',
+            includeAllChats: true,
+            userMessage: 'Search for Report across all chats'
+        });
+        const parsed2 = JSON.parse(result2);
+        t.is(parsed2.success, true);
+        t.is(parsed2.count, 1, 'Should still find 1 file (only one has "Report" in name)');
+        
+        // Test 3: Search by tag within chat-1
+        const result3 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'finance',
+            userMessage: 'Search by tag finance in chat-1'
+        });
+        const parsed3 = JSON.parse(result3);
+        t.is(parsed3.success, true);
+        t.is(parsed3.count, 2, 'Should find 2 files with finance tag in chat-1');
+        const filenames3 = parsed3.files.map(f => f.displayFilename);
+        t.true(filenames3.includes('Annual Report 2024.pdf'));
+        t.true(filenames3.includes('Budget Q1.xlsx'));
+        
+        // Test 4: Search by tag across all chats
+        const result4 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'product',
+            includeAllChats: true,
+            userMessage: 'Search by tag product across all chats'
+        });
+        const parsed4 = JSON.parse(result4);
+        t.is(parsed4.success, true);
+        t.is(parsed4.count, 2, 'Should find 2 files with product tag from chat-2');
+        const filenames4 = parsed4.files.map(f => f.displayFilename);
+        t.true(filenames4.includes('Product Presentation.pdf'));
+        t.true(filenames4.includes('Product Roadmap.xlsx'));
+        
+        // Test 5: Search by notes (partial match)
+        const result5 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'financial',
+            userMessage: 'Search by notes containing financial'
+        });
+        const parsed5 = JSON.parse(result5);
+        t.is(parsed5.success, true);
+        t.is(parsed5.count, 1, 'Should find file with "financial" in notes');
+        t.is(parsed5.files[0].displayFilename, 'Annual Report 2024.pdf');
+        
+        // Test 6: Search with tag filter
+        const result6 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: '2024',
+            tags: ['finance'],
+            userMessage: 'Search for 2024 with finance tag filter'
+        });
+        const parsed6 = JSON.parse(result6);
+        t.is(parsed6.success, true);
+        t.is(parsed6.count, 1, 'Should find 1 file matching both query and tag filter');
+        t.is(parsed6.files[0].displayFilename, 'Annual Report 2024.pdf');
+        
+        // Test 7: Search with tag filter (no matches)
+        const result7 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'Report',
+            tags: ['product'],
+            userMessage: 'Search for Report with product tag (should find nothing)'
+        });
+        const parsed7 = JSON.parse(result7);
+        t.is(parsed7.success, true);
+        t.is(parsed7.count, 0, 'Should find no files (Report is in chat-1, product tag is in chat-2)');
+        
+        // Test 8: Search with tag filter across all chats
+        const result8 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'Report',
+            tags: ['product'],
+            includeAllChats: true,
+            userMessage: 'Search for Report with product tag across all chats (should find nothing)'
+        });
+        const parsed8 = JSON.parse(result8);
+        t.is(parsed8.success, true);
+        t.is(parsed8.count, 0, 'Should find no files (Report file has finance tag, not product)');
+        
+        // Test 9: Search for shared file from chat-1
+        const result9 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'Shared',
+            userMessage: 'Search for Shared file in chat-1'
+        });
+        const parsed9 = JSON.parse(result9);
+        t.is(parsed9.success, true);
+        t.is(parsed9.count, 1, 'Should find shared file in chat-1');
+        t.is(parsed9.files[0].displayFilename, 'Shared Document.pdf');
+        
+        // Test 10: Search for shared file from chat-2
+        const result10 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId2,
+            query: 'Shared',
+            userMessage: 'Search for Shared file in chat-2'
+        });
+        const parsed10 = JSON.parse(result10);
+        t.is(parsed10.success, true);
+        t.is(parsed10.count, 1, 'Should find shared file in chat-2');
+        t.is(parsed10.files[0].displayFilename, 'Shared Document.pdf');
+        
+        // Test 11: Search for shared file across all chats (should still be 1 result, not 2)
+        const result11 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'Shared',
+            includeAllChats: true,
+            userMessage: 'Search for Shared file across all chats'
+        });
+        const parsed11 = JSON.parse(result11);
+        t.is(parsed11.success, true);
+        t.is(parsed11.count, 1, 'Should find 1 shared file (not duplicated)');
+        t.is(parsed11.files[0].displayFilename, 'Shared Document.pdf');
+        
+        // Test 12: Search with limit
+        const result12 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'pdf',
+            limit: 2,
+            userMessage: 'Search for pdf with limit 2'
+        });
+        const parsed12 = JSON.parse(result12);
+        t.is(parsed12.success, true);
+        t.true(parsed12.count <= 2, 'Should respect limit');
+        t.true(parsed12.files.length <= 2, 'Results array should respect limit');
+        
+        // Test 13: Search for global files from chat-1
+        const result13 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'Policy',
+            userMessage: 'Search for Policy (global file) from chat-1'
+        });
+        const parsed13 = JSON.parse(result13);
+        t.is(parsed13.success, true);
+        t.is(parsed13.count, 1, 'Should find global file from chat-1');
+        t.is(parsed13.files[0].displayFilename, 'Company Policy.pdf');
+        
+        // Test 14: Search with normalized matching (space/dash/underscore)
+        await addFileToCollection(contextId, null, 'https://example.com/test-file.pdf', null, 'Test File Name.pdf', [], '', 'hash-test-normalized', null, null, false, chatId1);
+        const result14 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'Test-File',
+            userMessage: 'Search with dash should match space-separated'
+        });
+        const parsed14 = JSON.parse(result14);
+        t.is(parsed14.success, true);
+        t.is(parsed14.count, 1, 'Should find file with normalized matching');
+        t.is(parsed14.files[0].displayFilename, 'Test File Name.pdf');
+        
+        // Test 15: Search with multiple tag filters
+        const result15 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'Report',
+            tags: ['finance', 'annual'],
+            userMessage: 'Search with multiple tag filters'
+        });
+        const parsed15 = JSON.parse(result15);
+        t.is(parsed15.success, true);
+        t.is(parsed15.count, 1, 'Should find file matching all tags');
+        t.is(parsed15.files[0].displayFilename, 'Annual Report 2024.pdf');
+        
+        // Test 16: Search with no matches
+        const result16 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'NonexistentFile12345',
+            userMessage: 'Search for nonexistent file'
+        });
+        const parsed16 = JSON.parse(result16);
+        t.is(parsed16.success, true);
+        t.is(parsed16.count, 0, 'Should find no files');
+        t.true(parsed16.message.includes('No files found'), 'Should have helpful message');
+        
+        // Test 17: Search case-insensitive
+        const result17 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'ANNUAL REPORT',
+            userMessage: 'Search case-insensitive'
+        });
+        const parsed17 = JSON.parse(result17);
+        t.is(parsed17.success, true);
+        t.is(parsed17.count, 1, 'Should find file with case-insensitive match');
+        t.is(parsed17.files[0].displayFilename, 'Annual Report 2024.pdf');
+        
+        // Test 18: Search from chat-2 (different chat)
+        const result18 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId2,
+            query: 'Product',
+            userMessage: 'Search for Product in chat-2'
+        });
+        const parsed18 = JSON.parse(result18);
+        t.is(parsed18.success, true);
+        t.is(parsed18.count, 2, 'Should find 2 product files in chat-2');
+        const filenames18 = parsed18.files.map(f => f.displayFilename);
+        t.true(filenames18.includes('Product Presentation.pdf'));
+        t.true(filenames18.includes('Product Roadmap.xlsx'));
+        
+        // Test 19: Search from chat-2 should NOT see chat-1 files (without includeAllChats)
+        const result19 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId2,
+            query: 'Report',
+            userMessage: 'Search for Report in chat-2 (should not find chat-1 file)'
+        });
+        const parsed19 = JSON.parse(result19);
+        t.is(parsed19.success, true);
+        // Should find global files with "Report" but not chat-1 specific files
+        // Actually, there are no global files with "Report", so should be 0
+        t.is(parsed19.count, 0, 'Should not find chat-1 files from chat-2');
+        
+        // Test 20: Search for files matching multiple criteria (query + tags + notes)
+        const result20 = await callPathway('sys_tool_file_collection', {
+            agentContext: [{ contextId, contextKey: null, default: true }],
+            chatId: chatId1,
+            query: 'budget',
+            tags: ['finance'],
+            userMessage: 'Search for budget with finance tag'
+        });
+        const parsed20 = JSON.parse(result20);
+        t.is(parsed20.success, true);
+        t.is(parsed20.count, 1, 'Should find file matching query and tag');
+        t.is(parsed20.files[0].displayFilename, 'Budget Q1.xlsx');
+        
+    } finally {
+        await cleanup(contextId);
+    }
+});
+
+test('File collection: SearchFileCollection with compound context (user + workspace)', async t => {
+    const userContextId = `test-user-search-${Date.now()}`;
+    const workspaceContextId = `test-workspace-search-${Date.now()}`;
+    const chatId = `test-chat-${Date.now()}`;
+    
+    try {
+        const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
+        
+        // Add files to user context
+        await addFileToCollection(userContextId, null, 'https://example.com/user-doc.pdf', null, 'User Document.pdf', ['personal'], 'Personal document', 'hash-user-doc', null, null, false, chatId);
+        await addFileToCollection(userContextId, null, 'https://example.com/user-notes.txt', null, 'User Notes.txt', ['personal', 'notes'], 'Personal notes', 'hash-user-notes', null, null, false, chatId);
+        
+        // Add files to workspace context
+        await addFileToCollection(workspaceContextId, null, 'https://example.com/workspace-doc.pdf', null, 'Workspace Document.pdf', ['workspace'], 'Workspace document', 'hash-workspace-doc', null, null, false, chatId);
+        await addFileToCollection(workspaceContextId, null, 'https://example.com/workspace-data.xlsx', null, 'Workspace Data.xlsx', ['workspace', 'data'], 'Workspace data', 'hash-workspace-data', null, null, false, chatId);
+        
+        // Define compound agentContext
+        const agentContext = [
+            { contextId: userContextId, contextKey: null, default: true },
+            { contextId: workspaceContextId, contextKey: null, default: false }
+        ];
+        
+        // Test 1: Search across both contexts
+        const result1 = await callPathway('sys_tool_file_collection', {
+            agentContext: agentContext,
+            chatId: chatId,
+            query: 'Document',
+            userMessage: 'Search for Document across user and workspace contexts'
+        });
+        const parsed1 = JSON.parse(result1);
+        t.is(parsed1.success, true);
+        t.is(parsed1.count, 2, 'Should find documents from both contexts');
+        const filenames1 = parsed1.files.map(f => f.displayFilename);
+        t.true(filenames1.includes('User Document.pdf'));
+        t.true(filenames1.includes('Workspace Document.pdf'));
+        
+        // Test 2: Search by tag across both contexts
+        const result2 = await callPathway('sys_tool_file_collection', {
+            agentContext: agentContext,
+            chatId: chatId,
+            query: 'personal',
+            userMessage: 'Search by personal tag across contexts'
+        });
+        const parsed2 = JSON.parse(result2);
+        t.is(parsed2.success, true);
+        t.is(parsed2.count, 2, 'Should find 2 files with personal tag from user context');
+        const filenames2 = parsed2.files.map(f => f.displayFilename);
+        t.true(filenames2.includes('User Document.pdf'));
+        t.true(filenames2.includes('User Notes.txt'));
+        
+        // Test 3: Search by tag with includeAllChats (should still work with compound context)
+        const result3 = await callPathway('sys_tool_file_collection', {
+            agentContext: agentContext,
+            chatId: chatId,
+            query: 'workspace',
+            includeAllChats: true,
+            userMessage: 'Search by workspace tag across all chats'
+        });
+        const parsed3 = JSON.parse(result3);
+        t.is(parsed3.success, true);
+        t.is(parsed3.count, 2, 'Should find 2 workspace files');
+        const filenames3 = parsed3.files.map(f => f.displayFilename);
+        t.true(filenames3.includes('Workspace Document.pdf'));
+        t.true(filenames3.includes('Workspace Data.xlsx'));
+        
+        // Test 4: Search with tag filter across compound context
+        const result4 = await callPathway('sys_tool_file_collection', {
+            agentContext: agentContext,
+            chatId: chatId,
+            query: 'Notes',
+            tags: ['personal'],
+            userMessage: 'Search for Notes with personal tag filter'
+        });
+        const parsed4 = JSON.parse(result4);
+        t.is(parsed4.success, true);
+        t.is(parsed4.count, 1, 'Should find 1 file matching query and tag');
+        t.is(parsed4.files[0].displayFilename, 'User Notes.txt');
+        
+    } finally {
+        const { getRedisClient } = await import('../../../../lib/fileUtils.js');
+        const redisClient = await getRedisClient();
+        if (redisClient) {
+            await redisClient.del(`FileStoreMap:ctx:${userContextId}`);
+            await redisClient.del(`FileStoreMap:ctx:${workspaceContextId}`);
+        }
     }
 });

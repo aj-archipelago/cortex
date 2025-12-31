@@ -1,7 +1,7 @@
 // sys_tool_view_image.js
 // Tool pathway that allows agents to view image files from the file collection
 import logger from '../../../../lib/logger.js';
-import { loadMergedFileCollection, findFileInCollection, ensureShortLivedUrl } from '../../../../lib/fileUtils.js';
+import { loadFileCollection, findFileInCollection, ensureShortLivedUrl } from '../../../../lib/fileUtils.js';
 import { config } from '../../../../config.js';
 
 export default {
@@ -45,8 +45,8 @@ export default {
         }
 
         try {
-            // Load the file collection (merged from all agentContext contexts)
-            const collection = await loadMergedFileCollection(args.agentContext);
+            // Load the file collection from all agentContext contexts
+            const collection = await loadFileCollection(args.agentContext);
             
             const imageUrls = [];
             const errors = [];

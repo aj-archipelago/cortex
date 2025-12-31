@@ -3,7 +3,7 @@
 // File collections are stored in Redis hash maps (FileStoreMap:ctx:<contextId>
 // Returns file collection as JSON array string for backward compatibility with Labeeb
 
-import { loadMergedFileCollection } from '../../../../lib/fileUtils.js';
+import { loadFileCollection } from '../../../../lib/fileUtils.js';
 
 export default {
     inputParameters: {
@@ -33,8 +33,8 @@ export default {
         }
         
         try {
-            // Load file collection from Redis hash maps (merged from all agentContext contexts)
-            const collection = await loadMergedFileCollection(agentContext);
+            // Load file collection from Redis hash maps (from all agentContext contexts)
+            const collection = await loadFileCollection(agentContext);
             
             // Return as JSON array string for backward compatibility with Labeeb
             // Labeeb expects either: [] or { version: "...", files: [...] }

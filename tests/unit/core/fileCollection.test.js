@@ -485,7 +485,7 @@ test('addFileToCollection should preserve original displayFilename for converted
         
         // Verify it was saved correctly
         const { loadFileCollection } = await import('../../../lib/fileUtils.js');
-        const collection = await loadFileCollection(contextId, null, false);
+        const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1);
         t.is(collection[0].displayFilename, 'original-document.docx');
         t.is(collection[0].mimeType, 'text/markdown');
