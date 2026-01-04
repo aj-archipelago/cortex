@@ -58,12 +58,13 @@ export class StorageFactory {
   getGCSProvider() {
     const key = "gcs";
     if (!this.providers.has(key)) {
-      const credentials = this.parseGCSCredentials();
-      if (!credentials) {
+      const config = this.parseGCSConfig();
+      if (!config) {
         return null;
       }
       const provider = new GCSStorageProvider(
-        credentials,
+        config.credentials,
+        config.projectId,
         GCS_BUCKETNAME,
       );
       this.providers.set(key, provider);
@@ -86,7 +87,23 @@ export class StorageFactory {
     return this.providers.get(key);
   }
 
-  parseGCSCredentials() {
+  parseGCSConfig() {
+    // Support service account impersonation (recommended)
+    const serviceAccountEmail = process.env.GCP_SERVICE_ACCOUNT_EMAIL;
+    const projectId = process.env.GCP_PROJECT_ID;
+    
+    if (serviceAccountEmail) {
+      // Using impersonation - extract project ID from email if not provided
+      const extractedProjectId = projectId || this.extractProjectIdFromEmail(serviceAccountEmail);
+      if (!extractedProjectId) {
+        console.error("GCP_PROJECT_ID is required when using GCP_SERVICE_ACCOUNT_EMAIL");
+        return null;
+      }
+      // Return null credentials to use ADC (Application Default Credentials)
+      return { credentials: null, projectId: extractedProjectId };
+    }
+    
+    // Fall back to service account key (legacy)
     const key =
       process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
       process.env.GCP_SERVICE_ACCOUNT_KEY;
@@ -95,14 +112,26 @@ export class StorageFactory {
     }
 
     try {
+      let credentials;
       if (this.isBase64(key)) {
-        return JSON.parse(Buffer.from(key, "base64").toString());
+        credentials = JSON.parse(Buffer.from(key, "base64").toString());
+      } else {
+        credentials = JSON.parse(key);
       }
-      return JSON.parse(key);
+      return {
+        credentials: credentials,
+        projectId: credentials.project_id || projectId,
+      };
     } catch (error) {
       console.error("Error parsing GCS credentials:", error);
       return null;
     }
+  }
+
+  extractProjectIdFromEmail(email) {
+    // Service account email format: name@project-id.iam.gserviceaccount.com
+    const match = email.match(/@([^.]+)\.iam\.gserviceaccount\.com$/);
+    return match ? match[1] : null;
   }
 
   isBase64(str) {

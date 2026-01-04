@@ -130,6 +130,12 @@ var config = convict({
         env: 'GCP_SERVICE_ACCOUNT_KEY',
         sensitive: true
     },
+    gcpServiceAccountEmail: {
+        format: String,
+        default: null,
+        env: 'GCP_SERVICE_ACCOUNT_EMAIL',
+        sensitive: false
+    },
     azureServicePrincipalCredentials: {
         format: String,
         default: null,
@@ -941,7 +947,7 @@ if (config.get('entityConstants') && defaultEntityConstants) {
     config.set('entityConstants', { ...defaultEntityConstants, ...config.get('entityConstants') });
 }
 
-if (config.get('gcpServiceAccountKey')) {
+if (config.get('gcpServiceAccountEmail') || config.get('gcpServiceAccountKey')) {
     const gcpAuthTokenHelper = new GcpAuthTokenHelper(config.getProperties());
     config.set('gcpAuthTokenHelper', gcpAuthTokenHelper);
 }

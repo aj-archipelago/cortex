@@ -41,37 +41,61 @@ const { SAS_TOKEN_LIFE_DAYS = 30 } = process.env;
 let GCP_SERVICE_ACCOUNT;
 let GCP_PROJECT_ID;
 
-try {
-  const GCP_SERVICE_ACCOUNT_KEY =
-    process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
-    process.env.GCP_SERVICE_ACCOUNT_KEY ||
-    "{}";
-  GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY)
-    ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, "base64").toString())
-    : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
-  GCP_PROJECT_ID = GCP_SERVICE_ACCOUNT.project_id;
-} catch (error) {
-  console.warn("Error parsing GCP service account credentials, GCS will not be used:", error.message);
-  GCP_SERVICE_ACCOUNT = {};
-  GCP_PROJECT_ID = null;
+// Support both service account impersonation (recommended) and service account key (legacy)
+const GCP_SERVICE_ACCOUNT_EMAIL = process.env.GCP_SERVICE_ACCOUNT_EMAIL;
+const GCP_PROJECT_ID_ENV = process.env.GCP_PROJECT_ID;
+
+if (GCP_SERVICE_ACCOUNT_EMAIL) {
+  // Using impersonation - extract project ID from email if not provided
+  GCP_PROJECT_ID = GCP_PROJECT_ID_ENV || extractProjectIdFromEmail(GCP_SERVICE_ACCOUNT_EMAIL);
+  GCP_SERVICE_ACCOUNT = null; // null means use ADC (Application Default Credentials)
+} else {
+  // Fall back to service account key (legacy)
+  try {
+    const GCP_SERVICE_ACCOUNT_KEY =
+      process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
+      process.env.GCP_SERVICE_ACCOUNT_KEY ||
+      "{}";
+    GCP_SERVICE_ACCOUNT = isBase64(GCP_SERVICE_ACCOUNT_KEY)
+      ? JSON.parse(Buffer.from(GCP_SERVICE_ACCOUNT_KEY, "base64").toString())
+      : JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
+    GCP_PROJECT_ID = GCP_SERVICE_ACCOUNT.project_id || GCP_PROJECT_ID_ENV;
+  } catch (error) {
+    console.warn("Error parsing GCP service account credentials, GCS will not be used:", error.message);
+    GCP_SERVICE_ACCOUNT = null;
+    GCP_PROJECT_ID = null;
+  }
+}
+
+function extractProjectIdFromEmail(email) {
+  // Service account email format: name@project-id.iam.gserviceaccount.com
+  const match = email.match(/@([^.]+)\.iam\.gserviceaccount\.com$/);
+  return match ? match[1] : null;
 }
 
 let gcs;
-if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
+if (!GCP_PROJECT_ID) {
   console.warn(
-    "No Google Cloud Storage credentials provided - GCS will not be used",
+    "No Google Cloud project ID provided - GCS will not be used",
   );
 } else {
   try {
-    gcs = new Storage({
+    const storageConfig = {
       projectId: GCP_PROJECT_ID,
-      credentials: GCP_SERVICE_ACCOUNT,
-    });
+    };
+    
+    // If GCP_SERVICE_ACCOUNT is null, Storage will use Application Default Credentials (ADC)
+    // This enables service account impersonation
+    if (GCP_SERVICE_ACCOUNT) {
+      storageConfig.credentials = GCP_SERVICE_ACCOUNT;
+    }
+    
+    gcs = new Storage(storageConfig);
 
     // Rest of your Google Cloud operations using gcs object
   } catch (error) {
     console.error(
-      "Google Cloud Storage credentials are invalid - GCS will not be used: ",
+      "Google Cloud Storage configuration is invalid - GCS will not be used: ",
       error,
     );
   }

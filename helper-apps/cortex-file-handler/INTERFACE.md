@@ -153,7 +153,7 @@ The file handler uses a unified storage approach with Azure Blob Storage:
 ## Storage Configuration
 
 - **Azure**: Enabled if `AZURE_STORAGE_CONNECTION_STRING` is set
-- **GCS**: Enabled if `GCP_SERVICE_ACCOUNT_KEY_BASE64` or `GCP_SERVICE_ACCOUNT_KEY` is set
+- **GCS**: Enabled if `GCP_SERVICE_ACCOUNT_EMAIL` (recommended, uses impersonation) or `GCP_SERVICE_ACCOUNT_KEY_BASE64`/`GCP_SERVICE_ACCOUNT_KEY` (legacy) is set
 - **Local**: Used as fallback if Azure is not configured
 
 ## Response Format
