@@ -1,1 +1,680 @@
-{}
+{
+    "defaultModelName": "oai-gpt41",
+    "models": {
+        "xai-grok-4": {
+            "type": "GROK-VISION",
+            "emulateOpenAIChatModel": "grok-4",
+            "restStreaming": {
+                "inputParameters": {
+                    "stream": false,
+                    "search_parameters": ""
+                }
+            },
+            "endpoints": [
+                {
+                    "name": "XAI GROK-4",
+                    "url": "https://api.x.ai/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{XAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "grok-4-0709"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 256000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true
+        },
+        "xai-grok-code-fast-1": {
+            "type": "GROK-VISION",
+            "endpoints": [
+                {
+                    "name": "XAI GROK-CODE-FAST-1",
+                    "url": "https://api.x.ai/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{XAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "grok-code-fast-1"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 2000000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true
+        },
+        "xai-grok-4-1-fast-reasoning": {
+            "type": "GROK-VISION",
+            "endpoints": [
+                {
+                    "name": "XAI GROK-4.1-FAST-REASONING",
+                    "url": "https://api.x.ai/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{XAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "grok-4-1-fast-reasoning"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 2000000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true
+        },
+        "xai-grok-4-1-fast-non-reasoning": {
+            "type": "GROK-VISION",
+            "endpoints": [
+                {
+                    "name": "XAI GROK-4.1-FAST-NON-REASONING",
+                    "url": "https://api.x.ai/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{XAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "grok-4-1-fast-non-reasoning"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 256000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true
+        },
+        "xai-grok-4-1-fast-responses": {
+            "type": "GROK-RESPONSES",
+            "emulateOpenAIChatModel": "grok-4-1-fast",
+            "restStreaming": {
+                "inputParameters": {
+                    "stream": true,
+                    "tools": "",
+                    "inline_citations": true
+                }
+            },
+            "endpoints": [
+                {
+                    "name": "XAI GROK-4.1-FAST-RESPONSES",
+                    "url": "https://api.x.ai/v1/responses",
+                    "headers": {
+                        "Authorization": "Bearer {{XAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "grok-4-1-fast"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 256000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true
+        },
+        "xai-grok-4-fast-reasoning": {
+            "type": "GROK-VISION",
+            "emulateOpenAIChatModel": "grok-4-fast-reasoning",
+            "restStreaming": {
+                "inputParameters": {
+                    "stream": false,
+                    "search_parameters": ""
+                }
+            },
+            "endpoints": [
+                {
+                    "name": "XAI GROK-4-FAST-REASONING",
+                    "url": "https://api.x.ai/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{XAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "grok-4-fast-reasoning"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 2000000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true
+        },
+        "xai-grok-4-fast-non-reasoning": {
+            "type": "GROK-VISION",
+            "emulateOpenAIChatModel": "grok-4-fast-non-reasoning",
+            "restStreaming": {
+                "inputParameters": {
+                    "stream": false,
+                    "search_parameters": ""
+                }
+            },
+            "endpoints": [
+                {
+                    "name": "XAI GROK-4-FAST-NON-REASONING",
+                    "url": "https://api.x.ai/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{XAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "grok-4-fast-non-reasoning"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 256000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true
+        },
+        "oai-whisper": {
+            "type": "OPENAI-WHISPER",
+            "url": "https://api.openai.com/v1/audio/transcriptions",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}"
+            },
+            "params": {
+                "model": "whisper-1"
+            }
+        },
+        "oai-embeddings": {
+            "type": "OPENAI-EMBEDDINGS",
+            "url": "https://api.openai.com/v1/embeddings",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "text-embedding-ada-002"
+            },
+            "maxTokenLength": 8192
+        },
+        "oai-text-embedding-3-large": {
+            "type": "OPENAI-EMBEDDINGS",
+            "url": "https://api.openai.com/v1/embeddings",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "text-embedding-3-large"
+            },
+            "maxTokenLength": 8192
+        },
+        "oai-text-embedding-3-small": {
+            "type": "OPENAI-EMBEDDINGS",
+            "url": "https://api.openai.com/v1/embeddings",
+            "headers": {
+                "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                "Content-Type": "application/json"
+            },
+            "params": {
+                "model": "text-embedding-3-small"
+            },
+            "maxTokenLength": 8192
+        },
+        "oai-gpt4o": {
+            "type": "OPENAI-VISION",
+            "emulateOpenAIChatModel": "gpt-4o",
+            "endpoints": [
+                {
+                    "name": "default",
+                    "url": "https://api.openai.com/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "gpt-4o"
+                    },
+                    "requestsPerSecond": 50
+                }
+            ],
+            "maxTokenLength": 131072,
+            "maxReturnTokens": 4096,
+            "supportsStreaming": true
+        },
+        "oai-o3": {
+            "type": "OPENAI-REASONING",
+            "endpoints": [
+                {
+                    "name": "default",
+                    "url": "https://api.openai.com/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "o3"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 200000,
+            "maxReturnTokens": 100000,
+            "supportsStreaming": true
+        },
+        "oai-router": {
+            "type": "OPENAI-REASONING-VISION",
+            "endpoints": [
+                {
+                    "name": "EUS2 AZURE MODEL ROUTER",
+                    "url": "https://archipelago-foundry-resource.cognitiveservices.azure.com/openai/deployments/archipelago-azure-model-router/chat/completions?api-version=2025-03-01-preview",
+                    "headers": {
+                        "api-key": "{{ARCHIPELAGO_FOUNDRY_RESOURCE_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 50
+                }
+            ],
+            "maxTokenLength": 200000,
+            "maxReturnTokens": 100000,
+            "supportsStreaming": true
+        },
+        "oai-gpt52": {
+            "type": "OPENAI-REASONING-VISION",
+            "emulateOpenAIChatModel": "gpt-5.2",
+            "endpoints": [
+                {
+                    "name": "default",
+                    "url": "https://api.openai.com/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "gpt-5.2"
+                    },
+                    "requestsPerSecond": 50
+                }
+            ],
+            "maxTokenLength": 400000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true
+        },
+        "oai-gpt51": {
+            "type": "OPENAI-REASONING-VISION",
+            "emulateOpenAIChatModel": "gpt-5.1",
+            "endpoints": [
+                {
+                    "name": "default",
+                    "url": "https://api.openai.com/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "gpt-5.1"
+                    },
+                    "requestsPerSecond": 50
+                }
+            ],
+            "maxTokenLength": 400000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true
+        },
+        "oai-gpt41": {
+            "type": "OPENAI-VISION",
+            "emulateOpenAIChatModel": "gpt-4.1",
+            "endpoints": [
+                {
+                    "name": "default",
+                    "url": "https://api.openai.com/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "gpt-4.1"
+                    },
+                    "requestsPerSecond": 50
+                }
+            ],
+            "maxTokenLength": 1000000,
+            "maxReturnTokens": 32768,
+            "supportsStreaming": true
+        },
+        "oai-gpt41-mini": {
+            "type": "OPENAI-VISION",
+            "endpoints": [
+                {
+                    "name": "default",
+                    "url": "https://api.openai.com/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "gpt-4.1-mini"
+                    },
+                    "requestsPerSecond": 50
+                }
+            ],
+            "maxTokenLength": 1000000,
+            "maxReturnTokens": 32768,
+            "supportsStreaming": true
+        },
+        "oai-gpt41-nano": {
+            "type": "OPENAI-VISION",
+            "emulateOpenAIChatModel": "gpt-4.1-nano",
+            "endpoints": [
+                {
+                    "name": "default",
+                    "url": "https://api.openai.com/v1/chat/completions",
+                    "headers": {
+                        "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "gpt-4.1-nano"
+                    },
+                    "requestsPerSecond": 50
+                }
+            ],
+            "maxTokenLength": 1000000,
+            "maxReturnTokens": 8192,
+            "supportsStreaming": true
+        },
+        "gemini-flash-25-vision": {
+            "type": "GEMINI-1.5-VISION",
+            "emulateOpenAIChatModel": "gemini-flash-25",
+            "restStreaming": {
+                "geminiSafetySettings": [
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"}
+                ]
+            },
+            "endpoints": [
+                {
+                    "name": "GLOBAL GEMINI-FLASH-2.5-VISION",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/gemini-2.5-flash",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 1048576,
+            "maxReturnTokens": 65535,
+            "supportsStreaming": true
+        },
+        "gemini-flash-25-image": {
+            "type": "GEMINI-2.5-IMAGE",
+            "endpoints": [
+                {
+                    "name": "GLOBAL GEMINI-FLASH-2.5-IMAGE",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/gemini-2.5-flash-image-preview",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 32768,
+            "maxReturnTokens": 16384,
+            "supportsStreaming": true
+        },
+        "gemini-pro-3-image": {
+            "type": "GEMINI-3-IMAGE",
+            "endpoints": [
+                {
+                    "name": "GLOBAL GEMINI-PRO-3.0-IMAGE",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/gemini-3-pro-image-preview",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 64576,
+            "maxReturnTokens": 32768,
+            "supportsStreaming": true
+        },
+        "gemini-pro-3-vision": {
+            "type": "GEMINI-3-REASONING-VISION",
+            "emulateOpenAIChatModel": "gemini-pro-3",
+            "endpoints": [
+                {
+                    "name": "GLOBAL GEMINI-PRO-3.0-VISION",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/gemini-3-pro-preview",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 1048576,
+            "maxReturnTokens": 65535,
+            "supportsStreaming": true
+        },
+        "gemini-flash-3-vision": {
+            "type": "GEMINI-3-REASONING-VISION",
+            "emulateOpenAIChatModel": "gemini-flash-3",
+            "endpoints": [
+                {
+                    "name": "GLOBAL GEMINI-FLASH-3-VISION",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/gemini-3-flash-preview",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 1048576,
+            "maxReturnTokens": 65535,
+            "supportsStreaming": true
+        },
+        "gemini-pro-25-vision": {
+            "type": "GEMINI-1.5-VISION",
+            "emulateOpenAIChatModel": "gemini-pro-25",
+            "restStreaming": {
+                "geminiSafetySettings": [
+                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
+                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"}
+                ]
+            },
+            "endpoints": [
+                {
+                    "name": "GLOBAL GEMINI-PRO-2.5-VISION",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/gemini-2.5-pro",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 1048576,
+            "maxReturnTokens": 65535,
+            "supportsStreaming": true
+        },
+        "claude-45-sonnet-vertex": {
+            "type": "CLAUDE-4-VERTEX",
+            "emulateOpenAIChatModel": "claude-4.5-sonnet",
+            "endpoints": [
+                {
+                    "name": "GLOBAL SONNET 4.5",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/anthropic/models/claude-sonnet-4-5@20250929",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 200000,
+            "maxReturnTokens": 64000,
+            "maxImageSize": 31457280,
+            "supportsStreaming": true
+        },
+        "claude-45-haiku-vertex": {
+            "type": "CLAUDE-4-VERTEX",
+            "emulateOpenAIChatModel": "claude-4.5-haiku",
+            "endpoints": [
+                {
+                    "name": "GLOBAL HAIKU 4.5",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/anthropic/models/claude-haiku-4-5@20251001",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 200000,
+            "maxReturnTokens": 64000,
+            "maxImageSize": 31457280,
+            "supportsStreaming": true
+        },
+        "local-llama30b": {
+            "type": "LOCAL-CPP-MODEL",
+            "executablePath": "../llm/llama.cpp/main",
+            "args": [
+                "-m", "/Volumes/JMac External/LLM/LLaMA/30B/ggml-model-q4_0.bin",
+                "-ngl", "1",
+                "--repeat_last_n", "1024",   
+                "--repeat_penalty", "1.17647",
+                "--keep", "-1",
+                "-t", "8",
+                "--temp", "0.7",
+                "--top_k", "40",
+                "--top_p", "0.5",
+                "-r","<|im_end|>"
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 2048
+        },
+        "veo-2.0-generate": {
+            "type": "VEO-VIDEO",
+            "endpoints": [
+                {
+                    "name": "GLOBAL VEO 2.0",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/veo-2.0-generate-001",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 2
+                }
+            ],
+            "maxTokenLength": 1000,
+            "supportsStreaming": false
+        },
+        "veo-3.0-generate": {
+            "type": "VEO-VIDEO",
+            "endpoints": [
+                {
+                    "name": "GLOBAL VEO 3.0 PREVIEW",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/veo-3.0-generate-preview",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 1
+                }
+            ],
+            "maxTokenLength": 1000,
+            "supportsStreaming": false
+        },
+        "veo-3.0-fast-generate": {
+            "type": "VEO-VIDEO",
+            "endpoints": [
+                {
+                    "name": "GLOBAL VEO 3.0 PREVIEW",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/veo-3.0-fast-generate-preview",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 1
+                }
+            ],
+            "maxTokenLength": 1000,
+            "supportsStreaming": false
+        },
+        "veo-3.1-generate": {
+            "type": "VEO-VIDEO",
+            "endpoints": [
+                {
+                    "name": "GLOBAL VEO 3.1 PREVIEW",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/veo-3.1-generate-preview",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 1
+                }
+            ],
+            "maxTokenLength": 1000,
+            "supportsStreaming": false
+        },
+        "veo-3.1-fast-generate": {
+            "type": "VEO-VIDEO",
+            "endpoints": [
+                {
+                    "name": "GLOBAL VEO 3.0 PREVIEW",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/enntityvertex/locations/global/publishers/google/models/veo-3.1-fast-generate-preview",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 1
+                }
+            ],
+            "maxTokenLength": 1000,
+            "supportsStreaming": false
+        },
+        "replicate-flux-2-pro": {
+            "type": "REPLICATE-API",
+            "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-2-pro/predictions",
+            "headers": {
+                "Prefer": "wait",
+                "Authorization": "Token {{REPLICATE_API_KEY}}",
+                "Content-Type": "application/json"
+            }
+        },
+        "replicate-qwen-image-edit-2511": {
+            "type": "REPLICATE-API",
+            "url": "https://api.replicate.com/v1/models/qwen/qwen-image-edit-2511/predictions",
+            "headers": {
+                "Prefer": "wait",
+                "Authorization": "Token {{REPLICATE_API_KEY}}",
+                "Content-Type": "application/json"
+            }
+        }
+    },
+    "enableCache": true,
+    "enableRestEndpoints": true,
+    "enableDuplicateRequests": true,
+    "subscriptionKeepAlive": 0,
+    "entityConfig": {
+        "labeeb": {
+            "name": "Labeeb",
+            "isDefault": true,
+            "useMemory": true,
+            "useContinuityMemory": true,
+            "description": "Labeeb is a self-aware AI entity that can help you with your tasks and answer your questions.",
+            "instructions": "",
+            "tools": ["*"]
+        }
+    },
+    "entityConstants": {
+        "AI_STYLE_OPENAI_PREVIEW": "oai-gpt52",
+        "AI_STYLE_OPENAI_PREVIEW_RESEARCH": "oai-gpt52",
+        "AI_STYLE_OPENAI": "oai-gpt51",
+        "AI_STYLE_OPENAI_RESEARCH": "oai-gpt51",
+        "AI_STYLE_OPENAI_LEGACY": "oai-gpt41",
+        "AI_STYLE_OPENAI_LEGACY_RESEARCH": "oai-o3",
+        "AI_STYLE_ANTHROPIC": "claude-45-sonnet-vertex",
+        "AI_STYLE_ANTHROPIC_RESEARCH": "claude-41-opus-vertex",
+        "AI_STYLE_XAI": "xai-grok-4-1-fast-reasoning",
+        "AI_STYLE_XAI_RESEARCH": "xai-grok-4-1-fast-reasoning",
+        "AI_STYLE_GOOGLE": "gemini-flash-3-vision",
+        "AI_STYLE_GOOGLE_RESEARCH": "gemini-pro-3-vision"
+    }
+}

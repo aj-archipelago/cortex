@@ -170,4 +170,17 @@ export const getDefaultContainerName = () => {
 
 // Export constant - evaluated at module load time, but getContainerName() handles defaults
 export const AZURE_STORAGE_CONTAINER_NAME = getContainerName();
-export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
+
+// GCS bucket name must be explicitly set - no default to prevent accidental bucket usage
+const getGCSBucketName = () => {
+  const bucketName = process.env.GCS_BUCKETNAME;
+  if (!bucketName || bucketName.trim() === "") {
+    throw new Error(
+      "GCS_BUCKETNAME environment variable is required but not set. " +
+      "Please set GCS_BUCKETNAME in your environment or .env file."
+    );
+  }
+  return bucketName.trim();
+};
+
+export const GCS_BUCKETNAME = getGCSBucketName();

@@ -55,6 +55,7 @@ export default {
         },
         {
             type: "function",
+            enabled: false,
             icon: "📰",
             function: {
                 name: "SearchAJA",
@@ -89,6 +90,7 @@ export default {
         },
         {
             type: "function",
+            enabled: false,
             icon: "📰",
             function: {
                 name: "SearchAJE",
@@ -123,6 +125,7 @@ export default {
         },
         {
             type: "function",
+            enabled: false,
             icon: "⚡️",
             function: {
                 name: "SearchWires",

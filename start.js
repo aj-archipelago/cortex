@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import startServerFactory from './index.js';
 
 (async () => {

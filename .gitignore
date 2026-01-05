@@ -1,6 +1,8 @@
 .DS_Store
 node_modules/
 .env
+.env.*
+deploy/env.production
 .vscode/
 **/__pycache__
 **/.venv
