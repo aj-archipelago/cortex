@@ -12,17 +12,27 @@ import axios from "axios";
 import { StorageProvider } from "./StorageProvider.js";
 
 export class GCSStorageProvider extends StorageProvider {
-  constructor(credentials, bucketName) {
+  constructor(credentials, projectId, bucketName) {
     super();
-    if (!credentials || !bucketName) {
-      throw new Error("Missing GCS credentials or bucket name");
+    if (!bucketName) {
+      throw new Error("Missing GCS bucket name");
+    }
+    if (!projectId && !credentials?.project_id) {
+      throw new Error("Missing GCS project ID");
     }
 
     this.bucketName = bucketName;
-    this.storage = new Storage({
-      projectId: credentials.project_id,
-      credentials: credentials,
-    });
+    const storageConfig = {
+      projectId: projectId || credentials.project_id,
+    };
+    
+    // If credentials is null/undefined, Storage will use Application Default Credentials (ADC)
+    // This enables service account impersonation
+    if (credentials) {
+      storageConfig.credentials = credentials;
+    }
+    
+    this.storage = new Storage(storageConfig);
   }
 
   isConfigured() {

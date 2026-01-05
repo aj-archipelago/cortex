@@ -72,9 +72,12 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                                 if (!base64Data) {
                                     return null;
                                 }
+                                // Extract MIME type from data URL if available
+                                const mimeMatch = fileUrl.match(/data:([^;]+);base64,/);
+                                const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
                                 return {
                                     inlineData: {
-                                        mimeType: 'image/jpeg',
+                                        mimeType: mimeType,
                                         data: base64Data
                                     }
                                 };
@@ -82,6 +85,15 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                                 return {
                                     fileData: {
                                         mimeType: 'video/youtube',
+                                        fileUri: fileUrl
+                                    }
+                                };
+                            } else if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+                                // Gemini can read directly from HTTP/HTTPS URLs using fileData with fileUri
+                                // No need to fetch and convert to base64
+                                return {
+                                    fileData: {
+                                        mimeType: mime.lookup(fileUrl) || 'image/jpeg',
                                         fileUri: fileUrl
                                     }
                                 };

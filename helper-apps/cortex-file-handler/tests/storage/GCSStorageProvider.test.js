@@ -32,16 +32,16 @@ test("should create provider with valid credentials", (t) => {
     private_key: "test-key",
   };
 
-  const provider = new GCSStorageProvider(credentials, "test-bucket");
+  const provider = new GCSStorageProvider(credentials, "test-project", "test-bucket");
   t.truthy(provider);
 });
 
 test("should throw error with missing credentials", (t) => {
   t.throws(
     () => {
-      new GCSStorageProvider(null, "test-bucket");
+      new GCSStorageProvider(null, null, "test-bucket");
     },
-    { message: "Missing GCS credentials or bucket name" },
+    { message: "Missing GCS project ID" },
   );
 });
 
@@ -65,6 +65,7 @@ test("should upload and delete file", async (t) => {
 
   const provider = new GCSStorageProvider(
     credentials,
+    credentials.project_id,
     process.env.GCS_BUCKETNAME || "cortextempfiles",
   );
 
@@ -123,6 +124,7 @@ test("should handle file download", async (t) => {
 
   const provider = new GCSStorageProvider(
     credentials,
+    credentials.project_id,
     process.env.GCS_BUCKETNAME || "cortextempfiles",
   );
 
@@ -175,6 +177,7 @@ test("should handle file existence check with spaces and special characters", as
 
   const provider = new GCSStorageProvider(
     credentials,
+    credentials.project_id,
     process.env.GCS_BUCKETNAME || "cortextempfiles",
   );
 

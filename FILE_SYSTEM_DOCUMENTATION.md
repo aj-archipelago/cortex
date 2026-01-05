@@ -650,10 +650,11 @@ RemoveFileFromCollection Tool
 - **Lifecycle**: Azure automatically deletes `retention=temporary` files after 30 days
 
 #### Google Cloud Storage (Optional)
-- **Enabled**: If `GCP_SERVICE_ACCOUNT_KEY` configured
+- **Enabled**: If `GCP_SERVICE_ACCOUNT_EMAIL` (recommended, uses impersonation) or `GCP_SERVICE_ACCOUNT_KEY` (legacy) is configured
 - **URL Format**: `gs://bucket/path`
 - **Usage**: Media file chunks, converted files
 - **No short-lived URLs**: GCS URLs are permanent (no SAS equivalent)
+- **Authentication**: See `GCP_IMPERSONATION_SETUP.md` for setup instructions using service account impersonation (recommended method)
 
 #### Local Storage (Fallback)
 - **Used**: If Azure not configured

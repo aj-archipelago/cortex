@@ -861,7 +861,8 @@ The following properties can be configured through environment variables or the 
 - `enableDuplicateRequests`: Enable sending duplicate requests if not completed after timeout. Default is true.
 - `enableGraphqlCache`: Enable GraphQL query caching. Default is false.
 - `enableRestEndpoints`: Create REST endpoints for pathways as well as GraphQL queries. Default is false.
-- `gcpServiceAccountKey`: GCP service account key for authentication. Default is null.
+- `gcpServiceAccountKey`: GCP service account key for authentication (legacy method). Default is null.
+- `gcpServiceAccountEmail`: GCP service account email for impersonation (recommended method). Default is null. See `GCP_IMPERSONATION_SETUP.md` for setup instructions.
 - `models`: Object containing the different models used by the project.
 - `pathways`: Object containing pathways for the project.
 - `pathwaysPath`: Path to custom pathways. Default is './pathways'.
