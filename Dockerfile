@@ -20,9 +20,9 @@ RUN apk del python3 make g++
 # Expose GraphQL port
 EXPOSE 4000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:4000/.well-known/apollo/server-health || exit 1
+# Health check - test GraphQL endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD wget -qO- --post-data='{"query":"{ __typename }"}' --header='Content-Type: application/json' http://localhost:4000/graphql | grep -q "__typename" || exit 1
 
 CMD ["npm", "start"]
 

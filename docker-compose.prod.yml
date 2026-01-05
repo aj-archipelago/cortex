@@ -3,13 +3,16 @@ version: "3.8"
 services:
   # Traefik - Reverse proxy with automatic SSL
   traefik:
-    image: traefik:v3.0
+    image: traefik:v3.6.2
     container_name: traefik
     restart: unless-stopped
     command:
       - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--log.level=DEBUG"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=cortex_web"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
