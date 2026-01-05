@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # Traefik - Reverse proxy with automatic SSL
   traefik:
@@ -70,7 +68,7 @@ services:
       # Internal container networking
       - REDIS_CONNECTION_STRING=redis://default:${REDIS_PASSWORD}@redis:6379
       - STORAGE_CONNECTION_STRING=redis://default:${REDIS_PASSWORD}@redis:6379
-      - WHISPER_MEDIA_API_URL=http://file-handler:7071
+      - WHISPER_MEDIA_API_URL=http://file-handler:7071/api/CortexFileHandler
     ports:
       # Expose on private network for Concierge to access
       - "10.0.0.2:4000:4000"
