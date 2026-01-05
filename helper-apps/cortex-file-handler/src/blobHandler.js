@@ -21,7 +21,7 @@ import {
   CONVERTED_EXTENSIONS, 
   AZURITE_ACCOUNT_NAME,
   getDefaultContainerName,
-  GCS_BUCKETNAME,
+  getGCSBucketName,
   AZURE_STORAGE_CONTAINER_NAME
 } from "./constants.js";
 import { FileConversionService } from "./services/FileConversionService.js";
@@ -1109,7 +1109,7 @@ async function cleanup(context, urls = null) {
 
 async function cleanupGCS(urls = null) {
   if (!gcs) return [];
-  const bucket = gcs.bucket(GCS_BUCKETNAME);
+  const bucket = gcs.bucket(getGCSBucketName());
   const directories = new Set();
   const cleanedURLs = [];
 
@@ -1172,7 +1172,7 @@ async function deleteGCS(blobName) {
       );
 
       // List files first
-      const listUrl = `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${GCS_BUCKETNAME}/o?prefix=${blobName}`;
+      const listUrl = `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${getGCSBucketName()}/o?prefix=${blobName}`;
       console.log(`[deleteGCS] Listing files with URL: ${listUrl}`);
 
       const listResponse = await axios.get(listUrl, {
@@ -1190,7 +1190,7 @@ async function deleteGCS(blobName) {
 
         // Delete each file
         for (const item of listResponse.data.items) {
-          const deleteUrl = `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${GCS_BUCKETNAME}/o/${encodeURIComponent(item.name)}`;
+          const deleteUrl = `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${getGCSBucketName()}/o/${encodeURIComponent(item.name)}`;
           console.log(`[deleteGCS] Deleting file: ${item.name}`);
           console.log(`[deleteGCS] Delete URL: ${deleteUrl}`);
 
@@ -1213,7 +1213,7 @@ async function deleteGCS(blobName) {
       }
     } else {
       console.log("[deleteGCS] Using real GCS");
-      const bucket = gcs.bucket(GCS_BUCKETNAME);
+      const bucket = gcs.bucket(getGCSBucketName());
       const [files] = await bucket.getFiles({ prefix: blobName });
       console.log(`[deleteGCS] Found ${files.length} files to delete`);
 
@@ -1286,9 +1286,9 @@ async function uploadChunkToGCS(chunkPath, requestId, filename = null) {
     gcsFileName = `${dirName}/${shortId}${fileExtension}`;
   }
   await gcs
-    .bucket(GCS_BUCKETNAME)
+    .bucket(getGCSBucketName())
     .upload(chunkPath, { destination: gcsFileName });
-  return `gs://${GCS_BUCKETNAME}/${gcsFileName}`;
+  return `gs://${getGCSBucketName()}/${gcsFileName}`;
 }
 
 export {
@@ -1306,6 +1306,6 @@ export {
   getMimeTypeFromUrl,
   // Re-export container constants
   getDefaultContainerName,
-  GCS_BUCKETNAME,
+  getGCSBucketName,
   AZURE_STORAGE_CONTAINER_NAME,
 };

@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from "uuid";
 import XLSX from "xlsx";
 
 import { port } from "../src/start.js";
-import { gcs, GCS_BUCKETNAME } from "../src/blobHandler.js";
+import { gcs, getGCSBucketName } from "../src/blobHandler.js";
 import { getFileStoreMap, setFileStoreMap } from "../src/redis.js";
 import { cleanupHashAndFile, startTestServer, stopTestServer } from "./testUtils.helper.js";
 import { gcsUrlExists } from "../src/blobHandler.js";
@@ -105,8 +105,8 @@ test.serial("checkHash recreates missing GCS converted file", async (t) => {
 
   // delete the GCS object
   const convertedGcsUrl = up.data.converted.gcs;
-  const bucket = gcs.bucket(GCS_BUCKETNAME);
-  const filename = convertedGcsUrl.replace(`gs://${GCS_BUCKETNAME}/`, "");
+  const bucket = gcs.bucket(getGCSBucketName());
+  const filename = convertedGcsUrl.replace(`gs://${getGCSBucketName()}/`, "");
   try {
     await bucket.file(filename).delete({ ignoreNotFound: true });
   } catch (_) {}

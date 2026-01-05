@@ -69,8 +69,9 @@ test("should parse base64 gcs credentials", (t) => {
   process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 = base64Credentials;
 
   const factory = new StorageFactory();
-  const credentials = factory.parseGCSCredentials();
-  t.deepEqual(credentials, testCredentials);
+  const config = factory.parseGCSConfig();
+  t.truthy(config);
+  t.deepEqual(config.credentials, testCredentials);
 
   // Cleanup
   delete process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64;
@@ -86,8 +87,9 @@ test("should parse json gcs credentials", (t) => {
   process.env.GCP_SERVICE_ACCOUNT_KEY = JSON.stringify(testCredentials);
 
   const factory = new StorageFactory();
-  const credentials = factory.parseGCSCredentials();
-  t.deepEqual(credentials, testCredentials);
+  const config = factory.parseGCSConfig();
+  t.truthy(config);
+  t.deepEqual(config.credentials, testCredentials);
 
   // Cleanup
   delete process.env.GCP_SERVICE_ACCOUNT_KEY;
@@ -97,8 +99,8 @@ test("should return null for invalid gcs credentials", (t) => {
   process.env.GCP_SERVICE_ACCOUNT_KEY = "invalid-json";
 
   const factory = new StorageFactory();
-  const credentials = factory.parseGCSCredentials();
-  t.is(credentials, null);
+  const config = factory.parseGCSConfig();
+  t.is(config, null);
 
   // Cleanup
   delete process.env.GCP_SERVICE_ACCOUNT_KEY;

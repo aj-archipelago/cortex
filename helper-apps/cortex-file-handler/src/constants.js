@@ -172,15 +172,43 @@ export const getDefaultContainerName = () => {
 export const AZURE_STORAGE_CONTAINER_NAME = getContainerName();
 
 // GCS bucket name must be explicitly set - no default to prevent accidental bucket usage
-const getGCSBucketName = () => {
-  const bucketName = process.env.GCS_BUCKETNAME;
-  if (!bucketName || bucketName.trim() === "") {
-    throw new Error(
-      "GCS_BUCKETNAME environment variable is required but not set. " +
-      "Please set GCS_BUCKETNAME in your environment or .env file."
-    );
+// Using lazy evaluation - only throws error when accessed, not at module load time
+// This allows tests to import the module without GCS_BUCKETNAME set
+let _GCS_BUCKETNAME_CACHE = null;
+const getGCSBucketNameValue = () => {
+  if (_GCS_BUCKETNAME_CACHE === null) {
+    const bucketName = process.env.GCS_BUCKETNAME;
+    if (!bucketName || bucketName.trim() === "") {
+      throw new Error(
+        "GCS_BUCKETNAME environment variable is required but not set. " +
+        "Please set GCS_BUCKETNAME in your environment or .env file."
+      );
+    }
+    _GCS_BUCKETNAME_CACHE = bucketName.trim();
   }
-  return bucketName.trim();
+  return _GCS_BUCKETNAME_CACHE;
 };
 
-export const GCS_BUCKETNAME = getGCSBucketName();
+// Export function for explicit access
+export const getGCSBucketName = getGCSBucketNameValue;
+
+// Export as a getter-like constant using a class with valueOf/toString
+// This allows it to work as a string in most contexts (function calls, template literals, etc.)
+class LazyGCSBucketName {
+  valueOf() {
+    return getGCSBucketNameValue();
+  }
+  toString() {
+    return getGCSBucketNameValue();
+  }
+  [Symbol.toPrimitive](hint) {
+    // Handle 'default', 'string', and 'number' hints
+    return getGCSBucketNameValue();
+  }
+}
+
+// Create instance that will convert to string when used
+const lazyBucketName = new LazyGCSBucketName();
+
+// Export as constant - will be converted to string when used in most contexts
+export const GCS_BUCKETNAME = lazyBucketName;

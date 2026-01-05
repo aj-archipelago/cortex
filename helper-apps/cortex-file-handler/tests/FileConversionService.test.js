@@ -196,8 +196,44 @@ test("handles unsupported file types", async (t) => {
 // Test file extension detection
 test("correctly detects file extensions", (t) => {
   const service = new FileConversionService(mockContext);
-  t.true(service.needsConversion("test.docx"));
+  
+  // Excel files should always convert (local conversion, no external service needed)
   t.true(service.needsConversion("test.xlsx"));
+  t.true(service.needsConversion("test.xls"));
+  
+  // Document files should only convert if conversion services are available
+  // Without MARKITDOWN_CONVERT_URL or DOC_TO_PDF_SERVICE_URL, they should not convert
+  const originalMarkitdown = process.env.MARKITDOWN_CONVERT_URL;
+  const originalPdfService = process.env.DOC_TO_PDF_SERVICE_URL;
+  
+  // Clear conversion services
+  delete process.env.MARKITDOWN_CONVERT_URL;
+  delete process.env.DOC_TO_PDF_SERVICE_URL;
+  t.false(service.needsConversion("test.docx"), "docx should not convert without services");
+  t.false(service.needsConversion("test.doc"), "doc should not convert without services");
+  t.false(service.needsConversion("test.ppt"), "ppt should not convert without services");
+  t.false(service.needsConversion("test.pptx"), "pptx should not convert without services");
+  
+  // With MARKITDOWN_CONVERT_URL set, document files should convert
+  process.env.MARKITDOWN_CONVERT_URL = "http://test";
+  t.true(service.needsConversion("test.docx"), "docx should convert with MARKITDOWN_CONVERT_URL");
+  t.true(service.needsConversion("test.doc"), "doc should convert with MARKITDOWN_CONVERT_URL");
+  t.true(service.needsConversion("test.ppt"), "ppt should convert with MARKITDOWN_CONVERT_URL");
+  t.true(service.needsConversion("test.pptx"), "pptx should convert with MARKITDOWN_CONVERT_URL");
+  
+  // Restore original env
+  if (originalMarkitdown) {
+    process.env.MARKITDOWN_CONVERT_URL = originalMarkitdown;
+  } else {
+    delete process.env.MARKITDOWN_CONVERT_URL;
+  }
+  if (originalPdfService) {
+    process.env.DOC_TO_PDF_SERVICE_URL = originalPdfService;
+  } else {
+    delete process.env.DOC_TO_PDF_SERVICE_URL;
+  }
+  
+  // Non-convertible files should never convert
   t.false(service.needsConversion("test.txt"));
   t.false(service.needsConversion("test.json"));
 });

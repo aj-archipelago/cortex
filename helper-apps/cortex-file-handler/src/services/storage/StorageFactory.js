@@ -1,7 +1,7 @@
 import { AzureStorageProvider } from "./AzureStorageProvider.js";
 import { GCSStorageProvider } from "./GCSStorageProvider.js";
 import { LocalStorageProvider } from "./LocalStorageProvider.js";
-import { getContainerName, GCS_BUCKETNAME } from "../../constants.js";
+import { getContainerName, getGCSBucketName } from "../../constants.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -65,7 +65,7 @@ export class StorageFactory {
       const provider = new GCSStorageProvider(
         config.credentials,
         config.projectId,
-        GCS_BUCKETNAME,
+        getGCSBucketName(),
       );
       this.providers.set(key, provider);
     }

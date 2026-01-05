@@ -24,7 +24,7 @@ export class ConversionService {
   }
 
   /**
-   * Determines if a file needs conversion based on its extension
+   * Determines if a file needs conversion based on its extension and available services
    * @param {string} filename - The name of the file to check
    * @returns {boolean} - Whether the file needs conversion
    */
@@ -32,18 +32,37 @@ export class ConversionService {
     // Accept either a full filename/path or a raw extension (e.g. ".docx")
     const input = filename.toLowerCase();
 
-    // If the input looks like an extension already, check directly
+    // Extract the extension
+    let ext;
     if (
       input.startsWith(".") &&
       !input.includes("/") &&
       !input.includes("\\")
     ) {
-      return CONVERTED_EXTENSIONS.includes(input);
+      ext = input;
+    } else {
+      ext = path.extname(input).toLowerCase();
     }
 
-    // Otherwise, extract the extension from the filename/path
-    const ext = path.extname(input).toLowerCase();
-    return CONVERTED_EXTENSIONS.includes(ext);
+    // Check if extension is in the list of convertible files
+    if (!CONVERTED_EXTENSIONS.includes(ext)) {
+      return false;
+    }
+
+    // Excel files can always be converted (local conversion, no external service needed)
+    if (ext === ".xlsx" || ext === ".xls") {
+      return true;
+    }
+
+    // Document files (.docx, .doc, .ppt, .pptx) need conversion services
+    // Check if either PDF service or MarkItDown service is available
+    if ([".docx", ".doc", ".ppt", ".pptx"].includes(ext)) {
+      const pdfServiceUrl = getDocToPdfUrl();
+      const markitdownUrl = getMarkitdownUrl();
+      return !!(pdfServiceUrl || markitdownUrl);
+    }
+
+    return false;
   }
 
   /**
