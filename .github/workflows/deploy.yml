@@ -119,16 +119,19 @@ jobs:
           script: |
             cd /opt/cortex
             
+            # Repository name must be lowercase for Docker
+            REPO_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+            
             # Login to GitHub Container Registry
             echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             
             # Pull the new images
-            docker pull ghcr.io/${{ github.repository }}:latest
-            docker pull ghcr.io/${{ github.repository }}-file-handler:latest
+            docker pull ghcr.io/${REPO_NAME}:latest
+            docker pull ghcr.io/${REPO_NAME}-file-handler:latest
             
             # Update the stack
             export IMAGE_TAG=latest
-            export GITHUB_REPOSITORY_CORTEX=${{ github.repository }}
+            export GITHUB_REPOSITORY_CORTEX=${REPO_NAME}
             
             # Load environment variables
             set -a
@@ -176,4 +179,5 @@ jobs:
               echo "❌ Redis failed to start"
               exit 1
             fi
+
 
