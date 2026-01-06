@@ -44,8 +44,9 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     try {
                         // First try to parse as JSON if it's a string
                         const part = typeof inputPart === 'string' ? JSON.parse(inputPart) : inputPart;
-                        const {type, text, image_url, gcs} = part;
-                        let fileUrl = gcs || image_url?.url;
+                        const {type, text, image_url, gcs, url} = part;
+                        // Check for URL in multiple places: gcs, image_url.url, or direct url property
+                        let fileUrl = gcs || image_url?.url || url;
 
                         if (typeof part === 'string') {
                             return { text: inputPart };
