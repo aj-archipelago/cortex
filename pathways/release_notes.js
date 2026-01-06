@@ -9,7 +9,8 @@ export default {
             ]
         })
     ],
-    model: 'oai-gpt4o',
+    model: 'gemini-flash-3-vision',
+    reasoningEffort: 'high',
     tokenRatio: 0.75,
     enableDuplicateRequests: false,
 }

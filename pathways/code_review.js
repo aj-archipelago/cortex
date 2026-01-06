@@ -9,7 +9,7 @@ export default {
             ]
         })
     ],
-    model: 'oai-gpt4o',
+    model: 'gemini-pro-3-vision',
     tokenRatio: 0.75,
     enableDuplicateRequests: false,
 }

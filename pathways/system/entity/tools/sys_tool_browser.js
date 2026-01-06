@@ -9,6 +9,7 @@ export default {
     timeout: 300,
     toolDefinition: { 
         type: "function",
+        enabled: false,
         icon: "🌍",
         function: {
             name: "FetchWebPageContent",
