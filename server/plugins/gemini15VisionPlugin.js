@@ -44,8 +44,9 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     try {
                         // First try to parse as JSON if it's a string
                         const part = typeof inputPart === 'string' ? JSON.parse(inputPart) : inputPart;
-                        const {type, text, image_url, gcs} = part;
-                        let fileUrl = gcs || image_url?.url;
+                        const {type, text, image_url, gcs, url} = part;
+                        // Check for URL in multiple places: gcs, image_url.url, or direct url property
+                        let fileUrl = gcs || image_url?.url || url;
 
                         if (typeof part === 'string') {
                             return { text: inputPart };
@@ -72,9 +73,12 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                                 if (!base64Data) {
                                     return null;
                                 }
+                                // Extract MIME type from data URL if available
+                                const mimeMatch = fileUrl.match(/data:([^;]+);base64,/);
+                                const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
                                 return {
                                     inlineData: {
-                                        mimeType: 'image/jpeg',
+                                        mimeType: mimeType,
                                         data: base64Data
                                     }
                                 };
@@ -82,6 +86,15 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                                 return {
                                     fileData: {
                                         mimeType: 'video/youtube',
+                                        fileUri: fileUrl
+                                    }
+                                };
+                            } else if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+                                // Gemini can read directly from HTTP/HTTPS URLs using fileData with fileUri
+                                // No need to fetch and convert to base64
+                                return {
+                                    fileData: {
+                                        mimeType: mime.lookup(fileUrl) || 'image/jpeg',
                                         fileUri: fileUrl
                                     }
                                 };
