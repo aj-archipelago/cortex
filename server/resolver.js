@@ -1,8 +1,9 @@
 import { fulfillWithTimeout } from '../lib/promiser.js';
 import { PathwayResolver } from './pathwayResolver.js';
 import CortexResponse from '../lib/cortexResponse.js';
-import { withRequestLoggingDisabled } from '../lib/logger.js';
+import logger, { withRequestLoggingDisabled } from '../lib/logger.js';
 import { sanitizeBase64 } from '../lib/util.js';
+import { resolveClientToolCallback } from './clientToolCallbacks.js';
 
 // This resolver uses standard parameters required by Apollo server:
 // (parent, args, contextValue, info)
@@ -99,6 +100,40 @@ const cancelRequestResolver = (parent, args, contextValue, _info) => {
     return true
 }
 
+const submitClientToolResultResolver = async (parent, args, contextValue, _info) => {
+    const { requestId, toolCallbackId, result, success } = args;
+    
+    logger.info(`Received client tool result submission: requestId=${requestId}, toolCallbackId=${toolCallbackId}, success=${success}`);
+    
+    try {
+        // Parse the result if it's a string
+        let parsedResult = result;
+        try {
+            parsedResult = JSON.parse(result);
+        } catch (e) {
+            // If parsing fails, use the string as-is
+        }
+        
+        // Resolve the waiting callback (now async, publishes to Redis if available)
+        const resolved = await resolveClientToolCallback(toolCallbackId, {
+            success,
+            data: parsedResult,
+            error: !success ? (parsedResult.error || 'Tool execution failed') : null
+        });
+        
+        if (!resolved) {
+            logger.warn(`Failed to publish/resolve callback for toolCallbackId: ${toolCallbackId}`);
+            return false;
+        }
+        
+        logger.info(`Successfully published/resolved client tool callback: ${toolCallbackId}`);
+        return true;
+    } catch (error) {
+        logger.error(`Error in submitClientToolResultResolver: ${error.message}`);
+        return false;
+    }
+}
+
 export {
-    resolver, rootResolver, cancelRequestResolver
+    resolver, rootResolver, cancelRequestResolver, submitClientToolResultResolver
 };

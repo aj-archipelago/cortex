@@ -79,7 +79,13 @@ export default {
         entityId: ``,
         researchMode: false,
         userInfo: '',
-        model: 'oai-gpt41'
+        model: 'oai-gpt41',
+        contextKey: ``,
+        clientSideTools: {
+            type: 'array',
+            items: { type: 'object' },
+            default: []
+        }
     },
     timeout: 600,
 
@@ -449,15 +455,47 @@ export default {
         let pathwayResolver = resolver;
 
         // Load input parameters and information into args
-        const { entityId, voiceResponse, aiMemorySelfModify, chatId, researchMode } = { ...pathwayResolver.pathway.inputParameters, ...args };
+        let { entityId, voiceResponse, aiMemorySelfModify, chatId, researchMode, clientSideTools } = { ...pathwayResolver.pathway.inputParameters, ...args };
+        
+        // Parse clientSideTools if it's a string (from GraphQL)
+        if (typeof clientSideTools === 'string') {
+            try {
+                clientSideTools = JSON.parse(clientSideTools);
+            } catch (e) {
+                logger.error(`Failed to parse clientSideTools: ${e.message}`);
+                clientSideTools = [];
+            }
+        }
         
         const entityConfig = loadEntityConfig(entityId);
-        const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
+        let { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
         const { name: entityName, instructions: entityInstructions } = entityConfig || {};
         
         // Determine useMemory: entityConfig.useMemory === false is a hard disable (entity can't use memory)
         // Otherwise args.useMemory can disable it, default true
         args.useMemory = entityConfig?.useMemory === false ? false : (args.useMemory ?? true);
+
+        // Add client-side tools from the caller
+        if (clientSideTools && Array.isArray(clientSideTools) && clientSideTools.length > 0) {
+            logger.info(`Adding ${clientSideTools.length} client-side tools from caller`);
+            clientSideTools.forEach(tool => {
+                const toolName = tool.function?.name?.toLowerCase();
+                if (toolName) {
+                    // Mark as client-side tool and add to available tools
+                    entityTools[toolName] = {
+                        definition: {
+                            ...tool,
+                            clientSide: true,  // Mark it as client-side
+                            icon: tool.icon || '📱'
+                        },
+                        pathwayName: 'client_side_execution',  // Placeholder pathway
+                        clientSide: true
+                    };
+                    entityToolsOpenAiFormat.push(tool);
+                    logger.info(`Registered client-side tool: ${toolName}`);
+                }
+            });
+        }
 
         // Initialize chat history if needed
         if (!args.chatHistory || args.chatHistory.length === 0) {
