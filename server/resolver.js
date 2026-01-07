@@ -1,7 +1,7 @@
 import { fulfillWithTimeout } from '../lib/promiser.js';
 import { PathwayResolver } from './pathwayResolver.js';
 import CortexResponse from '../lib/cortexResponse.js';
-import { withRequestLoggingDisabled, logger } from '../lib/logger.js';
+import logger, { withRequestLoggingDisabled } from '../lib/logger.js';
 import { sanitizeBase64 } from '../lib/util.js';
 import { resolveClientToolCallback } from './clientToolCallbacks.js';
 

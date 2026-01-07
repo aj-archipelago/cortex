@@ -361,27 +361,6 @@ export default {
                     }
                 }));
 
-                // Check if any tool result indicates a client-side tool
-                // If so, stop the agentic loop and let the client handle it
-                for (const result of toolResults) {
-                    if (result?.result?.result) {
-                        try {
-                            const resultData = typeof result.result.result === 'string' 
-                                ? JSON.parse(result.result.result) 
-                                : result.result.result;
-                            
-                            if (resultData?.clientSideTool === true) {
-                                logger.info('Client-side tool detected - stopping agentic loop and waiting for client');
-                                // Don't continue with the agentic loop
-                                // The client will send a new request with the tool result
-                                return ""; // Return empty response - client will handle the continuation
-                            }
-                        } catch (e) {
-                            // Not JSON or doesn't have clientSideTool flag, continue normally
-                        }
-                    }
-                }
-
                 // Merge all message histories in order
                 for (const result of toolResults) {
                     try {
