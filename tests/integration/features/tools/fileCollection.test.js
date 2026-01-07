@@ -1086,7 +1086,7 @@ test('File collection: syncAndStripFilesFromChatHistory only strips collection f
         ];
         
         // Process chat history
-        const { chatHistory: processed } = await syncAndStripFilesFromChatHistory(chatHistory, createAgentContext(contextId));
+        const { chatHistory: processed, availableFiles } = await syncAndStripFilesFromChatHistory(chatHistory, createAgentContext(contextId));
         
         // Verify only collection file was stripped
         const content = processed[0].content;

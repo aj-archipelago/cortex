@@ -432,9 +432,9 @@ test('Gemini 1.5 image URL type handling', t => {
             { type: 'image_url', image_url: { url: 'gs://my-bucket/image1.jpg' } },
             // Base64 URL - should be converted to inlineData
             { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/4AAQSkZJRg...' } },
-            // Regular HTTP URL - should be dropped (return null)
+            // Regular HTTP URL - should be converted to fileData (Gemini supports HTTP URLs directly)
             { type: 'image_url', image_url: { url: 'https://example.com/image.jpg' } },
-            // Azure blob URL - should be dropped (return null)
+            // Azure blob URL - should be converted to fileData (Gemini supports HTTP URLs directly)
             { type: 'image_url', image_url: { url: 'https://myaccount.blob.core.windows.net/container/image.jpg' } }
         ]}
     ];
@@ -442,20 +442,30 @@ test('Gemini 1.5 image URL type handling', t => {
     const { modifiedMessages } = gemini15.convertMessagesToGemini(messages);
 
     t.is(modifiedMessages.length, 1);
-    t.is(modifiedMessages[0].parts.length, 3); // text + gcs + base64 (2 urls dropped)
-    
+    t.is(modifiedMessages[0].parts.length, 5); // text + gcs + base64 + http + azure (all urls kept)
+
     // Check text part
     t.is(modifiedMessages[0].parts[0].text, 'Process these images:');
-    
+
     // Check GCS URL handling
     t.true('fileData' in modifiedMessages[0].parts[1]);
     t.is(modifiedMessages[0].parts[1].fileData.fileUri, 'gs://my-bucket/image1.jpg');
     t.is(modifiedMessages[0].parts[1].fileData.mimeType, 'image/jpeg');
-    
+
     // Check base64 URL handling
     t.true('inlineData' in modifiedMessages[0].parts[2]);
     t.is(modifiedMessages[0].parts[2].inlineData.mimeType, 'image/jpeg');
     t.is(modifiedMessages[0].parts[2].inlineData.data, '/9j/4AAQSkZJRg...');
+
+    // Check HTTP URL handling
+    t.true('fileData' in modifiedMessages[0].parts[3]);
+    t.is(modifiedMessages[0].parts[3].fileData.fileUri, 'https://example.com/image.jpg');
+    t.is(modifiedMessages[0].parts[3].fileData.mimeType, 'image/jpeg');
+
+    // Check Azure blob URL handling
+    t.true('fileData' in modifiedMessages[0].parts[4]);
+    t.is(modifiedMessages[0].parts[4].fileData.fileUri, 'https://myaccount.blob.core.windows.net/container/image.jpg');
+    t.is(modifiedMessages[0].parts[4].fileData.mimeType, 'image/jpeg');
 });
 
 // Test edge cases for image URLs in Gemini 1.5
