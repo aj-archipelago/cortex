@@ -274,6 +274,7 @@ class PathwayResolver {
 
     async handleStream(response) {
         let streamErrorOccurred = false;
+        let streamErrorMessage = null;
 
         if (response && typeof response.on === 'function') {
             try {
@@ -300,6 +301,7 @@ class PathwayResolver {
                         requestProgress = this.modelExecutor.plugin.processStreamEvent(event, requestProgress);
                     } catch (error) {
                         streamErrorOccurred = true;
+                        streamErrorMessage = error instanceof Error ? error.message : String(error);
                         logger.error(`Stream error: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
                         incomingMessage.off('data', processStream);
                         return;
@@ -327,22 +329,33 @@ class PathwayResolver {
                     await new Promise((resolve, reject) => {
                         incomingMessage.on('data', processStream);
                         incomingMessage.on('end', resolve);
-                        incomingMessage.on('error', reject);
+                        incomingMessage.on('error', (err) => {
+                            streamErrorOccurred = true;
+                            streamErrorMessage = err instanceof Error ? err.message : String(err);
+                            reject(err);
+                        });
                     });
                 }
 
             } catch (error) {
+                streamErrorOccurred = true;
+                if (!streamErrorMessage) {
+                    streamErrorMessage = error instanceof Error ? error.message : String(error);
+                }
                 logger.error(`Could not subscribe to stream: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
             }
 
             if (streamErrorOccurred) {
                 logger.error(`Stream read failed. Finishing stream...`);
+                const errorMessage = streamErrorMessage || 
+                    (this.errors.length > 0 ? this.errors.join(', ') : 'Stream read failed');
+                const infoObject = { ...this.pathwayResultData || {} };
                 publishRequestProgress({
-                    requestId: this.requestId,
+                    requestId: this.rootRequestId || this.requestId,
                     progress: 1,
                     data: '',
-                    info: '',
-                    error: 'Stream read failed'
+                    info: JSON.stringify(infoObject),
+                    error: errorMessage
                 });
             } else {
                 return;
