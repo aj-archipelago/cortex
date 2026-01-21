@@ -500,20 +500,38 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
             const finishReason = this.hadToolCalls ? "tool_calls" : "stop";
 
             // Check if there's any remaining content in the final chunk that needs to be published
+            let sentFinalChunk = false;
             if (eventData.candidates?.[0]?.content?.parts) {
                 const parts = eventData.candidates[0].content.parts;
                 for (const part of parts) {
                     if (part.text && part.text.trim()) {
                         // Send the final content chunk with finish reason
-                        requestProgress.data = JSON.stringify(createChunk({ 
-                            content: part.text 
+                        requestProgress.data = JSON.stringify(createChunk({
+                            content: part.text
                         }, finishReason));
+                        sentFinalChunk = true;
                         break; // Only process the first text part
                     }
                 }
-            } else {
-                // No content, just send finish chunk
-                requestProgress.data = JSON.stringify(createChunk({}, finishReason));
+            }
+            if (!sentFinalChunk) {
+                // If we have tool calls, include them in the finish chunk
+                // (Gemini often sends functionCall and finishReason in the same event)
+                // Filter out undefined elements before mapping
+                const validToolCallsForChunk = this.toolCallsBuffer.filter(tc => tc && tc.function);
+                if (this.hadToolCalls && validToolCallsForChunk.length > 0) {
+                    requestProgress.data = JSON.stringify(createChunk({
+                        tool_calls: validToolCallsForChunk.map((tc, index) => ({
+                            index,
+                            id: tc.id,
+                            type: tc.type,
+                            function: tc.function
+                        }))
+                    }, finishReason));
+                } else {
+                    // No final text content, just send finish chunk
+                    requestProgress.data = JSON.stringify(createChunk({}, finishReason));
+                }
             }
 
             const pathwayResolver = requestState[this.requestId]?.pathwayResolver;

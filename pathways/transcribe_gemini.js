@@ -225,7 +225,7 @@ REMEMBER:
                     .sort((a, b) => a.index - b.index)
                     .map(item => item.result);
             } catch (error) {
-                logger.error('Error processing chunks:', error);
+                logger.error(`Error processing chunks: ${error.message}`);
                 throw error;
             }
         };
