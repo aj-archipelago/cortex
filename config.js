@@ -575,6 +575,72 @@ var config = convict({
                 "maxImageSize": 5242880,
                 "supportsStreaming": true
             },
+            "claude-sonnet-4": {
+                "type": "CLAUDE-ANTHROPIC",
+                "emulateOpenAIChatModel": "claude-sonnet-4",
+                "endpoints": [
+                    {
+                        "name": "Anthropic Claude Sonnet 4",
+                        "url": "https://api.anthropic.com/v1/messages",
+                        "headers": {
+                            "x-api-key": "{{CLAUDE_API_KEY}}",
+                            "Content-Type": "application/json"
+                        },
+                        "params": {
+                            "model": "claude-sonnet-4-20250514"
+                        },
+                        "requestsPerSecond": 10
+                    }
+                ],
+                "maxTokenLength": 200000,
+                "maxReturnTokens": 64000,
+                "maxImageSize": 31457280,
+                "supportsStreaming": true
+            },
+            "claude-45-sonnet": {
+                "type": "CLAUDE-ANTHROPIC",
+                "emulateOpenAIChatModel": "claude-4.5-sonnet",
+                "endpoints": [
+                    {
+                        "name": "Anthropic Claude 4.5 Sonnet",
+                        "url": "https://api.anthropic.com/v1/messages",
+                        "headers": {
+                            "x-api-key": "{{CLAUDE_API_KEY}}",
+                            "Content-Type": "application/json"
+                        },
+                        "params": {
+                            "model": "claude-sonnet-4-5-20250514"
+                        },
+                        "requestsPerSecond": 10
+                    }
+                ],
+                "maxTokenLength": 200000,
+                "maxReturnTokens": 64000,
+                "maxImageSize": 31457280,
+                "supportsStreaming": true
+            },
+            "claude-45-opus": {
+                "type": "CLAUDE-ANTHROPIC",
+                "emulateOpenAIChatModel": "claude-4.5-opus",
+                "endpoints": [
+                    {
+                        "name": "Anthropic Claude 4.5 Opus",
+                        "url": "https://api.anthropic.com/v1/messages",
+                        "headers": {
+                            "x-api-key": "{{CLAUDE_API_KEY}}",
+                            "Content-Type": "application/json"
+                        },
+                        "params": {
+                            "model": "claude-opus-4-5-20250514"
+                        },
+                        "requestsPerSecond": 10
+                    }
+                ],
+                "maxTokenLength": 200000,
+                "maxReturnTokens": 32000,
+                "maxImageSize": 31457280,
+                "supportsStreaming": true
+            },
             "gemini-flash-25-vision": {
                 "type": "GEMINI-1.5-VISION",
                 "emulateOpenAIChatModel": "gemini-flash-25",
@@ -776,6 +842,12 @@ var config = convict({
         format: String,
         default: null,
         env: 'OPENAI_API_KEY',
+        sensitive: true
+    },
+    claudeApiKey: {
+        format: String,
+        default: null,
+        env: 'CLAUDE_API_KEY',
         sensitive: true
     },
     openaiApiUrl: {

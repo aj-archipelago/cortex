@@ -26,6 +26,7 @@ import Gemini3ImagePlugin from './plugins/gemini3ImagePlugin.js';
 import Gemini3ReasoningVisionPlugin from './plugins/gemini3ReasoningVisionPlugin.js';
 import Claude3VertexPlugin from './plugins/claude3VertexPlugin.js';
 import Claude4VertexPlugin from './plugins/claude4VertexPlugin.js';
+import ClaudeAnthropicPlugin from './plugins/claudeAnthropicPlugin.js';
 import NeuralSpacePlugin from './plugins/neuralSpacePlugin.js';
 import RunwareAiPlugin from './plugins/runwareAiPlugin.js';
 import ReplicateApiPlugin from './plugins/replicateApiPlugin.js';
@@ -121,6 +122,9 @@ class ModelExecutor {
                 break;
             case 'CLAUDE-4-VERTEX':
                 plugin = new Claude4VertexPlugin(pathway, model);
+                break;
+            case 'CLAUDE-ANTHROPIC':
+                plugin = new ClaudeAnthropicPlugin(pathway, model);
                 break;
             case 'RUNWARE-AI':
                 plugin = new RunwareAiPlugin(pathway, model);
