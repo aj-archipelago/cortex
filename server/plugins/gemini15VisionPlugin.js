@@ -546,6 +546,8 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     tool_calls: validToolCalls,
                 };
                 this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
+                // Signal to pathwayResolver that stream close is expected (tool callback invoked)
+                requestProgress.toolCallbackInvoked = true;
                 // Clear tool buffer after processing; keep content for citations/continuations
                 this.toolCallsBuffer = [];
             } else {

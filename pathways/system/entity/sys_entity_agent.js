@@ -1,8 +1,10 @@
 // sys_entity_agent.js
 // Agentic extension of the entity system that uses OpenAI's tool calling API
 const MAX_TOOL_CALLS = 50;
+const TOOL_TIMEOUT_MS = 120000; // 2 minute timeout per tool call
+const MAX_TOOL_RESULT_LENGTH = 50000; // Truncate oversized tool results to prevent context overflow
 
-import { callPathway, callTool, say, sendToolStart, sendToolFinish } from '../../../lib/pathwayTools.js';
+import { callPathway, callTool, say, sendToolStart, sendToolFinish, withTimeout } from '../../../lib/pathwayTools.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
 import { syncAndStripFilesFromChatHistory } from '../../../lib/fileUtils.js';
@@ -138,9 +140,12 @@ export default {
                         // Create an isolated copy of messages for this tool
                         const toolMessages = JSON.parse(JSON.stringify(preToolCallMessages));
                         
-                        // Get the tool definition to check for icon
+                        // Get the tool definition to check for icon and timeout
                         const toolDefinition = entityTools[toolFunction]?.definition;
                         const toolIcon = toolDefinition?.icon || '🛠️';
+                        
+                        // Get timeout from tool definition or use default
+                        const toolTimeout = toolDefinition?.timeout || TOOL_TIMEOUT_MS;
                         
                         // Get the user message for the tool
                         const toolUserMessage = toolArgs.userMessage || `Executing tool: ${toolCall.function.name}`;
@@ -155,13 +160,19 @@ export default {
                             // Continue execution even if start message fails
                         }
 
-                        const toolResult = await callTool(toolFunction, {
-                            ...args,
-                            ...toolArgs,
-                            toolFunction,
-                            chatHistory: toolMessages,
-                            stream: false
-                        }, entityTools, pathwayResolver);
+                        // Wrap tool call with timeout to prevent hanging
+                        const toolResult = await withTimeout(
+                            callTool(toolFunction, {
+                                ...args,
+                                ...toolArgs,
+                                toolFunction,
+                                chatHistory: toolMessages,
+                                stream: false,
+                                useMemory: false  // Disable memory synthesis for tool calls
+                            }, entityTools, pathwayResolver),
+                            toolTimeout,
+                            `Tool ${toolCall.function.name} timed out after ${toolTimeout / 1000}s`
+                        );
 
                         // Tool calls and results need to be paired together in the message history
                         // Add the tool call to the isolated message history
@@ -311,7 +322,9 @@ export default {
                             messages: toolMessages
                         };
                     } catch (error) {
-                        logger.error(`Error executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
+                        // Detect if this is a timeout error for clearer logging
+                        const isTimeout = error.message?.includes('timed out');
+                        logger.error(`${isTimeout ? 'Timeout' : 'Error'} executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
                         
                         // Send tool finish message (error)
                         // Get requestId and toolCallId if not already defined (in case error occurred before they were set)
@@ -412,7 +425,17 @@ export default {
                 );
             }
 
-            args.chatHistory = finalMessages;
+            // Truncate oversized tool results to prevent context overflow
+            args.chatHistory = finalMessages.map(msg => {
+                if (msg.role === 'tool' && msg.content && msg.content.length > MAX_TOOL_RESULT_LENGTH) {
+                    logger.warn(`Truncating oversized tool result (${msg.content.length} chars) for ${msg.name || 'unknown tool'}`);
+                    return {
+                        ...msg,
+                        content: msg.content.substring(0, MAX_TOOL_RESULT_LENGTH) + '\n\n[Content truncated due to length]'
+                    };
+                }
+                return msg;
+            });
 
             // clear any accumulated pathwayResolver errors from the tools
             pathwayResolver.errors = [];

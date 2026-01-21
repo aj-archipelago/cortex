@@ -275,6 +275,10 @@ class PathwayResolver {
     async handleStream(response) {
         let streamErrorOccurred = false;
         let streamErrorMessage = null;
+        let completionSent = false;
+        // Accumulate streamed content for continuity memory
+        this.streamedContent = '';
+        const requestId = this.rootRequestId || this.requestId;
 
         if (response && typeof response.on === 'function') {
             try {
@@ -283,7 +287,7 @@ class PathwayResolver {
 
                 const onParse = (event) => {
                     let requestProgress = {
-                        requestId: this.rootRequestId || this.requestId
+                        requestId
                     };
 
                     logger.debug(`Received event: ${event.type}`);
@@ -293,6 +297,18 @@ class PathwayResolver {
                         logger.debug(`id: ${event.id || '<none>'}`)
                         logger.debug(`name: ${event.name || '<none>'}`)
                         logger.debug(`data: ${event.data}`)
+                        
+                        // Check for error events in the stream data
+                        try {
+                            const eventData = JSON.parse(event.data);
+                            if (eventData.error) {
+                                streamErrorOccurred = true;
+                                streamErrorMessage = eventData.error.message || JSON.stringify(eventData.error);
+                                logger.error(`Stream contained error event: ${streamErrorMessage}`);
+                            }
+                        } catch {
+                            // Not JSON or no error field, continue normal processing
+                        }
                     } else if (event.type === 'reconnect-interval') {
                         logger.debug(`We should set reconnect interval to ${event.value} milliseconds`)
                     }
@@ -302,7 +318,7 @@ class PathwayResolver {
                     } catch (error) {
                         streamErrorOccurred = true;
                         streamErrorMessage = error instanceof Error ? error.message : String(error);
-                        logger.error(`Stream error: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
+                        logger.error(`Stream processing error: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
                         incomingMessage.off('data', processStream);
                         return;
                     }
@@ -311,6 +327,9 @@ class PathwayResolver {
                         if (!streamEnded && requestProgress.data) {
                             this.publishNestedRequestProgress(requestProgress);
                             streamEnded = requestProgress.progress === 1;
+                            if (streamEnded) {
+                                completionSent = true;
+                            }
                         }
                     } catch (error) {
                         logger.error(`Could not publish the stream message: "${event.data}", ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
@@ -326,15 +345,36 @@ class PathwayResolver {
                 }
 
                 if (incomingMessage) {
-                    await new Promise((resolve, reject) => {
-                        incomingMessage.on('data', processStream);
-                        incomingMessage.on('end', resolve);
-                        incomingMessage.on('error', (err) => {
+                    // Add timeout to prevent hanging forever
+                    const streamTimeout = setTimeout(() => {
+                        if (!completionSent && !streamErrorOccurred) {
                             streamErrorOccurred = true;
-                            streamErrorMessage = err instanceof Error ? err.message : String(err);
-                            reject(err);
+                            streamErrorMessage = 'Stream timeout - no data received for 5 minutes';
+                            logger.error(streamErrorMessage);
+                            incomingMessage.destroy();
+                        }
+                    }, 5 * 60 * 1000); // 5 minute timeout
+
+                    try {
+                        await new Promise((resolve, reject) => {
+                            incomingMessage.on('data', processStream);
+                            incomingMessage.on('end', resolve);
+                            incomingMessage.on('error', (err) => {
+                                streamErrorOccurred = true;
+                                streamErrorMessage = err instanceof Error ? err.message : String(err);
+                                reject(err);
+                            });
+                            incomingMessage.on('close', () => {
+                                // Stream closed - could be normal or abnormal
+                                if (!completionSent && !streamErrorOccurred) {
+                                    logger.warn('Stream closed without completion signal');
+                                }
+                                resolve();
+                            });
                         });
-                    });
+                    } finally {
+                        clearTimeout(streamTimeout);
+                    }
                 }
 
             } catch (error) {
@@ -345,20 +385,21 @@ class PathwayResolver {
                 logger.error(`Could not subscribe to stream: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
             }
 
-            if (streamErrorOccurred) {
-                logger.error(`Stream read failed. Finishing stream...`);
-                const errorMessage = streamErrorMessage || 
-                    (this.errors.length > 0 ? this.errors.join(', ') : 'Stream read failed');
-                const infoObject = { ...this.pathwayResultData || {} };
+            // Ensure completion is sent if not already done
+            if (streamErrorOccurred || !completionSent) {
+                if (streamErrorOccurred) {
+                    logger.error(`Stream read failed: ${streamErrorMessage}`);
+                }
+                const errorMessage = streamErrorOccurred 
+                    ? (streamErrorMessage || this.errors.join(', ') || 'Stream read failed')
+                    : '';
                 publishRequestProgress({
-                    requestId: this.rootRequestId || this.requestId,
+                    requestId,
                     progress: 1,
                     data: '',
-                    info: JSON.stringify(infoObject),
+                    info: JSON.stringify(this.pathwayResultData || {}),
                     error: errorMessage
                 });
-            } else {
-                return;
             }
         }
     }
