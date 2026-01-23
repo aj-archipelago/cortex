@@ -2,6 +2,7 @@ import Gemini15ChatPlugin from './gemini15ChatPlugin.js';
 import CortexResponse from '../../lib/cortexResponse.js';
 import { requestState } from '../requestState.js';
 import { addCitationsToResolver } from '../../lib/pathwayTools.js';
+import logger from '../../lib/logger.js';
 import mime from 'mime-types';
 
 class Gemini15VisionPlugin extends Gemini15ChatPlugin {
@@ -414,6 +415,18 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
 
                 return cortexResponse;
             }
+
+            // Handle MALFORMED_FUNCTION_CALL - model tried to call a function but generated invalid JSON
+            if (finishReason === 'MALFORMED_FUNCTION_CALL') {
+                const textContent = content?.parts?.[0]?.text || '';
+                logger.warn(`Gemini returned MALFORMED_FUNCTION_CALL, returning graceful response`);
+                return new CortexResponse({
+                    output_text: textContent || 'I encountered an issue processing that request. Please try rephrasing your question.',
+                    finishReason: "stop",
+                    usage: data.usageMetadata || null,
+                    metadata: { model: this.modelName }
+                });
+            }
         }
 
         // Fallback to parent implementation
@@ -557,6 +570,19 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                 this.toolCallsBuffer = [];
                 this.contentBuffer = '';
             }
+        }
+
+        // Handle MALFORMED_FUNCTION_CALL - model tried to call a function but generated invalid JSON
+        if (eventData.candidates?.[0]?.finishReason === "MALFORMED_FUNCTION_CALL") {
+            logger.warn(`Gemini streaming returned MALFORMED_FUNCTION_CALL`);
+            requestProgress.data = JSON.stringify(createChunk({
+                content: '\n\nI encountered an issue processing that request. Please try rephrasing your question.'
+            }, "stop"));
+            requestProgress.progress = 1;
+            // Clear buffers
+            this.toolCallsBuffer = [];
+            this.contentBuffer = '';
+            return requestProgress;
         }
 
         // Handle safety blocks

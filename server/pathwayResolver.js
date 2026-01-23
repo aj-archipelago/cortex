@@ -276,6 +276,8 @@ class PathwayResolver {
         let streamErrorOccurred = false;
         let streamErrorMessage = null;
         let completionSent = false;
+        let receivedSSEData = false; // Track if we actually received SSE events
+        let toolCallbackInvoked = false; // Track if a tool callback was invoked (stream close is expected)
         // Accumulate streamed content for continuity memory
         this.streamedContent = '';
         const requestId = this.rootRequestId || this.requestId;
@@ -297,7 +299,9 @@ class PathwayResolver {
                         logger.debug(`id: ${event.id || '<none>'}`)
                         logger.debug(`name: ${event.name || '<none>'}`)
                         logger.debug(`data: ${event.data}`)
-                        
+
+                        receivedSSEData = true; // Only mark SSE data when we get actual 'event' type
+
                         // Check for error events in the stream data
                         try {
                             const eventData = JSON.parse(event.data);
@@ -315,6 +319,10 @@ class PathwayResolver {
 
                     try {
                         requestProgress = this.modelExecutor.plugin.processStreamEvent(event, requestProgress);
+                        // Check if plugin signaled a tool callback was invoked
+                        if (requestProgress.toolCallbackInvoked) {
+                            toolCallbackInvoked = true;
+                        }
                     } catch (error) {
                         streamErrorOccurred = true;
                         streamErrorMessage = error instanceof Error ? error.message : String(error);
@@ -345,36 +353,23 @@ class PathwayResolver {
                 }
 
                 if (incomingMessage) {
-                    // Add timeout to prevent hanging forever
-                    const streamTimeout = setTimeout(() => {
-                        if (!completionSent && !streamErrorOccurred) {
+                    await new Promise((resolve, reject) => {
+                        incomingMessage.on('data', processStream);
+                        incomingMessage.on('end', resolve);
+                        incomingMessage.on('error', (err) => {
                             streamErrorOccurred = true;
-                            streamErrorMessage = 'Stream timeout - no data received for 5 minutes';
-                            logger.error(streamErrorMessage);
-                            incomingMessage.destroy();
-                        }
-                    }, 5 * 60 * 1000); // 5 minute timeout
-
-                    try {
-                        await new Promise((resolve, reject) => {
-                            incomingMessage.on('data', processStream);
-                            incomingMessage.on('end', resolve);
-                            incomingMessage.on('error', (err) => {
-                                streamErrorOccurred = true;
-                                streamErrorMessage = err instanceof Error ? err.message : String(err);
-                                reject(err);
-                            });
-                            incomingMessage.on('close', () => {
-                                // Stream closed - could be normal or abnormal
-                                if (!completionSent && !streamErrorOccurred) {
-                                    logger.warn('Stream closed without completion signal');
-                                }
-                                resolve();
-                            });
+                            streamErrorMessage = err instanceof Error ? err.message : String(err);
+                            reject(err);
                         });
-                    } finally {
-                        clearTimeout(streamTimeout);
-                    }
+                        incomingMessage.on('close', () => {
+                            // Stream closed - only warn if we received SSE data but no completion
+                            // Skip warning if: non-streaming (no SSE), tool callback invoked (expected close), or error occurred
+                            if (receivedSSEData && !completionSent && !streamErrorOccurred && !toolCallbackInvoked) {
+                                logger.warn('Stream closed without completion signal');
+                            }
+                            resolve();
+                        });
+                    });
                 }
 
             } catch (error) {
@@ -386,11 +381,18 @@ class PathwayResolver {
             }
 
             // Ensure completion is sent if not already done
-            if (streamErrorOccurred || !completionSent) {
+            // Send completion if:
+            // 1. Stream error occurred (always notify client of errors)
+            // 2. OR we received SSE data but no completion was sent (and no tool callback)
+            // Don't send completion if a tool callback was invoked (stream will resume)
+            const shouldSendCompletion = !toolCallbackInvoked && !completionSent &&
+                (streamErrorOccurred || receivedSSEData);
+
+            if (shouldSendCompletion) {
                 if (streamErrorOccurred) {
                     logger.error(`Stream read failed: ${streamErrorMessage}`);
                 }
-                const errorMessage = streamErrorOccurred 
+                const errorMessage = streamErrorOccurred
                     ? (streamErrorMessage || this.errors.join(', ') || 'Stream read failed')
                     : '';
                 publishRequestProgress({
