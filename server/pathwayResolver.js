@@ -277,6 +277,7 @@ class PathwayResolver {
         let streamErrorMessage = null;
         let completionSent = false;
         let receivedSSEData = false; // Track if we actually received SSE events
+        let receivedAnyData = false; // Track if we received ANY data from the stream
         let toolCallbackInvoked = false; // Track if a tool callback was invoked (stream close is expected)
         // Accumulate streamed content for continuity memory
         this.streamedContent = '';
@@ -348,7 +349,7 @@ class PathwayResolver {
                 const sseParser = createParser(onParse);
 
                 const processStream = (data) => {
-                    //logger.warn(`RECEIVED DATA: ${JSON.stringify(data.toString())}`);
+                    receivedAnyData = true; // Track that we got data from the stream
                     sseParser.feed(data.toString());
                 }
 
@@ -362,9 +363,12 @@ class PathwayResolver {
                             reject(err);
                         });
                         incomingMessage.on('close', () => {
-                            // Stream closed - only warn if we received SSE data but no completion
-                            // Skip warning if: non-streaming (no SSE), tool callback invoked (expected close), or error occurred
-                            if (receivedSSEData && !completionSent && !streamErrorOccurred && !toolCallbackInvoked) {
+                            // Stream closed - detect various incomplete states
+                            if (!receivedAnyData && !streamErrorOccurred && !toolCallbackInvoked) {
+                                // Stream opened but closed with NO data at all - this is likely a provider issue
+                                logger.warn('Stream closed with no data received (empty stream)');
+                            } else if (receivedSSEData && !completionSent && !streamErrorOccurred && !toolCallbackInvoked) {
+                                // Got SSE data but no completion signal
                                 logger.warn('Stream closed without completion signal');
                             }
                             resolve();
@@ -380,10 +384,14 @@ class PathwayResolver {
                 logger.error(`Could not subscribe to stream: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
             }
 
+            // Detect empty stream (opened but closed with no data) - this should be retried
+            const emptyStream = !receivedAnyData && !streamErrorOccurred && !toolCallbackInvoked;
+
             // Ensure completion is sent if not already done
             // Send completion if:
             // 1. Stream error occurred (always notify client of errors)
             // 2. OR we received SSE data but no completion was sent (and no tool callback)
+            // 3. OR empty stream (will only happen if retry logic exhausted - see executePathway)
             // Don't send completion if a tool callback was invoked (stream will resume)
             const shouldSendCompletion = !toolCallbackInvoked && !completionSent &&
                 (streamErrorOccurred || receivedSSEData);
@@ -403,7 +411,17 @@ class PathwayResolver {
                     error: errorMessage
                 });
             }
+
+            // Return stream result for retry logic
+            return {
+                success: completionSent || toolCallbackInvoked,
+                emptyStream,
+                error: streamErrorOccurred ? streamErrorMessage : null
+            };
         }
+
+        // Non-stream response
+        return { success: true, emptyStream: false, error: null };
     }
 
     async resolve(args) {
@@ -535,7 +553,23 @@ class PathwayResolver {
 
             // if data is a stream, handle it
             if (data && typeof data.on === 'function') {
-                await this.handleStream(data);
+                const streamResult = await this.handleStream(data);
+                // Check if stream was empty (opened but closed with no data) - retry if so
+                if (streamResult?.emptyStream) {
+                    logger.warn(`Empty stream received - retrying. Attempt ${retries + 1} of ${MAX_RETRIES}`);
+                    if (retries === MAX_RETRIES - 1) {
+                        // Last retry - send error completion so client doesn't hang
+                        logger.error('All stream retries exhausted - empty stream from provider');
+                        publishRequestProgress({
+                            requestId: this.rootRequestId || this.requestId,
+                            progress: 1,
+                            data: '',
+                            info: JSON.stringify(this.pathwayResultData || {}),
+                            error: 'Provider returned empty stream - please try again'
+                        });
+                    }
+                    continue; // Retry
+                }
                 return data;
             }
 
