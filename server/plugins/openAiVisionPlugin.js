@@ -374,14 +374,16 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                             const validToolCalls = this.toolCallsBuffer.filter(tc => tc && tc.function && tc.function.name);
                             const toolMessage = {
                                 role: 'assistant',
-                                content: delta?.content || '', 
+                                content: delta?.content || '',
                                 tool_calls: validToolCalls,
                             };
                             this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
+                            // Signal to pathwayResolver that tool callback was invoked - prevents [DONE] from ending stream
+                            requestProgress.toolCallbackInvoked = true;
                         }
                         // Don't set progress to 1 for tool calls to keep stream open
                         // Clear tool buffer after processing, but keep content buffer
-                        this.toolCallsBuffer = []; 
+                        this.toolCallsBuffer = [];
                         break;
                     case 'safety':
                         const safetyRatings = JSON.stringify(parsedMessage?.candidates?.[0]?.safetyRatings) || '';

@@ -275,6 +275,13 @@ class PathwayResolver {
     async handleStream(response) {
         let streamErrorOccurred = false;
         let streamErrorMessage = null;
+        let completionSent = false;
+        let receivedSSEData = false; // Track if we actually received SSE events
+        let receivedAnyData = false; // Track if we received ANY data from the stream
+        let toolCallbackInvoked = false; // Track if a tool callback was invoked (stream close is expected)
+        // Accumulate streamed content for continuity memory
+        this.streamedContent = '';
+        const requestId = this.rootRequestId || this.requestId;
 
         if (response && typeof response.on === 'function') {
             try {
@@ -283,7 +290,7 @@ class PathwayResolver {
 
                 const onParse = (event) => {
                     let requestProgress = {
-                        requestId: this.rootRequestId || this.requestId
+                        requestId
                     };
 
                     logger.debug(`Received event: ${event.type}`);
@@ -293,16 +300,34 @@ class PathwayResolver {
                         logger.debug(`id: ${event.id || '<none>'}`)
                         logger.debug(`name: ${event.name || '<none>'}`)
                         logger.debug(`data: ${event.data}`)
+
+                        receivedSSEData = true; // Only mark SSE data when we get actual 'event' type
+
+                        // Check for error events in the stream data
+                        try {
+                            const eventData = JSON.parse(event.data);
+                            if (eventData.error) {
+                                streamErrorOccurred = true;
+                                streamErrorMessage = eventData.error.message || JSON.stringify(eventData.error);
+                                logger.error(`Stream contained error event: ${streamErrorMessage}`);
+                            }
+                        } catch {
+                            // Not JSON or no error field, continue normal processing
+                        }
                     } else if (event.type === 'reconnect-interval') {
                         logger.debug(`We should set reconnect interval to ${event.value} milliseconds`)
                     }
 
                     try {
                         requestProgress = this.modelExecutor.plugin.processStreamEvent(event, requestProgress);
+                        // Check if plugin signaled a tool callback was invoked
+                        if (requestProgress.toolCallbackInvoked) {
+                            toolCallbackInvoked = true;
+                        }
                     } catch (error) {
                         streamErrorOccurred = true;
                         streamErrorMessage = error instanceof Error ? error.message : String(error);
-                        logger.error(`Stream error: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
+                        logger.error(`Stream processing error: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
                         incomingMessage.off('data', processStream);
                         return;
                     }
@@ -311,6 +336,9 @@ class PathwayResolver {
                         if (!streamEnded && requestProgress.data) {
                             this.publishNestedRequestProgress(requestProgress);
                             streamEnded = requestProgress.progress === 1;
+                            if (streamEnded) {
+                                completionSent = true;
+                            }
                         }
                     } catch (error) {
                         logger.error(`Could not publish the stream message: "${event.data}", ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
@@ -321,7 +349,7 @@ class PathwayResolver {
                 const sseParser = createParser(onParse);
 
                 const processStream = (data) => {
-                    //logger.warn(`RECEIVED DATA: ${JSON.stringify(data.toString())}`);
+                    receivedAnyData = true; // Track that we got data from the stream
                     sseParser.feed(data.toString());
                 }
 
@@ -334,6 +362,17 @@ class PathwayResolver {
                             streamErrorMessage = err instanceof Error ? err.message : String(err);
                             reject(err);
                         });
+                        incomingMessage.on('close', () => {
+                            // Stream closed - detect various incomplete states
+                            if (!receivedAnyData && !streamErrorOccurred && !toolCallbackInvoked) {
+                                // Stream opened but closed with NO data at all - this is likely a provider issue
+                                logger.warn('Stream closed with no data received (empty stream)');
+                            } else if (receivedSSEData && !completionSent && !streamErrorOccurred && !toolCallbackInvoked) {
+                                // Got SSE data but no completion signal
+                                logger.warn('Stream closed without completion signal');
+                            }
+                            resolve();
+                        });
                     });
                 }
 
@@ -345,22 +384,44 @@ class PathwayResolver {
                 logger.error(`Could not subscribe to stream: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
             }
 
-            if (streamErrorOccurred) {
-                logger.error(`Stream read failed. Finishing stream...`);
-                const errorMessage = streamErrorMessage || 
-                    (this.errors.length > 0 ? this.errors.join(', ') : 'Stream read failed');
-                const infoObject = { ...this.pathwayResultData || {} };
+            // Detect empty stream (opened but closed with no data) - this should be retried
+            const emptyStream = !receivedAnyData && !streamErrorOccurred && !toolCallbackInvoked;
+
+            // Ensure completion is sent if not already done
+            // Send completion if:
+            // 1. Stream error occurred (always notify client of errors)
+            // 2. OR we received SSE data but no completion was sent (and no tool callback)
+            // 3. OR empty stream (will only happen if retry logic exhausted - see executePathway)
+            // Don't send completion if a tool callback was invoked (stream will resume)
+            const shouldSendCompletion = !toolCallbackInvoked && !completionSent &&
+                (streamErrorOccurred || receivedSSEData);
+
+            if (shouldSendCompletion) {
+                if (streamErrorOccurred) {
+                    logger.error(`Stream read failed: ${streamErrorMessage}`);
+                }
+                const errorMessage = streamErrorOccurred
+                    ? (streamErrorMessage || this.errors.join(', ') || 'Stream read failed')
+                    : '';
                 publishRequestProgress({
-                    requestId: this.rootRequestId || this.requestId,
+                    requestId,
                     progress: 1,
                     data: '',
-                    info: JSON.stringify(infoObject),
+                    info: JSON.stringify(this.pathwayResultData || {}),
                     error: errorMessage
                 });
-            } else {
-                return;
             }
+
+            // Return stream result for retry logic
+            return {
+                success: completionSent || toolCallbackInvoked,
+                emptyStream,
+                error: streamErrorOccurred ? streamErrorMessage : null
+            };
         }
+
+        // Non-stream response
+        return { success: true, emptyStream: false, error: null };
     }
 
     async resolve(args) {
@@ -492,7 +553,23 @@ class PathwayResolver {
 
             // if data is a stream, handle it
             if (data && typeof data.on === 'function') {
-                await this.handleStream(data);
+                const streamResult = await this.handleStream(data);
+                // Check if stream was empty (opened but closed with no data) - retry if so
+                if (streamResult?.emptyStream) {
+                    logger.warn(`Empty stream received - retrying. Attempt ${retries + 1} of ${MAX_RETRIES}`);
+                    if (retries === MAX_RETRIES - 1) {
+                        // Last retry - send error completion so client doesn't hang
+                        logger.error('All stream retries exhausted - empty stream from provider');
+                        publishRequestProgress({
+                            requestId: this.rootRequestId || this.requestId,
+                            progress: 1,
+                            data: '',
+                            info: JSON.stringify(this.pathwayResultData || {}),
+                            error: 'Provider returned empty stream - please try again'
+                        });
+                    }
+                    continue; // Retry
+                }
                 return data;
             }
 

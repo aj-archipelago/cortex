@@ -642,6 +642,8 @@ class GrokResponsesPlugin extends OpenAIVisionPlugin {
                                     tool_calls: validToolCalls,
                                 };
                                 this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
+                                // Signal to pathwayResolver that tool callback was invoked - prevents [DONE] from ending stream
+                                requestProgress.toolCallbackInvoked = true;
                             }
                             this.toolCallsBuffer = [];
                             break;

@@ -178,6 +178,16 @@ class Gemini15ChatPlugin extends ModelPlugin {
             const { content, finishReason, safetyRatings } = data.candidates[0];
             if (finishReason === 'STOP' || finishReason === 'MAX_TOKENS') {
                 return content?.parts?.[0]?.text ?? '';
+            } else if (finishReason === 'MALFORMED_FUNCTION_CALL') {
+                // Model attempted a function call but generated invalid JSON
+                // Return any partial text content if available, otherwise return an error message
+                const textContent = content?.parts?.[0]?.text;
+                if (textContent) {
+                    logger.warn(`Gemini returned MALFORMED_FUNCTION_CALL but had text content, returning text`);
+                    return textContent;
+                }
+                logger.warn(`Gemini returned MALFORMED_FUNCTION_CALL with no text content`);
+                return 'I encountered an issue processing that request. Please try rephrasing your question.';
             } else {
                 const returnString = `Response was not completed.  Finish reason: ${finishReason}, Safety ratings: ${JSON.stringify(safetyRatings, null, 2)}`;
                 throw new Error(returnString);
@@ -258,6 +268,13 @@ class Gemini15ChatPlugin extends ModelPlugin {
         } else if (eventData.candidates?.[0]?.finishReason === "STOP") {
             // Only send DONE if there was no content in this message
             requestProgress.data = '[DONE]';
+            requestProgress.progress = 1;
+        } else if (eventData.candidates?.[0]?.finishReason === "MALFORMED_FUNCTION_CALL") {
+            // Model attempted a function call but generated invalid JSON
+            logger.warn(`Gemini streaming returned MALFORMED_FUNCTION_CALL`);
+            requestProgress.data = JSON.stringify(createChunk({
+                content: '\n\nI encountered an issue processing that request. Please try rephrasing your question.'
+            }));
             requestProgress.progress = 1;
         }
 
