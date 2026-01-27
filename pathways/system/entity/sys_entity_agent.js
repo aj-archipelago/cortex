@@ -5,6 +5,7 @@ const TOOL_TIMEOUT_MS = 120000; // 2 minute timeout per tool call
 const MAX_TOOL_RESULT_LENGTH = 50000; // Truncate oversized tool results to prevent context overflow
 
 import { callPathway, callTool, say, sendToolStart, sendToolFinish, withTimeout } from '../../../lib/pathwayTools.js';
+import { publishRequestProgress } from '../../../lib/redisSubscription.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
 import { syncAndStripFilesFromChatHistory } from '../../../lib/fileUtils.js';
@@ -452,16 +453,27 @@ export default {
                 
                 // Check if promptAndParse returned null (model call failed)
                 if (!result) {
-                    const errorMessage = pathwayResolver.errors.length > 0 
+                    const errorMessage = pathwayResolver.errors.length > 0
                         ? pathwayResolver.errors.join(', ')
                         : 'Model request failed - no response received';
                     logger.error(`promptAndParse returned null during tool callback: ${errorMessage}`);
                     const errorResponse = await generateErrorResponse(new Error(errorMessage), args, pathwayResolver);
                     // Ensure errors are cleared before returning
                     pathwayResolver.errors = [];
+
+                    // In streaming mode, the toolCallback is invoked fire-and-forget by the plugin,
+                    // so we must stream the error response directly to the client and close the stream
+                    const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+                    publishRequestProgress({
+                        requestId,
+                        progress: 1,
+                        data: JSON.stringify(errorResponse),
+                        info: JSON.stringify(pathwayResolver.pathwayResultData || {}),
+                        error: ''
+                    });
                     return errorResponse;
                 }
-                
+
                 return result;
             } catch (parseError) {
                 // If promptAndParse fails, generate error response instead of re-throwing
@@ -469,6 +481,17 @@ export default {
                 const errorResponse = await generateErrorResponse(parseError, args, pathwayResolver);
                 // Ensure errors are cleared before returning
                 pathwayResolver.errors = [];
+
+                // In streaming mode, the toolCallback is invoked fire-and-forget by the plugin,
+                // so we must stream the error response directly to the client and close the stream
+                const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+                publishRequestProgress({
+                    requestId,
+                    progress: 1,
+                    data: JSON.stringify(errorResponse),
+                    info: JSON.stringify(pathwayResolver.pathwayResultData || {}),
+                    error: ''
+                });
                 return errorResponse;
             }
         }
@@ -623,10 +646,10 @@ export default {
 
         // truncate the chat history in case there is really long content
         const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
-      
+
         // Asynchronously manage memory for this context
         if (args.aiMemorySelfModify && args.useMemory) {
-            callPathway('sys_memory_manager', {  ...args, chatHistory: truncatedChatHistory, stream: false })    
+            callPathway('sys_memory_manager', {  ...args, chatHistory: truncatedChatHistory, stream: false })
             .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
         }
 
@@ -654,6 +677,10 @@ export default {
             // If we hit the timeout or any other error, we'll proceed without memory lookup
             memoryLookupRequired = false;
         }
+
+        // Update pathwayResolver.args with stripped chatHistory
+        // This ensures toolCallback receives the processed history, not the original
+        pathwayResolver.args = {...args};
 
         try {
             let currentMessages = JSON.parse(JSON.stringify(args.chatHistory));
