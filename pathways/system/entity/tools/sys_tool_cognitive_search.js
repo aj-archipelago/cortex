@@ -201,8 +201,9 @@ export default {
         }
 
         try {
-            // Call the cognitive search pathway
-            const response = await callPathway('cognitive_search', {
+            // Call the cognitive search pathway (allow override via pathwayParams)
+            const searchPathwayName = args.searchPathway || 'cognitive_search';
+            const response = await callPathway(searchPathwayName, {
                 ...args,
                 text,
                 filter,
@@ -311,6 +312,21 @@ export default {
                     // url: null - Answers don't have URLs
                 }));
                 combinedResults.push(...formattedAnswers);
+            }
+
+            // Map custom fields to standard citation fields if configured via pathwayParams
+            const { urlField, titleField, blobSasEnvVar } = args;
+            if (urlField || titleField) {
+                const urlSuffix = blobSasEnvVar ? (process.env[blobSasEnvVar] || '') : '';
+                combinedResults.forEach(result => {
+                    if (result.source_type === 'metadata' || result.source_type === 'answer') return;
+                    if (urlField && result[urlField]) {
+                        result.url = result[urlField] + urlSuffix;
+                    }
+                    if (titleField && result[titleField]) {
+                        result.title = result[titleField];
+                    }
+                });
             }
 
             return JSON.stringify({ _type: "SearchResponse", value: combinedResults });
