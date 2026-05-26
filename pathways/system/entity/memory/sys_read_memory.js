@@ -19,6 +19,7 @@ const isValidPriority = (priority) => {
 
 export const processMemoryContent = (content, { priority = 0, recentHours = 0, numResults = 0, stripMetadata = false }) => {
     if (!content) return content;
+    if (typeof content !== 'string') content = String(content ?? '');
     if (!priority && !recentHours && !numResults && !stripMetadata) return content;
 
     const lines = content.split('\n');

@@ -68,7 +68,8 @@ Each modification object should look like:
         maxIterations: 5,
         contextKey: ``
     },
-    model: 'oai-gpt41',
+    model: 'cortex-default-small-fast',
+    reasoningEffort: 'none',
     useInputChunking: false,
     enableDuplicateRequests: false,
     json: true,

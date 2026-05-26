@@ -5,6 +5,7 @@ import logger from '../../../../../lib/logger.js';
 
 const normalizeMemoryFormat = async (args, content) => {
     if (!content) return '';
+    if (typeof content !== 'string') content = String(content);
 
     const lines = content.split('\n').map(line => line.trim()).filter(line => line);
     const validLines = [];

@@ -467,6 +467,11 @@ test('processMemoryContent handles empty and null input', t => {
     t.is(processMemoryContent(undefined, {}), undefined);
 });
 
+test('processMemoryContent coerces non-string content before filtering', t => {
+    t.is(processMemoryContent(123, {}), '123');
+    t.is(processMemoryContent(123, { stripMetadata: true }), '123');
+});
+
 test('processMemoryContent returns unmodified content when no options set', t => {
     const input = '1|2024-03-19T10:00:00Z|Test content';
     t.is(processMemoryContent(input, {}), input);
