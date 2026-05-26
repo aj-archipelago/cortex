@@ -1,6 +1,7 @@
 // ModelExecutor.js
 import CortexRequest from '../lib/cortexRequest.js';
 import logger from '../lib/logger.js';
+import latencyTrace from '../lib/latencyTrace.js';
 
 import OpenAIChatPlugin from './plugins/openAiChatPlugin.js';
 import OpenAICompletionPlugin from './plugins/openAiCompletionPlugin.js';
@@ -39,8 +40,12 @@ import GroqChatPlugin from './plugins/groqChatPlugin.js';
 import VeoVideoPlugin from './plugins/veoVideoPlugin.js';
 import GrokVisionPlugin from './plugins/grokVisionPlugin.js';
 import GrokResponsesPlugin from './plugins/grokResponsesPlugin.js';
+import KimiChatPlugin from './plugins/kimiChatPlugin.js';
+import OpenAIResponsesPlugin from './plugins/openAiResponsesPlugin.js';
 import AzureFoundryAgentsPlugin from './plugins/azureFoundryAgentsPlugin.js';
 import GoogleCsePlugin from './plugins/googleCsePlugin.js';
+import GeminiMusicPlugin from './plugins/geminiMusicPlugin.js';
+import GeminiTtsPlugin from './plugins/geminiTtsPlugin.js';
 
 class ModelExecutor {
     constructor(pathway, model) {
@@ -117,6 +122,12 @@ class ModelExecutor {
             case 'GEMINI-3-REASONING-VISION':
                 plugin = new Gemini3ReasoningVisionPlugin(pathway, model);
                 break;
+            case 'GEMINI-MUSIC':
+                plugin = new GeminiMusicPlugin(pathway, model);
+                break;
+            case 'GEMINI-TTS':
+                plugin = new GeminiTtsPlugin(pathway, model);
+                break;
             case 'CLAUDE-3-VERTEX':
                 plugin = new Claude3VertexPlugin(pathway, model);
                 break;
@@ -159,6 +170,12 @@ class ModelExecutor {
             case 'GROK-RESPONSES':
                 plugin = new GrokResponsesPlugin(pathway, model);
                 break;
+            case 'KIMI-CHAT':
+                plugin = new KimiChatPlugin(pathway, model);
+                break;
+            case 'OPENAI-RESPONSES':
+                plugin = new OpenAIResponsesPlugin(pathway, model);
+                break;
             case 'AZURE-FOUNDRY-AGENTS':
                 plugin = new AzureFoundryAgentsPlugin(pathway, model);
                 break;
@@ -174,12 +191,29 @@ class ModelExecutor {
 
     async execute(text, parameters, prompt, pathwayResolver) {
         const cortexRequest = new CortexRequest({ pathwayResolver });
+        const span = latencyTrace.start('modelExecutor.execute', {
+            requestId: pathwayResolver?.requestId,
+            rootRequestId: pathwayResolver?.rootRequestId || undefined,
+            pathway: pathwayResolver?.pathway?.name,
+            model: pathwayResolver?.modelName,
+            modelType: pathwayResolver?.model?.type,
+            plugin: this.plugin?.constructor?.name,
+            stream: Boolean(parameters?.stream),
+            async: Boolean(parameters?.async),
+            textChars: typeof text === 'string' ? text.length : undefined,
+        });
         try {
-            return await this.plugin.execute(text, parameters, prompt, cortexRequest);
+            const result = await this.plugin.execute(text, parameters, prompt, cortexRequest);
+            latencyTrace.end(span, {
+                resultKind: result && typeof result.on === 'function' ? 'stream' : typeof result,
+                resultChars: typeof result === 'string' ? result.length : undefined,
+            });
+            return result;
         } catch (error) {
             logger.error(`Error executing model plugin for pathway ${pathwayResolver?.pathway?.name}: ${error.message}`);
             logger.debug(error.stack);
             pathwayResolver.logError(error.message);
+            latencyTrace.end(span, { error: error.message });
             return null;
         }
     }

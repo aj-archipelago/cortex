@@ -3,10 +3,11 @@ import HandleBars from '../../lib/handleBars.js';
 import { executeRequest } from '../../lib/requestExecutor.js';
 import { encode } from '../../lib/encodeCache.js';
 import { getFirstNToken } from '../chunker.js';
-import logger, { obscureUrlParams } from '../../lib/logger.js';
+import logger from '../../lib/logger.js';
 import { config } from '../../config.js';
 import axios from 'axios';
 import { extractValueFromTypeSpec } from '../typeDef.js';
+import latencyTrace from '../../lib/latencyTrace.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETURN_TOKENS = 256;
@@ -66,6 +67,38 @@ class ModelPlugin {
 
     safeGetEncodedLength(data) {
         return encode(data).length;
+    }
+
+    normalizeLengthInput(data) {
+        if (data === null || data === undefined) {
+            return '';
+        }
+
+        if (typeof data === 'string') {
+            return data;
+        }
+
+        if (Buffer.isBuffer(data)) {
+            return data.toString('utf8');
+        }
+
+        if (data && typeof data === 'object' && data.constructor?.name === 'CortexResponse') {
+            return data.output_text || '';
+        }
+
+        if (typeof data === 'object' && typeof data.output_text === 'string') {
+            return data.output_text;
+        }
+
+        if (typeof data === 'number' || typeof data === 'boolean' || typeof data === 'bigint') {
+            return String(data);
+        }
+
+        try {
+            return JSON.stringify(data) || '';
+        } catch {
+            return String(data);
+        }
     }
 
     truncateMessagesToTargetLength(messages, targetTokenLength = null, maxMessageTokenLength = Infinity) {
@@ -486,30 +519,22 @@ class ModelPlugin {
     // Default simple logging
     logRequestStart() {
         this.requestCount++;
-        const logMessage = `>>> [${this.requestId}: ${this.pathwayName}.${this.requestCount}] request`;
-        const header = '>'.repeat(logMessage.length);
-        logger.info(`${header}`);
-        logger.info(`${logMessage}`);
-        logger.info(`>>> Making API request to ${obscureUrlParams(this.url)}`);
     }
 
     logAIRequestFinished(requestDuration) {
-        const logMessage = `<<< [${this.requestId}: ${this.pathwayName}] response - complete in ${requestDuration}ms - data:`;
-        const header = '<'.repeat(logMessage.length);
-        logger.info(`${header}`);
-        logger.info(`${logMessage}`);
     }
 
     getLength(data) {
         const isProd = config.get('env') === 'production';
         let length = 0;
         let units = isProd ? 'characters' : 'tokens';
-        if (data) {
-            if (isProd || data.length > 5000) {
-                length = data.length;
+        const text = this.normalizeLengthInput(data);
+        if (text) {
+            if (isProd || text.length > 5000) {
+                length = text.length;
                 units = 'characters';
             } else {
-                length = encode(data).length;
+                length = encode(text).length;
             }
         }
         return {length, units};
@@ -534,18 +559,24 @@ class ModelPlugin {
         if (modelInput) {
             const { length, units } = this.getLength(modelInput);
             logger.info(`[request sent containing ${length} ${units}]`);
-            logger.verbose(`${this.shortenContent(modelInput)}`);
         }
     
         const responseText = JSON.stringify(responseData);
         const { length, units } = this.getLength(responseText);
         logger.info(`[response received containing ${length} ${units}]`);
-        logger.verbose(`${this.shortenContent(responseText)}`);
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
     
     async executeRequest(cortexRequest) {
+        const span = latencyTrace.start('modelPlugin.executeRequest', {
+            requestId: cortexRequest?.requestId,
+            pathway: cortexRequest?.pathway?.name,
+            model: cortexRequest?.model?.name,
+            modelType: cortexRequest?.model?.type,
+            plugin: this.constructor?.name,
+            stream: Boolean(cortexRequest?.stream || cortexRequest?.params?.stream || cortexRequest?.data?.stream),
+        });
         try {
             const { url, data, pathway, requestId, prompt } = cortexRequest;
             this.url = url;
@@ -557,6 +588,14 @@ class ModelPlugin {
             this.logRequestStart();
 
             const response = await executeRequest(cortexRequest);
+            latencyTrace.mark('modelPlugin.responseReady', {
+                requestId,
+                pathway: this.pathwayName,
+                model: cortexRequest?.model?.name,
+                plugin: this.constructor?.name,
+                responseKind: response?.data && typeof response.data.on === 'function' ? 'stream' : typeof response?.data,
+                requestDuration: response?.duration,
+            });
             
             // Add null check and default values for response
             if (!response) {
@@ -572,7 +611,8 @@ class ModelPlugin {
 
             const errorData = Array.isArray(responseData) ? responseData[0] : responseData;
             if (errorData && errorData.error) {
-                const newError = new Error(errorData.error.message);
+                const errorMsg = typeof errorData.error === 'string' ? errorData.error : errorData.error.message;
+                const newError = new Error(errorMsg);
                 newError.data = errorData;
                 throw newError;
             }
@@ -581,6 +621,11 @@ class ModelPlugin {
             const parsedData = this.parseResponse(responseData);
             this.logRequestData(data, parsedData, prompt);
 
+            latencyTrace.end(span, {
+                requestDuration,
+                resultKind: parsedData && typeof parsedData.on === 'function' ? 'stream' : typeof parsedData,
+                resultChars: typeof parsedData === 'string' ? parsedData.length : undefined,
+            });
             return parsedData;
         } catch (error) {
             // Enhanced error logging
@@ -589,22 +634,25 @@ class ModelPlugin {
                                  ?? error?.message
                                  ?? String(error);
             
+            const log = cortexRequest?.pathway?.suppressErrorLogging ? logger.debug.bind(logger) : logger.error.bind(logger);
+
             // Log the full error details for debugging
-            logger.error(`Error in executeRequest for ${this.pathwayName}: ${errorMessage}`);
+            log(`Error in executeRequest for ${this.pathwayName}: ${errorMessage}`);
             if (error.response) {
-                logger.error(`Response status: ${error.response.status}`);
-                logger.error(`Response headers: ${JSON.stringify(error.response.headers)}`);
+                log(`Response status: ${error.response.status}`);
+                log(`Response headers: ${JSON.stringify(error.response.headers)}`);
                 if (error.response.data) {
-                    logger.error(`Response data: ${JSON.stringify(error.response.data)}`);
+                    log(`Response data: ${JSON.stringify(error.response.data)}`);
                 }
             }
             if (error.data) {
-                logger.error(`Additional error data: ${JSON.stringify(error.data)}`);
+                log(`Additional error data: ${JSON.stringify(error.data)}`);
             }
             if (error.stack) {
-                logger.error(`Error stack: ${error.stack}`);
+                log(`Error stack: ${error.stack}`);
             }
 
+            latencyTrace.end(span, { error: errorMessage });
             // Throw a more informative error
             throw new Error(`Execution failed for ${this.pathwayName}: ${errorMessage}`);
         }
@@ -648,6 +696,10 @@ class ModelPlugin {
             }
         }
         return requestProgress;
+    }
+
+    get supportsImageUrls() {
+        return this.model.supportsImageUrls ?? false;
     }
 
     getModelMaxImageSize() {
@@ -699,5 +751,3 @@ class ModelPlugin {
 }
 
 export default ModelPlugin;
-
-  

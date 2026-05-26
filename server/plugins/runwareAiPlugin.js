@@ -69,8 +69,11 @@ class RunwareAiPlugin extends ModelPlugin {
   logRequestData(data, responseData, prompt) {
     const modelInput = data[1].positivePrompt;
 
-    logger.verbose(`${modelInput}`);
-    logger.verbose(`${this.parseResponse(responseData)}`);
+    const requestLength = this.getLength(modelInput || '');
+    logger.info(`[Runware request sent containing ${requestLength.length} ${requestLength.units}]`);
+    const responseText = this.parseResponse(responseData);
+    const responseLength = this.getLength(responseText || '');
+    logger.info(`[Runware response received containing ${responseLength.length} ${responseLength.units}]`);
 
     prompt &&
       prompt.debugInfo &&
