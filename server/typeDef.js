@@ -58,7 +58,7 @@ const getGraphQlType = (value) => {
       const items = schema.items || {};
       const def = schema.default;
       const defaultArray = Array.isArray(def) ? JSON.stringify(def) : '[]';
-      // Support explicit object type name (e.g., items: { objType: 'AgentContextInput' })
+      // Support explicit object type name (e.g., items: { objType: 'FileAccessTargetInput' })
       if (items.objType) {
         return { type: `[${items.objType}]`, defaultValue: `"${defaultArray.replace(/"/g, '\\"')}"` };
       }
@@ -108,8 +108,12 @@ const getGraphQlType = (value) => {
             return {type: '[MultiMessage]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
           }
           // Check if it's AgentContextInput (has contextId and default properties)
-          else if (value[0] && typeof value[0] === 'object' && 'contextId' in value[0] && 'default' in value[0]) {
+          if (value[0] && typeof value[0] === 'object' && 'contextId' in value[0] && 'default' in value[0]) {
             return {type: '[AgentContextInput]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
+          }
+          // Check if it's FileAccessTargetInput
+          else if (value[0] && typeof value[0] === 'object' && 'kind' in value[0]) {
+            return {type: '[FileAccessTargetInput]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
           }
           else {
             return {type: '[Message]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
@@ -132,8 +136,9 @@ const getMessageTypeDefs = () => {
   const messageType = `input Message { role: String, content: String, name: String }`;
   const multiMessageType = `input MultiMessage { role: String, content: [String], name: String, tool_calls: [String], tool_call_id: String }`;
   const agentContextType = `input AgentContextInput { contextId: String, contextKey: String, default: Boolean }`;
+  const fileAccessTargetType = `input FileAccessTargetInput { kind: String, userContextId: String, workspaceId: String, appletId: String, chatId: String, contextKey: String, write: Boolean }`;
   
-  return `${messageType}\n\n${multiMessageType}\n\n${agentContextType}`;
+  return `${messageType}\n\n${multiMessageType}\n\n${agentContextType}\n\n${fileAccessTargetType}`;
 };
 
 const getPathwayTypeDef = (name, returnType) => {
