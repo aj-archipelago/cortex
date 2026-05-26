@@ -959,6 +959,158 @@ var config = convict({
         format: String,
         default: null,
         env: 'AZURE_FOUNDRY_BING_SEARCH_CONNECTION_ID'
+    },
+    workspaceImage: {
+        format: String,
+        default: 'cortex-workspace',
+        env: 'WORKSPACE_IMAGE'
+    },
+    workspaceImageVersion: {
+        format: String,
+        default: '',
+        env: 'WORKSPACE_IMAGE_VERSION'
+    },
+    workspaceNetwork: {
+        format: String,
+        default: 'cortex_workspace',
+        env: 'WORKSPACE_NETWORK'
+    },
+    workspaceCpus: {
+        format: String,
+        default: '1.0',
+        env: 'WORKSPACE_CPUS'
+    },
+    workspaceMemory: {
+        format: String,
+        default: '512m',
+        env: 'WORKSPACE_MEMORY'
+    },
+    workspaceDiskSize: {
+        format: String,
+        default: '10g',
+        env: 'WORKSPACE_DISK_SIZE'
+    },
+    dockerHost: {
+        format: String,
+        default: '',
+        env: 'DOCKER_HOST',
+        doc: 'Docker Engine endpoint. Unix socket (unix:///var/run/docker.sock) or TCP (tcp://host:port). Empty = auto-detect local socket.'
+    },
+    workspaceHost: {
+        format: String,
+        default: '',
+        env: 'WORKSPACE_HOST',
+        doc: 'Hostname/IP for reaching workspace containers. Set when Docker runs on a remote host. Empty = auto (localhost or Docker DNS).'
+    },
+    workspaceIdleTimeoutMs: {
+        format: Number,
+        default: 1800000,
+        env: 'WORKSPACE_IDLE_TIMEOUT_MS',
+        doc: 'Milliseconds of inactivity before a workspace container is automatically stopped. Default 30 minutes. Set 0 to disable.'
+    },
+    workspaceIdleCheckpointMs: {
+        format: Number,
+        default: 900000,
+        env: 'WORKSPACE_IDLE_CHECKPOINT_MS',
+        doc: 'Milliseconds of workspace inactivity before an ACI workspace checkpoint is refreshed. Default 15 minutes. Set 0 to checkpoint only at reap time.'
+    },
+    workspaceBackend: {
+        format: String,
+        default: 'docker',
+        env: 'WORKSPACE_BACKEND',
+        doc: "Container backend: 'docker' (local/remote Docker Engine) or 'aci' (Azure Container Instances)."
+    },
+    workspaceContainerPrefix: {
+        format: String,
+        default: 'workspace-local',
+        env: 'WORKSPACE_CONTAINER_PREFIX',
+        doc: 'Prefix for workspace ACI container groups. Production should explicitly set "workspace"; non-prod should use env-specific prefixes such as "workspace-dev", "workspace-blue", or "workspace-local".'
+    },
+    warmPoolSize: {
+        format: Number,
+        default: 2,
+        env: 'WARM_POOL_SIZE',
+        doc: 'Number of pre-provisioned ACI containers in the warm pool. 0 = disabled.'
+    },
+    warmPoolBootstrapSecret: {
+        format: String,
+        default: '',
+        env: 'WARM_POOL_BOOTSTRAP_SECRET',
+        sensitive: true,
+        doc: 'Legacy shared warm-pool bootstrap secret. Deprecated and no longer used for new containers.'
+    },
+    warmPoolEnabled: {
+        format: Boolean,
+        default: false,
+        env: 'WARM_POOL_ENABLED',
+        doc: 'Enable the warm pool for pre-provisioned ACI workspace containers.'
+    },
+    azureSubscriptionId: {
+        format: String,
+        default: '',
+        env: 'AZURE_SUBSCRIPTION_ID'
+    },
+    azureResourceGroup: {
+        format: String,
+        default: '',
+        env: 'AZURE_RESOURCE_GROUP'
+    },
+    azureLocation: {
+        format: String,
+        default: 'eastus',
+        env: 'AZURE_LOCATION'
+    },
+    aciSubnetId: {
+        format: String,
+        default: '',
+        env: 'ACI_SUBNET_ID',
+        doc: 'Full resource ID of the subnet delegated to ACI (enables private VNet deployment)'
+    },
+    azureAcrServer: {
+        format: String,
+        default: '',
+        env: 'AZURE_ACR_SERVER',
+        doc: 'Azure Container Registry server (e.g. myacr.azurecr.io)'
+    },
+    azureAcrUsername: {
+        format: String,
+        default: '',
+        env: 'AZURE_ACR_USERNAME',
+        sensitive: true
+    },
+    azureAcrPassword: {
+        format: String,
+        default: '',
+        env: 'AZURE_ACR_PASSWORD',
+        sensitive: true
+    },
+    azureStorageAccountName: {
+        format: String,
+        default: '',
+        env: 'AZURE_STORAGE_ACCOUNT_NAME'
+    },
+    azureStorageAccountKey: {
+        format: String,
+        default: '',
+        env: 'AZURE_STORAGE_ACCOUNT_KEY',
+        sensitive: true
+    },
+    workspaceAzureFilesStorageAccountName: {
+        format: String,
+        default: '',
+        env: 'WORKSPACE_AZURE_FILES_STORAGE_ACCOUNT_NAME'
+    },
+    workspaceAzureFilesStorageAccountKey: {
+        format: String,
+        default: '',
+        env: 'WORKSPACE_AZURE_FILES_STORAGE_ACCOUNT_KEY',
+        sensitive: true
+    },
+    azureBlobContainerName: {
+        format: String,
+        default: '',
+        env: 'AZURE_BLOB_CONTAINER_NAME',
+        doc: 'Azure Blob container for user files (blob mount in ACI workspaces)'
     }
 });
 
