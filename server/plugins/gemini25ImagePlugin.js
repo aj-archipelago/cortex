@@ -49,15 +49,23 @@ class Gemini25ImagePlugin extends Gemini15VisionPlugin {
                 const parts = data.candidates[0].content.parts;
                 let imageContent = [];
 
+                let skippedThoughtImages = 0;
                 for (const part of parts) {
                     if (part.inlineData) {
-                        // Handle generated image content
+                        if (part.thought) {
+                            skippedThoughtImages++;
+                            continue;
+                        }
                         imageContent.push({
                             type: "image",
                             data: part.inlineData.data,
                             mimeType: part.inlineData.mimeType
                         });
                     }
+                }
+
+                if (skippedThoughtImages > 0) {
+                    logger.info(`[skipped ${skippedThoughtImages} image artifact(s) from thinking phase]`);
                 }
 
                 // If we have image artifacts, add them to the existing CortexResponse
@@ -75,9 +83,13 @@ class Gemini25ImagePlugin extends Gemini15VisionPlugin {
             let imageContent = [];
             let textContent = '';
 
+            let skippedThoughtImages = 0;
             for (const part of parts) {
                 if (part.inlineData) {
-                    // Handle generated image content
+                    if (part.thought) {
+                        skippedThoughtImages++;
+                        continue;
+                    }
                     imageContent.push({
                         type: "image",
                         data: part.inlineData.data,
@@ -86,6 +98,10 @@ class Gemini25ImagePlugin extends Gemini15VisionPlugin {
                 } else if (part.text) {
                     textContent += part.text;
                 }
+            }
+
+            if (skippedThoughtImages > 0) {
+                logger.info(`[skipped ${skippedThoughtImages} image artifact(s) from thinking phase]`);
             }
 
             // If we have image artifacts, create a new CortexResponse object
@@ -114,9 +130,10 @@ class Gemini25ImagePlugin extends Gemini15VisionPlugin {
             
             for (const part of parts) {
                 if (part.inlineData) {
-                    // Handle generated image content in streaming
-                    // For now, we'll accumulate images and send them at the end
-                    // This could be enhanced to stream image data if needed
+                    if (part.thought) {
+                        logger.info(`[skipped streaming image artifact from thinking phase]`);
+                        continue;
+                    }
                     if (!requestProgress.artifacts) {
                         requestProgress.artifacts = [];
                     }
@@ -142,7 +159,6 @@ class Gemini25ImagePlugin extends Gemini15VisionPlugin {
             if (responseData.artifacts && responseData.artifacts.length > 0) {
                 logger.info(`[response contains ${responseData.artifacts.length} image artifact(s)]`);
             }
-            logger.verbose(`${this.shortenContent(responseData.output_text || '')}`);
             return;
         }
 

@@ -62,6 +62,74 @@ test('getRequestParameters', async (t) => {
     });
 });
 
+test('getRequestParameters requests usage for OpenAI-family streams', async (t) => {
+    const plugin = new OpenAIChatPlugin(pathway, model);
+    const result = await plugin.getRequestParameters('Help me', { stream: true }, mockPathwayResolverMessages.pathway.prompt);
+
+    t.deepEqual(result.stream_options, { include_usage: true });
+});
+
+test('getRequestParameters does not request stream usage for non-OpenAI adapters', async (t) => {
+    const plugin = new OpenAIChatPlugin(pathway, { ...model, type: 'KIMI-CHAT' });
+    const result = await plugin.getRequestParameters('Help me', { stream: true }, mockPathwayResolverMessages.pathway.prompt);
+
+    t.is(result.stream_options, undefined);
+});
+
+test('processStreamEvent does not complete stream on finish_reason before DONE', (t) => {
+    const plugin = new OpenAIChatPlugin(pathway, model);
+    const finishEvent = {
+        data: JSON.stringify({
+            choices: [
+                {
+                    delta: {},
+                    finish_reason: 'stop',
+                },
+            ],
+        }),
+    };
+    const usageEvent = {
+        data: JSON.stringify({
+            choices: [],
+            usage: {
+                prompt_tokens: 10,
+                completion_tokens: 2,
+                total_tokens: 12,
+            },
+        }),
+    };
+
+    const afterFinish = plugin.processStreamEvent(finishEvent, { requestId: 'req_1' });
+    t.is(afterFinish.progress, undefined);
+    t.is(afterFinish.data, finishEvent.data);
+
+    const afterUsage = plugin.processStreamEvent(usageEvent, { requestId: 'req_1' });
+    t.is(afterUsage.progress, undefined);
+    t.is(afterUsage.data, undefined);
+
+    const afterDone = plugin.processStreamEvent({ data: '[DONE]' }, { requestId: 'req_1' });
+    t.is(afterDone.progress, 1);
+});
+
+test('processStreamEvent waits for DONE when usage is not expected', (t) => {
+    const plugin = new OpenAIChatPlugin(pathway, model);
+    const finishEvent = {
+        data: JSON.stringify({
+            choices: [
+                {
+                    delta: {},
+                    finish_reason: 'stop',
+                },
+            ],
+        }),
+    };
+
+    const afterFinish = plugin.processStreamEvent(finishEvent, { requestId: 'req_1' });
+
+    t.is(afterFinish.progress, undefined);
+    t.is(afterFinish.data, finishEvent.data);
+});
+
 // Test the execute function
 test('execute', async (t) => {
     const plugin = new OpenAIChatPlugin(pathway, model);

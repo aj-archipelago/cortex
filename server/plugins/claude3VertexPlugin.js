@@ -1,10 +1,146 @@
 import OpenAIVisionPlugin from "./openAiVisionPlugin.js";
 import logger from "../../lib/logger.js";
-import { requestState } from '../requestState.js';
-import { addCitationsToResolver } from '../../lib/pathwayTools.js';
-import CortexResponse from '../../lib/cortexResponse.js';
-import axios from 'axios';
+import { requestState } from "../requestState.js";
+import { addCitationsToResolver } from "../../lib/pathwayTools.js";
+import CortexResponse from "../../lib/cortexResponse.js";
+import axios from "axios";
 import { sanitizeBase64 } from "../../lib/util.js";
+
+const SYNTHETIC_TOOL_RESULT_TEXT =
+  "Tool execution was interrupted or did not return a result. Continuing without tool output.";
+
+const normalizeContentArray = (content) => {
+  if (Array.isArray(content)) return content.slice();
+  if (content == null) return [];
+  return [content];
+};
+
+const isToolUse = (item) =>
+  item && typeof item === "object" && item.type === "tool_use";
+const isToolResult = (item) =>
+  item && typeof item === "object" && item.type === "tool_result";
+
+const sanitizeToolUseSequences = (messages) => {
+  const sanitized = [];
+  let syntheticCounter = 0;
+
+  const makeId = () => `tool_${Date.now()}_${syntheticCounter++}`;
+  const makeSyntheticResult = (toolUse) => ({
+    type: "tool_result",
+    tool_use_id: toolUse.id,
+    content: [{ type: "text", text: SYNTHETIC_TOOL_RESULT_TEXT }],
+  });
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = { ...messages[i] };
+    message.content = normalizeContentArray(message.content);
+
+    if (message.role === "assistant") {
+      const toolUses = message.content.filter(isToolUse);
+      toolUses.forEach((toolUse) => {
+        if (!toolUse.id) {
+          toolUse.id = makeId();
+          logger.warn(`Tool use missing id; generated ${toolUse.id}.`);
+        }
+      });
+
+      sanitized.push(message);
+
+      if (toolUses.length > 0) {
+        const next = messages[i + 1];
+        if (!next || next.role !== "user") {
+          logger.warn(
+            "Tool use missing immediate tool_result; inserting synthetic tool_result message.",
+          );
+          sanitized.push({
+            role: "user",
+            content: toolUses.map((toolUse) => makeSyntheticResult(toolUse)),
+          });
+          continue;
+        } else {
+          const nextContent = normalizeContentArray(next.content);
+          const validIds = new Set(toolUses.map((toolUse) => toolUse.id));
+          const existingIds = new Set();
+          const toolResultContent = [];
+          const preservedContent = [];
+
+          nextContent.forEach((item) => {
+            if (isToolResult(item)) {
+              if (validIds.has(item.tool_use_id)) {
+                toolResultContent.push(item);
+                existingIds.add(item.tool_use_id);
+              } else {
+                logger.warn(
+                  `Orphaned tool_result found for id ${item.tool_use_id || "unknown"}; removing from tool response payload.`,
+                );
+              }
+              return;
+            }
+            preservedContent.push(item);
+          });
+
+          const syntheticToolResults = [];
+          toolUses.forEach((toolUse) => {
+            if (!existingIds.has(toolUse.id)) {
+              logger.warn(
+                `Tool result missing for ${toolUse.id}; inserting synthetic tool_result.`,
+              );
+              syntheticToolResults.push(makeSyntheticResult(toolUse));
+            }
+          });
+
+          sanitized.push({
+            ...next,
+            role: "user",
+            content: [...syntheticToolResults, ...toolResultContent],
+          });
+          if (preservedContent.length > 0) {
+            logger.warn(
+              `Preserving ${preservedContent.length} non-tool_result item(s) from immediate user message after tool_use.`,
+            );
+            sanitized.push({
+              role: "user",
+              content: preservedContent,
+            });
+          }
+          i += 1;
+        }
+      }
+      continue;
+    }
+
+    if (message.role === "user") {
+      const prev = sanitized[sanitized.length - 1];
+      const validIds = new Set();
+
+      if (prev?.role === "assistant") {
+        const prevContent = normalizeContentArray(prev.content);
+        prevContent.forEach((item) => {
+          if (isToolUse(item)) validIds.add(item.id);
+        });
+      }
+
+      if (validIds.size === 0) {
+        message.content = message.content.map((item) => {
+          if (isToolResult(item)) {
+            logger.warn(
+              "Orphaned tool_result without preceding tool_use; converting to text.",
+            );
+            return {
+              type: "text",
+              text: `[orphaned tool_result ${item.tool_use_id || "unknown"} removed]`,
+            };
+          }
+          return item;
+        });
+      }
+    }
+
+    sanitized.push(message);
+  }
+
+  return sanitized;
+};
 
 async function convertContentItem(item, maxImageSize, plugin) {
   let imageUrl = "";
@@ -24,44 +160,64 @@ async function convertContentItem(item, maxImageSize, plugin) {
               type: "tool_use",
               id: item.id,
               name: item.name,
-              input: typeof item.input === 'string' ? { query: item.input } : item.input
+              input:
+                typeof item.input === "string"
+                  ? { query: item.input }
+                  : item.input,
             };
 
           case "tool_result":
             return {
               type: "tool_result",
               tool_use_id: item.tool_use_id,
-              content: item.content
+              content: item.content,
             };
+
+          // Pass through server-side tool blocks unchanged
+          case "server_tool_use":
+            return item;
+
+          case "web_search_tool_result":
+            return item;
 
           case "image_url":
             imageUrl = item.url || item.image_url?.url || item.image_url;
 
             if (!imageUrl) {
-              logger.warn("Could not parse image URL from content - skipping image content.");
+              logger.warn(
+                "Could not parse image URL from content - skipping image content.",
+              );
               return null;
             }
 
             try {
               // First validate the image URL
-              if (!await plugin.validateImageUrl(imageUrl)) {
+              if (!(await plugin.validateImageUrl(imageUrl))) {
                 return null;
               }
 
               // Then fetch and convert to base64 if needed
-              const urlData = imageUrl.startsWith("data:") ? imageUrl : await fetchImageAsDataURL(imageUrl);
-              if (!urlData) { return null; }
-              
-              const base64Image = urlData.split(",")[1];
-              // Calculate actual decoded size of base64 data
-              const base64Size = Buffer.from(base64Image, 'base64').length;
-              
-              if (base64Size > maxImageSize) {
-                logger.warn(`Image size ${base64Size} bytes exceeds maximum allowed size ${maxImageSize} - skipping image content.`);
+              const urlData = imageUrl.startsWith("data:")
+                ? imageUrl
+                : await fetchImageAsDataURL(imageUrl);
+              if (!urlData) {
                 return null;
               }
-              
-              const [, mimeType = "image/jpeg"] = urlData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/) || [];
+
+              const base64Image = urlData.split(",")[1];
+              // Calculate actual decoded size of base64 data
+              const base64Size = Buffer.from(base64Image, "base64").length;
+
+              if (base64Size > maxImageSize) {
+                logger.warn(
+                  `Image size ${base64Size} bytes exceeds maximum allowed size ${maxImageSize} - skipping image content.`,
+                );
+                return null;
+              }
+
+              const [, mimeType = "image/jpeg"] =
+                urlData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/) ||
+                [];
 
               return {
                 type: "image",
@@ -83,8 +239,7 @@ async function convertContentItem(item, maxImageSize, plugin) {
       default:
         return null;
     }
-  }
-  catch (e) {
+  } catch (e) {
     logger.warn(`Error converting content item: ${e}`);
     return null;
   }
@@ -96,184 +251,201 @@ async function fetchImageAsDataURL(imageUrl) {
     // Get the actual image data
     const dataResponse = await axios.get(imageUrl, {
       timeout: 30000,
-      responseType: 'arraybuffer',
-      maxRedirects: 5
+      responseType: "arraybuffer",
+      maxRedirects: 5,
     });
 
-    const contentType = dataResponse.headers['content-type'];
-    const base64Image = Buffer.from(dataResponse.data).toString('base64');
+    const contentType = dataResponse.headers["content-type"];
+    const base64Image = Buffer.from(dataResponse.data).toString("base64");
     return `data:${contentType};base64,${base64Image}`;
-  }
-  catch (e) {
+  } catch (e) {
     logger.error(`Failed to fetch image: ${imageUrl}. ${e}`);
     throw e;
   }
 }
 
 class Claude3VertexPlugin extends OpenAIVisionPlugin {
-  
   constructor(pathway, model) {
     super(pathway, model);
     this.isMultiModal = true;
     this.pathwayToolCallback = pathway.toolCallback;
     this.toolCallsBuffer = [];
-    this.contentBuffer = ''; // Initialize content buffer
+    this.contentBuffer = ""; // Initialize content buffer
     this.hadToolCalls = false; // Track if this stream had tool calls
   }
-  
+
   // Override tryParseMessages to add Claude-specific content types (tool_use, tool_result)
   async tryParseMessages(messages) {
     // Whitelist of content types we accept from parsed JSON strings
     // Only these types will be used if a JSON string parses to an object
     // Includes Claude-specific types: tool_use, tool_result
-    const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url', 'tool_use', 'tool_result'];
-    
+    const WHITELISTED_CONTENT_TYPES = [
+      "text",
+      "image",
+      "image_url",
+      "tool_use",
+      "tool_result",
+    ];
+
     // Helper to check if an object is a valid whitelisted content type
     const isValidContentObject = (obj) => {
       return (
-        typeof obj === 'object' && 
-        obj !== null && 
-        typeof obj.type === 'string' &&
+        typeof obj === "object" &&
+        obj !== null &&
+        typeof obj.type === "string" &&
         WHITELISTED_CONTENT_TYPES.includes(obj.type)
       );
     };
-    
+
     function safeJsonParse(content) {
       try {
         const parsedContent = JSON.parse(content);
-        return (typeof parsedContent === 'object' && parsedContent !== null) ? parsedContent : content;
+        return typeof parsedContent === "object" && parsedContent !== null
+          ? parsedContent
+          : content;
       } catch (e) {
         return content;
       }
     }
-    
-    return await Promise.all(messages.map(async message => {
-      try {
-        // Parse tool_calls from string array to object array if present
-        const parsedMessage = { ...message };
-        if (message.tool_calls && Array.isArray(message.tool_calls)) {
-          parsedMessage.tool_calls = message.tool_calls.map(tc => {
-            if (typeof tc === 'string') {
-              try {
-                return JSON.parse(tc);
-              } catch (e) {
-                logger.warn(`Failed to parse tool_call: ${tc}`);
-                return tc;
-              }
-            }
-            return tc;
-          });
-        }
-        
-        // Handle tool-related message types
-        // For tool messages, OpenAI supports content as either:
-        // 1. A string (text content)
-        // 2. An array of text content parts: [{ type: "text", text: "..." }]
-        if (message.role === "tool") {
-          // If content is already a string, keep it as-is
-          if (typeof parsedMessage.content === 'string') {
-            return parsedMessage;
-          }
-          
-          // If content is an array, process it
-          if (Array.isArray(parsedMessage.content)) {
-            // Check if array is already in the correct format (array of text content parts)
-            const isTextContentPartsArray = parsedMessage.content.every(item => 
-              typeof item === 'object' && 
-              item !== null && 
-              item.type === 'text' && 
-              typeof item.text === 'string'
-            );
-            
-            if (isTextContentPartsArray) {
-              // Already in correct format, keep as array
-              return parsedMessage;
-            }
-            
-            // Convert array to array of text content parts
-            parsedMessage.content = parsedMessage.content.map(item => {
-              if (typeof item === 'string') {
-                return { type: 'text', text: item };
-              }
-              if (typeof item === 'object' && item !== null && item.text) {
-                return { type: 'text', text: String(item.text) };
-              }
-              return { type: 'text', text: JSON.stringify(item) };
-            });
-            return parsedMessage;
-          }
-          
-          // If content is null/undefined, convert to empty string
-          if (parsedMessage.content == null) {
-            parsedMessage.content = '';
-          }
-          
-          return parsedMessage;
-        }
-        
-        // For assistant messages with tool_calls, return as-is (content can be null or string)
-        if (message.role === "assistant" && parsedMessage.tool_calls) {
-          return parsedMessage;
-        }
 
-        if (Array.isArray(message.content)) {
-          return {
-            ...parsedMessage,
-            content: await Promise.all(message.content.map(async item => {
-              // A content array item can be a plain string, a JSON string, or a valid content object
-              let itemToProcess, contentType;
-
-              // First try to parse it as a JSON string
-              const parsedItem = safeJsonParse(item);
-              
-              // Check if parsed item is a known content object
-              if (isValidContentObject(parsedItem)) {
-                itemToProcess = parsedItem;
-                contentType = parsedItem.type;
-              } 
-              // It's not, so check if original item is already a known content object
-              else if (isValidContentObject(item)) {
-                itemToProcess = item;
-                contentType = item.type;
-              } 
-              // It's not, so return it as a text object. This covers all unknown objects and strings.
-              else {
-                const textContent = typeof item === 'string' ? item : JSON.stringify(item);
-                return { type: 'text', text: textContent };
-              }
-              
-              // Process whitelisted content types (we know contentType is known and valid at this point)
-              if (contentType === 'text') {
-                return { type: 'text', text: itemToProcess.text || '' };
-              }
-              
-              if (contentType === 'image' || contentType === 'image_url') {
-                const url = itemToProcess.url || itemToProcess.image_url?.url;
-                if (url && await this.validateImageUrl(url)) {
-                  return { type: 'image_url', image_url: { url } };
+    return await Promise.all(
+      messages.map(async (message) => {
+        try {
+          // Parse tool_calls from string array to object array if present
+          const parsedMessage = { ...message };
+          if (message.tool_calls && Array.isArray(message.tool_calls)) {
+            parsedMessage.tool_calls = message.tool_calls.map((tc) => {
+              if (typeof tc === "string") {
+                try {
+                  return JSON.parse(tc);
+                } catch (e) {
+                  logger.warn(`Failed to parse tool_call: ${tc}`);
+                  return tc;
                 }
               }
+              return tc;
+            });
+          }
 
-              // Handle Claude-specific content types
-              if (contentType === 'tool_use' || contentType === 'tool_result') {
-                return itemToProcess;
+          // Handle tool-related message types
+          // For tool messages, OpenAI supports content as either:
+          // 1. A string (text content)
+          // 2. An array of text content parts: [{ type: "text", text: "..." }]
+          if (message.role === "tool") {
+            // If content is already a string, keep it as-is
+            if (typeof parsedMessage.content === "string") {
+              return parsedMessage;
+            }
+
+            // If content is an array, process it
+            if (Array.isArray(parsedMessage.content)) {
+              // Check if array is already in the correct format (array of text content parts)
+              const isTextContentPartsArray = parsedMessage.content.every(
+                (item) =>
+                  typeof item === "object" &&
+                  item !== null &&
+                  item.type === "text" &&
+                  typeof item.text === "string",
+              );
+
+              if (isTextContentPartsArray) {
+                // Already in correct format, keep as array
+                return parsedMessage;
               }
 
-              // If we got here, we failed to process something - likely the image - so we'll return it as a text object.
-              const textContent = typeof itemToProcess === 'string' 
-                ? itemToProcess 
-                : JSON.stringify(itemToProcess);
-              return { type: 'text', text: textContent };
-            }))
-          };
+              // Convert array to array of text content parts
+              parsedMessage.content = parsedMessage.content.map((item) => {
+                if (typeof item === "string") {
+                  return { type: "text", text: item };
+                }
+                if (typeof item === "object" && item !== null && item.text) {
+                  return { type: "text", text: String(item.text) };
+                }
+                return { type: "text", text: JSON.stringify(item) };
+              });
+              return parsedMessage;
+            }
+
+            // If content is null/undefined, convert to empty string
+            if (parsedMessage.content == null) {
+              parsedMessage.content = "";
+            }
+
+            return parsedMessage;
+          }
+
+          // For assistant messages with tool_calls, return as-is (content can be null or string)
+          if (message.role === "assistant" && parsedMessage.tool_calls) {
+            return parsedMessage;
+          }
+
+          if (Array.isArray(message.content)) {
+            return {
+              ...parsedMessage,
+              content: await Promise.all(
+                message.content.map(async (item) => {
+                  // A content array item can be a plain string, a JSON string, or a valid content object
+                  let itemToProcess, contentType;
+
+                  // First try to parse it as a JSON string
+                  const parsedItem = safeJsonParse(item);
+
+                  // Check if parsed item is a known content object
+                  if (isValidContentObject(parsedItem)) {
+                    itemToProcess = parsedItem;
+                    contentType = parsedItem.type;
+                  }
+                  // It's not, so check if original item is already a known content object
+                  else if (isValidContentObject(item)) {
+                    itemToProcess = item;
+                    contentType = item.type;
+                  }
+                  // It's not, so return it as a text object. This covers all unknown objects and strings.
+                  else {
+                    const textContent =
+                      typeof item === "string" ? item : JSON.stringify(item);
+                    return { type: "text", text: textContent };
+                  }
+
+                  // Process whitelisted content types (we know contentType is known and valid at this point)
+                  if (contentType === "text") {
+                    return { type: "text", text: itemToProcess.text || "" };
+                  }
+
+                  if (contentType === "image" || contentType === "image_url") {
+                    const url =
+                      itemToProcess.url || itemToProcess.image_url?.url;
+                    if (url && (await this.validateImageUrl(url))) {
+                      return { type: "image_url", image_url: { url } };
+                    }
+                  }
+
+                  // Handle Claude-specific content types
+                  if (
+                    contentType === "tool_use" ||
+                    contentType === "tool_result"
+                  ) {
+                    return itemToProcess;
+                  }
+
+                  // If we got here, we failed to process something - likely the image - so we'll return it as a text object.
+                  const textContent =
+                    typeof itemToProcess === "string"
+                      ? itemToProcess
+                      : JSON.stringify(itemToProcess);
+                  return { type: "text", text: textContent };
+                }),
+              ),
+            };
+          }
+        } catch (e) {
+          return message;
         }
-      } catch (e) {
         return message;
-      }
-      return message;
-    }));
+      }),
+    );
   }
-  
+
   parseResponse(data) {
     if (!data) {
       return data;
@@ -283,7 +455,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
     // Handle tool use responses from Claude
     if (content && Array.isArray(content)) {
-      const toolUses = content.filter(item => item.type === "tool_use");
+      const toolUses = content.filter((item) => item.type === "tool_use");
       if (toolUses.length > 0) {
         // Create standardized CortexResponse object for tool calls
         const cortexResponse = new CortexResponse({
@@ -291,25 +463,25 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
           finishReason: "tool_calls",
           usage: usage || null,
           metadata: {
-            model: this.modelName
-          }
+            model: this.modelName,
+          },
         });
 
         // Convert Claude tool uses to OpenAI format
-        cortexResponse.toolCalls = toolUses.map(toolUse => ({
+        cortexResponse.toolCalls = toolUses.map((toolUse) => ({
           id: toolUse.id,
           type: "function",
           function: {
             name: toolUse.name,
-            arguments: JSON.stringify(toolUse.input)
-          }
+            arguments: JSON.stringify(toolUse.input),
+          },
         }));
 
         return cortexResponse;
       }
 
       // Handle regular text responses
-      const textContent = content.find(item => item.type === "text");
+      const textContent = content.find((item) => item.type === "text");
       if (textContent) {
         // Create standardized CortexResponse object for text responses
         const cortexResponse = new CortexResponse({
@@ -317,11 +489,24 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
           finishReason: stop_reason === "tool_use" ? "tool_calls" : "stop",
           usage: usage || null,
           metadata: {
-            model: this.modelName
-          }
+            model: this.modelName,
+          },
         });
 
         return cortexResponse;
+      }
+
+      // Normalize empty-content responses so GraphQL callers still receive a
+      // scalar result instead of the raw provider envelope object.
+      if (content.length === 0) {
+        return new CortexResponse({
+          output_text: "",
+          finishReason: stop_reason === "tool_use" ? "tool_calls" : "stop",
+          usage: usage || null,
+          metadata: {
+            model: this.modelName,
+          },
+        });
       }
     }
 
@@ -332,61 +517,68 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
   async convertMessagesToClaudeVertex(messages) {
     // Create a deep copy of the input messages
     const messagesCopy = JSON.parse(JSON.stringify(messages));
-  
+
     let system = "";
     let imageCount = 0;
     const maxImages = 20; // Claude allows up to 20 images per request
-  
+
     // Extract system messages
-    const systemMessages = messagesCopy.filter(message => message.role === "system");
+    const systemMessages = messagesCopy.filter(
+      (message) => message.role === "system",
+    );
     if (systemMessages.length > 0) {
-      system = systemMessages.map(message => {
-        if (Array.isArray(message.content)) {
-          // For content arrays, extract text content and join
-          return message.content
-            .filter(item => item.type === 'text')
-            .map(item => item.text)
-            .join("\n");
-        }
-        return message.content;
-      }).join("\n");
+      system = systemMessages
+        .map((message) => {
+          if (Array.isArray(message.content)) {
+            // For content arrays, extract text content and join
+            return message.content
+              .filter((item) => item.type === "text")
+              .map((item) => item.text)
+              .join("\n");
+          }
+          return message.content;
+        })
+        .join("\n");
     }
-  
+
     // Filter out system messages and empty messages
     let modifiedMessages = messagesCopy
-      .filter(message => message.role !== "system")
-      .map(message => {
+      .filter((message) => message.role !== "system")
+      .map((message) => {
         // Handle OpenAI tool calls format conversion to Claude format
         if (message.tool_calls) {
           return {
             role: message.role,
-            content: message.tool_calls.map(toolCall => ({
+            content: message.tool_calls.map((toolCall) => ({
               type: "tool_use",
               id: toolCall.id,
               name: toolCall.function.name,
-              input: JSON.parse(toolCall.function.arguments)
-            }))
+              input: JSON.parse(toolCall.function.arguments),
+            })),
           };
         }
-        
+
         // Handle OpenAI tool response format conversion to Claude format
         if (message.role === "tool") {
           return {
             role: "user",
-            content: [{
-              type: "tool_result",
-              tool_use_id: message.tool_call_id,
-              content: message.content
-            }]
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: message.tool_call_id,
+                content: message.content,
+              },
+            ],
           };
         }
 
         return { ...message };
       })
-      .filter(message => {
+      .filter((message) => {
         // Filter out messages with empty content
         if (!message.content) return false;
-        if (Array.isArray(message.content) && message.content.length === 0) return false;
+        if (Array.isArray(message.content) && message.content.length === 0)
+          return false;
         return true;
       });
 
@@ -396,60 +588,80 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
         acc.push({ ...message });
       } else {
         const lastMessage = acc[acc.length - 1];
-        if (Array.isArray(lastMessage.content) && Array.isArray(message.content)) {
+        if (
+          Array.isArray(lastMessage.content) &&
+          Array.isArray(message.content)
+        ) {
           lastMessage.content = [...lastMessage.content, ...message.content];
         } else if (Array.isArray(lastMessage.content)) {
-          lastMessage.content.push({ type: 'text', text: message.content });
+          lastMessage.content.push({ type: "text", text: message.content });
         } else if (Array.isArray(message.content)) {
-          lastMessage.content = [{ type: 'text', text: lastMessage.content }, ...message.content];
+          lastMessage.content = [
+            { type: "text", text: lastMessage.content },
+            ...message.content,
+          ];
         } else {
           lastMessage.content += "\n" + message.content;
         }
       }
       return acc;
     }, []);
-  
+
+    const sanitizedMessages = sanitizeToolUseSequences(combinedMessages);
+
     // Ensure an odd number of messages
-    const finalMessages = combinedMessages.length % 2 === 0
-      ? combinedMessages.slice(1)
-      : combinedMessages;
-  
+    let finalMessages = sanitizedMessages;
+
+    if (combinedMessages.length % 2 === 0) {
+      finalMessages = sanitizedMessages.slice(1);
+    }
+
     // Convert content items
     const claude3Messages = await Promise.all(
       finalMessages.map(async (message) => {
-        const contentArray = Array.isArray(message.content) ? message.content : [message.content];
-        const claude3Content = await Promise.all(contentArray.map(async item => {
-          const convertedItem = await convertContentItem(item, this.getModelMaxImageSize(), this);
-          
-          // Track image count
-          if (convertedItem?.type === 'image') {
-            imageCount++;
-            if (imageCount > maxImages) {
-              logger.warn(`Maximum number of images (${maxImages}) exceeded - skipping additional images.`);
-              return null;
+        const contentArray = Array.isArray(message.content)
+          ? message.content
+          : [message.content];
+        const claude3Content = await Promise.all(
+          contentArray.map(async (item) => {
+            const convertedItem = await convertContentItem(
+              item,
+              this.getModelMaxImageSize(),
+              this,
+            );
+
+            // Track image count
+            if (convertedItem?.type === "image") {
+              imageCount++;
+              if (imageCount > maxImages) {
+                logger.warn(
+                  `Maximum number of images (${maxImages}) exceeded - skipping additional images.`,
+                );
+                return null;
+              }
             }
-          }
-          
-          return convertedItem;
-        }));
+
+            return convertedItem;
+          }),
+        );
         return {
           role: message.role,
           content: claude3Content.filter(Boolean),
         };
-      })
+      }),
     );
-  
+
     return {
       system,
       modifiedMessages: claude3Messages,
     };
   }
-  
+
   async getRequestParameters(text, parameters, prompt) {
     const requestParameters = await super.getRequestParameters(
       text,
       parameters,
-      prompt
+      prompt,
     );
 
     const { system, modifiedMessages } =
@@ -459,25 +671,25 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
     // Convert OpenAI tools format to Claude format if present
     let toolsArray = parameters.tools;
-    if (typeof toolsArray === 'string') {
+    if (typeof toolsArray === "string") {
       try {
         toolsArray = JSON.parse(toolsArray);
       } catch (e) {
         toolsArray = [];
       }
     }
-    
+
     if (toolsArray && Array.isArray(toolsArray) && toolsArray.length > 0) {
-      requestParameters.tools = toolsArray.map(tool => {
-        if (tool.type === 'function') {
+      requestParameters.tools = toolsArray.map((tool) => {
+        if (tool.type === "function") {
           return {
             name: tool.function.name,
             description: tool.function.description,
-                  input_schema: {
+            input_schema: {
               type: "object",
               properties: tool.function.parameters.properties,
-              required: tool.function.parameters.required || []
-            }
+              required: tool.function.parameters.required || [],
+            },
           };
         }
         return tool;
@@ -485,77 +697,111 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     }
 
     // Handle tool_choice parameter conversion from OpenAI format to Claude format
-    if (parameters.tool_choice) {
-      let toolChoice = parameters.tool_choice;
-      
+    const rawToolChoice =
+      parameters.tool_choice ?? requestParameters.tool_choice;
+    if (rawToolChoice) {
+      let toolChoice = rawToolChoice;
+
       // Parse JSON string if needed
-      if (typeof toolChoice === 'string') {
+      if (typeof toolChoice === "string") {
         try {
           toolChoice = JSON.parse(toolChoice);
         } catch (e) {
           // If not JSON, handle as simple string values: auto, required, none
-          if (toolChoice === 'required') {
-            requestParameters.tool_choice = { type: 'any' }; // OpenAI's 'required' maps to Claude's 'any'
-          } else if (toolChoice === 'auto') {
-            requestParameters.tool_choice = { type: 'auto' };
-          } else if (toolChoice === 'none') {
-            requestParameters.tool_choice = { type: 'none' };
+          if (toolChoice === "required") {
+            requestParameters.tool_choice = { type: "any" }; // OpenAI's 'required' maps to Claude's 'any'
+          } else if (toolChoice === "auto") {
+            requestParameters.tool_choice = { type: "auto" };
+          } else if (toolChoice === "none") {
+            requestParameters.tool_choice = { type: "none" };
           }
           toolChoice = null; // Prevent further processing
         }
       }
-      
+
       // Handle parsed object
-      if (toolChoice && toolChoice.type === "function") {
-        // Handle function-specific tool choice
-        requestParameters.tool_choice = {
-          type: "tool",
-          name: toolChoice.function.name || toolChoice.function
-        };
+      if (toolChoice && typeof toolChoice === "object") {
+        if (toolChoice.type === "function") {
+          // OpenAI function selection maps to Claude tool selection
+          requestParameters.tool_choice = {
+            type: "tool",
+            name: toolChoice.function.name || toolChoice.function,
+          };
+        } else if (
+          toolChoice.type === "auto" ||
+          toolChoice.type === "any" ||
+          toolChoice.type === "none"
+        ) {
+          // Preserve Anthropic/OpenAI-compatible object forms when already normalized
+          requestParameters.tool_choice = { type: toolChoice.type };
+        } else if (toolChoice.type === "tool") {
+          // Preserve explicit Claude tool choice object
+          requestParameters.tool_choice = {
+            type: "tool",
+            name: toolChoice.name || toolChoice.function?.name || toolChoice.function,
+          };
+        }
       }
     }
 
     // If there are function calls in messages, generate tools block
-    if (modifiedMessages?.some(msg => 
-      Array.isArray(msg.content) && msg.content.some(item => item.type === 'tool_use')
-    )) {
+    if (
+      modifiedMessages?.some(
+        (msg) =>
+          Array.isArray(msg.content) &&
+          msg.content.some((item) => item.type === "tool_use"),
+      )
+    ) {
       const toolsMap = new Map();
-      
+
       // First add any existing tools from parameters to the map
       if (requestParameters.tools) {
-        requestParameters.tools.forEach(tool => {
+        requestParameters.tools.forEach((tool) => {
           toolsMap.set(tool.name, tool);
         });
       }
-      
+
       // Collect all unique tool uses from messages, only adding if not already present
-      modifiedMessages.forEach(msg => {
+      modifiedMessages.forEach((msg) => {
         if (Array.isArray(msg.content)) {
-          msg.content.forEach(item => {
-            if (item.type === 'tool_use' && !toolsMap.has(item.name)) {
+          msg.content.forEach((item) => {
+            if (item.type === "tool_use" && !toolsMap.has(item.name)) {
               toolsMap.set(item.name, {
                 name: item.name,
                 description: `Tool for ${item.name}`,
                 input_schema: {
                   type: "object",
-                  properties: item.input ? Object.keys(item.input).reduce((acc, key) => {
-                    acc[key] = {
-                      type: typeof item.input[key] === 'string' ? 'string' : 'object',
-                      description: `Parameter ${key} for ${item.name}`
-                    };
-                    return acc;
-                  }, {}) : {},
-                  required: item.input ? Object.keys(item.input) : []
-                }
+                  properties: item.input
+                    ? Object.keys(item.input).reduce((acc, key) => {
+                        acc[key] = {
+                          type:
+                            typeof item.input[key] === "string"
+                              ? "string"
+                              : "object",
+                          description: `Parameter ${key} for ${item.name}`,
+                        };
+                        return acc;
+                      }, {})
+                    : {},
+                  required: item.input ? Object.keys(item.input) : [],
+                },
               });
             }
           });
         }
       });
-      
+
       // Update the tools array with the combined unique tools
       requestParameters.tools = Array.from(toolsMap.values());
     }
+
+    // Note: Server-side tools (e.g., web_search_20250305) are handled via
+    // native passthrough in anthropicMessagesRoute.js, not through this plugin.
+
+    // Claude 3 models do not support Anthropic thinking/output_config controls.
+    delete requestParameters.reasoningEffort;
+    delete requestParameters.thinkingType;
+    delete requestParameters.thinkingBudgetTokens;
 
     requestParameters.max_tokens = this.getModelMaxReturnTokens();
     requestParameters.anthropic_version = "vertex-2023-10-16";
@@ -568,7 +814,6 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     if (system) {
       const { length, units } = this.getLength(system);
       logger.info(`[system messages sent containing ${length} ${units}]`);
-      logger.verbose(`${this.shortenContent(system)}`);
     }
 
     if (messages && messages.length > 1) {
@@ -579,21 +824,18 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
         let content;
         if (Array.isArray(message.content)) {
           // Only stringify objects, not strings (which may already be JSON strings)
-          content = message.content.map((item) => {
-            const sanitized = sanitizeBase64(item);
-            return typeof sanitized === 'string' ? sanitized : JSON.stringify(sanitized);
-          }).join(", ");
+          content = message.content
+            .map((item) => {
+              const sanitized = sanitizeBase64(item);
+              return typeof sanitized === "string"
+                ? sanitized
+                : JSON.stringify(sanitized);
+            })
+            .join(", ");
         } else {
           content = message.content;
         }
         const { length, units } = this.getLength(content);
-        const preview = this.shortenContent(content);
-
-        logger.verbose(
-          `message ${index + 1}: role: ${
-            message.role
-          }, ${units}: ${length}, content: "${preview}"`
-        );
         totalLength += length;
         totalUnits = units;
       });
@@ -603,31 +845,28 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       let content;
       if (Array.isArray(message.content)) {
         // Only stringify objects, not strings (which may already be JSON strings)
-        content = message.content.map((item) => {
-          return typeof item === 'string' ? item : JSON.stringify(item);
-        }).join(", ");
+        content = message.content
+          .map((item) => {
+            return typeof item === "string" ? item : JSON.stringify(item);
+          })
+          .join(", ");
       } else {
         content = message.content;
       }
       const { length, units } = this.getLength(content);
       logger.info(`[request sent containing ${length} ${units}]`);
-      logger.verbose(`${this.shortenContent(content)}`);
     }
 
-    if (stream) {
-      logger.info(`[response received as an SSE stream]`);
-    } else {
+    if (!stream) {
       const parsedResponse = this.parseResponse(responseData);
-      
-      if (typeof parsedResponse === 'string') {
-          const { length, units } = this.getLength(parsedResponse);
-          logger.info(`[response received containing ${length} ${units}]`);
-          logger.verbose(`${this.shortenContent(parsedResponse)}`);
+
+      if (typeof parsedResponse === "string") {
+        const { length, units } = this.getLength(parsedResponse);
+        logger.info(`[response received containing ${length} ${units}]`);
       } else {
-          logger.info(`[response received containing object]`);
-          logger.verbose(`${JSON.stringify(parsedResponse)}`);
+        logger.info(`[response received containing object]`);
       }
-  }
+    }
 
     prompt &&
       prompt.debugInfo &&
@@ -639,7 +878,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       text,
       parameters,
       prompt,
-      cortexRequest
+      cortexRequest,
     );
     const { stream } = parameters;
 
@@ -662,7 +901,7 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
   convertClaudeSSEToOpenAI(event) {
     // Handle end of stream
-    if (event.data.trim() === '[DONE]') {
+    if (event.data.trim() === "[DONE]") {
       return event; // Pass through unchanged
     }
 
@@ -678,11 +917,13 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       object: "chat.completion.chunk",
       created: Math.floor(Date.now() / 1000),
       model: this.modelName,
-      choices: [{
-        index: 0,
-        delta: {},
-        finish_reason: null
-      }]
+      choices: [
+        {
+          index: 0,
+          delta: {},
+          finish_reason: null,
+        },
+      ],
     };
 
     let delta = {};
@@ -692,18 +933,18 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     const streamError = eventData?.error?.message || eventData?.error;
     if (streamError) {
       delta = {
-        content: `\n\n*** ${streamError} ***`
+        content: `\n\n*** ${streamError} ***`,
       };
       finishReason = "error";
-      
+
       // Update the OpenAI response
       baseOpenAIResponse.choices[0].delta = delta;
       baseOpenAIResponse.choices[0].finish_reason = finishReason;
-      
+
       // Create new event with OpenAI format
       return {
         ...event,
-        data: JSON.stringify(baseOpenAIResponse)
+        data: JSON.stringify(baseOpenAIResponse),
       };
     }
 
@@ -711,8 +952,12 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
     switch (eventData.type) {
       case "message_start":
         delta = { role: "assistant", content: "" };
-        // Reset tool calls flag for new message
+        // Reset state for new message
         this.hadToolCalls = false;
+        // Forward initial usage (input_tokens) from Claude message_start
+        if (eventData.message?.usage) {
+          baseOpenAIResponse.usage = eventData.message.usage;
+        }
         break;
 
       case "content_block_delta":
@@ -721,61 +966,92 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
         } else if (eventData.delta.type === "input_json_delta") {
           // Handle tool call argument streaming
           const toolCallIndex = eventData.index || 0;
-          
+
           // Create OpenAI tool call delta - parent class will handle accumulation
           delta = {
-            tool_calls: [{
-              index: toolCallIndex,
-              id: eventData.id || `call_${toolCallIndex}_${Date.now()}`,
-              type: "function",
-              function: {
-                arguments: eventData.delta.partial_json || ""
-              }
-            }]
+            tool_calls: [
+              {
+                index: toolCallIndex,
+                id: eventData.id || `call_${toolCallIndex}_${Date.now()}`,
+                type: "function",
+                function: {
+                  arguments: eventData.delta.partial_json || "",
+                },
+              },
+            ],
           };
         } else if (eventData.delta.type === "name_delta") {
           // Handle tool call name streaming
           const toolCallIndex = eventData.index || 0;
-          
+
           // Create OpenAI tool call delta - parent class will handle accumulation
           delta = {
-            tool_calls: [{
-              index: toolCallIndex,
-              id: eventData.id || `call_${toolCallIndex}_${Date.now()}`,
-              type: "function",
-              function: {
-                name: eventData.delta.name || ""
-              }
-            }]
+            tool_calls: [
+              {
+                index: toolCallIndex,
+                id: eventData.id || `call_${toolCallIndex}_${Date.now()}`,
+                type: "function",
+                function: {
+                  name: eventData.delta.name || "",
+                },
+              },
+            ],
           };
         }
+        // Note: thinking_delta and server tool deltas are ignored here -
+        // Claude clients use native passthrough which handles these directly
         break;
 
       case "content_block_start":
         if (eventData.content_block.type === "tool_use") {
           // Mark that we have tool calls in this stream
           this.hadToolCalls = true;
-          
+
           // Create OpenAI tool call delta - parent class will handle buffer management
           const toolCallIndex = eventData.index || 0;
           delta = {
-            tool_calls: [{
-              index: toolCallIndex,
-              id: eventData.content_block.id || `call_${toolCallIndex}_${Date.now()}`,
-              type: "function",
-              function: {
-                name: eventData.content_block.name || ""
-              }
-            }]
+            tool_calls: [
+              {
+                index: toolCallIndex,
+                id:
+                  eventData.content_block.id ||
+                  `call_${toolCallIndex}_${Date.now()}`,
+                type: "function",
+                function: {
+                  name: eventData.content_block.name || "",
+                },
+              },
+            ],
           };
         }
+        // Note: thinking, server_tool_use, and web_search_tool_result blocks are ignored here -
+        // Claude clients use native passthrough which handles these directly
         break;
 
-      case "message_delta":
-        // Handle message delta events (like stop_reason)
-        // Don't set finish_reason here - let the stream continue until message_stop
+      case "message_delta": {
         delta = {};
+        const rawStopReason =
+          eventData?.delta?.stop_reason ??
+          eventData?.delta?.stopReason ??
+          eventData?.stop_reason ??
+          eventData?.stopReason;
+        if (rawStopReason && !this.pathwayToolCallback) {
+          const stopReason = String(rawStopReason).toLowerCase();
+          if (stopReason === "tool_use") {
+            finishReason = "tool_calls";
+          } else if (stopReason === "max_tokens") {
+            finishReason = "length";
+          } else if (stopReason === "stop_sequence") {
+            finishReason = "stop_sequence";
+          } else {
+            finishReason = "stop";
+          }
+        }
+        if (eventData.usage) {
+          baseOpenAIResponse.usage = eventData.usage;
+        }
         break;
+      }
 
       case "message_stop":
         delta = {};
@@ -789,14 +1065,16 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
 
       case "error":
         delta = {
-          content: `\n\n*** ${eventData.error.message || eventData.error} ***`
+          content: `\n\n*** ${eventData.error.message || eventData.error} ***`,
         };
         finishReason = "error";
         break;
 
-      // Ignore other event types as they don't map to OpenAI format
       case "content_block_stop":
-      case "message_delta":
+        // No action needed - block stops are implicit in OpenAI format
+        break;
+
+      // Ignore other event types as they don't map to OpenAI format
       case "ping":
         break;
     }
@@ -807,21 +1085,34 @@ class Claude3VertexPlugin extends OpenAIVisionPlugin {
       baseOpenAIResponse.choices[0].finish_reason = finishReason;
     }
 
-    // Create new event with OpenAI format
     return {
       ...event,
-      data: JSON.stringify(baseOpenAIResponse)
+      data: JSON.stringify(baseOpenAIResponse),
     };
   }
 
   processStreamEvent(event, requestProgress) {
+    let originalEventType = null;
+    try {
+      originalEventType = JSON.parse(event.data)?.type || null;
+    } catch {
+      // Let the delegated parser handle invalid event data consistently.
+    }
+
     // Convert Claude event to OpenAI format
     const openAIEvent = this.convertClaudeSSEToOpenAI(event);
-    
-    // Delegate to parent class for all the tool call logic
-    return super.processStreamEvent(openAIEvent, requestProgress);
-  }
 
+    // Delegate to parent class for all the tool call logic
+    const progress = super.processStreamEvent(openAIEvent, requestProgress);
+    if (
+      (originalEventType === "message_stop" || originalEventType === "error") &&
+      !progress.toolCallbackInvoked
+    ) {
+      progress.progress = 1;
+    }
+    return progress;
+  }
 }
 
 export default Claude3VertexPlugin;
+export { sanitizeToolUseSequences };

@@ -96,8 +96,10 @@ class GroqChatPlugin extends ModelPlugin {
         const modelInput = userMessage ? userMessage.content : JSON.stringify(data.messages);
         const modelOutput = this.parseResponse(responseData);
         
-        logger.verbose(`Input: ${modelInput}`);
-        logger.verbose(`Output: ${modelOutput}`);
+        const requestLength = this.getLength(modelInput || '');
+        logger.info(`[Groq chat request sent containing ${requestLength.length} ${requestLength.units}]`);
+        const responseLength = this.getLength(modelOutput || '');
+        logger.info(`[Groq chat response received containing ${responseLength.length} ${responseLength.units}]`);
         
         if (prompt?.debugInfo) {
             prompt.debugInfo += `\nInput: ${modelInput}\nOutput: ${modelOutput}`;

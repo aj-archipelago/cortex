@@ -42,16 +42,6 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
                     content = message.content;
                 }
                 const { length, units } = this.getLength(content);
-                const displayContent = this.shortenContent(content);
-
-                let logMessage = `message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${displayContent}"`;
-                
-                // Add tool calls to log if they exist
-                if (message.role === 'assistant' && message.tool_calls) {
-                    logMessage += `, tool_calls: ${JSON.stringify(message.tool_calls)}`;
-                }
-                
-                logger.verbose(logMessage);
                 totalLength += length;
                 totalUnits = units;
             });
@@ -70,20 +60,15 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
             }
             const { length, units } = this.getLength(content);
             logger.info(`[grok request sent containing ${length} ${units}]`);
-            logger.verbose(`${this.shortenContent(content)}`);
         }
-        if (stream) {
-            logger.info(`[grok response received as an SSE stream]`);
-        } else {
+        if (!stream) {
             const parsedResponse = this.parseResponse(responseData);
             
             if (typeof parsedResponse === 'string') {
                 const { length, units } = this.getLength(parsedResponse);
                 logger.info(`[grok response received containing ${length} ${units}]`);
-                logger.verbose(`${this.shortenContent(parsedResponse)}`);
             } else {
                 logger.info(`[grok response received containing object]`);
-                logger.verbose(`${JSON.stringify(parsedResponse)}`);
             }
         }
 
@@ -235,6 +220,15 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
             requestParameters.search_parameters = search_parameters;
         }
 
+        const reasoningEffort = parameters.reasoningEffort || this.promptParameters.reasoningEffort;
+        if (reasoningEffort) {
+            const effort = String(reasoningEffort).toLowerCase();
+            const effortMap = this.model.reasoningEffortMap;
+            if (effortMap && effortMap[effort]) {
+                requestParameters.reasoning_effort = effortMap[effort];
+            }
+        }
+
         return requestParameters;
     }
 
@@ -367,4 +361,4 @@ class GrokVisionPlugin extends OpenAIVisionPlugin {
 
 }
 
-export default GrokVisionPlugin; 
+export default GrokVisionPlugin;

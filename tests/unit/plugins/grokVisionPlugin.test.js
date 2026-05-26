@@ -69,6 +69,88 @@ test('should handle Grok-specific parameters', async t => {
   // Vision parameters are handled in message content, not as top-level parameters
 });
 
+test('should map reasoning effort for Grok requests', async t => {
+  const mockPathway = {
+    name: 'test-pathway',
+    temperature: 0.7,
+    prompt: 'Test prompt'
+  };
+
+  const mockModel = {
+    name: 'xai-grok-4-3',
+    type: 'GROK-VISION',
+    url: 'https://api.x.ai/v1/chat/completions',
+    headers: {
+      'Authorization': 'Bearer test-key',
+      'Content-Type': 'application/json'
+    },
+    params: {
+      model: 'grok-4.3'
+    },
+    reasoningEffortMap: {
+      none: 'none',
+      low: 'low',
+      medium: 'medium',
+      high: 'high'
+    },
+    maxTokenLength: 1000000,
+    maxReturnTokens: 128000
+  };
+
+  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+
+  for (const effort of ['none', 'low', 'medium', 'high']) {
+    const requestParams = await plugin.getRequestParameters(
+      'test text',
+      { reasoningEffort: effort },
+      {}
+    );
+    t.is(requestParams.reasoning_effort, effort);
+  }
+});
+
+test('should not send reasoning effort for Grok models without an explicit map', async t => {
+  const mockPathway = {
+    name: 'test-pathway',
+    temperature: 0.7,
+    prompt: 'Test prompt'
+  };
+
+  const grokModelsWithoutReasoningEffort = [
+    ['xai-grok-4-20-reasoning', 'grok-4.20-0309-reasoning'],
+    ['xai-grok-4-20-non-reasoning', 'grok-4.20-0309-non-reasoning'],
+    ['xai-grok-4-1-fast-reasoning', 'grok-4-1-fast-reasoning'],
+    ['xai-grok-4-1-fast-non-reasoning', 'grok-4-1-fast-non-reasoning'],
+    ['xai-grok-code-fast-1', 'grok-code-fast-1'],
+  ];
+
+  for (const [name, providerModel] of grokModelsWithoutReasoningEffort) {
+    const mockModel = {
+      name,
+      type: 'GROK-VISION',
+      url: 'https://api.x.ai/v1/chat/completions',
+      headers: {
+        'Authorization': 'Bearer test-key',
+        'Content-Type': 'application/json'
+      },
+      params: {
+        model: providerModel
+      },
+      maxTokenLength: 2000000,
+      maxReturnTokens: 128000
+    };
+
+    const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+    const requestParams = await plugin.getRequestParameters(
+      'test text',
+      { reasoningEffort: 'high' },
+      {}
+    );
+
+    t.is(requestParams.reasoning_effort, undefined, `${name} should omit reasoning_effort`);
+  }
+});
+
 test('should handle all Live Search parameters correctly', async t => {
   const mockPathway = {
     name: 'test-pathway',

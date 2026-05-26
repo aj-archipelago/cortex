@@ -97,6 +97,39 @@ test('getRequestParameters includes model in body', async (t) => {
     t.is(requestParams.anthropic_version, undefined);
 });
 
+test('getRequestParameters maps reasoningEffort to adaptive output_config effort', async (t) => {
+    const plugin = new ClaudeAnthropicPlugin(pathway, anthropicModel);
+
+    const messages = [
+        { role: 'user', content: 'Hello' }
+    ];
+
+    const parameters = { messages, reasoningEffort: 'xhigh' };
+    const requestParams = await plugin.getRequestParameters('', parameters, {});
+
+    t.deepEqual(requestParams.thinking, { type: 'adaptive' });
+    t.deepEqual(requestParams.output_config, { effort: 'max' });
+    t.is(requestParams.temperature, 1);
+});
+
+test('getRequestParameters maps thinkingType and budget tokens to anthropic thinking config', async (t) => {
+    const plugin = new ClaudeAnthropicPlugin(pathway, anthropicModel);
+
+    const messages = [
+        { role: 'user', content: 'Hello' }
+    ];
+
+    const parameters = {
+        messages,
+        thinkingType: 'enabled',
+        thinkingBudgetTokens: 4096
+    };
+    const requestParams = await plugin.getRequestParameters('', parameters, {});
+
+    t.deepEqual(requestParams.thinking, { type: 'enabled', budget_tokens: 4096 });
+    t.is(requestParams.temperature, 1);
+});
+
 test('convertMessagesToClaudeVertex preserves message conversion from parent', async (t) => {
     const plugin = new ClaudeAnthropicPlugin(pathway, anthropicModel);
     

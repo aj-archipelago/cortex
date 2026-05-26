@@ -7,6 +7,23 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
         super(pathway, model);
         this.isMultiModal = true;
     }
+
+    resolveMimeType(fileUrl, explicitMimeType = null, fallback = 'image/jpeg') {
+        if (explicitMimeType) {
+            return explicitMimeType;
+        }
+
+        if (!fileUrl) {
+            return fallback;
+        }
+
+        try {
+            const parsed = new URL(fileUrl);
+            return mime.lookup(parsed.pathname) || mime.lookup(fileUrl) || fallback;
+        } catch (e) {
+            return mime.lookup(fileUrl) || fallback;
+        }
+    }
     
     // Override the convertMessagesToGemini method to handle multimodal vision messages
     // This function can operate on messages in Gemini native format or in OpenAI's format
@@ -27,8 +44,12 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
                 const convertPartToGemini = (inputPart) => {
                     try {
                         const part = typeof inputPart === 'string' ? JSON.parse(inputPart) : inputPart;
-                        const {type, text, image_url, gcs} = part;
-                        let fileUrl = gcs || image_url?.url;
+                        const {type, text, image_url, gcs, url, mimeType, mime_type} = part;
+                        let fileUrl = gcs || image_url?.url || url;
+                        const resolvedMimeType = this.resolveMimeType(
+                            fileUrl,
+                            mimeType || mime_type || image_url?.mimeType || image_url?.mime_type,
+                        );
 
                         if (typeof part === 'string') {
                             return { text: text };
@@ -38,7 +59,7 @@ class GeminiVisionPlugin extends GeminiChatPlugin {
                             if (fileUrl.startsWith('gs://')) {
                                 return {
                                     fileData: {
-                                        mimeType: mime.lookup(fileUrl) || 'image/jpeg',
+                                        mimeType: resolvedMimeType,
                                         fileUri: fileUrl
                                     }
                                 };

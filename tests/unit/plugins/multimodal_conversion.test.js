@@ -1,8 +1,44 @@
 import test from 'ava';
 import OpenAIVisionPlugin from '../../../server/plugins/openAiVisionPlugin.js';
 import Claude3VertexPlugin from '../../../server/plugins/claude3VertexPlugin.js';
+import Claude4VertexPlugin from '../../../server/plugins/claude4VertexPlugin.js';
+import ClaudeAnthropicPlugin from '../../../server/plugins/claudeAnthropicPlugin.js';
 import Gemini15VisionPlugin from '../../../server/plugins/gemini15VisionPlugin.js';
 import GeminiVisionPlugin from '../../../server/plugins/geminiVisionPlugin.js';
+import axios from 'axios';
+
+const originalAxiosHead = axios.head;
+const originalAxiosGet = axios.get;
+const sampleJpegBuffer = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+    Buffer.alloc(256, 0),
+    Buffer.from([0xff, 0xd9]),
+]);
+const samplePdfBuffer = Buffer.concat([
+    Buffer.from('%PDF-1.4\n'),
+    Buffer.alloc(256, 65),
+    Buffer.from('\n%%EOF'),
+]);
+
+test.before(() => {
+    axios.head = async (url) => ({
+        headers: {
+            'content-type': String(url).endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+        },
+    });
+    axios.get = async (url) => {
+        const isPdf = String(url).endsWith('.pdf');
+        return {
+            headers: { 'content-type': isPdf ? 'application/pdf' : 'image/jpeg' },
+            data: isPdf ? samplePdfBuffer : sampleJpegBuffer,
+        };
+    };
+});
+
+test.after.always(() => {
+    axios.head = originalAxiosHead;
+    axios.get = originalAxiosGet;
+});
 
 // Mock pathway and model for plugin initialization
 const mockPathway = { name: 'test', temperature: 0.7 };
@@ -134,7 +170,7 @@ test('Cortex special properties conversion', async (t) => {
     const { modifiedMessages: geminiMessages15, system: geminiSystem15 } = gemini15.convertMessagesToGemini(cortexMessages);
 
     // Check Claude conversion
-    t.true(claudeMessages[0].content[1].source.data.startsWith('/9j/4AAQ'));
+    t.true(validateBase64Image(claudeMessages[0].content[1].source.data));
 
     // Check Gemini conversion
     t.is(geminiMessages[0].parts[1].fileData.fileUri, 'gs://cortex-bucket/special-image.png');
@@ -507,6 +543,28 @@ test('Gemini 1.5 image URL edge cases', t => {
     t.is(modifiedMessages[0].parts.length, 1, 'Should only have the text part');
 });
 
+test('Gemini 1.5 preserves mimeType for signed blob URLs', t => {
+    const { gemini15 } = createPlugins();
+
+    const signedCsvUrl = 'https://myaccount.blob.core.windows.net/container/sample-production.users.csv?sv=2025-05-05&sig=abc123';
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'Process this file:' },
+            {
+                type: 'image_url',
+                mimeType: 'text/csv',
+                image_url: { url: signedCsvUrl }
+            }
+        ]}
+    ];
+
+    const { modifiedMessages } = gemini15.convertMessagesToGemini(messages);
+
+    t.true('fileData' in modifiedMessages[0].parts[1]);
+    t.is(modifiedMessages[0].parts[1].fileData.fileUri, signedCsvUrl);
+    t.is(modifiedMessages[0].parts[1].fileData.mimeType, 'text/csv');
+});
+
 // Test multiple images in single message for Claude
 test('Multiple images in single Claude message', async (t) => {
     const { claude } = createPlugins();
@@ -595,4 +653,136 @@ test('Large image handling', async (t) => {
     // (The exact behavior - rejection vs. compression - should match the model's specifications)
     t.is(claudeMessages[0].content[0].text, 'Check this large image:');
     t.is(geminiMessages[0].parts[0].text, 'Check this large image:');
+});
+
+// Test Claude 4 Vertex defaults to base64 for HTTP URLs (Vertex doesn't support URL sources)
+test('Claude 4 Vertex HTTP URL defaults to base64', async (t) => {
+    const claude4 = new Claude4VertexPlugin(mockPathway, mockModel);
+
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'What is in this image?' },
+            { type: 'image_url', image_url: { url: 'https://static.toiimg.com/thumb/msid-102827471,width-1280,height-720,resizemode-4/102827471.jpg' } }
+        ]}
+    ];
+
+    const { modifiedMessages } = await claude4.convertMessagesToClaudeVertex(messages);
+
+    t.is(modifiedMessages[0].content.length, 2);
+    t.is(modifiedMessages[0].content[0].text, 'What is in this image?');
+    t.is(modifiedMessages[0].content[1].type, 'image');
+    t.is(modifiedMessages[0].content[1].source.type, 'base64');
+    t.truthy(modifiedMessages[0].content[1].source.data);
+    t.true(validateBase64Image(modifiedMessages[0].content[1].source.data));
+});
+
+// Test Claude 4 Vertex with supportsImageUrls:true explicitly enabled uses URL passthrough
+test('Claude 4 Vertex with supportsImageUrls true uses url passthrough', async (t) => {
+    const claude4 = new Claude4VertexPlugin(mockPathway, { name: 'test-model', supportsImageUrls: true });
+
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'What is in this image?' },
+            { type: 'image_url', image_url: { url: 'https://example.com/photo.jpg' } }
+        ]}
+    ];
+
+    const { modifiedMessages } = await claude4.convertMessagesToClaudeVertex(messages);
+
+    t.is(modifiedMessages[0].content[1].type, 'image');
+    t.is(modifiedMessages[0].content[1].source.type, 'url');
+    t.is(modifiedMessages[0].content[1].source.url, 'https://example.com/photo.jpg');
+});
+
+// Test Claude 4 data: URL still uses base64 (data is already inline)
+test('Claude 4 data URL still uses base64', async (t) => {
+    const claude4 = new Claude4VertexPlugin(mockPathway, mockModel);
+
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'What is this?' },
+            { type: 'image_url', image_url: { url: sampleBase64Image } }
+        ]}
+    ];
+
+    const { modifiedMessages } = await claude4.convertMessagesToClaudeVertex(messages);
+
+    t.is(modifiedMessages[0].content[1].type, 'image');
+    t.is(modifiedMessages[0].content[1].source.type, 'base64');
+    t.truthy(modifiedMessages[0].content[1].source.data);
+    t.is(modifiedMessages[0].content[1].source.media_type, 'image/jpeg');
+});
+
+// Test data: URL still uses base64 even when supportsImageUrls is true
+test('Claude 4 data URL uses base64 even with supportsImageUrls true', async (t) => {
+    const claude4 = new Claude4VertexPlugin(mockPathway, { name: 'test-model', supportsImageUrls: true });
+
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'What is this?' },
+            { type: 'image_url', image_url: { url: sampleBase64Image } }
+        ]}
+    ];
+
+    const { modifiedMessages } = await claude4.convertMessagesToClaudeVertex(messages);
+
+    t.is(modifiedMessages[0].content[1].type, 'image');
+    t.is(modifiedMessages[0].content[1].source.type, 'base64');
+    t.truthy(modifiedMessages[0].content[1].source.data);
+});
+
+// Test Claude 3 still uses base64 for HTTP URLs (unchanged behavior)
+test('Claude 3 HTTP URL still uses base64', async (t) => {
+    const claude3 = new Claude3VertexPlugin(mockPathway, mockModel);
+
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'Analyze this:' },
+            { type: 'image_url', image_url: { url: 'https://static.toiimg.com/thumb/msid-102827471,width-1280,height-720,resizemode-4/102827471.jpg' } }
+        ]}
+    ];
+
+    const { modifiedMessages } = await claude3.convertMessagesToClaudeVertex(messages);
+
+    t.is(modifiedMessages[0].content[1].type, 'image');
+    t.is(modifiedMessages[0].content[1].source.type, 'base64');
+    t.truthy(modifiedMessages[0].content[1].source.data);
+    t.true(validateBase64Image(modifiedMessages[0].content[1].source.data));
+});
+
+// Test ClaudeAnthropicPlugin uses URL passthrough (direct Anthropic API supports it)
+test('ClaudeAnthropicPlugin HTTP URL uses source.type url passthrough', async (t) => {
+    const anthropic = new ClaudeAnthropicPlugin(mockPathway, mockModel);
+
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'What do you see?' },
+            { type: 'image_url', image_url: { url: 'https://example.com/image.png' } }
+        ]}
+    ];
+
+    const { modifiedMessages } = await anthropic.convertMessagesToClaudeVertex(messages);
+
+    t.is(modifiedMessages[0].content[1].type, 'image');
+    t.is(modifiedMessages[0].content[1].source.type, 'url');
+    t.is(modifiedMessages[0].content[1].source.url, 'https://example.com/image.png');
+});
+
+// Test ClaudeAnthropicPlugin with supportsImageUrls:false falls back to base64
+test('ClaudeAnthropicPlugin with supportsImageUrls false falls back to base64', async (t) => {
+    const anthropic = new ClaudeAnthropicPlugin(mockPathway, { name: 'test-model', supportsImageUrls: false });
+
+    const messages = [
+        { role: 'user', content: [
+            { type: 'text', text: 'Describe this:' },
+            { type: 'image_url', image_url: { url: 'https://static.toiimg.com/thumb/msid-102827471,width-1280,height-720,resizemode-4/102827471.jpg' } }
+        ]}
+    ];
+
+    const { modifiedMessages } = await anthropic.convertMessagesToClaudeVertex(messages);
+
+    t.is(modifiedMessages[0].content[1].type, 'image');
+    t.is(modifiedMessages[0].content[1].source.type, 'base64');
+    t.truthy(modifiedMessages[0].content[1].source.data);
+    t.true(validateBase64Image(modifiedMessages[0].content[1].source.data));
 });

@@ -231,6 +231,187 @@ test('getRequestParameters - transforms function role to user role', t => {
     'Should not have any function role messages after transformation');
 });
 
+// ===== FunctionResponse.response must be a Struct (plain object) =====
+// Gemini API defines FunctionResponse.response as protobuf Struct (map<string, Value>).
+// Arrays, null, and primitives cannot be serialized as a Struct — they must be wrapped in an object.
+// Ref: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/Content
+
+test('getRequestParameters - wraps array tool responses in object for Struct compatibility', t => {
+  const resolver = createResolverWithPlugin(Gemini3ReasoningVisionPlugin);
+  const plugin = resolver.modelExecutor.plugin;
+
+  const originalGetCompiledPrompt = plugin.getCompiledPrompt.bind(plugin);
+  plugin.getCompiledPrompt = (text, parameters, prompt) => {
+    const result = originalGetCompiledPrompt(text, parameters, prompt);
+    result.modelPromptMessages = [
+      { role: 'user', content: 'Search for cards' },
+      {
+        role: 'assistant', content: '',
+        tool_calls: [{
+          id: 'call_1',
+          function: { name: 'AssetLibrary', arguments: '{"resource":"cards","action":"search"}' },
+          thoughtSignature: 'test_sig'
+        }]
+      },
+      // Tool returns a stringified array, such as asset-library search results
+      { role: 'tool', tool_call_id: 'AssetLibrary_call_1',
+        content: JSON.stringify([{id: 'VX-1', title: 'Card A'}, {id: 'VX-2', title: 'Card B'}]) }
+    ];
+    return result;
+  };
+
+  const params = plugin.getRequestParameters('test', {}, { prompt: 'test' }, { pathway: {} });
+
+  // Find the functionResponse in transformed contents
+  let functionResponseData = null;
+  for (const content of params.contents) {
+    for (const part of (content.parts || [])) {
+      if (part.functionResponse) {
+        functionResponseData = part.functionResponse.response;
+      }
+    }
+  }
+
+  t.truthy(functionResponseData, 'Should have a functionResponse');
+  t.false(Array.isArray(functionResponseData),
+    'response must not be an array — Gemini Struct requires an object');
+  t.true(typeof functionResponseData === 'object' && functionResponseData !== null,
+    'response must be an object (Struct)');
+  t.true(Array.isArray(functionResponseData.result),
+    'Original array should be preserved under "result" key');
+  t.is(functionResponseData.result.length, 2);
+  t.is(functionResponseData.result[0].id, 'VX-1');
+});
+
+test('getRequestParameters - passes object tool responses through unchanged', t => {
+  const resolver = createResolverWithPlugin(Gemini3ReasoningVisionPlugin);
+  const plugin = resolver.modelExecutor.plugin;
+
+  const originalGetCompiledPrompt = plugin.getCompiledPrompt.bind(plugin);
+  plugin.getCompiledPrompt = (text, parameters, prompt) => {
+    const result = originalGetCompiledPrompt(text, parameters, prompt);
+    result.modelPromptMessages = [
+      { role: 'user', content: 'Get card details' },
+      {
+        role: 'assistant', content: '',
+        tool_calls: [{
+          id: 'call_1',
+          function: { name: 'AssetLibrary', arguments: '{"resource":"cards","action":"get"}' },
+          thoughtSignature: 'test_sig'
+        }]
+      },
+      // Tool returns a stringified object — should pass through as-is
+      { role: 'tool', tool_call_id: 'AssetLibrary_call_1',
+        content: JSON.stringify({id: 'VX-1', title: 'Card A', status: 'active'}) }
+    ];
+    return result;
+  };
+
+  const params = plugin.getRequestParameters('test', {}, { prompt: 'test' }, { pathway: {} });
+
+  let functionResponseData = null;
+  for (const content of params.contents) {
+    for (const part of (content.parts || [])) {
+      if (part.functionResponse) {
+        functionResponseData = part.functionResponse.response;
+      }
+    }
+  }
+
+  t.truthy(functionResponseData, 'Should have a functionResponse');
+  t.false(Array.isArray(functionResponseData),
+    'response should not be an array');
+  t.is(functionResponseData.id, 'VX-1',
+    'Object properties should pass through directly');
+  t.is(functionResponseData.title, 'Card A');
+  t.is(functionResponseData.result, undefined,
+    'Should not wrap objects in a result key');
+});
+
+test('getRequestParameters - wraps null tool responses in object for Struct compatibility', t => {
+  const resolver = createResolverWithPlugin(Gemini3ReasoningVisionPlugin);
+  const plugin = resolver.modelExecutor.plugin;
+
+  const originalGetCompiledPrompt = plugin.getCompiledPrompt.bind(plugin);
+  plugin.getCompiledPrompt = (text, parameters, prompt) => {
+    const result = originalGetCompiledPrompt(text, parameters, prompt);
+    result.modelPromptMessages = [
+      { role: 'user', content: 'Delete card' },
+      {
+        role: 'assistant', content: '',
+        tool_calls: [{
+          id: 'call_1',
+          function: { name: 'AssetLibrary', arguments: '{"resource":"cards","action":"delete"}' },
+          thoughtSignature: 'test_sig'
+        }]
+      },
+      // Tool returns null
+      { role: 'tool', tool_call_id: 'AssetLibrary_call_1', content: 'null' }
+    ];
+    return result;
+  };
+
+  const params = plugin.getRequestParameters('test', {}, { prompt: 'test' }, { pathway: {} });
+
+  let functionResponseData = null;
+  let found = false;
+  for (const content of params.contents) {
+    for (const part of (content.parts || [])) {
+      if (part.functionResponse) {
+        functionResponseData = part.functionResponse.response;
+        found = true;
+      }
+    }
+  }
+
+  t.true(found, 'Should have a functionResponse');
+  t.true(typeof functionResponseData === 'object' && functionResponseData !== null,
+    'null must be wrapped in an object (Struct)');
+  t.is(functionResponseData.result, null,
+    'Original null should be preserved under "result" key');
+});
+
+test('getRequestParameters - wraps primitive tool responses in object for Struct compatibility', t => {
+  const resolver = createResolverWithPlugin(Gemini3ReasoningVisionPlugin);
+  const plugin = resolver.modelExecutor.plugin;
+
+  const originalGetCompiledPrompt = plugin.getCompiledPrompt.bind(plugin);
+  plugin.getCompiledPrompt = (text, parameters, prompt) => {
+    const result = originalGetCompiledPrompt(text, parameters, prompt);
+    result.modelPromptMessages = [
+      { role: 'user', content: 'Check existence' },
+      {
+        role: 'assistant', content: '',
+        tool_calls: [{
+          id: 'call_1',
+          function: { name: 'AssetLibrary', arguments: '{"resource":"cards","action":"exists"}' },
+          thoughtSignature: 'test_sig'
+        }]
+      },
+      // Tool returns a primitive (boolean)
+      { role: 'tool', tool_call_id: 'AssetLibrary_call_1', content: 'true' }
+    ];
+    return result;
+  };
+
+  const params = plugin.getRequestParameters('test', {}, { prompt: 'test' }, { pathway: {} });
+
+  let functionResponseData = null;
+  for (const content of params.contents) {
+    for (const part of (content.parts || [])) {
+      if (part.functionResponse) {
+        functionResponseData = part.functionResponse.response;
+      }
+    }
+  }
+
+  t.truthy(functionResponseData, 'Should have a functionResponse');
+  t.true(typeof functionResponseData === 'object' && functionResponseData !== null,
+    'Primitive must be wrapped in an object (Struct)');
+  t.is(functionResponseData.result, true,
+    'Original primitive should be preserved under "result" key');
+});
+
 test('Gemini3ReasoningVisionPlugin - inherits from Gemini3ImagePlugin', t => {
   const resolver = createResolverWithPlugin(Gemini3ReasoningVisionPlugin);
   const plugin = resolver.modelExecutor.plugin;
@@ -245,4 +426,3 @@ test('Gemini3ReasoningVisionPlugin - inherits from Gemini3ImagePlugin', t => {
   t.true(typeof plugin.buildToolCallFromFunctionCall === 'function',
     'Should have buildToolCallFromFunctionCall method');
 });
-

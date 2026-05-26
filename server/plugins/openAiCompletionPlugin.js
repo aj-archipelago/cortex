@@ -110,7 +110,6 @@ class OpenAICompletionPlugin extends ModelPlugin {
         const { length, units } = this.getLength(modelInput);
 
         logger.info(`[request sent containing ${length} ${units}]`);
-        logger.verbose(`${modelInput}`);
 
         if (stream) {
             logger.info(`[response received as an SSE stream]`);
@@ -118,7 +117,6 @@ class OpenAICompletionPlugin extends ModelPlugin {
             const responseText = this.parseResponse(responseData);
             const { length, units } = this.getLength(responseText);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${responseText}`);
         }
     
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
@@ -126,4 +124,3 @@ class OpenAICompletionPlugin extends ModelPlugin {
 }
 
 export default OpenAICompletionPlugin;
-

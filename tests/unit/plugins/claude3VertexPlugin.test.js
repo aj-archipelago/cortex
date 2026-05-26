@@ -4,6 +4,32 @@ import { mockPathwayResolverMessages } from '../../helpers/mocks.js';
 import { config } from '../../../config.js';
 import fs from 'fs';
 import path from 'path';
+import axios from 'axios';
+
+const originalAxiosHead = axios.head;
+const originalAxiosGet = axios.get;
+const sampleJpegBuffer = Buffer.concat([
+  Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+  Buffer.alloc(256, 0),
+  Buffer.from([0xff, 0xd9]),
+]);
+
+test.before(() => {
+  axios.head = async (url) => ({
+    headers: {
+      'content-type': String(url).endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+    },
+  });
+  axios.get = async () => ({
+    headers: { 'content-type': 'image/jpeg' },
+    data: sampleJpegBuffer,
+  });
+});
+
+test.after.always(() => {
+  axios.head = originalAxiosHead;
+  axios.get = originalAxiosGet;
+});
 
 // Helper function to load test data from files
 function loadTestData(filename) {
@@ -182,6 +208,24 @@ test('parseResponse', (t) => {
     const dataNull = null;
     const resultNull = plugin.parseResponse(dataNull);
     t.is(resultNull, dataNull);
+});
+
+test('parseResponse normalizes empty content arrays to an empty CortexResponse', (t) => {
+    const plugin = new Claude3VertexPlugin(pathway, model);
+
+    const emptyContentResponse = {
+        content: [],
+        usage: { input_tokens: 42, output_tokens: 8 },
+        stop_reason: 'end_turn',
+    };
+
+    const result = plugin.parseResponse(emptyContentResponse);
+
+    t.truthy(result);
+    t.is(result.output_text, '');
+    t.is(result.finishReason, 'stop');
+    t.deepEqual(result.usage, emptyContentResponse.usage);
+    t.is(result.metadata.model, plugin.modelName);
 });
 
 test('convertMessagesToClaudeVertex text message', async (t) => {

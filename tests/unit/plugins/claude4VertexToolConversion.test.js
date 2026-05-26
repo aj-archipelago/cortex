@@ -7,6 +7,36 @@ const { pathway, modelName, model } = mockPathwayResolverMessages;
 // Helper function to create a plugin instance
 const createPlugin = () => new Claude4VertexPlugin(pathway, model);
 
+test('Claude4 maps reasoningEffort to adaptive output_config effort', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    const parameters = {
+        messages: [{ role: 'user', content: 'Hello' }],
+        reasoningEffort: 'xhigh'
+    };
+
+    const result = await plugin.getRequestParameters('test', parameters, prompt);
+
+    t.deepEqual(result.thinking, { type: 'adaptive' });
+    t.deepEqual(result.output_config, { effort: 'max' });
+    t.is(result.temperature, 1);
+});
+
+test('Claude4 maps thinkingType and budget tokens to anthropic thinking config', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    const parameters = {
+        messages: [{ role: 'user', content: 'Hello' }],
+        thinkingType: 'enabled',
+        thinkingBudgetTokens: 4096
+    };
+
+    const result = await plugin.getRequestParameters('test', parameters, prompt);
+
+    t.deepEqual(result.thinking, { type: 'enabled', budget_tokens: 4096 });
+    t.is(result.temperature, 1);
+});
+
 // Test OpenAI tools block conversion
 test('OpenAI tools block conversion', async (t) => {
     const plugin = createPlugin();
@@ -318,8 +348,8 @@ test('Tool conversion with document content blocks', async (t) => {
     // System message should be extracted
     t.is(result.system, 'You are a helpful assistant');
     
-    // After filtering system messages and ensuring odd count, we have 3 messages
-    t.is(result.messages.length, 3);
+    // After sanitization, preserved interrupt-style text after tool_use is kept as a separate user message.
+    t.is(result.messages.length, 4);
     t.is(result.messages[0].role, 'user');
     t.is(result.messages[0].content.length, 2);
     t.is(result.messages[0].content[0].type, 'text');
@@ -327,6 +357,7 @@ test('Tool conversion with document content blocks', async (t) => {
     
     t.is(result.messages[1].role, 'assistant');
     t.is(result.messages[2].role, 'user');
+    t.is(result.messages[3].role, 'user');
     
     // Check tool was generated
     t.truthy(result.tools);
@@ -396,7 +427,7 @@ test('Prevent duplicate tool definitions', async (t) => {
     
     // Verify the tool_use call is still properly converted
     t.truthy(result.messages, 'Messages should be defined');
-    t.is(result.messages.length, 1, 'Should have 1 message after conversion');
+    t.is(result.messages.length, 2, 'Should have 2 messages after conversion');
     
     // Check the converted message
     const message = result.messages[0];
@@ -409,5 +440,157 @@ test('Prevent duplicate tool definitions', async (t) => {
         name: 'memory_lookup',
         input: { query: 'search memory' }
     });
+
+    const toolResultMessage = result.messages[1];
+    t.is(toolResultMessage.role, 'user', 'Tool result should be from user');
+    const toolResult = toolResultMessage.content.find(item => item.type === 'tool_result');
+    t.truthy(toolResult, 'Should insert a tool_result');
+    t.is(toolResult.tool_use_id, 'tool_1', 'Tool result should match tool_use id');
 });
 
+test('Interrupted tool call preserves user interrupt text while inserting synthetic tool result', async (t) => {
+  const plugin = createPlugin();
+  const prompt = mockPathwayResolverMessages.pathway.prompt;
+  const interruptText = 'Request interrupted by user for tool use';
+
+  const messages = [
+    {
+      role: 'system',
+      content: 'You are a helpful assistant'
+    },
+    {
+      role: 'user',
+      content: 'Can you call memory_lookup?'
+    },
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'tool_1',
+          name: 'memory_lookup',
+          input: { query: 'what did you find?' }
+        }
+      ]
+    },
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: interruptText
+        }
+      ]
+    }
+  ];
+
+  prompt.messages = messages;
+  const cortexRequest = { messages };
+  const result = await plugin.getRequestParameters('test', {}, prompt, cortexRequest);
+
+  t.is(result.messages.length, 4, 'Should include tool result and preserved interrupt text');
+  t.is(result.messages[1].role, 'assistant');
+  t.is(result.messages[2].role, 'user');
+  const toolResult = result.messages[2].content.find(item => item.type === 'tool_result');
+  t.truthy(toolResult, 'Should insert a synthetic tool result');
+  t.is(toolResult.tool_use_id, 'tool_1');
+
+  t.is(result.messages[3].role, 'user');
+  t.deepEqual(result.messages[3].content[0], {
+    type: 'text',
+    text: interruptText
+  });
+});
+
+// ----- Forced tool choice + thinking disable tests -----
+
+test('Claude4 disables thinking when tool_choice type is "any"', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    const parameters = {
+        messages: [{ role: 'user', content: 'Hello' }],
+        reasoningEffort: 'high',
+        tool_choice: { type: 'any' },
+    };
+
+    const result = await plugin.getRequestParameters('test', parameters, prompt);
+
+    t.deepEqual(result.thinking, { type: 'disabled' });
+    t.is(result.output_config, undefined);
+});
+
+test('Claude4 disables thinking when tool_choice type is "tool"', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    const parameters = {
+        messages: [{ role: 'user', content: 'Hello' }],
+        thinkingType: 'enabled',
+        thinkingBudgetTokens: 8192,
+        tool_choice: { type: 'tool', name: 'search_web' },
+    };
+
+    const result = await plugin.getRequestParameters('test', parameters, prompt);
+
+    t.deepEqual(result.thinking, { type: 'disabled' });
+    t.is(result.output_config, undefined);
+});
+
+test('Claude4 preserves thinking when tool_choice type is "auto"', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    const parameters = {
+        messages: [{ role: 'user', content: 'Hello' }],
+        reasoningEffort: 'high',
+        tool_choice: { type: 'auto' },
+    };
+
+    const result = await plugin.getRequestParameters('test', parameters, prompt);
+
+    // thinking should NOT be disabled
+    t.not(result.thinking?.type, 'disabled');
+});
+
+test('Claude4 preserves thinking when no tool_choice is set', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    const parameters = {
+        messages: [{ role: 'user', content: 'Hello' }],
+        reasoningEffort: 'high',
+    };
+
+    const result = await plugin.getRequestParameters('test', parameters, prompt);
+
+    // thinking should NOT be disabled
+    t.not(result.thinking?.type, 'disabled');
+});
+
+test('Claude4 preserves thinking when tool_choice is a string (not object)', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    const parameters = {
+        messages: [{ role: 'user', content: 'Hello' }],
+        reasoningEffort: 'high',
+        tool_choice: 'auto',
+    };
+
+    const result = await plugin.getRequestParameters('test', parameters, prompt);
+
+    // String tool_choice should not trigger thinking disable
+    t.not(result.thinking?.type, 'disabled');
+});
+
+test('Claude4 disables thinking for forced tool choice even with adaptive thinking', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    const parameters = {
+        messages: [{ role: 'user', content: 'Hello' }],
+        thinking: JSON.stringify({ type: 'adaptive' }),
+        output_config: JSON.stringify({ effort: 'max' }),
+        tool_choice: { type: 'any' },
+    };
+
+    const result = await plugin.getRequestParameters('test', parameters, prompt);
+
+    t.deepEqual(result.thinking, { type: 'disabled' });
+    t.is(result.output_config, undefined);
+});
