@@ -7,10 +7,14 @@ export default {
     inputParameters: {
         model: "oai-gpt41",
         chatHistory: [{role: '', content: []}],
-        researchMode: false,
-        agentContext: [
-            { contextId: "", contextKey: "", default: true }
-        ]
+        reasoningEffort: '',
+        fileAccessPlan: {
+            type: 'array',
+            items: { objType: 'FileAccessTargetInput' },
+            default: [],
+        },
+        contextId: '',
+        contextKey: '',
     },
     timeout: 600,
 
@@ -26,4 +30,3 @@ export default {
         return response;
     }
 }
-
