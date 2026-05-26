@@ -134,8 +134,7 @@ export default {
                 x_search: Object.keys(xSearchConfig).length > 0 ? xSearchConfig : true
             };
 
-            // Call the Grok Live Search pathway with new tools format
-            // Use the new Responses API model for X search
+            // Call the Grok Live Search pathway with the current 4.20-backed Responses wrapper.
             const { model, text, ...restArgs } = args;
             
             // Construct a prompt that asks for structured output with rich metadata
@@ -158,7 +157,7 @@ Return posts as a numbered list. Keep metadata fields clean without inline citat
             const result = await callPathway('grok_live_search', { 
                 ...restArgs,
                 text: structuredPrompt,
-                model: 'xai-grok-4-1-fast-responses',
+                model: 'xai-grok-4-20-responses',
                 tools: JSON.stringify(tools),
                 inline_citations: true
             }, resolver);

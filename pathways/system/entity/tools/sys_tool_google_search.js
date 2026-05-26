@@ -11,9 +11,9 @@ import { getSearchResultId } from '../../../../lib/util.js';
  * @returns {string|null} - Error message if validation fails, null if valid
  */
 function validateParameters(args) {
-    // Validate required parameter: q
+    // Validate required parameter: q. Accept query as a model-friendly alias.
     if (!args.q || typeof args.q !== 'string' || args.q.trim() === '') {
-        return "Parameter 'q' (query) is required and must be a non-empty string.";
+        return "Parameter 'q' or alias 'query' is required and must be a non-empty string.";
     }
 
     // Validate num: must be integer between 1-10
@@ -103,6 +103,10 @@ export default {
                         type: "string",
                         description: "The complete query to pass to Google CSE using Google's search syntax."
                     },
+                    query: {
+                        type: "string",
+                        description: "Alias for q. Use either q or query for the search string."
+                    },
                     num: {
                         type: "integer",
                         description: "Number of results to return (1-10). Default 10."
@@ -172,14 +176,19 @@ export default {
                         description: "A user-friendly message that describes what you're doing with this tool"
                     }
                 },
-                required: ["q", "userMessage"]
+                required: []
             }
         }
     },
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
+        const normalizedArgs = {
+            ...args,
+            q: args.q || args.query
+        };
+
         // Validate parameters before proceeding
-        const validationError = validateParameters(args);
+        const validationError = validateParameters(normalizedArgs);
         if (validationError) {
             logger.error(`Google CSE parameter validation failed: ${validationError}`);
             return JSON.stringify({ 
@@ -203,8 +212,8 @@ export default {
         try {
             // Pass-through: call Google CSE with provided args
             const response = await callPathway('google_cse', { 
-                ...args,
-                text: args.q
+                ...normalizedArgs,
+                text: normalizedArgs.q
             }, resolver);
 
             if (resolver.errors && resolver.errors.length > 0) {
