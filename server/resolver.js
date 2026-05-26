@@ -4,6 +4,25 @@ import CortexResponse from '../lib/cortexResponse.js';
 import logger, { withRequestLoggingDisabled } from '../lib/logger.js';
 import { sanitizeBase64 } from '../lib/util.js';
 import { resolveClientToolCallback } from './clientToolCallbacks.js';
+import { queueUserMessage } from './pendingUserMessages.js';
+
+/** GraphQL declares pathway errors/warnings as [String]; coerce any accumulated values. */
+function coerceGraphqlStringList(values) {
+    if (!Array.isArray(values)) return [];
+    return values.map((item) => {
+        if (item == null) return '';
+        if (typeof item === 'string') return item;
+        if (item instanceof Error) return item.message || String(item);
+        if (typeof item === 'object') {
+            try {
+                return JSON.stringify(item);
+            } catch {
+                return String(item);
+            }
+        }
+        return String(item);
+    });
+}
 
 // This resolver uses standard parameters required by Apollo server:
 // (parent, args, contextValue, info)
@@ -79,8 +98,8 @@ const rootResolver = async (parent, args, contextValue, info) => {
         debug, 
         result, 
         resultData,
-        warnings, 
-        errors, 
+        warnings: coerceGraphqlStringList(warnings),
+        errors: coerceGraphqlStringList(errors),
         previousResult, 
         tool, 
         contextId: savedContextId 
@@ -96,7 +115,8 @@ const resolver = async (parent, args, contextValue, _info) => {
 const cancelRequestResolver = (parent, args, contextValue, _info) => {
     const { requestId } = args;
     const { requestState } = contextValue;
-    requestState[requestId] = { canceled: true };
+    requestState[requestId] = { ...requestState[requestId], canceled: true };
+    requestState[requestId]?.abortRequest?.();
     return true
 }
 
@@ -134,6 +154,15 @@ const submitClientToolResultResolver = async (parent, args, contextValue, _info)
     }
 }
 
+const injectAgentMessageResolver = async (parent, args, contextValue, _info) => {
+    const { requestId, message } = args;
+
+    // No requestState check — with Redis pub/sub, the request may be on
+    // a different instance. The message is published to all instances and
+    // only the one owning the requestId will queue it locally.
+    return queueUserMessage(requestId, message);
+};
+
 export {
-    resolver, rootResolver, cancelRequestResolver, submitClientToolResultResolver
+    resolver, rootResolver, cancelRequestResolver, submitClientToolResultResolver, injectAgentMessageResolver
 };
