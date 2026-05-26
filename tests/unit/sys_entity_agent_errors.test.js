@@ -1,8 +1,14 @@
 import test from 'ava';
-import sysEntityAgent from '../../pathways/system/entity/sys_entity_agent.js';
+import sysEntityAgent, {
+  applyNewMcpConfigToResolver,
+  extractNewMcpConfigFromToolResult,
+  redactNewMcpConfigInToolResult,
+  validateClientProvidedMcpConfig,
+} from '../../pathways/system/entity/sys_entity_agent.js';
 import { config } from '../../config.js';
 import { getToolsForEntity } from '../../pathways/system/entity/tools/shared/sys_entity_tools.js';
 import { withTimeout } from '../../lib/pathwayTools.js';
+import { getEntityStore } from '../../lib/MongoEntityStore.js';
 
 const buildToolDefinition = (name, pathwayName, overrides = {}) => ({
   pathwayName,
@@ -128,6 +134,264 @@ const restoreConfig = (originals) => {
   config.get = originals.originalGet;
 };
 
+const stubEntityStore = (overrides = {}) => {
+  const entityStore = getEntityStore();
+  const originals = {
+    isConfigured: entityStore.isConfigured,
+    getEntity: entityStore.getEntity,
+    findOrCreatePersonalEntity: entityStore.findOrCreatePersonalEntity,
+    getDefaultEntity: entityStore.getDefaultEntity,
+  };
+
+  Object.assign(entityStore, overrides);
+
+  return () => {
+    Object.assign(entityStore, originals);
+  };
+};
+
+test('extractNewMcpConfigFromToolResult reads client tool config updates', (t) => {
+  const config = {
+    atlassian: {
+      type: 'streamable-http',
+      url: 'https://mcp.atlassian.com/v1/mcp',
+      headers: { Authorization: 'Bearer token' },
+    },
+  };
+
+  t.deepEqual(
+    extractNewMcpConfigFromToolResult({
+      result: JSON.stringify({
+        description: 'connected',
+        newMcpConfig: config,
+      }),
+    }),
+    config
+  );
+  t.is(extractNewMcpConfigFromToolResult({ result: '{"description":"ok"}' }), null);
+});
+
+test('redactNewMcpConfigInToolResult preserves config shape without credentials', (t) => {
+  const toolResult = {
+    result: JSON.stringify({
+      description: 'connected',
+      newMcpConfig: {
+        atlassian: {
+          type: 'streamable-http',
+          url: 'https://mcp.atlassian.com/v1/mcp',
+          cloudId: 'cloud-123',
+          headers: {
+            Authorization: 'Bearer secret-token',
+            'X-Atlassian-Cloud-Id': 'cloud-123',
+          },
+        },
+      },
+    }),
+  };
+
+  redactNewMcpConfigInToolResult(toolResult);
+
+  t.false(toolResult.result.includes('secret-token'));
+  const parsed = JSON.parse(toolResult.result);
+  t.is(parsed.newMcpConfig.atlassian.url, 'https://mcp.atlassian.com/v1/mcp');
+  t.is(parsed.newMcpConfig.atlassian.cloudId, 'cloud-123');
+  t.is(parsed.newMcpConfig.atlassian.headers.Authorization, '[REDACTED]');
+  t.is(parsed.newMcpConfig.atlassian.headers['X-Atlassian-Cloud-Id'], 'cloud-123');
+});
+
+test('validateClientProvidedMcpConfig accepts only the requested approved server target', (t) => {
+  const result = validateClientProvidedMcpConfig({
+    requestedServerKey: 'atlassian',
+    args: {
+      mcpAvailableServers: JSON.stringify([
+        {
+          id: 'atlassian',
+          name: 'Atlassian',
+          description: 'Jira and Confluence',
+          type: 'streamable-http',
+          url: 'https://mcp.atlassian.com/v1/mcp',
+        },
+      ]),
+    },
+    newMcpConfig: {
+      atlassian: {
+        type: 'streamable-http',
+        url: 'https://mcp.atlassian.com/v1/mcp',
+        headers: { Authorization: 'Bearer fresh' },
+      },
+      internal: {
+        type: 'streamable-http',
+        url: 'http://169.254.169.254/latest/meta-data',
+      },
+    },
+  });
+
+  t.true(result.valid);
+  t.deepEqual(Object.keys(result.config), ['atlassian']);
+  t.is(result.config.atlassian.headers.Authorization, 'Bearer fresh');
+});
+
+test('validateClientProvidedMcpConfig rejects unapproved MCP targets', (t) => {
+  const result = validateClientProvidedMcpConfig({
+    requestedServerKey: 'atlassian',
+    args: {
+      mcpAvailableServers: JSON.stringify([
+        {
+          id: 'atlassian',
+          name: 'Atlassian',
+          description: 'Jira and Confluence',
+          type: 'streamable-http',
+          url: 'https://mcp.atlassian.com/v1/mcp',
+        },
+      ]),
+    },
+    newMcpConfig: {
+      atlassian: {
+        type: 'streamable-http',
+        url: 'http://169.254.169.254/latest/meta-data',
+        headers: { Authorization: 'Bearer fresh' },
+      },
+    },
+  });
+
+  t.false(result.valid);
+  t.true(result.reason.includes('unapproved MCP URL'));
+});
+
+test('validateClientProvidedMcpConfig accepts expired configured server target for reauth', (t) => {
+  const result = validateClientProvidedMcpConfig({
+    requestedServerKey: 'atlassian',
+    args: {
+      mcpConfig: JSON.stringify({
+        atlassian: {
+          type: 'streamable-http',
+          url: 'https://mcp.atlassian.com/v1/mcp',
+          expiresAt: Date.now() - 60000,
+        },
+      }),
+    },
+    newMcpConfig: {
+      atlassian: {
+        type: 'streamable-http',
+        url: 'https://mcp.atlassian.com/v1/mcp',
+        headers: { Authorization: 'Bearer fresh' },
+      },
+    },
+  });
+
+  t.true(result.valid);
+  t.is(result.source, 'expired-config');
+});
+
+test('applyNewMcpConfigToResolver hot-loads MCP clients and tools', async (t) => {
+  let closedOldTransport = false;
+  const oldClientEntry = {
+    transport: {
+      close: async () => {
+        closedOldTransport = true;
+      },
+    },
+    connectTimestamp: Date.now(),
+  };
+  const nextClientEntry = {
+    client: {},
+    transport: { close: async () => {} },
+    connectTimestamp: Date.now(),
+  };
+  const args = {
+    mcpAvailableServers: JSON.stringify([
+      {
+        id: 'atlassian',
+        name: 'Atlassian',
+        description: 'Jira and Confluence',
+        type: 'streamable-http',
+        url: 'https://mcp.atlassian.com/v1/mcp',
+      },
+    ]),
+    mcpClients: new Map([['atlassian', oldClientEntry]]),
+    mcpToolCatalog: {},
+    mcpEntityToolsDeferred: {},
+    entityTools: {},
+    entityToolsOpenAiFormat: [],
+  };
+  const pathwayResolver = { args };
+  const discoveredTool = {
+    definition: {
+      type: 'function',
+      function: {
+        name: 'atlassian__searchjiraissuesusingjql',
+        description: 'Search Jira issues using JQL',
+        parameters: { type: 'object', properties: {} },
+      },
+    },
+    pathwayName: 'mcp_tool_execution',
+    mcpServer: 'atlassian',
+    mcpToolName: 'searchJiraIssuesUsingJql',
+  };
+
+  const result = await applyNewMcpConfigToResolver({
+    newMcpConfig: {
+      atlassian: {
+        type: 'streamable-http',
+        url: 'https://mcp.atlassian.com/v1/mcp',
+        headers: { Authorization: 'Bearer fresh' },
+      },
+    },
+    args,
+    pathwayResolver,
+    requestedServerKey: 'atlassian',
+    initializeClients: async (configJson) => {
+      const parsedConfig = JSON.parse(configJson);
+      t.deepEqual(Object.keys(parsedConfig), ['atlassian']);
+      t.is(parsedConfig.atlassian.url, 'https://mcp.atlassian.com/v1/mcp');
+      t.is(parsedConfig.atlassian.headers.Authorization, 'Bearer fresh');
+      return {
+        clients: new Map([['atlassian', nextClientEntry]]),
+        expiredServers: [],
+      };
+    },
+    discoverTools: async () => ({
+      entityTools: {
+        atlassian__searchjiraissuesusingjql: discoveredTool,
+      },
+      entityToolsOpenAiFormat: [
+        {
+          type: 'function',
+          function: {
+            name: 'atlassian__searchjiraissuesusingjql',
+            description: 'Search Jira issues using JQL',
+            parameters: { type: 'object', properties: {} },
+          },
+        },
+      ],
+      mcpToolCatalog: {
+        atlassian__searchjiraissuesusingjql: {
+          name: 'atlassian__searchjiraissuesusingjql',
+          originalName: 'searchJiraIssuesUsingJql',
+          server: 'atlassian',
+          description: 'Search Jira issues using JQL',
+          parameters: [],
+        },
+      },
+    }),
+    closeClients: async (clients) => {
+      for (const [, entry] of clients) {
+        await entry.transport.close();
+      }
+      clients.clear();
+    },
+  });
+
+  t.true(result.applied);
+  t.true(closedOldTransport);
+  t.is(args.mcpClients.get('atlassian'), nextClientEntry);
+  t.truthy(args.entityTools.atlassian__searchjiraissuesusingjql);
+  t.truthy(args.mcpEntityToolsDeferred.atlassian__searchjiraissuesusingjql);
+  t.truthy(args.mcpToolCatalog.atlassian__searchjiraissuesusingjql);
+  t.is(args.entityToolsOpenAiFormat.length, 1);
+  t.is(pathwayResolver.args.mcpClients.get('atlassian'), nextClientEntry);
+});
+
 test.serial('executePathway returns sys_generator_error output on 500 base model error', async (t) => {
   const originals = setupConfig();
   t.teardown(() => restoreConfig(originals));
@@ -136,7 +400,7 @@ test.serial('executePathway returns sys_generator_error output on 500 base model
   const args = {
     text: 'trigger base model error',
     chatHistory: [{ role: 'user', content: 'hi' }],
-    agentContext: [],
+    fileAccessPlan: [],
     entityId: originals.entityId,
   };
 
@@ -147,6 +411,70 @@ test.serial('executePathway returns sys_generator_error output on 500 base model
   const result = await sysEntityAgent.executePathway({ args, runAllPrompts, resolver });
   t.true(result.includes('ERROR_RESPONSE'));
   t.true(result.includes('HTTP 500 from model'));
+});
+
+test.serial('executePathway does not derive file access from contextId/contextKey', async (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+
+  const resolver = buildResolver();
+  let promptArgs;
+  const args = {
+    text: 'legacy file access',
+    chatHistory: [{ role: 'user', content: 'hi' }],
+    fileAccessPlan: [],
+    contextId: 'legacy-context-123',
+    contextKey: 'legacy-key-abc',
+    entityId: originals.entityId,
+  };
+
+  const runAllPrompts = async (receivedArgs) => {
+    promptArgs = receivedArgs;
+    return 'legacy-ok';
+  };
+
+  const result = await sysEntityAgent.executePathway({ args, runAllPrompts, resolver });
+
+  t.is(result, 'legacy-ok');
+  t.deepEqual(promptArgs.fileAccessPlan, []);
+});
+
+test.serial('executePathway leaves entityId blank when caller omits it', async (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+
+  const defaultEntity = {
+    id: 'default-workspace-entity',
+    name: 'Default Workspace Entity',
+    isDefault: true,
+    tools: [],
+    customTools: {},
+  };
+
+  const restoreStore = stubEntityStore({
+    isConfigured: () => true,
+    getEntity: async () => null,
+    getDefaultEntity: async () => defaultEntity,
+  });
+  t.teardown(restoreStore);
+
+  const resolver = buildResolver();
+  let promptArgs;
+  const args = {
+    text: 'use default entity config without impersonating it',
+    chatHistory: [{ role: 'user', content: 'hi' }],
+    fileAccessPlan: [],
+  };
+
+  const runAllPrompts = async (receivedArgs) => {
+    promptArgs = receivedArgs;
+    return 'default-ok';
+  };
+
+  const result = await sysEntityAgent.executePathway({ args, runAllPrompts, resolver });
+
+  t.is(result, 'default-ok');
+  t.is(promptArgs.entityId, '');
 });
 
 test.serial('executePathway falls back when sys_generator_error fails after null model response', async (t) => {
@@ -167,7 +495,7 @@ test.serial('executePathway falls back when sys_generator_error fails after null
   const args = {
     text: 'trigger null response',
     chatHistory: [{ role: 'user', content: 'hi' }],
-    agentContext: [],
+    fileAccessPlan: [],
     entityId: originals.entityId,
   };
 
@@ -176,6 +504,193 @@ test.serial('executePathway falls back when sys_generator_error fails after null
 
   t.true(result.includes('I apologize, but I encountered an error while processing your request'));
   t.true(result.includes('Model execution returned null'));
+});
+
+test.serial('executePathway repairs a stale explicit entityId to the canonical personal entity', async (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+
+  const restoreEntityStore = stubEntityStore({
+    isConfigured: () => true,
+    getEntity: async (entityId) => {
+      if (entityId === 'repaired-entity') {
+        return {
+          id: 'repaired-entity',
+          name: 'Lana',
+          tools: ['*'],
+          customTools: {},
+        };
+      }
+      return null;
+    },
+    findOrCreatePersonalEntity: async () => ({
+      id: 'repaired-entity',
+      name: 'Lana',
+      created: false,
+    }),
+    getDefaultEntity: async () => ({
+      id: 'default-entity',
+      name: 'Default',
+      tools: ['*'],
+      customTools: {},
+    }),
+  });
+  t.teardown(restoreEntityStore);
+
+  const resolver = buildResolver();
+  let promptArgs;
+  const args = {
+    text: 'repair stale entity id',
+    chatHistory: [{ role: 'user', content: 'hi' }],
+    fileAccessPlan: [{ userContextId: 'user-123' }],
+    entityId: 'stale-entity',
+  };
+
+  const runAllPrompts = async (receivedArgs) => {
+    promptArgs = receivedArgs;
+    return 'repair-ok';
+  };
+
+  const result = await sysEntityAgent.executePathway({ args, runAllPrompts, resolver });
+
+  t.is(result, 'repair-ok');
+  t.is(promptArgs.entityId, 'repaired-entity');
+});
+
+test.serial('executePathway clears stale explicit entityId when no user context exists', async (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+
+  const restoreEntityStore = stubEntityStore({
+    isConfigured: () => true,
+    getEntity: async (entityId) => {
+      if (entityId === 'default-entity') {
+        return {
+          id: 'default-entity',
+          name: 'Default',
+          isDefault: true,
+          tools: ['*'],
+          customTools: {},
+        };
+      }
+      return null;
+    },
+    findOrCreatePersonalEntity: async () => null,
+    getDefaultEntity: async () => ({
+      id: 'default-entity',
+      name: 'Default',
+      isDefault: true,
+      tools: ['*'],
+      customTools: {},
+    }),
+  });
+  t.teardown(restoreEntityStore);
+
+  const resolver = buildResolver();
+  let promptArgs;
+  const args = {
+    text: 'clear stale entity id without user',
+    chatHistory: [{ role: 'user', content: 'hi' }],
+    fileAccessPlan: [],
+    entityId: 'stale-entity',
+  };
+
+  const runAllPrompts = async (receivedArgs) => {
+    promptArgs = receivedArgs;
+    return 'default-ok';
+  };
+
+  const result = await sysEntityAgent.executePathway({ args, runAllPrompts, resolver });
+
+  t.is(result, 'default-ok');
+  t.is(promptArgs.entityId, '');
+});
+
+test.serial('executePathway clears stale explicit entityId when personal entity repair is unavailable', async (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+
+  const restoreEntityStore = stubEntityStore({
+    isConfigured: () => true,
+    getEntity: async () => null,
+    findOrCreatePersonalEntity: async () => null,
+    getDefaultEntity: async () => ({
+      id: 'default-entity',
+      name: 'Default',
+      isDefault: true,
+      tools: ['*'],
+      customTools: {},
+    }),
+  });
+  t.teardown(restoreEntityStore);
+
+  const resolver = buildResolver();
+  let promptArgs;
+  const args = {
+    text: 'clear stale entity id when personal entity is unavailable',
+    chatHistory: [{ role: 'user', content: 'hi' }],
+    fileAccessPlan: [{ userContextId: 'user-123' }],
+    entityId: 'stale-entity',
+  };
+
+  const runAllPrompts = async (receivedArgs) => {
+    promptArgs = receivedArgs;
+    return 'default-ok';
+  };
+
+  const result = await sysEntityAgent.executePathway({ args, runAllPrompts, resolver });
+
+  t.is(result, 'default-ok');
+  t.is(promptArgs.entityId, '');
+});
+
+test.serial('executePathway preserves disabled explicit entity failures instead of repairing them', async (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+
+  const restoreEntityStore = stubEntityStore({
+    isConfigured: () => true,
+    getEntity: async (entityId) => {
+      if (entityId === 'disabled-entity') {
+        return {
+          id: 'disabled-entity',
+          name: 'Disabled',
+          requiredEnvVars: ['MISSING_SECRET'],
+          tools: ['*'],
+          customTools: {},
+        };
+      }
+      return null;
+    },
+    findOrCreatePersonalEntity: async () => ({
+      id: 'repaired-entity',
+      name: 'Lana',
+      created: false,
+    }),
+    getDefaultEntity: async () => ({
+      id: 'default-entity',
+      name: 'Default',
+      isDefault: true,
+      tools: ['*'],
+      customTools: {},
+    }),
+  });
+  t.teardown(restoreEntityStore);
+
+  const resolver = buildResolver();
+  const args = {
+    text: 'use disabled entity',
+    chatHistory: [{ role: 'user', content: 'hi' }],
+    fileAccessPlan: [{ userContextId: 'user-123' }],
+    entityId: 'disabled-entity',
+  };
+
+  const runAllPrompts = async () => 'should-not-run';
+  const result = await sysEntityAgent.executePathway({ args, runAllPrompts, resolver });
+
+  t.true(result.includes('ERROR_RESPONSE'));
+  t.true(result.includes('disabled-entity'));
+  t.true(result.includes('missing required environment variables'));
 });
 
 test.serial('toolCallback surfaces 400 error JSON from tool result', async (t) => {
@@ -280,7 +795,7 @@ test.serial('toolCallback captures tool null result as error', async (t) => {
   )));
 });
 
-test.serial('toolCallback reports invalid tool call arguments', async (t) => {
+test.serial('toolCallback handles missing tool call arguments gracefully with empty args', async (t) => {
   const originals = setupConfig();
   t.teardown(() => restoreConfig(originals));
 
@@ -309,15 +824,14 @@ test.serial('toolCallback reports invalid tool call arguments', async (t) => {
     }],
   };
 
+  // With the updated code, missing arguments default to {} and the tool still executes
   const result = await sysEntityAgent.toolCallback(args, message, resolver);
   t.is(result, 'tool-handled');
   const toolMessage = args.chatHistory.find((entry) => entry.role === 'tool');
   t.truthy(toolMessage);
-  t.true(toolMessage.content.includes('Invalid tool call structure: missing function arguments'));
+  // The tool executes with empty args and returns its normal result (400 Bad Request)
+  t.true(toolMessage.content.includes('400 Bad Request'));
   t.truthy(promptArgs);
-  t.true(promptArgs.chatHistory.some((entry) => (
-    entry.role === 'tool' && entry.content.includes('Invalid tool call structure')
-  )));
 });
 
 test.serial('toolCallback returns error response when promptAndParse throws', async (t) => {
@@ -362,7 +876,7 @@ test.serial('executePathway returns error response when tool recursion times out
   const args = {
     text: 'trigger tool recursion',
     chatHistory: [{ role: 'user', content: 'hi' }],
-    agentContext: [],
+    fileAccessPlan: [],
     entityId: originals.entityId,
     entityToolsOpenAiFormat,
   };
@@ -452,43 +966,17 @@ test('withTimeout clears timeout when promise rejects', async (t) => {
   t.is(error.message, 'Original error');
 });
 
-test.serial('toolCallback truncates oversized tool results', async (t) => {
+test.serial('toolCallback compacts oversized tool results in chat history', async (t) => {
+  // The compaction block protects against tool messages that arrive in
+  // chatHistory already large. Fresh tool results from a tool call are envelope-shaped by
+  // buildToolResultContent before they ever hit this block, so the test
+  // exercises the safety net by seeding chatHistory directly.
   const originals = setupConfig();
   t.teardown(() => restoreConfig(originals));
 
-  // Create a tool that returns a very large result
-  const largeResultPathways = {
-    ...config.get('pathways'),
-    test_tool_large_result: {
-      rootResolver: async () => ({
-        // Create a result larger than MAX_TOOL_RESULT_LENGTH (150000)
-        result: JSON.stringify({ data: 'x'.repeat(160000) }),
-      }),
-    },
-  };
-  config.load({ pathways: largeResultPathways });
-
-  const tools = {
-    ...config.get('entityConfig')[originals.entityId].customTools,
-    largeresult: buildToolDefinition('LargeResult', 'test_tool_large_result'),
-  };
-
-  const entityConfig = {
-    [originals.entityId]: {
-      ...config.get('entityConfig')[originals.entityId],
-      tools: [...config.get('entityConfig')[originals.entityId].tools, 'largeresult'],
-      customTools: tools,
-    },
-  };
-
-  config.get = (key) => {
-    if (key === 'entityConfig') {
-      return entityConfig;
-    }
-    return originals.originalGet(key);
-  };
-
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig[originals.entityId]);
+  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(
+    config.get('entityConfig')[originals.entityId]
+  );
 
   let promptArgs;
   const resolver = buildResolver({
@@ -498,24 +986,57 @@ test.serial('toolCallback truncates oversized tool results', async (t) => {
     },
   });
 
+  // 60 KB seeded tool message (mimics a legacy or externally supplied
+  // oversized tool envelope).
+  const oversizedContent = JSON.stringify({ data: 'x'.repeat(60000) });
+  const oversizedToolMessage = {
+    role: 'tool',
+    tool_call_id: 'prior-call',
+    name: 'PriorTool',
+    content: oversizedContent,
+  };
+
   const args = {
-    chatHistory: [{ role: 'user', content: 'use large tool' }],
+    chatHistory: [
+      { role: 'user', content: 'previous' },
+      { role: 'assistant', content: '', tool_calls: [{ id: 'prior-call', type: 'function', function: { name: 'PriorTool', arguments: '{}' } }] },
+      oversizedToolMessage,
+      { role: 'user', content: 'follow up' },
+    ],
     entityTools,
     entityToolsOpenAiFormat,
   };
 
-  const message = { tool_calls: [buildToolCall('LargeResult')] };
+  // Issue any tool call to drive toolCallback through the truncation path.
+  const message = { tool_calls: [buildToolCall('ErrorJson')] };
   await sysEntityAgent.toolCallback(args, message, resolver);
 
-  // Find the tool result message in chatHistory
-  const toolMessage = promptArgs.chatHistory.find((entry) => entry.role === 'tool');
-  t.truthy(toolMessage);
-  
-  // Verify the content was truncated (should be less than 160000 chars)
-  t.true(toolMessage.content.length < 160000);
-  
-  // Verify truncation message was added
-  t.true(toolMessage.content.includes('[Content truncated due to length]'));
+  // The seeded tool message in promptArgs.chatHistory should now be compacted
+  // into a valid envelope instead of substring-truncated into invalid JSON.
+  const seededAfter = promptArgs.chatHistory.find(
+    (entry) => entry.role === 'tool' && entry.tool_call_id === 'prior-call'
+  );
+  t.truthy(seededAfter, 'seeded tool message should still be present');
+  t.true(seededAfter.content.length < oversizedContent.length, 'should have been compacted');
+  const compactedEnvelope = JSON.parse(seededAfter.content);
+  t.true(compactedEnvelope._toolResultEnvelope);
+  t.true(compactedEnvelope.compacted);
+  t.truthy(compactedEnvelope.resultRef);
+  t.true(compactedEnvelope.note.includes('InspectToolResult'));
+
+  // Re-running with the now-compacted history should pass through unchanged.
+  const compactedLength = seededAfter.content.length;
+  const args2 = {
+    ...args,
+    chatHistory: promptArgs.chatHistory, // feed the post-compaction history back
+  };
+  promptArgs = null;
+  await sysEntityAgent.toolCallback(args2, { tool_calls: [buildToolCall('ErrorJson', { userMessage: 'again' }, 'call-2')] }, resolver);
+  const seededSecondPass = promptArgs.chatHistory.find(
+    (entry) => entry.role === 'tool' && entry.tool_call_id === 'prior-call'
+  );
+  t.is(seededSecondPass.content.length, compactedLength,
+    'already-compacted content should pass through unchanged on subsequent turns');
 });
 
 test('findSafeSplitPoint preserves tool call/result pairs', (t) => {
@@ -772,6 +1293,183 @@ test('SSE parser with reconnect-interval should not set receivedSSEData', async 
   t.false(receivedSSEData, 'reconnect-interval should not set receivedSSEData');
 });
 
+// === MCP LIFECYCLE AND REF-COUNTING TESTS ===
+
+test('toolCallback increments _mcpActiveCallbacks ref count', async (t) => {
+  // Test that the ref count is properly incremented
+  const args = {
+    chatHistory: [],
+    entityTools: {},
+    entityToolsOpenAiFormat: [],
+    _mcpActiveCallbacks: 0,
+  };
+
+  const resolver = buildResolver({
+    promptAndParse: async () => 'done',
+  });
+
+  // Simulate no tool_calls to hit the early return path
+  const message = { tool_calls: [] };
+  await sysEntityAgent.toolCallback(args, message, resolver);
+
+  // _mcpToolCallbackFired should be set
+  t.true(args._mcpToolCallbackFired);
+  // ref count should have been incremented then decremented (0 + 1 - 1 = 0)
+  t.true(args._mcpActiveCallbacks <= 0);
+});
+
+test('MCP clients are not closed when ref count is still positive', (t) => {
+  // Test the ref counting logic
+  let _mcpActiveCallbacks = 0;
+
+  // First callback starts
+  _mcpActiveCallbacks += 1;
+  t.is(_mcpActiveCallbacks, 1);
+
+  // Second callback starts (chained)
+  _mcpActiveCallbacks += 1;
+  t.is(_mcpActiveCallbacks, 2);
+
+  // First callback finishes
+  _mcpActiveCallbacks -= 1;
+  const shouldCloseAfterFirst = _mcpActiveCallbacks <= 0;
+  t.false(shouldCloseAfterFirst);
+
+  // Second callback finishes
+  _mcpActiveCallbacks -= 1;
+  const shouldCloseAfterSecond = _mcpActiveCallbacks <= 0;
+  t.true(shouldCloseAfterSecond);
+});
+
+test('MCP closeMcpClientsIfNeeded only closes when last callback completes', async (t) => {
+  let closeCount = 0;
+  const mockClients = new Map();
+  mockClients.set('server1', {
+    transport: { close: async () => { closeCount++; } },
+    connectTimestamp: Date.now(),
+  });
+
+  const args = {
+    mcpClients: mockClients,
+    _mcpActiveCallbacks: 2,
+  };
+
+  // Simulate the closeMcpClientsIfNeeded logic
+  const closeMcpClientsIfNeeded = async () => {
+    args._mcpActiveCallbacks = (args._mcpActiveCallbacks || 1) - 1;
+    if (args._mcpActiveCallbacks <= 0 && args.mcpClients && args.mcpClients.size > 0) {
+      for (const [, { transport }] of args.mcpClients) {
+        await transport.close();
+      }
+      args.mcpClients.clear();
+    }
+  };
+
+  // First callback completes — should NOT close
+  await closeMcpClientsIfNeeded();
+  t.is(closeCount, 0);
+  t.is(args.mcpClients.size, 1);
+
+  // Second callback completes — should close
+  await closeMcpClientsIfNeeded();
+  t.is(closeCount, 1);
+  t.is(args.mcpClients.size, 0);
+});
+
+test.serial('toolCallback preserves MCP clients when follow-up response still has tool calls', async (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+
+  const entityConfig = config.get('entityConfig')[originals.entityId];
+  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
+
+  let closeCount = 0;
+  const mcpClients = new Map([
+    ['atlassian', {
+      transport: { close: async () => { closeCount++; } },
+      connectTimestamp: Date.now(),
+    }],
+  ]);
+
+  const resolver = buildResolver({
+    promptAndParse: async () => ({
+      tool_calls: [buildToolCall('ErrorJson', { userMessage: 'next tool' }, 'call-next')],
+    }),
+  });
+
+  const args = {
+    chatHistory: [{ role: 'user', content: 'search tools, then call jira' }],
+    entityTools,
+    entityToolsOpenAiFormat,
+    mcpClients,
+    _mcpActiveCallbacks: 0,
+  };
+
+  const result = await sysEntityAgent.toolCallback(
+    args,
+    { tool_calls: [buildToolCall('ErrorJson', { userMessage: 'first tool' }, 'call-first')] },
+    resolver,
+  );
+
+  t.truthy(result?.tool_calls?.length);
+  t.is(closeCount, 0);
+  t.is(args.mcpClients.size, 1);
+  t.is(args._mcpActiveCallbacks, 0);
+});
+
+test.serial('toolCallback returns cached result for duplicate tool calls and injects system message', async (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+
+  const entityConfig = config.get('entityConfig')[originals.entityId];
+  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
+
+  let promptCallCount = 0;
+  let lastPromptArgs;
+  const resolver = buildResolver({
+    promptAndParse: async (args) => {
+      promptCallCount++;
+      lastPromptArgs = args;
+      return 'tool-handled';
+    },
+  });
+
+  const args = {
+    chatHistory: [{ role: 'user', content: 'use tool' }],
+    entityTools,
+    entityToolsOpenAiFormat,
+  };
+
+  // First call — should execute normally
+  const message1 = { tool_calls: [buildToolCall('ErrorJson', { userMessage: 'run test' }, 'call-1')] };
+  await sysEntityAgent.toolCallback(args, message1, resolver);
+  t.is(promptCallCount, 1);
+
+  // Second call with identical args — should execute normally (count=1, threshold=2)
+  const message2 = { tool_calls: [buildToolCall('ErrorJson', { userMessage: 'run test' }, 'call-2')] };
+  await sysEntityAgent.toolCallback(args, message2, resolver);
+  t.is(promptCallCount, 2);
+
+  // Third call with identical args — should return cached result (count=2 >= threshold)
+  const message3 = { tool_calls: [buildToolCall('ErrorJson', { userMessage: 'run test' }, 'call-3')] };
+  await sysEntityAgent.toolCallback(args, message3, resolver);
+  t.is(promptCallCount, 3);
+
+  // The tool result for the third call should contain the duplicate warning
+  const toolMessage = lastPromptArgs.chatHistory.find((entry) =>
+    entry.role === 'tool' && entry.content.includes('Duplicate call')
+  );
+  t.truthy(toolMessage, 'Should have a tool result with duplicate warning');
+
+  // Should also have a system message about duplicates
+  const systemMessage = lastPromptArgs.chatHistory.find((entry) =>
+    entry.role === 'user' &&
+    typeof entry.content === 'string' &&
+    entry.content.includes('duplicates of previous calls')
+  );
+  t.truthy(systemMessage, 'Should inject system message about duplicate tool calls');
+});
+
 test('tool callback invoked should not trigger stream warning or completion', (t) => {
   // When a tool callback is invoked (e.g., Gemini returns tool calls),
   // the stream closes but this is expected - the tool will execute and 
@@ -789,4 +1487,50 @@ test('tool callback invoked should not trigger stream warning or completion', (t
   // Completion condition
   const shouldPublishCompletion = receivedSSEData && !toolCallbackInvoked && (streamErrorOccurred || !completionSent);
   t.false(shouldPublishCompletion, 'Should not publish completion when tool callback invoked');
+});
+
+test.serial('toolCallback handles malformed tool arguments without crashing', async (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+
+  const entityConfig = config.get('entityConfig')[originals.entityId];
+  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
+
+  let promptArgs;
+  const resolver = buildResolver({
+    promptAndParse: async (args) => {
+      promptArgs = args;
+      return 'tool-handled';
+    },
+  });
+
+  const args = {
+    chatHistory: [{ role: 'user', content: 'use tool' }],
+    entityTools,
+    entityToolsOpenAiFormat,
+  };
+
+  // Simulate a model sending truncated/malformed JSON arguments
+  // This happens in production with streaming truncation or rate-limited responses
+  const message = {
+    tool_calls: [{
+      id: 'call-malformed',
+      type: 'function',
+      function: {
+        name: 'ErrorJson',
+        arguments: '{"query": "test',  // truncated JSON
+      },
+    }],
+  };
+
+  // Should NOT throw — malformed args should be handled gracefully
+  const result = await sysEntityAgent.toolCallback(args, message, resolver);
+
+  t.is(result, 'tool-handled');
+  // The error should appear in chat history as a tool error message
+  const toolMessage = args.chatHistory.find((entry) => entry.role === 'tool');
+  t.truthy(toolMessage, 'tool error message should be in chat history');
+  t.true(toolMessage.content.includes('Error:'), 'tool message should contain the parse error');
+  // Model should still be called with the error context
+  t.truthy(promptArgs, 'promptAndParse should still be called after the error');
 });

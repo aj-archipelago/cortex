@@ -21,7 +21,6 @@ export default {
         chatId: ``,
         dataSources: { type: 'array', items: { type: 'string' }, default: [] },
         model: 'oai-gpt4o',
-        aiStyle: "OpenAI",
         generatorPathway: 'sys_generator_results',
         voiceResponse: false,
     },
@@ -55,10 +54,6 @@ export default {
                 ...args,
                 chatHistory: args.chatHistory.slice(-20)
             };
-
-            if (generatorPathway === 'coding') {
-                return;
-            }
 
             if (generatorPathway === 'sys_generator_document') {
                 generatorPathway = 'sys_generator_results';
