@@ -558,3 +558,82 @@ test.serial("checkHash with different file types should return shortLivedUrl", a
     }
   }
 });
+
+test.serial("checkHash should copy blob to new chat folder when folder context differs", async (t) => {
+  if (!isUsingAzureStorage()) {
+    t.pass("Skipping test - requires Azure storage (including Azurite)");
+    return;
+  }
+
+  const testContent = "Content for cross-chat copy test";
+  const filePath = await createTestFile(testContent);
+  const hash = `test-crosschat-${uuidv4()}`;
+  const userId = `testuser-${uuidv4().slice(0, 8)}`;
+  const chat1 = `chat1-${uuidv4().slice(0, 8)}`;
+  const chat2 = `chat2-${uuidv4().slice(0, 8)}`;
+
+  try {
+    // Upload file with userId, chatId=chat1, fileScope=chat
+    const form = new FormData();
+    form.append("hash", hash);
+    form.append("userId", userId);
+    form.append("chatId", chat1);
+    form.append("fileScope", "chat");
+    form.append("file", fs.createReadStream(filePath));
+
+    const uploadResponse = await axios.post(baseUrl, form, {
+      headers: form.getHeaders(),
+      validateStatus: (status) => true,
+      timeout: 15000,
+    });
+    t.is(uploadResponse.status, 200, "Upload should succeed");
+    t.truthy(uploadResponse.data.url, "Upload should return URL");
+
+    // Verify the uploaded blob is in chats/chat1/ folder
+    const uploadedBlobPath = decodeURIComponent(new URL(uploadResponse.data.url).pathname);
+    t.true(uploadedBlobPath.includes(`chats/${chat1}/`), "Uploaded file should be in chat1 folder");
+
+    // checkHash with chatId=chat2 — should copy blob to chats/chat2/
+    const checkResponse = await axios.get(baseUrl, {
+      params: {
+        hash,
+        checkHash: true,
+        userId,
+        chatId: chat2,
+        fileScope: "chat",
+      },
+      validateStatus: (status) => true,
+      timeout: 15000,
+    });
+
+    t.is(checkResponse.status, 200, "checkHash should succeed");
+    t.truthy(checkResponse.data.url, "checkHash should return URL");
+
+    // Verify the returned URL now points to chats/chat2/
+    const returnedBlobPath = decodeURIComponent(new URL(checkResponse.data.url).pathname);
+    t.true(returnedBlobPath.includes(`chats/${chat2}/`), "Returned URL should be in chat2 folder");
+    t.false(returnedBlobPath.includes(`chats/${chat1}/`), "Returned URL should NOT be in chat1 folder");
+
+    // listFolder for chat2 should show the file
+    const listResponse = await axios.get(baseUrl, {
+      params: {
+        listFolder: true,
+        userId,
+        chatId: chat2,
+        fileScope: "chat",
+      },
+      validateStatus: (status) => true,
+      timeout: 10000,
+    });
+
+    t.is(listResponse.status, 200, "listFolder should succeed");
+    t.true(listResponse.data.count >= 1, "chat2 folder should have at least 1 file");
+    const fileNames = listResponse.data.files.map(f => f.name);
+    const hasFile = fileNames.some(n => n.includes(`chats/${chat2}/`));
+    t.true(hasFile, "listFolder for chat2 should include the copied file");
+
+  } finally {
+    fs.unlinkSync(filePath);
+    await cleanupHashAndFile(hash, null, baseUrl);
+  }
+});

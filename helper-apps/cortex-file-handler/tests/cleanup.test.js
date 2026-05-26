@@ -80,13 +80,7 @@ function getRequestIdFromUploadResult(uploadResult) {
 // Ensure server is ready before tests
 test.before(async () => {
   // Start the server with Redis connection setup
-  await startTestServer({
-    beforeReady: async () => {
-      // Ensure Redis is connected
-      const { connectClient } = await import("../src/redis.js");
-      await connectClient();
-    }
-  });
+  await startTestServer();
 });
 
 test.after(async () => {

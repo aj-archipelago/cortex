@@ -74,7 +74,7 @@ app.all("/api/CortexFileHandler", async (req, res) => {
   } catch (error) {
     const status = error.status || 500;
     const message = error.message || "Internal server error";
-    res.status(status).send(message);
+    res.status(status).type("text/plain").send(message);
   }
 });
 
@@ -90,7 +90,7 @@ app.all("/api/MediaFileChunker", async (req, res) => {
   } catch (error) {
     const status = error.status || 500;
     const message = error.message || "Internal server error";
-    res.status(status).send(message);
+    res.status(status).type("text/plain").send(message);
   }
 });
 

@@ -38,10 +38,10 @@ async function createTestFile(content, extension) {
 // Helper function to upload file with hash and container
 async function uploadFile(filePath, hash = null, containerName = null, contextId = null) {
   const form = new FormData();
-  form.append("file", fs.createReadStream(filePath));
   if (hash) form.append("hash", hash);
   if (containerName) form.append("container", containerName);
   if (contextId) form.append("contextId", contextId);
+  form.append("file", fs.createReadStream(filePath));
 
   return await axios.post(baseUrl, form, {
     headers: form.getHeaders(),

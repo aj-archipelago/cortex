@@ -106,7 +106,7 @@ export class ConversionService {
    * @returns {Promise<Object>} - Updated file info with conversion if needed
    */
   async ensureConvertedVersion(fileInfo, requestId) {
-    const { url, gcs } = fileInfo;
+    const { url, gcs, folderPath } = fileInfo;
     // Remove any query parameters before extension check
     const extension = path.extname(url.split("?")[0]).toLowerCase();
 
@@ -167,6 +167,7 @@ export class ConversionService {
           conversion.convertedPath,
           requestId,
           null,
+          folderPath,
         );
         if (!convertedSaveResult) {
           throw new Error("Failed to save converted file to primary storage");
@@ -178,6 +179,8 @@ export class ConversionService {
           gcsUrl = await this._uploadChunkToGCS(
             conversion.convertedPath,
             requestId,
+            null,
+            folderPath,
           );
         }
 
@@ -377,11 +380,11 @@ export class ConversionService {
     throw new Error("Method _downloadFile must be implemented");
   }
 
-  async _saveConvertedFile(filePath, requestId, filename = null) {
+  async _saveConvertedFile(filePath, requestId, filename = null, folderPath = null) {
     throw new Error("Method _saveConvertedFile must be implemented");
   }
 
-  async _uploadChunkToGCS(filePath, requestId) {
+  async _uploadChunkToGCS(filePath, requestId, filename = null, folderPath = null) {
     throw new Error("Method _uploadChunkToGCS must be implemented");
   }
 

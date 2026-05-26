@@ -39,16 +39,16 @@ export class StorageFactory {
     return this.getLocalProvider();
   }
 
-  async getAzureProvider() {
-    // Always use single container from env var
-    const containerName = getContainerName();
-    
+  async getAzureProvider(containerName = null) {
+    // Use provided container name, or fall back to default from env var
+    const resolvedContainer = containerName || getContainerName();
+
     // Create unique key for caching
-    const key = `azure-${containerName}`;
+    const key = `azure-${resolvedContainer}`;
     if (!this.providers.has(key)) {
       const provider = new AzureStorageProvider(
         process.env.AZURE_STORAGE_CONNECTION_STRING,
-        containerName,
+        resolvedContainer,
       );
       this.providers.set(key, provider);
     }

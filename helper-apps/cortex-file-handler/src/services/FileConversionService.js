@@ -1,3 +1,7 @@
+import { createReadStream } from "fs";
+import path from "path";
+import mime from "mime-types";
+
 import { ConversionService } from "./ConversionService.js";
 import { getFileStoreMap, setFileStoreMap } from "../redis.js";
 import { urlExists } from "../helper.js";
@@ -34,24 +38,34 @@ export class FileConversionService extends ConversionService {
     return downloadFile(url, destination);
   }
 
-  async _saveConvertedFile(filePath, requestId, filename = null) {
+  async _saveConvertedFile(filePath, requestId, filename = null, folderPath = null) {
     // Generate a fallback requestId if none supplied (e.g. during checkHash calls)
     const reqId = requestId || uuidv4();
 
     let fileUrl;
     if (this.useAzure) {
-      // Container parameter is ignored - always uses default container from env var
       const provider = await this.storageFactory.getAzureProvider();
-      const result = await provider.uploadFile({}, filePath, reqId, null, filename);
-      fileUrl = result.url;
+      if (folderPath) {
+        // Use uploadStream which supports folderPath to store converted file
+        // next to the original in the user's folder
+        const uploadName = filename || path.basename(filePath);
+        const stream = createReadStream(filePath);
+        const contentType = mime.lookup(uploadName) || null;
+        const result = await provider.uploadStream({}, uploadName, stream, contentType, 'temporary', folderPath);
+        fileUrl = result.url;
+      } else {
+        // Container parameter is ignored - always uses default container from env var
+        const result = await provider.uploadFile({}, filePath, reqId, null, filename);
+        fileUrl = result.url;
+      }
     } else {
       fileUrl = await moveFileToPublicFolder(filePath, reqId);
     }
     return { url: fileUrl };
   }
 
-  async _uploadChunkToGCS(filePath, requestId, filename = null) {
-    return uploadChunkToGCS(filePath, requestId, filename);
+  async _uploadChunkToGCS(filePath, requestId, filename = null, folderPath = null) {
+    return uploadChunkToGCS(filePath, requestId, filename, folderPath);
   }
 
   _isGCSConfigured() {

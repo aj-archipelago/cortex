@@ -45,12 +45,9 @@ async function uploadFile(filePath, requestId = null, hash = null) {
   if (hash) form.append("hash", hash);
 
   const response = await axios.post(baseUrl, form, {
-    headers: {
-      ...form.getHeaders(),
-      "Content-Type": "multipart/form-data",
-    },
+    headers: form.getHeaders(),
     validateStatus: (status) => true,
-    timeout: 30000,
+    timeout: 120000,
     maxContentLength: Infinity,
     maxBodyLength: Infinity,
   });

@@ -140,6 +140,7 @@ async function splitMediaFile(
   inputPath,
   chunkDurationInSeconds = 500,
   requestId = uuidv4(),
+  chunkOverlapSeconds = 0,
 ) {
   let tempPath = null;
   let uniqueOutputPath = null;
@@ -186,7 +187,14 @@ async function splitMediaFile(
     }
 
     const duration = metadata.format.duration;
-    const numChunks = Math.ceil((duration - 1) / chunkDurationInSeconds);
+    const numChunks = Math.max(
+      1,
+      Math.ceil((duration - 1) / chunkDurationInSeconds),
+    );
+    const overlapSeconds = Math.max(
+      0,
+      Math.min(Number(chunkOverlapSeconds) || 0, chunkDurationInSeconds / 2),
+    );
     console.log(
       `Processing ${numChunks} chunks of ${chunkDurationInSeconds} seconds each`,
     );
@@ -212,14 +220,23 @@ async function splitMediaFile(
           uniqueOutputPath,
           `chunk-${chunkIndex + 1}-${chunkBaseName}`,
         );
-        const offset = chunkIndex * chunkDurationInSeconds;
+        const idealOffset = chunkIndex * chunkDurationInSeconds;
+        const offset = Math.max(
+          0,
+          idealOffset - (chunkIndex > 0 ? overlapSeconds : 0),
+        );
+        const chunkEnd = Math.min(
+          duration,
+          (chunkIndex + 1) * chunkDurationInSeconds,
+        );
+        const chunkLength = Math.max(0.1, chunkEnd - offset);
 
         chunkBatch.push(
           processChunk(
             inputPath,
             outputFileName,
             offset,
-            chunkDurationInSeconds,
+            chunkLength,
           )
             .then((result) => {
               chunkResults[chunkIndex] = result; // Store in correct position

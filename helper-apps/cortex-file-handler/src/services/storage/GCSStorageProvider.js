@@ -39,7 +39,7 @@ export class GCSStorageProvider extends StorageProvider {
     return `gs://${bucket}/${pathParts.map((part) => decodeURIComponent(part)).join("/")}`;
   }
 
-  async uploadFile(context, filePath, requestId, hash = null, filename = null) {
+  async uploadFile(context, filePath, requestId, hash = null, filename = null, folderPath = null) {
     const bucket = this.storage.bucket(this.bucketName);
 
     // Use provided filename or generate LLM-friendly naming
@@ -50,6 +50,14 @@ export class GCSStorageProvider extends StorageProvider {
       const fileExtension = path.extname(filePath);
       const shortId = generateShortId();
       blobName = generateBlobName(requestId, `${shortId}${fileExtension}`);
+    }
+
+    // If folderPath is provided, prepend it to create folder hierarchy (e.g., userId isolation for GCS)
+    if (folderPath) {
+      const normalizedFolder = folderPath.replace(/^\/+|\/+$/g, '');
+      if (normalizedFolder) {
+        blobName = `${normalizedFolder}/${blobName}`;
+      }
     }
 
     if (typeof filePath === "string") {
@@ -74,12 +82,21 @@ export class GCSStorageProvider extends StorageProvider {
     };
   }
 
-  async uploadStream(context, encodedFilename, stream, providedContentType = null) {
+  async uploadStream(context, encodedFilename, stream, providedContentType = null, retention = 'temporary', folderPath = null) {
     const bucket = this.storage.bucket(this.bucketName);
-    const blobName = sanitizeFilename(encodedFilename);
+    let blobName = sanitizeFilename(encodedFilename);
+
+    // If folderPath is provided, prepend it to create folder hierarchy
+    if (folderPath) {
+      // Normalize folder path: remove leading/trailing slashes
+      const normalizedFolder = folderPath.replace(/^\/+|\/+$/g, '');
+      if (normalizedFolder) {
+        blobName = `${normalizedFolder}/${blobName}`;
+      }
+    }
 
     let contentType = providedContentType || this.getContentType(encodedFilename) || "application/octet-stream";
-    
+
     // For text MIME types, ensure charset=utf-8 is included if not already present
     if (this.isTextMimeType(contentType)) {
       if (!contentType.includes('charset=')) {
@@ -96,6 +113,7 @@ export class GCSStorageProvider extends StorageProvider {
     });
 
     await new Promise((resolve, reject) => {
+      stream.on('error', reject);
       stream.pipe(writeStream)
         .on('finish', resolve)
         .on('error', reject);
@@ -107,6 +125,122 @@ export class GCSStorageProvider extends StorageProvider {
   // Use shared utility for MIME type checking
   isTextMimeType(mimeType) {
     return isTextMimeTypeUtil(mimeType);
+  }
+
+  /**
+   * List all files in a folder path
+   * @param {string} folderPath - The folder path to list (e.g., 'users/123/global')
+   * @returns {Promise<Array>} Array of file objects with name, filename, hash, lastModified
+   */
+  async listFolder(folderPath) {
+    const bucket = this.storage.bucket(this.bucketName);
+
+    // Ensure folder path ends with / for proper prefix matching.
+    // Empty string means "list everything" — use undefined prefix (no filter).
+    const prefix = folderPath === '' ? undefined : (folderPath.endsWith('/') ? folderPath : `${folderPath}/`);
+    const results = [];
+
+    if (process.env.STORAGE_EMULATOR_HOST) {
+      // Use REST API for emulator
+      try {
+        const listResp = await axios.get(
+          `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${this.bucketName}/o`,
+          {
+            params: { prefix },
+            validateStatus: (s) => s === 200 || s === 404,
+          },
+        );
+
+        if (listResp.status === 200 && Array.isArray(listResp.data.items)) {
+          for (const item of listResp.data.items) {
+            const rawFilename = item.name.split('/').pop();
+            let filename;
+            try { filename = decodeURIComponent(rawFilename); } catch { filename = rawFilename; }
+            const hashMatch = filename.match(/^([a-f0-9]+)_/i);
+
+            // For emulator, construct a direct download URL (no signed URLs needed)
+            const url = `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${this.bucketName}/o/${encodeURIComponent(item.name)}?alt=media`;
+
+            results.push({
+              name: item.name,
+              filename: hashMatch ? filename.replace(/^[a-f0-9]+_/i, '') : filename,
+              hash: hashMatch ? hashMatch[1] : null,
+              lastModified: item.updated ? new Date(item.updated) : null,
+              contentType: item.contentType,
+              size: parseInt(item.size, 10) || 0,
+              url,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Error listing folder from emulator:", error);
+      }
+    } else {
+      // Use GCS client library
+      try {
+        const [files] = await bucket.getFiles({ prefix });
+        for (const file of files) {
+          const rawFilename = file.name.split('/').pop();
+          let filename;
+          try { filename = decodeURIComponent(rawFilename); } catch { filename = rawFilename; }
+          const hashMatch = filename.match(/^([a-f0-9]+)_/i);
+
+          const [metadata] = await file.getMetadata();
+
+          // Generate a signed URL for direct download (60 min)
+          const [signedUrl] = await file.getSignedUrl({
+            action: 'read',
+            expires: Date.now() + 60 * 60 * 1000,
+          });
+
+          results.push({
+            name: file.name,
+            filename: hashMatch ? filename.replace(/^[a-f0-9]+_/i, '') : filename,
+            hash: hashMatch ? hashMatch[1] : null,
+            lastModified: metadata.updated ? new Date(metadata.updated) : null,
+            contentType: metadata.contentType,
+            size: parseInt(metadata.size, 10) || 0,
+            url: signedUrl,
+          });
+        }
+      } catch (error) {
+        console.error("Error listing folder from GCS:", error);
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Rename a blob by copying to a new name and deleting the old one.
+   * @param {string} oldBlobName - The current blob name
+   * @param {string} newBlobName - The new blob name
+   * @returns {Promise<{url: string}>}
+   */
+  async renameBlob(oldBlobName, newBlobName) {
+    const bucket = this.storage.bucket(this.bucketName);
+
+    if (process.env.STORAGE_EMULATOR_HOST) {
+      // Emulator: use REST API to copy then delete
+      const copyUrl = `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${this.bucketName}/o/${encodeURIComponent(oldBlobName)}/copyTo/b/${this.bucketName}/o/${encodeURIComponent(newBlobName)}`;
+      await axios.post(copyUrl, null, {
+        validateStatus: (s) => s === 200,
+      });
+
+      await axios.delete(
+        `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${this.bucketName}/o/${encodeURIComponent(oldBlobName)}`,
+        { validateStatus: (s) => s === 200 || s === 204 },
+      );
+    } else {
+      // Real GCS: use client library
+      const file = bucket.file(oldBlobName);
+      await file.copy(bucket.file(newBlobName));
+      await file.delete();
+    }
+
+    return {
+      url: `gs://${this.bucketName}/${newBlobName}`,
+    };
   }
 
   async deleteFiles(requestId) {
@@ -267,6 +401,9 @@ export class GCSStorageProvider extends StorageProvider {
           );
           return response.status === 200;
         } catch (error) {
+          if (error.response?.status === 404) {
+            return false;
+          }
           console.error("Error checking emulator file:", error);
           return false;
         }
@@ -277,6 +414,9 @@ export class GCSStorageProvider extends StorageProvider {
       const [exists] = await file.exists();
       return exists;
     } catch (error) {
+      if (error.code === 404) {
+        return false;
+      }
       console.error("Error checking if GCS URL exists:", error);
       return false;
     }

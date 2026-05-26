@@ -14,9 +14,15 @@ const createMockClient = () => {
   const store = new Map();
   const hashMap = new Map();
   const locks = new Map(); // For lock simulation
-  
+
   return {
     connected: false,
+    // Reset all in-memory state (used between test files to prevent leakage)
+    _reset() {
+      store.clear();
+      hashMap.clear();
+      locks.clear();
+    },
     async connect() { return Promise.resolve(); },
     async publish() { return Promise.resolve(); },
     async hgetall(hashName) { 
@@ -141,33 +147,7 @@ if (connectionString && process.env.NODE_ENV !== 'test') {
 
 const channel = "requestProgress";
 
-const connectClient = async () => {
-  // ioredis connects automatically; this function is kept for backwards
-  // compatibility and for the mock client.
-  try {
-    // Mock client uses `connected`; ioredis uses `status`.
-    if (typeof client?.connected === "boolean") {
-      if (!client.connected && typeof client.connect === "function") {
-        await client.connect();
-      }
-      return;
-    }
-
-    // ioredis states: "wait" | "connecting" | "connect" | "ready" | "close" | "end"
-    if (client?.status && client.status !== "ready") {
-      // If the caller explicitly wants to ensure connectivity, we can ping.
-      // If Redis is down, ping will throw and we handle it.
-      await client.ping();
-    }
-  } catch (error) {
-    console.error(
-      `[redis] Not ready (status=${client?.status || "unknown"}): ${error?.message || error}`,
-    );
-  }
-};
-
 const publishRequestProgress = async (data) => {
-  // await connectClient();
   try {
     const message = JSON.stringify(data);
     console.log(`Publishing message ${message} to channel ${channel}`);
@@ -364,10 +344,10 @@ const getFileStoreMap = async (hash, skipLazyCleanup = false, contextId = null) 
             // Remove stale entry if both primary and backup are missing
             // Need to extract contextId from the key if it was scoped
             if (shouldRemove) {
-              // For lazy cleanup, we don't have contextId, so try unscoped first
-              // If the key was scoped, we'd need contextId, but lazy cleanup doesn't have it
-              // So we'll just try to remove from unscoped map
-              await removeFromFileStoreMap(hash, null);
+              // Use contextId if available (passed to getFileStoreMap), otherwise
+              // fall back to unscoped map. Context-scoped entries found without a
+              // contextId cannot be cleaned up here.
+              await removeFromFileStoreMap(hash, contextId || null);
               console.log(
                 `Lazy cleanup: Removed stale cache entry for hash ${hash}`,
               );
@@ -524,9 +504,9 @@ const acquireLock = async (lockKey, ttlSeconds = 300) => {
     return result === "OK";
   } catch (error) {
     console.error(`Error acquiring lock for ${lockKey}:`, error);
-    // In case of error, allow operation to proceed (fail open)
-    // This prevents Redis issues from blocking operations
-    return true;
+    // Fail closed: callers must handle the case where the lock was NOT acquired
+    // rather than proceeding unsafely without mutual exclusion
+    return false;
   }
 };
 
@@ -547,7 +527,6 @@ const releaseLock = async (lockKey) => {
 
 export {
   publishRequestProgress,
-  connectClient,
   setFileStoreMap,
   getFileStoreMap,
   removeFromFileStoreMap,

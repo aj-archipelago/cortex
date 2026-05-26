@@ -4,13 +4,20 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import mime from "mime-types";
 
-import { DOC_EXTENSIONS, AZURITE_ACCOUNT_NAME } from "./constants.js";
+import {
+  DOC_EXTENSIONS,
+  AZURITE_ACCOUNT_NAME,
+  getDefaultContainerName,
+  getUserContainerName,
+  getUserContainerNameCandidates,
+} from "./constants.js";
 import { easyChunker } from "./docHelper.js";
 import { downloadFile, splitMediaFile } from "./fileChunker.js";
 import { ensureEncoded, ensureFileExtension, urlExists } from "./helper.js";
 import {
   cleanupRedisFileStoreMap,
   getFileStoreMap,
+  getAllFilesForContext,
   publishRequestProgress,
   removeFromFileStoreMap,
   setFileStoreMap,
@@ -18,14 +25,287 @@ import {
 } from "./redis.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageService } from "./services/storage/StorageService.js";
-import { uploadBlob, getMimeTypeFromUrl } from "./blobHandler.js";
-import { generateShortId } from "./utils/filenameUtils.js";
+import {
+  uploadBlob,
+  getMimeTypeFromUrl,
+  constructFolderPath,
+  sanitizeSubPath,
+  getScopedContainerOwnerId,
+  getScopedLogicalContextId,
+} from "./blobHandler.js";
+import { StorageFactory } from "./services/storage/StorageFactory.js";
+import { generateShortId, sanitizeFilename } from "./utils/filenameUtils.js";
+import { sanitizeTargetBlobPath } from "./utils/targetBlobPathUtils.js";
 import { redactContextId, redactSasToken, sanitizeForLogging } from "./utils/logSecurity.js";
+import {
+  resolveHashRecordWithLegacyWorkspacePrivateFallback,
+  migrateHashRecordToScopedStorage,
+  resolveBlobPathWithLegacyFallback,
+} from "./utils/legacyWorkspacePrivateResolver.js";
 
-// Hybrid cleanup approach:
-// 1. Lazy cleanup: Check file existence when cache entries are accessed (in getFileStoreMap)
-// 2. Age cleanup: Remove old entries every 100 requests to prevent cache bloat
+// Lazy cleanup remains in getFileStoreMap for entries whose backing files are
+// actually gone. Age/container cleanup is opt-in because Redis hash records are
+// needed to resolve legacy files whose blobs still exist.
 let requestCount = 0;
+
+function isEnabled(value) {
+  return /^(1|true|yes)$/i.test(String(value || ""));
+}
+
+/**
+ * Extract the container name from an Azure blob URL.
+ * Handles both real Azure URLs (/{container}/blob) and Azurite URLs (/devstoreaccount1/{container}/blob).
+ */
+function extractContainerFromUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    let pathParts = urlObj.pathname.split('/').filter(p => p.length > 0);
+    // Azurite: /devstoreaccount1/{container}/blob → skip account name
+    if (pathParts[0] === AZURITE_ACCOUNT_NAME) {
+      pathParts = pathParts.slice(1);
+    }
+    return pathParts[0] || null;
+  } catch { return null; }
+}
+
+/**
+ * Extract the blob name (everything after the container) from an Azure blob URL.
+ */
+function extractBlobNameFromUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    const decodedPath = decodeURIComponent(urlObj.pathname);
+    let pathParts = decodedPath.split('/').filter(p => p.length > 0);
+    if (pathParts[0] === AZURITE_ACCOUNT_NAME) {
+      pathParts = pathParts.slice(1);
+    }
+    // First part is container, rest is blob name
+    return pathParts.length > 1 ? pathParts.slice(1).join('/') : null;
+  } catch { return null; }
+}
+
+async function getScopedProvider({
+  storageService,
+  resolvedContextId = null,
+  userId = null,
+  workspaceId = null,
+  appletId = null,
+  fileScope = null,
+} = {}) {
+  const containerOwnerId = getScopedContainerOwnerId({
+    contextId: resolvedContextId,
+    userId,
+    workspaceId,
+    appletId,
+    fileScope,
+  });
+  const containerName = containerOwnerId
+    ? getUserContainerName(getDefaultContainerName(), containerOwnerId)
+    : null;
+  const useScopedAzureProvider =
+    containerName
+    && storageService.primaryProvider?.constructor?.name === "AzureStorageProvider";
+
+  return {
+    containerOwnerId,
+    containerName,
+    provider: useScopedAzureProvider
+      ? await StorageFactory.getInstance().getAzureProvider(containerName)
+      : storageService.primaryProvider,
+  };
+}
+
+function isNotFoundError(error) {
+  const message = error?.message || "";
+  return error?.statusCode === 404 || /not found/i.test(message);
+}
+
+function getLegacyScopedContainerNames(containerOwnerId = null) {
+  if (!containerOwnerId) {
+    return [];
+  }
+
+  const [, ...legacyContainerNames] = getUserContainerNameCandidates(
+    getDefaultContainerName(),
+    containerOwnerId,
+  );
+  return legacyContainerNames;
+}
+
+function getListedFileKey(file = {}) {
+  return file.hash || file.name || file.url || file.filename || null;
+}
+
+function mergeListedFiles(primaryFiles = [], fallbackFiles = []) {
+  const merged = [...primaryFiles];
+  const seen = new Set(primaryFiles.map((file) => getListedFileKey(file)).filter(Boolean));
+
+  for (const file of fallbackFiles) {
+    const key = getListedFileKey(file);
+    if (key && seen.has(key)) {
+      continue;
+    }
+    if (key) {
+      seen.add(key);
+    }
+    merged.push(file);
+  }
+
+  return merged;
+}
+
+async function listAzureFolderIfContainerExists(provider, folderPath) {
+  if (!provider?.ensureInitialized) {
+    return [];
+  }
+
+  try {
+    await provider.ensureInitialized();
+    const containerClient = provider._containerClient;
+    if (!containerClient) {
+      return [];
+    }
+
+    const prefix = folderPath === '' ? undefined : (folderPath.endsWith('/') ? folderPath : `${folderPath}/`);
+    const results = [];
+
+    for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+      const rawFilename = blob.name.split('/').pop();
+      let filename;
+      try {
+        filename = decodeURIComponent(rawFilename);
+      } catch {
+        filename = rawFilename;
+      }
+
+      const hashMatch = filename.match(/^([a-f0-9]+)_/i);
+      const blockBlobClient = containerClient.getBlockBlobClient(blob.name);
+      const sasToken = provider.generateShortLivedSASToken(blob.name, 60);
+
+      results.push({
+        name: blob.name,
+        filename: hashMatch ? filename.replace(/^[a-f0-9]+_/i, '') : filename,
+        hash: hashMatch ? hashMatch[1] : null,
+        lastModified: blob.properties.lastModified,
+        contentType: blob.properties.contentType,
+        size: blob.properties.contentLength,
+        url: `${blockBlobClient.url}?${sasToken}`,
+      });
+    }
+
+    return results;
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export async function listLegacyScopedFolderFiles(containerOwnerId, folderPath) {
+  const files = [];
+  for (const containerName of getLegacyScopedContainerNames(containerOwnerId)) {
+    try {
+      const provider = await StorageFactory.getInstance().getAzureProvider(
+        containerName,
+      );
+      const legacyFiles = await listAzureFolderIfContainerExists(
+        provider,
+        folderPath,
+      );
+      files.push(...legacyFiles);
+    } catch (error) {
+      if (/Missing Azure Storage connection string or container name/i.test(error?.message || "")) {
+        return files;
+      }
+      throw error;
+    }
+  }
+  return files;
+}
+
+export async function resolveLegacyScopedBlobClient(containerOwnerId, blobPath) {
+  if (!containerOwnerId || !blobPath) {
+    return null;
+  }
+
+  for (const containerName of getLegacyScopedContainerNames(containerOwnerId)) {
+    let provider;
+    try {
+      provider = await StorageFactory.getInstance().getAzureProvider(
+        containerName,
+      );
+    } catch (error) {
+      if (/Missing Azure Storage connection string or container name/i.test(error?.message || "")) {
+        return null;
+      }
+      throw error;
+    }
+
+    try {
+      await provider.ensureInitialized();
+      const containerClient = provider._containerClient;
+      if (!containerClient) {
+        continue;
+      }
+
+      const blockBlobClient = containerClient.getBlockBlobClient(blobPath);
+      if (await blockBlobClient.exists()) {
+        return {
+          containerName,
+          provider,
+          containerClient,
+          blockBlobClient,
+        };
+      }
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Delete up to `limit` empty per-user blob containers.
+ * Per-user containers follow the naming pattern `{baseName}-{userId}`.
+ * Fire-and-forget — errors are logged, never thrown.
+ */
+async function cullEmptyContainers(context, limit = 20) {
+  const { BlobServiceClient } = await import('@azure/storage-blob');
+  const connStr = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  if (!connStr) return;
+
+  const baseName = getDefaultContainerName();
+  const prefix = `${baseName}-`;
+  const blobService = BlobServiceClient.fromConnectionString(connStr);
+
+  let deleted = 0;
+  for await (const container of blobService.listContainers({ prefix })) {
+    if (deleted >= limit) break;
+    try {
+      const client = blobService.getContainerClient(container.name);
+      const iter = client.listBlobsFlat().byPage({ maxPageSize: 1 });
+      const page = await iter.next();
+      const hasBlobs = page.value?.segment?.blobItems?.length > 0;
+      if (!hasBlobs) {
+        await client.delete();
+        deleted++;
+        context.log(`Culled empty container: ${container.name}`);
+      }
+    } catch (err) {
+      if (err.statusCode !== 404) {
+        console.log(`Container cull error (${container.name}): ${err.message}`);
+      }
+    }
+  }
+  if (deleted > 0) {
+    context.log(`Container cull: deleted ${deleted} empty container(s)`);
+  }
+}
 
 /**
  * Lightweight age-based cleanup - removes old cache entries to prevent bloat
@@ -34,13 +314,22 @@ let requestCount = 0;
  */
 async function cleanupInactive(context) {
   try {
-    // Only run age cleanup every 100 requests to avoid overhead
     requestCount++;
-    if (requestCount % 100 === 0) {
+    if (
+      isEnabled(process.env.CFH_ENABLE_FILESTORE_AGE_CLEANUP)
+      && requestCount % 100 === 0
+    ) {
       const cleaned = await cleanupRedisFileStoreMapAge(7, 10); // 7 days, max 10 entries
       if (cleaned.length > 0) {
         context.log(`Age cleanup: Removed ${cleaned.length} old cache entries`);
       }
+    }
+    // Empty-container culling is opt-in; it can race with newly created upload containers.
+    if (
+      isEnabled(process.env.CFH_ENABLE_EMPTY_CONTAINER_CULL)
+      && requestCount % 100 === 0
+    ) {
+      cullEmptyContainers(context).catch(() => {});
     }
   } catch (error) {
     console.log("Error occurred during age-based cleanup:", error);
@@ -58,17 +347,17 @@ async function CortexFileHandler(context, req) {
       parsedBody = {};
     }
   }
-  
+
   // For GET requests, prioritize query string. For other methods, check body first, then query
   // Also check if parsedBody actually has content (not just empty object)
   const hasBodyContent = parsedBody && typeof parsedBody === 'object' && Object.keys(parsedBody).length > 0;
   const bodySource = hasBodyContent ? (parsedBody.params || parsedBody) : {};
   const querySource = req.query || {};
-  
+
   // Merge sources: for GET, query takes priority; for others, body takes priority
   const isGet = req.method?.toLowerCase() === 'get';
   const source = isGet ? { ...bodySource, ...querySource } : { ...querySource, ...bodySource };
-  
+
   const {
     uri,
     requestId,
@@ -81,10 +370,35 @@ async function CortexFileHandler(context, req) {
     load,
     restore,
     setRetention,
+    rename,
+    newFilename,
+    filename: clientFilename,
     contextId,
+    chunkOverlapSeconds,
+    blobPath,
+    // Folder-based storage parameters
+    listFolder,
+    userId,
+    chatId,
+    workspaceId,
+    appletId,
+    fileScope,
+    subPath,
   } = source;
-  // Container parameter is ignored - always uses default container from env var
-  const resolvedContextId = contextId || null;
+  const logicalContextId = getScopedLogicalContextId({
+    contextId: contextId || null,
+    userId,
+    workspaceId,
+    appletId,
+    fileScope,
+  });
+  const storageOwnerId = getScopedContainerOwnerId({
+    contextId: logicalContextId,
+    userId,
+    workspaceId,
+    appletId,
+    fileScope,
+  });
 
   // Normalize boolean parameters
   const shouldSave = save === true || save === "true";
@@ -95,30 +409,48 @@ async function CortexFileHandler(context, req) {
 
 
 
-  const shouldSetRetention = setRetention === true || setRetention === "true" || 
+  const shouldSetRetention = setRetention === true || setRetention === "true" ||
                               (req.query?.operation === "setRetention") || (parsedBody?.operation === "setRetention");
-  
-  const operation = shouldSave
-    ? "save"
-    : shouldCheckHash
-      ? "checkHash"
-      : shouldClearHash
-        ? "clearHash"
-        : shouldSetRetention
-          ? "setRetention"
-          : shouldFetchRemote
-            ? "remoteFile"
-            : req.method.toLowerCase() === "delete" ||
-                (req.query?.operation === "delete") || (parsedBody?.operation === "delete")
-              ? "delete"
-              : uri
-                ? DOC_EXTENSIONS.some((ext) => uri.toLowerCase().endsWith(ext))
-                  ? "document_processing"
-                  : "media_chunking"
-                : "upload";
+  const shouldRename = rename === true || rename === "true" ||
+                        (req.query?.operation === "rename") || (parsedBody?.operation === "rename");
+  const shouldListFolder = listFolder === true || listFolder === "true" ||
+                            (req.query?.operation === "listFolder") || (parsedBody?.operation === "listFolder");
+
+  // Determine operation using explicit if-else chain
+  let operation;
+  if (shouldSave) {
+    operation = "save";
+  } else if (shouldCheckHash) {
+    operation = "checkHash";
+  } else if (shouldClearHash) {
+    operation = "clearHash";
+  } else if (shouldSetRetention) {
+    operation = "setRetention";
+  } else if (shouldRename) {
+    operation = "rename";
+  } else if (shouldListFolder) {
+    operation = "listFolder";
+  } else if (shouldFetchRemote) {
+    operation = "remoteFile";
+  } else if (req.method.toLowerCase() === "delete" ||
+             (req.query?.operation === "delete") || (parsedBody?.operation === "delete")) {
+    operation = "delete";
+  } else if (uri) {
+    if (DOC_EXTENSIONS.some((ext) => uri.toLowerCase().endsWith(ext))) {
+      operation = "document_processing";
+    } else {
+      operation = "media_chunking";
+    }
+  } else if (blobPath && isGet) {
+    operation = "blobLookup";
+  } else if (hash && isGet) {
+    operation = "hashLookup";
+  } else {
+    operation = "upload";
+  }
 
   context.log(
-    `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ""}${uri ? `uri: ${redactSasToken(uri)}, ` : ""}${hash ? `hash: ${hash}, ` : ""}${resolvedContextId ? `contextId: ${redactContextId(resolvedContextId)}, ` : ""}operation: ${operation}`,
+    `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ""}${uri ? `uri: ${redactSasToken(uri)}, ` : ""}${hash ? `hash: ${hash}, ` : ""}${blobPath ? `blobPath: ${blobPath}, ` : ""}${logicalContextId ? `contextId: ${redactContextId(logicalContextId)}, ` : ""}operation: ${operation}`,
   );
 
   // Trigger lightweight age-based cleanup (runs every 100 requests)
@@ -168,20 +500,25 @@ async function CortexFileHandler(context, req) {
   if (operation === "delete") {
     // Check both query string and body params for delete parameters
     // Handle both req.body.params.hash and req.body.hash formats
-    // Note: container is already extracted from source above (line 82), same as checkHash
     const deleteRequestId = req.query.requestId || parsedBody?.params?.requestId || parsedBody?.requestId || requestId;
     const deleteHash = req.query.hash || parsedBody?.params?.hash || parsedBody?.hash || hash;
-    
+
     // If only hash is provided, delete single file by hash
     if (deleteHash && !deleteRequestId) {
       try {
-        // Container parameter is ignored - always uses default container from env var
-        const deleted = await storageService.deleteFileByHash(deleteHash, resolvedContextId);
+        const deleted = await storageService.deleteFileByHash(deleteHash, logicalContextId);
+        if (deleted.alreadyDeleted) {
+          context.res = {
+            status: 404,
+            body: `File with hash ${deleteHash} not found`,
+          };
+          return;
+        }
         context.res = {
           status: 200,
-          body: { 
+          body: {
             message: `File with hash ${deleteHash} deleted successfully`,
-            deleted 
+            deleted
           },
         };
         return;
@@ -193,22 +530,81 @@ async function CortexFileHandler(context, req) {
         return;
       }
     }
-    
+
+    // Delete by blobPath: directly delete the blob from storage without Redis lookup
+    const deleteBlobPath = req.query.blobPath || parsedBody?.params?.blobPath || parsedBody?.blobPath || blobPath;
+    if (deleteBlobPath && !deleteRequestId) {
+      try {
+        const { provider } = await getScopedProvider({
+          storageService,
+          resolvedContextId: logicalContextId,
+          userId,
+          workspaceId,
+          appletId,
+          fileScope,
+        });
+        const { containerClient } = await provider.getBlobClient();
+        const blockBlobClient = containerClient.getBlockBlobClient(deleteBlobPath);
+        await blockBlobClient.delete();
+        context.log(`Deleted blob by blobPath: ${deleteBlobPath}`);
+        context.res = {
+          status: 200,
+          body: {
+            message: `File deleted successfully`,
+            blobPath: deleteBlobPath,
+          },
+        };
+        return;
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          try {
+            const legacyBlob = await resolveLegacyScopedBlobClient(
+              logicalContextId || storageOwnerId,
+              deleteBlobPath,
+            );
+            if (legacyBlob) {
+              await legacyBlob.blockBlobClient.delete();
+              context.log(`Deleted legacy blob by blobPath: ${deleteBlobPath} (${legacyBlob.containerName})`);
+              context.res = {
+                status: 200,
+                body: {
+                  message: `File deleted successfully`,
+                  blobPath: deleteBlobPath,
+                },
+              };
+              return;
+            }
+          } catch (legacyError) {
+            context.res = {
+              status: legacyError.statusCode === 404 ? 404 : 500,
+              body: `Error deleting blob ${deleteBlobPath}: ${legacyError.message}`,
+            };
+            return;
+          }
+        }
+        context.res = {
+          status: error.statusCode === 404 ? 404 : 500,
+          body: `Error deleting blob ${deleteBlobPath}: ${error.message}`,
+        };
+        return;
+      }
+    }
+
     // If requestId is provided, use the existing multi-file delete flow
     if (!deleteRequestId) {
       context.res = {
         status: 400,
-        body: "Please pass either a requestId or hash in the query string or request body",
+        body: "Please pass either a requestId, hash, or blobPath in the query string or request body",
       };
       return;
     }
 
     // First, get the hash from the map if it exists
     if (deleteHash) {
-      const hashResult = await getFileStoreMap(deleteHash, false, resolvedContextId);
+      const hashResult = await getFileStoreMap(deleteHash, false, logicalContextId);
       if (hashResult) {
-        context.log(`Found hash in map for deletion: ${deleteHash}${resolvedContextId ? ` (contextId: ${redactContextId(resolvedContextId)})` : ""}`);
-        await removeFromFileStoreMap(deleteHash, resolvedContextId);
+        context.log(`Found hash in map for deletion: ${deleteHash}${logicalContextId ? ` (contextId: ${redactContextId(logicalContextId)})` : ""}`);
+        await removeFromFileStoreMap(deleteHash, logicalContextId);
       }
     }
 
@@ -224,16 +620,17 @@ async function CortexFileHandler(context, req) {
   if (operation === "setRetention") {
     // Extract parameters from query string or body
     const fileHash = req.query.hash || parsedBody?.params?.hash || parsedBody?.hash || hash;
+    const fileBlobPath = req.query.blobPath || parsedBody?.params?.blobPath || parsedBody?.blobPath || blobPath;
     const retention = req.query.retention || parsedBody?.params?.retention || parsedBody?.retention;
-    
-    if (!fileHash) {
+
+    if (!fileHash && !fileBlobPath) {
       context.res = {
         status: 400,
-        body: "Missing hash parameter. Please provide hash in query string or request body.",
+        body: "Missing identifier. Please provide hash or blobPath in query string or request body.",
       };
       return;
     }
-    
+
     if (!retention) {
       context.res = {
         status: 400,
@@ -241,7 +638,7 @@ async function CortexFileHandler(context, req) {
       };
       return;
     }
-    
+
     // Validate retention value
     if (retention !== 'temporary' && retention !== 'permanent') {
       context.res = {
@@ -251,17 +648,388 @@ async function CortexFileHandler(context, req) {
       return;
     }
 
+    // Prefer hash-based lookup (updates Redis + blob tags), fall back to blobPath (blob tags only)
+    if (fileHash) {
+      try {
+        const result = await storageService.setRetention(fileHash, retention, context, logicalContextId);
+        context.res = {
+          status: 200,
+          body: result,
+        };
+        return;
+      } catch (error) {
+        // If hash lookup failed but we have blobPath, fall through to blobPath handler
+        if (!fileBlobPath) {
+          context.res = {
+            status: error.message.includes("not found") ? 404 : 500,
+            body: error.message,
+          };
+          return;
+        }
+        context.log(`Hash-based setRetention failed for ${fileHash}, trying blobPath: ${fileBlobPath}`);
+      }
+    }
+
+    // Set retention directly by blobPath (no Redis lookup needed)
+    if (fileBlobPath) {
+      try {
+        const { provider } = await getScopedProvider({
+          storageService,
+          resolvedContextId: logicalContextId,
+          userId,
+          workspaceId,
+          appletId,
+          fileScope,
+        });
+        if (provider && provider.updateBlobTags) {
+          await provider.updateBlobTags(fileBlobPath, retention);
+          context.log(`Set retention to ${retention} for blobPath: ${fileBlobPath}`);
+          context.res = {
+            status: 200,
+            body: {
+              message: `Retention set to ${retention}`,
+              blobPath: fileBlobPath,
+              retention,
+            },
+          };
+          return;
+        }
+        context.res = {
+          status: 500,
+          body: "Storage provider does not support blob tags",
+        };
+        return;
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          try {
+            const legacyBlob = await resolveLegacyScopedBlobClient(
+              logicalContextId || storageOwnerId,
+              fileBlobPath,
+            );
+            if (legacyBlob?.provider?.updateBlobTags) {
+              await legacyBlob.provider.updateBlobTags(fileBlobPath, retention);
+              context.log(`Set retention to ${retention} for legacy blobPath: ${fileBlobPath} (${legacyBlob.containerName})`);
+              context.res = {
+                status: 200,
+                body: {
+                  message: `Retention set to ${retention}`,
+                  blobPath: fileBlobPath,
+                  retention,
+                },
+              };
+              return;
+            }
+          } catch (legacyError) {
+            context.res = {
+              status: legacyError.statusCode === 404 ? 404 : 500,
+              body: `Error setting retention for ${fileBlobPath}: ${legacyError.message}`,
+            };
+            return;
+          }
+        }
+        context.res = {
+          status: error.statusCode === 404 ? 404 : 500,
+          body: `Error setting retention for ${fileBlobPath}: ${error.message}`,
+        };
+        return;
+      }
+    }
+  }
+
+  // Rename a file (rename blob in cloud storage + update Redis)
+  if (operation === "rename") {
+    const fileHash = req.query.hash || parsedBody?.params?.hash || parsedBody?.hash || hash;
+    const fileBlobPath = req.query.blobPath || parsedBody?.params?.blobPath || parsedBody?.blobPath || blobPath;
+    const targetFilename = req.query.newFilename || parsedBody?.params?.newFilename || parsedBody?.newFilename || newFilename;
+    const targetBlobPath = req.query.targetBlobPath || parsedBody?.params?.targetBlobPath || parsedBody?.targetBlobPath;
+    const sanitizedTargetBlobPath = targetBlobPath
+      ? sanitizeTargetBlobPath(targetBlobPath)
+      : "";
+
+    if (!fileHash && !fileBlobPath) {
+      context.res = {
+        status: 400,
+        body: "Missing identifier. Please provide hash or blobPath in query string or request body.",
+      };
+      return;
+    }
+
+    if (!targetFilename || !targetFilename.trim()) {
+      context.res = {
+        status: 400,
+        body: "Missing newFilename parameter. Please provide newFilename in query string or request body.",
+      };
+      return;
+    }
+
+    if (targetBlobPath && !sanitizedTargetBlobPath) {
+      context.res = {
+        status: 400,
+        body: "Invalid targetBlobPath parameter.",
+      };
+      return;
+    }
+
+    const renameDirectlyByBlobPath = async () => {
+      try {
+        const { provider } = await getScopedProvider({
+          storageService,
+          resolvedContextId: logicalContextId,
+          userId,
+          workspaceId,
+          appletId,
+          fileScope,
+        });
+
+        const sanitized = sanitizeFilename(targetFilename.trim());
+        const newBlobName = sanitizedTargetBlobPath
+          || storageService._computeNewBlobName(fileBlobPath, sanitized);
+
+        context.log(`Renaming blob by blobPath: ${fileBlobPath} → ${newBlobName}`);
+        const result = await provider.renameBlob(fileBlobPath, newBlobName);
+
+        context.res = {
+          status: 200,
+          body: {
+            blobPath: newBlobName,
+            filename: sanitized,
+            url: result.url,
+            shortLivedUrl: result.shortLivedUrl || result.url,
+            message: `File renamed to "${targetFilename.trim()}"`,
+          },
+        };
+        return;
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          try {
+            const legacyBlob = await resolveLegacyScopedBlobClient(
+              logicalContextId || storageOwnerId,
+              fileBlobPath,
+            );
+            if (legacyBlob?.provider?.renameBlob) {
+              const sanitized = sanitizeFilename(targetFilename.trim());
+              const newBlobName = sanitizedTargetBlobPath
+                || storageService._computeNewBlobName(
+                  fileBlobPath,
+                  sanitized,
+                );
+
+              context.log(`Renaming legacy blob by blobPath: ${fileBlobPath} → ${newBlobName} (${legacyBlob.containerName})`);
+              const result = await legacyBlob.provider.renameBlob(
+                fileBlobPath,
+                newBlobName,
+              );
+
+              context.res = {
+                status: 200,
+                body: {
+                  blobPath: newBlobName,
+                  filename: sanitized,
+                  url: result.url,
+                  shortLivedUrl: result.shortLivedUrl || result.url,
+                  message: `File renamed to "${targetFilename.trim()}"`,
+                },
+              };
+              return;
+            }
+          } catch (legacyError) {
+            context.log(`Error renaming legacy blob by blobPath: ${legacyError.message}`);
+            context.res = {
+              status: legacyError.message.includes("not found") || legacyError.statusCode === 404 ? 404 : 500,
+              body: `Error renaming file: ${legacyError.message}`,
+            };
+            return;
+          }
+        }
+        context.log(`Error renaming blob by blobPath: ${error.message}`);
+        context.res = {
+          status: error.message.includes("not found") || error.statusCode === 404 ? 404 : 500,
+          body: `Error renaming file: ${error.message}`,
+        };
+      }
+    };
+
+    // Prefer blobPath when provided; hash is retained for legacy callers and Redis updates.
+    if (fileBlobPath) {
+      if (fileHash) {
+        try {
+          const result = await storageService.renameFile(
+            fileHash,
+            targetFilename,
+            context,
+            logicalContextId,
+            {
+              sourceBlobPath: fileBlobPath,
+              targetBlobPath: sanitizedTargetBlobPath,
+            },
+          );
+
+          context.log(`Renamed blob ${fileBlobPath} to "${targetFilename.trim()}" via hash ${fileHash}${logicalContextId ? ` (contextId: ${redactContextId(logicalContextId)})` : ""}`);
+
+          context.res = {
+            status: 200,
+            body: result,
+          };
+          return;
+        } catch (error) {
+          if (!isNotFoundError(error)) {
+            context.log(`Error renaming file: ${error.message}`);
+            context.res = {
+              status: 500,
+              body: `Error renaming file: ${error.message}`,
+            };
+            return;
+          }
+          context.log(`Hash-based rename failed for ${fileHash}, trying blobPath: ${fileBlobPath}`);
+        }
+      }
+      await renameDirectlyByBlobPath();
+      return;
+    }
+
+    // Legacy hash-only rename path.
+    if (fileHash) {
+      try {
+        const result = await storageService.renameFile(
+          fileHash,
+          targetFilename,
+          context,
+          logicalContextId,
+          { targetBlobPath: sanitizedTargetBlobPath },
+        );
+
+        context.log(`Renamed file ${fileHash} to "${targetFilename.trim()}"${logicalContextId ? ` (contextId: ${redactContextId(logicalContextId)})` : ""}`);
+
+        context.res = {
+          status: 200,
+          body: result,
+        };
+        return;
+      } catch (error) {
+        context.log(`Error renaming file: ${error.message}`);
+        const status = error.message.includes("not found") ? 404 : 500;
+        context.res = {
+          status,
+          body: `Error renaming file: ${error.message}`,
+        };
+        return;
+      }
+    }
+  }
+
+  // List files in a folder (folder-based storage)
+  if (operation === "listFolder") {
+    // Construct folder path from provided parameters
+    let folderPath = constructFolderPath({
+      userId,
+      chatId,
+      workspaceId,
+      appletId,
+      contextId: logicalContextId,
+      fileScope,
+    });
+
+    // Optional subPath appends a subdirectory within the fileScope folder.
+    if (subPath && folderPath !== null) {
+      const sanitizedSub = sanitizeSubPath(subPath);
+      if (sanitizedSub) {
+        folderPath = folderPath ? `${folderPath}/${sanitizedSub}` : sanitizedSub;
+      }
+    }
+
+    if (folderPath === null) {
+      context.res = {
+        status: 400,
+        body: "Missing required parameters. Provide contextId or userId with optional chatId/workspaceId/appletId/fileScope, or workspaceId with fileScope='workspace-shared-legacy'",
+      };
+      return;
+    }
+
     try {
-      const result = await storageService.setRetention(fileHash, retention, context, resolvedContextId);
+      // Derive the correct per-user or per-workspace container
+      const { provider, containerOwnerId } = await getScopedProvider({
+        storageService,
+        resolvedContextId: logicalContextId,
+        userId,
+        workspaceId,
+        appletId,
+        fileScope,
+      });
+
+      if (!provider || typeof provider.listFolder !== 'function') {
+        context.res = {
+          status: 500,
+          body: "Storage provider does not support folder listing",
+        };
+        return;
+      }
+
+      let files = await provider.listFolder(folderPath);
+      if (containerOwnerId) {
+        files = mergeListedFiles(
+          files,
+          await listLegacyScopedFolderFiles(containerOwnerId, folderPath),
+        );
+      }
+
+      // Enrich listing with hash, gcs, displayFilename, and permanent from Redis
+      const enrichContextId = logicalContextId || containerOwnerId || storageOwnerId;
+      if (enrichContextId) {
+        // Load all Redis records for this context to match files without hashes
+        const allRedisRecords = await getAllFilesForContext(enrichContextId);
+
+        // Build a filename→{hash, record} lookup from Redis for matching hashless files
+        const redisFilenameMap = new Map();
+        for (const [hash, record] of Object.entries(allRedisRecords)) {
+          if (record && record.filename) {
+            redisFilenameMap.set(record.filename.toLowerCase(), { hash, record });
+          }
+        }
+
+        for (const file of files) {
+          // If file has no hash from blob name, try to find it in Redis by filename
+          if (!file.hash && file.filename) {
+            const match = redisFilenameMap.get(file.filename.toLowerCase());
+            if (match) {
+              file.hash = match.hash;
+              if (match.record.gcs) {
+                file.gcs = match.record.gcs;
+              }
+            }
+          }
+
+          // Enrich files that have a hash (either from blob name or Redis match above)
+          if (file.hash) {
+            try {
+              const stored = allRedisRecords[file.hash] || await getFileStoreMap(file.hash, true, enrichContextId);
+              if (stored) {
+                if (stored.displayFilename) {
+                  file.displayFilename = stored.displayFilename;
+                }
+                if (stored.gcs && !file.gcs) {
+                  file.gcs = stored.gcs;
+                }
+                file.permanent = stored.permanent || false;
+              }
+            } catch { /* skip enrichment for this file */ }
+          }
+        }
+      }
+
       context.res = {
         status: 200,
-        body: result,
+        body: {
+          folderPath,
+          files,
+          count: files.length
+        },
       };
       return;
     } catch (error) {
+      context.log(`Error listing folder: ${error.message}`);
       context.res = {
-        status: error.message.includes("not found") ? 404 : 500,
-        body: error.message,
+        status: 500,
+        body: `Error listing folder: ${error.message}`,
       };
       return;
     }
@@ -284,9 +1052,9 @@ async function CortexFileHandler(context, req) {
 
       // Check if file already exists (using hash or URL as the key)
       // Always respect contextId if provided, even for URL-based lookups
-      const exists = hash 
-        ? await getFileStoreMap(hash, false, resolvedContextId)
-        : await getFileStoreMap(remoteUrl, false, resolvedContextId);
+      const exists = hash
+        ? await getFileStoreMap(hash, false, logicalContextId)
+        : await getFileStoreMap(remoteUrl, false, logicalContextId);
       if (exists) {
         context.res = {
           status: 200,
@@ -294,26 +1062,85 @@ async function CortexFileHandler(context, req) {
         };
         //update redis timestamp with current time
         if (hash) {
-          await setFileStoreMap(hash, exists, resolvedContextId);
+          await setFileStoreMap(hash, exists, logicalContextId);
         } else {
-          await setFileStoreMap(remoteUrl, exists, resolvedContextId);
+          await setFileStoreMap(remoteUrl, exists, logicalContextId);
         }
         return;
       }
 
       // Download the file first
       const urlObj = new URL(remoteUrl);
-      // Use LLM-friendly naming for temp files instead of original filename
       const fileExtension = path.extname(urlObj.pathname) || ".mp3";
-      const shortId = generateShortId();
-      const tempFileName = `${shortId}${fileExtension}`;
+      // Use client-provided filename when available (for folder-based storage);
+      // fall back to shortId-based name for legacy flat storage
+      const folderPath = constructFolderPath({
+        userId,
+        chatId,
+        workspaceId,
+        appletId,
+        contextId: logicalContextId,
+        fileScope,
+      });
+      const tempFileName = (folderPath && clientFilename)
+        ? sanitizeFilename(clientFilename)
+        : `${generateShortId()}${fileExtension}`;
       filename = path.join(os.tmpdir(), tempFileName);
       await downloadFile(remoteUrl, filename);
 
-      // For remote files, we don't need a requestId folder structure since it's just a single file
-      // Pass empty string to store the file directly in the root
-      // Container parameter is ignored - always uses default container from env var
-      const res = await storageService.uploadFile(context, filename, '', null, null);
+      const finalFilename = path.basename(filename);
+      const { provider, containerOwnerId } = await getScopedProvider({
+        storageService,
+        resolvedContextId: logicalContextId,
+        userId,
+        workspaceId,
+        appletId,
+        fileScope,
+      });
+      const fileStream = fs.createReadStream(filename);
+      // Prefer the content type from the remote server's HEAD response;
+      // uploadStream falls back to mime.lookup(filename) if null.
+      const remoteContentType = urlCheck.contentType || null;
+      const primaryUploadResult = await provider.uploadStream(
+        context,
+        finalFilename,
+        fileStream,
+        remoteContentType,
+        "temporary",
+        folderPath,
+      );
+
+      let backupUploadUrl = null;
+      if (
+        storageService.backupProvider &&
+        typeof storageService.backupProvider.uploadStream === "function"
+      ) {
+        // Prefix GCS backup path with the scoped container owner to preserve
+        // isolation in the shared bucket backend.
+        const gcsFolderPath = containerOwnerId
+          ? `${containerOwnerId}/${folderPath || ''}`.replace(/\/+$/, '')
+          : folderPath;
+        const backupStream = fs.createReadStream(filename);
+        backupUploadUrl = await storageService.backupProvider.uploadStream(
+          context,
+          finalFilename,
+          backupStream,
+          remoteContentType,
+          "temporary",
+          gcsFolderPath,
+        );
+      }
+
+      const primaryBlobName =
+        provider?.extractBlobNameFromUrl?.(primaryUploadResult.url) ||
+        primaryUploadResult.blobName ||
+        null;
+      const res = {
+        ...primaryUploadResult,
+        ...(primaryBlobName && { blobName: primaryBlobName }),
+        ...(primaryBlobName && { blobPath: primaryBlobName }),
+        ...(backupUploadUrl && { gcs: backupUploadUrl.url || backupUploadUrl }),
+      };
 
       // All uploads default to temporary (permanent: false) to match file collection logic
       res.permanent = false;
@@ -321,9 +1148,9 @@ async function CortexFileHandler(context, req) {
       //Update Redis (using hash or URL as the key)
       // Always respect contextId if provided, even for URL-based lookups
       if (hash) {
-        await setFileStoreMap(hash, res, resolvedContextId);
+        await setFileStoreMap(hash, res, logicalContextId);
       } else {
-        await setFileStoreMap(remoteUrl, res, resolvedContextId);
+        await setFileStoreMap(remoteUrl, res, logicalContextId);
       }
 
       // Return the file URL
@@ -352,9 +1179,9 @@ async function CortexFileHandler(context, req) {
 
   if (hash && clearHash) {
     try {
-      const hashValue = await getFileStoreMap(hash, false, resolvedContextId);
+      const hashValue = await getFileStoreMap(hash, false, logicalContextId);
       if (hashValue) {
-        await removeFromFileStoreMap(hash, resolvedContextId);
+        await removeFromFileStoreMap(hash, logicalContextId);
         context.res = {
           status: 200,
           body: `Hash ${hash} removed`,
@@ -376,10 +1203,65 @@ async function CortexFileHandler(context, req) {
   }
 
   if (hash && checkHash) {
-    let hashResult = await getFileStoreMap(hash, true, resolvedContextId); // Skip lazy cleanup to handle it ourselves
+    let mapContextId = logicalContextId || null;
+    let hashResult = await getFileStoreMap(hash, true, mapContextId); // Skip lazy cleanup to handle it ourselves
+
+    // Self-healing fallback for old applet-private layout:
+    // if current context misses, probe legacy compound context and migrate.
+    if (!hashResult && logicalContextId) {
+      try {
+        const legacyRecord =
+          await resolveHashRecordWithLegacyWorkspacePrivateFallback({
+            hash,
+            resolvedContextId: logicalContextId,
+            userId,
+            workspaceId,
+            fileScope,
+            getFileStoreMap,
+          });
+
+        if (legacyRecord?.hashResult) {
+          hashResult = legacyRecord.hashResult;
+          mapContextId = legacyRecord.sourceContextId || mapContextId;
+          context.log(
+            `Recovered hash from legacy context for self-heal: ${hash}${mapContextId ? ` (contextId: ${redactContextId(mapContextId)})` : ""}`,
+          );
+
+          try {
+            hashResult = await migrateHashRecordToScopedStorage({
+              context,
+              hash,
+              hashResult,
+              sourceContextId: mapContextId,
+              resolvedContextId: logicalContextId,
+              userId,
+              chatId,
+              workspaceId,
+              appletId,
+              fileScope,
+              storageService,
+              setFileStoreMap,
+              removeFromFileStoreMap,
+            });
+            mapContextId = logicalContextId;
+            context.log(
+              `Legacy hash self-healed into current context: ${hash} (contextId: ${redactContextId(logicalContextId)})`,
+            );
+          } catch (migrationError) {
+            context.log(
+              `Legacy hash migration failed (continuing with legacy location): ${migrationError.message}`,
+            );
+          }
+        }
+      } catch (legacyLookupError) {
+        context.log(
+          `Legacy hash lookup failed for ${hash}: ${legacyLookupError.message}`,
+        );
+      }
+    }
 
     if (hashResult) {
-      context.log(`File exists in map: ${hash}${resolvedContextId ? ` (contextId: ${redactContextId(resolvedContextId)})` : ""}`);
+      context.log(`File exists in map: ${hash}${mapContextId ? ` (contextId: ${redactContextId(mapContextId)})` : ""}`);
 
       // Log the URL retrieved from Redis before checking existence
       context.log(`Checking existence of URL from Redis: ${redactSasToken(hashResult?.url || '')}`);
@@ -398,7 +1280,7 @@ async function CortexFileHandler(context, req) {
           context.log(
             `File not found in any storage. Removing from map: ${hash}`,
           );
-          await removeFromFileStoreMap(hash, resolvedContextId);
+          await removeFromFileStoreMap(hash, mapContextId);
           context.res = {
             status: 404,
             body: `Hash ${hash} not found in storage`,
@@ -417,7 +1299,7 @@ async function CortexFileHandler(context, req) {
           } catch (error) {
             context.log(`Error restoring to GCS: ${error}`);
             // If restoration fails, remove the hash from the map
-            await removeFromFileStoreMap(hash, resolvedContextId);
+            await removeFromFileStoreMap(hash, mapContextId);
             context.res = {
               status: 404,
               body: `Hash ${hash} not found`,
@@ -448,15 +1330,36 @@ async function CortexFileHandler(context, req) {
             // Download from GCS
             await storageService.downloadFile(hashResult.gcs, downloadedFile);
 
-            // Upload to primary storage
-            // Container parameter is ignored - always uses default container from env var
-            const res = await storageService.uploadFile(
-              context,
-              downloadedFile,
-              hash,
-              null,
-              null,
-            );
+            // Restore to the ORIGINAL container and folder path (not the default container).
+            // Extract container name and blob path from the original URL stored in Redis.
+            let res;
+            const originalUrl = hashResult.url;
+            if (originalUrl && originalUrl.startsWith('http')) {
+              const containerName = storageService._extractContainerFromUrl(originalUrl);
+              const provider = containerName
+                ? await StorageFactory.getInstance().getAzureProvider(containerName)
+                : storageService.primaryProvider;
+              const originalBlobName = provider.extractBlobNameFromUrl(originalUrl);
+
+              // Extract folder path and filename from the original blob name
+              const lastSlash = originalBlobName ? originalBlobName.lastIndexOf('/') : -1;
+              const folderPath = lastSlash >= 0 ? originalBlobName.substring(0, lastSlash) : null;
+              const originalFilePart = lastSlash >= 0 ? originalBlobName.substring(lastSlash + 1) : originalBlobName;
+              // Use the original filename (with hash prefix) for the restored blob
+              const filename = originalFilePart || hashResult.filename || path.basename(hashResult.gcs);
+
+              const stream = fs.createReadStream(downloadedFile);
+              res = await provider.uploadStream(context, filename, stream, null, 'temporary', folderPath);
+            } else {
+              // Fallback: no original URL, restore to default container
+              res = await storageService.uploadFile(
+                context,
+                downloadedFile,
+                hash,
+                null,
+                null,
+              );
+            }
 
             // Update the hash result with the new primary storage URL
             hashResult.url = res.url;
@@ -475,7 +1378,7 @@ async function CortexFileHandler(context, req) {
           } catch (error) {
             console.error("Error restoring from GCS:", error);
             // If restoration fails, remove the hash from the map
-            await removeFromFileStoreMap(hash, resolvedContextId);
+            await removeFromFileStoreMap(hash, mapContextId);
             context.res = {
               status: 404,
               body: `Hash ${hash} not found`,
@@ -493,7 +1396,7 @@ async function CortexFileHandler(context, req) {
           : false;
         if (!finalPrimaryCheck && !finalGCSCheck) {
           context.log(`Failed to restore file. Removing from map: ${hash}`);
-          await removeFromFileStoreMap(hash, resolvedContextId);
+          await removeFromFileStoreMap(hash, mapContextId);
           context.res = {
             status: 404,
             body: `Hash ${hash} not found`,
@@ -516,10 +1419,176 @@ async function CortexFileHandler(context, req) {
             context.log(`Error extracting filename from URL: ${error.message}`);
           }
         }
-        
-        // Ensure hash is set if missing
+
+        // Ensure hash/blobPath are set if missing
         if (!hashResult.hash) {
           hashResult.hash = hash;
+        }
+        if (!hashResult.blobPath && hashResult.url) {
+          const inferredBlobPath = extractBlobNameFromUrl(hashResult.url);
+          if (inferredBlobPath) {
+            hashResult.blobPath = inferredBlobPath;
+          }
+        }
+
+        // === Lazy migration: move old shared-container files to per-user container ===
+        if (userId && hashResult.url) {
+          try {
+            const defaultContainer = getDefaultContainerName();
+            const urlContainer = extractContainerFromUrl(hashResult.url);
+            const perUserContainer = getUserContainerName(defaultContainer, userId);
+
+            // Only migrate if file is in old shared container, not already in per-user
+            if (urlContainer === defaultContainer && perUserContainer !== defaultContainer) {
+              context.log(`Migrating file from shared to per-user container: ${hash}`);
+              const factory = StorageFactory.getInstance();
+              const perUserProvider = await factory.getAzureProvider(perUserContainer);
+              const { containerClient: destContainerClient } = await perUserProvider.getBlobClient();
+
+              const oldBlobName = extractBlobNameFromUrl(hashResult.url);
+              if (oldBlobName) {
+                // Strip "users/{id}/" prefix to get new blob name
+                const newBlobName = oldBlobName.replace(/^users\/[^/]+\//, '');
+
+                // Download from old URL (has valid SAS) and upload to per-user container
+                const downloadResp = await globalThis.fetch(hashResult.url);
+                if (!downloadResp.ok) throw new Error(`Download failed: ${downloadResp.status}`);
+                const blobBuffer = Buffer.from(await downloadResp.arrayBuffer());
+                const contentType = downloadResp.headers.get('content-type');
+                const destBlob = destContainerClient.getBlockBlobClient(newBlobName);
+                await destBlob.upload(blobBuffer, blobBuffer.length, {
+                  blobHTTPHeaders: {
+                    ...(contentType ? { blobContentType: contentType } : {}),
+                    blobCacheControl: 'public, max-age=2592000, immutable',
+                  },
+                });
+
+                // Generate new long-lived SAS token and update URL
+                const newSasToken = perUserProvider.generateSASToken(destContainerClient, newBlobName);
+                hashResult.url = `${destBlob.url}?${newSasToken}`;
+                hashResult.blobPath = newBlobName;
+                hashResult.blobName = newBlobName;
+
+                // Migrate converted file if it exists
+                if (hashResult.converted?.url) {
+                  const oldConvertedBlob = extractBlobNameFromUrl(hashResult.converted.url);
+                  if (oldConvertedBlob) {
+                    const newConvertedBlob = oldConvertedBlob.replace(/^users\/[^/]+\//, '');
+                    const convResp = await globalThis.fetch(hashResult.converted.url);
+                    if (convResp.ok) {
+                      const convBuffer = Buffer.from(await convResp.arrayBuffer());
+                      const convContentType = convResp.headers.get('content-type');
+                      const destConvBlob = destContainerClient.getBlockBlobClient(newConvertedBlob);
+                      await destConvBlob.upload(convBuffer, convBuffer.length, {
+                        blobHTTPHeaders: {
+                          ...(convContentType ? { blobContentType: convContentType } : {}),
+                          blobCacheControl: 'public, max-age=2592000, immutable',
+                        },
+                      });
+                      const convSasToken = perUserProvider.generateSASToken(destContainerClient, newConvertedBlob);
+                      hashResult.converted.url = `${destConvBlob.url}?${convSasToken}`;
+                      hashResult.converted.blobPath = newConvertedBlob;
+                      hashResult.converted.blobName = newConvertedBlob;
+                    }
+                  }
+                }
+
+                // Strip users/ prefix from GCS path if present
+                if (hashResult.gcs) {
+                  hashResult.gcs = hashResult.gcs.replace(/\/users\/[^/]+\//, '/');
+                }
+
+                // Persist updated record to Redis
+                await setFileStoreMap(hash, hashResult, mapContextId);
+                context.log(`Migration complete for hash: ${hash}`);
+              }
+            }
+          } catch (migrationError) {
+            context.log(`Migration failed (using existing URL): ${migrationError.message}`);
+          }
+        }
+
+        // === Copy blob to target folder if checkHash matched from a different folder ===
+        if (hashResult.url) {
+          try {
+            const targetFolder = constructFolderPath({
+              userId,
+              chatId,
+              workspaceId,
+              appletId,
+              contextId: logicalContextId,
+              fileScope,
+            });
+            if (targetFolder !== null) {
+              const currentBlobName = extractBlobNameFromUrl(hashResult.url);
+              if (currentBlobName) {
+                // Extract the current folder and filename from the blob name
+                const lastSlash = currentBlobName.lastIndexOf('/');
+                const currentFolder = lastSlash >= 0 ? currentBlobName.substring(0, lastSlash) : '';
+                const filenameOnly = lastSlash >= 0 ? currentBlobName.substring(lastSlash + 1) : currentBlobName;
+
+                // Normalize for comparison (empty string means root)
+                const normalizedTarget = targetFolder.replace(/^\/+|\/+$/g, '');
+
+                if (currentFolder !== normalizedTarget) {
+                  context.log(`Copying blob from folder "${currentFolder}" to "${normalizedTarget}" for hash: ${hash}`);
+
+                  const urlContainer = extractContainerFromUrl(hashResult.url);
+                  const factory = StorageFactory.getInstance();
+                  const provider = urlContainer
+                    ? await factory.getAzureProvider(urlContainer)
+                    : storageService.primaryProvider;
+
+                  await provider.ensureInitialized();
+                  const { containerClient } = await provider.getBlobClient();
+
+                  const newBlobName = normalizedTarget ? `${normalizedTarget}/${filenameOnly}` : filenameOnly;
+                  const srcBlobClient = containerClient.getBlockBlobClient(currentBlobName);
+                  const destBlobClient = containerClient.getBlockBlobClient(newBlobName);
+
+                  // Copy using short-lived SAS for source auth
+                  const sourceSas = provider.generateShortLivedSASToken(currentBlobName, 10);
+                  const sourceUrl = `${srcBlobClient.url}?${sourceSas}`;
+                  const copyPoller = await destBlobClient.beginCopyFromURL(sourceUrl);
+                  await copyPoller.pollUntilDone();
+
+                  // Generate new long-lived SAS for the copied blob
+                  const newSasToken = provider.generateSASToken(newBlobName);
+                  hashResult.url = `${destBlobClient.url}?${newSasToken}`;
+                  hashResult.blobPath = newBlobName;
+                  hashResult.blobName = newBlobName;
+
+                  // Copy converted file if it exists and is in a different folder too
+                  if (hashResult.converted?.url) {
+                    const convBlobName = extractBlobNameFromUrl(hashResult.converted.url);
+                    if (convBlobName) {
+                      const convLastSlash = convBlobName.lastIndexOf('/');
+                      const convFilename = convLastSlash >= 0 ? convBlobName.substring(convLastSlash + 1) : convBlobName;
+                      const newConvBlobName = normalizedTarget ? `${normalizedTarget}/${convFilename}` : convFilename;
+
+                      const srcConvClient = containerClient.getBlockBlobClient(convBlobName);
+                      const destConvClient = containerClient.getBlockBlobClient(newConvBlobName);
+                      const convSas = provider.generateShortLivedSASToken(convBlobName, 10);
+                      const convSourceUrl = `${srcConvClient.url}?${convSas}`;
+                      const convPoller = await destConvClient.beginCopyFromURL(convSourceUrl);
+                      await convPoller.pollUntilDone();
+
+                      const convSasToken = provider.generateSASToken(newConvBlobName);
+                      hashResult.converted.url = `${destConvClient.url}?${convSasToken}`;
+                      hashResult.converted.blobPath = newConvBlobName;
+                      hashResult.converted.blobName = newConvBlobName;
+                    }
+                  }
+
+                  // Persist updated record to Redis
+                  await setFileStoreMap(hash, hashResult, mapContextId);
+                  context.log(`Folder copy complete for hash: ${hash}`);
+                }
+              }
+            }
+          } catch (folderCopyError) {
+            context.log(`Folder copy failed (using existing URL): ${folderCopyError.message}`);
+          }
         }
 
         // Create the response object
@@ -529,9 +1598,10 @@ async function CortexFileHandler(context, req) {
           url: hashResult.url,
           gcs: hashResult.gcs,
           hash: hashResult.hash || hash,
+          ...(hashResult.blobPath ? { blobPath: hashResult.blobPath } : {}),
           timestamp: new Date().toISOString(),
         };
-        
+
         // Include displayFilename if it exists in Redis record
         if (hashResult.displayFilename) {
           response.displayFilename = hashResult.displayFilename;
@@ -539,7 +1609,6 @@ async function CortexFileHandler(context, req) {
 
         // Ensure converted version exists and is synced across storage providers
         try {
-          // Container parameter is ignored - always uses default container from env var
           hashResult = await conversionService.ensureConvertedVersion(
             hashResult,
             requestId,
@@ -557,21 +1626,24 @@ async function CortexFileHandler(context, req) {
         // Helper function to generate short-lived URL for a given URL
         const generateShortLivedUrlForUrl = async (urlToProcess) => {
           if (!urlToProcess) return null;
-          
+
           try {
             // Extract blob name from the URL to generate new SAS token
             let blobName;
             try {
               const url = new URL(urlToProcess);
               let path = url.pathname.substring(1);
-              
+
               // For Azurite URLs, the path includes account name: devstoreaccount1/container/blob
               // For real Azure URLs, the path is: container/blob
               if (path.startsWith(`${AZURITE_ACCOUNT_NAME}/`)) {
                 path = path.substring(`${AZURITE_ACCOUNT_NAME}/`.length);
               }
-              
-              const pathSegments = path.split('/').filter(segment => segment.length > 0);
+
+              // Decode each segment so double-encoded names (e.g. %2520 → %20)
+              // resolve to the actual blob name used in Azure storage.
+              const pathSegments = path.split('/').filter(segment => segment.length > 0)
+                .map(s => decodeURIComponent(s));
               if (pathSegments.length >= 2) {
                 blobName = pathSegments.slice(1).join('/');
               } else if (pathSegments.length === 1) {
@@ -583,26 +1655,35 @@ async function CortexFileHandler(context, req) {
             }
 
             if (blobName) {
-              const provider = storageService.primaryProvider;
-              
+              // Use correct provider based on URL container
+              const urlContainer = extractContainerFromUrl(urlToProcess);
+              const defaultContainer = getDefaultContainerName();
+              let provider;
+              if (urlContainer && urlContainer !== defaultContainer) {
+                provider = await StorageFactory.getInstance().getAzureProvider(urlContainer);
+              } else {
+                provider = storageService.primaryProvider;
+              }
+
               if (provider && provider.generateShortLivedSASToken) {
-                const blobClientResult = await provider.getBlobClient();
-                const containerClient = blobClientResult.containerClient;
-                
+                await provider.ensureInitialized();
+
                 const sasToken = provider.generateShortLivedSASToken(
-                  containerClient, 
-                  blobName, 
+                  blobName,
                   shortLivedDuration
                 );
-                
-                const baseUrl = urlToProcess.split('?')[0];
-                return `${baseUrl}?${sasToken}`;
+
+                // Build URL from the blob client so path encoding matches
+                // the decoded blobName used for SAS generation.
+                const { containerClient } = await provider.getBlobClient();
+                const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+                return `${blockBlobClient.url}?${sasToken}`;
               }
             }
           } catch (error) {
             context.log(`Error generating short-lived URL: ${error}`);
           }
-          
+
           return null;
         };
 
@@ -636,18 +1717,21 @@ async function CortexFileHandler(context, req) {
 
         // Attach converted info to response if present (include shortLivedUrl in response only)
         if (hashResult.converted) {
+          const convertedBlobPath = hashResult.converted.blobPath
+            || extractBlobNameFromUrl(hashResult.converted.url || "");
           response.converted = {
             url: hashResult.converted.url,
             shortLivedUrl: convertedShortLivedUrl || hashResult.converted.url,
             gcs: hashResult.converted.gcs,
             mimeType: hashResult.converted.mimeType || null,
+            ...(convertedBlobPath ? { blobPath: convertedBlobPath } : {}),
           };
         }
 
         // Update redis timestamp with current time
         // Note: setFileStoreMap will remove shortLivedUrl fields before storing
         // hashResult has already been enriched with filename/hash above if missing
-        await setFileStoreMap(hash, hashResult, resolvedContextId);
+        await setFileStoreMap(hash, hashResult, mapContextId);
 
         context.res = {
           status: 200,
@@ -657,7 +1741,7 @@ async function CortexFileHandler(context, req) {
       } catch (error) {
         context.log(`Error checking file existence: ${error}`);
         // If there's an error checking file existence, remove the hash from the map
-        await removeFromFileStoreMap(hash, resolvedContextId);
+        await removeFromFileStoreMap(hash, mapContextId);
         context.res = {
           status: 404,
           body: `Hash ${hash} not found`,
@@ -666,11 +1750,168 @@ async function CortexFileHandler(context, req) {
       }
     }
 
-    context.res = {
-      status: 404,
-      body: `Hash ${hash} not found`,
-    };
-    return;
+    // If blobPath is available, fall through to blobPath-based lookup
+    // instead of returning 404 — the file may still exist in storage
+    // even though its hash expired from Redis.
+    if (!blobPath) {
+      context.res = {
+        status: 404,
+        body: `Hash ${hash} not found`,
+      };
+      return;
+    }
+
+    try {
+      const legacyBlobResult = await resolveBlobPathWithLegacyFallback({
+        context,
+        hash,
+        blobPath,
+        resolvedContextId: logicalContextId,
+        userId,
+        chatId,
+        workspaceId,
+        appletId,
+        fileScope,
+        storageService,
+        setFileStoreMap,
+      });
+      if (legacyBlobResult?.url) {
+        context.res = {
+          status: 200,
+          body: {
+            url: legacyBlobResult.url,
+            shortLivedUrl: legacyBlobResult.shortLivedUrl || legacyBlobResult.url,
+            hash: legacyBlobResult.hash || hash,
+            blobPath: legacyBlobResult.blobPath || blobPath,
+            filename: legacyBlobResult.filename || null,
+            message: "File found by legacy blobPath fallback",
+          },
+        };
+        return;
+      }
+    } catch (legacyBlobError) {
+      context.log(`Legacy blobPath fallback failed for ${blobPath}: ${legacyBlobError.message}`);
+    }
+
+    context.log(`Hash ${hash} not found in Redis, falling back to blobPath: ${blobPath}`);
+  }
+
+  // Handle blobPath-based lookups: generate a short-lived SAS URL directly
+  // from the blob path, without needing a hash in Redis.
+  if (blobPath) {
+    try {
+      const { provider } = await getScopedProvider({
+        storageService,
+        resolvedContextId: logicalContextId,
+        userId,
+        workspaceId,
+        appletId,
+        fileScope,
+      });
+
+      // Azure storage: use SDK to check existence and generate SAS token
+      if (provider && provider.getBlobClient && provider.generateShortLivedSASToken) {
+        const { containerClient } = await provider.getBlobClient();
+        const blockBlobClient = containerClient.getBlockBlobClient(blobPath);
+
+        const exists = await blockBlobClient.exists();
+        if (exists) {
+          const sasToken = provider.generateShortLivedSASToken(blobPath, shortLivedDuration);
+          const shortLivedUrl = `${blockBlobClient.url}?${sasToken}`;
+          let gcsUrl = null;
+
+          try {
+            const ensuredFile = await storageService.ensureGCSUpload(context, {
+              url: shortLivedUrl,
+              blobName: blobPath,
+            });
+            gcsUrl = ensuredFile?.gcs || null;
+          } catch (ensureGcsError) {
+            context.log(
+              `Warning: Could not ensure GCS backup for blobPath ${blobPath}: ${ensureGcsError.message}`,
+            );
+          }
+
+          context.log(`Generated short-lived URL for blobPath: ${blobPath} (expires in ${shortLivedDuration} minutes)`);
+          context.res = {
+            status: 200,
+            body: {
+              url: shortLivedUrl,
+              shortLivedUrl: shortLivedUrl,
+              ...(gcsUrl ? { gcs: gcsUrl } : {}),
+              ...(hash ? { hash } : {}),
+              blobPath,
+              expiresInMinutes: shortLivedDuration,
+              message: "File found by blobPath",
+            },
+          };
+          return;
+        }
+      } else if (provider && provider.fileExists) {
+        // Local/other storage: check if a file with this path exists
+        const localUrl = `http://localhost:${process.env.PORT || 7071}/files/${blobPath}`;
+        const exists = await provider.fileExists(localUrl);
+        if (exists) {
+          context.log(`Found local file for blobPath: ${blobPath}`);
+          context.res = {
+            status: 200,
+            body: {
+              url: localUrl,
+              shortLivedUrl: localUrl,
+              message: "File found by blobPath",
+            },
+          };
+          return;
+        }
+      }
+
+      try {
+        const legacyBlobResult = await resolveBlobPathWithLegacyFallback({
+          context,
+          hash,
+          blobPath,
+          resolvedContextId: logicalContextId,
+          userId,
+          chatId,
+          workspaceId,
+          appletId,
+          fileScope,
+          storageService,
+          setFileStoreMap,
+        });
+        if (legacyBlobResult?.url) {
+          context.res = {
+            status: 200,
+            body: {
+              url: legacyBlobResult.shortLivedUrl || legacyBlobResult.url,
+              shortLivedUrl: legacyBlobResult.shortLivedUrl || legacyBlobResult.url,
+              ...(legacyBlobResult.hash ? { hash: legacyBlobResult.hash } : {}),
+              blobPath: legacyBlobResult.blobPath || blobPath,
+              filename: legacyBlobResult.filename || null,
+              expiresInMinutes: shortLivedDuration,
+              message: "File found by legacy blobPath fallback",
+            },
+          };
+          return;
+        }
+      } catch (legacyBlobError) {
+        context.log(`Legacy blobPath fallback failed for ${blobPath}: ${legacyBlobError.message}`);
+      }
+
+      context.log(`Blob not found for blobPath: ${blobPath}`);
+      context.res = {
+        status: 404,
+        body: `Blob not found: ${blobPath}`,
+      };
+      return;
+    } catch (error) {
+      context.log(`Error looking up blobPath ${blobPath}: ${error}`);
+      context.res = {
+        status: 404,
+        body: `Blob not found: ${blobPath}`,
+      };
+      return;
+    }
   }
 
   if (req.method.toLowerCase() === "post") {
@@ -679,11 +1920,21 @@ async function CortexFileHandler(context, req) {
       storageService.primaryProvider.constructor.name ===
       "LocalStorageProvider";
     // Use uploadBlob to handle multipart/form-data
-    // Container parameter is ignored - always uses default container from env var
     const result = await uploadBlob(context, req, saveToLocal, null, hash);
     if (result?.hash && context?.res?.body) {
-      // Use contextId from result (extracted from form fields) or from resolvedContextId (query/body)
-      const uploadContextId = result.contextId || resolvedContextId;
+      // Use the explicit scoped context when available, otherwise derive it
+      // from the folder-storage routing inputs so uploads and lookups share
+      // the same Redis namespace.
+      const uploadContextId =
+        result.contextId
+        || getScopedLogicalContextId({
+          contextId: null,
+          userId: result.userId || null,
+          workspaceId: result.workspaceId || null,
+          appletId: result.appletId || null,
+          fileScope: result.fileScope || null,
+        })
+        || logicalContextId;
       // Store contextId alongside the entry for debugging/traceability
       if (uploadContextId && typeof context.res.body === "object" && context.res.body) {
         context.res.body.contextId = uploadContextId;
@@ -750,7 +2001,6 @@ async function CortexFileHandler(context, req) {
             }
 
             // Save the converted file
-            // Container parameter is ignored - always uses default container from env var
             const convertedSaveResult =
               await conversionService._saveConvertedFile(
                 conversion.convertedPath,
@@ -768,7 +2018,6 @@ async function CortexFileHandler(context, req) {
             };
           } else {
             // File doesn't need conversion, save the original file
-            // Container parameter is ignored - always uses default container from env var
             const saveResult = await conversionService._saveConvertedFile(
               downloadedFile,
               requestId,
@@ -830,7 +2079,7 @@ async function CortexFileHandler(context, req) {
       }
     } else {
       const { chunkPromises, chunkOffsets, uniqueOutputPath, chunkBaseName } =
-        await splitMediaFile(file);
+        await splitMediaFile(file, 500, requestId, chunkOverlapSeconds);
 
       numberOfChunks = chunkPromises.length; // for progress reporting
       totalCount += chunkPromises.length * 4; // 4 steps for each chunk (download and upload)
@@ -848,7 +2097,6 @@ async function CortexFileHandler(context, req) {
         const chunkPath = chunks[index];
         // Use the same base filename for all chunks to ensure consistency
         const chunkFilename = `chunk-${index + 1}-${chunkBaseName}`;
-        // Container parameter is ignored - always uses default container from env var
         const chunkResult = await storageService.uploadFile(
           context,
           chunkPath,

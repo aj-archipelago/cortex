@@ -20,6 +20,10 @@ export function sanitizeFilename(filename) {
   // Get just the basename to prevent path traversal
   let basename = path.basename(decoded);
 
+  // Strip ASCII and C1 control characters. C1 controls can appear when UTF-8
+  // filenames are misdecoded as Latin-1 and Azure rejects them as invalid URIs.
+  basename = basename.normalize("NFC").replace(/[\u0000-\u001F\u007F-\u009F]/g, "_");
+
   // Replace invalid characters with underscores
   basename = basename.replace(/[<>:"/\\|?*]/g, "_");
 
