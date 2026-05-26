@@ -1,126 +1,49 @@
 // sys_tool_file_collection.js
-// Tool pathway that manages user file collections (add, search, list, update, remove files)
-// Uses Redis hash maps (FileStoreMap:ctx:<contextId>) for storage
-// Supports atomic rename/tag/notes updates via UpdateFileMetadata
+// Tool pathway that manages user file collections (list, search, remove files)
+// Files are listed from cloud storage via CFH listFolder API
 import logger from '../../../../lib/logger.js';
-import { addFileToCollection, loadFileCollection, findFileInCollection, deleteFileByHash, updateFileMetadata, invalidateFileCollectionCache } from '../../../../lib/fileUtils.js';
+import {
+    deleteFileByHash,
+    findFileInCollection,
+    getWorkspacePathForFile,
+    listFilesForFileAccessPlan,
+} from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
     timeout: 30,
     toolDefinition: [
-        { 
+        {
             type: "function",
             icon: "📁",
+            toolCost: 1,
             function: {
-                name: "AddFileToCollection",
-                description: "Add a file to the file collection for this chat. This tool can upload a file from a URL to cloud storage (checking for duplicates by hash) and then store it in your collection with metadata so it can be used to download files from the internet.",
+                name: "FileCollection",
+                description: "View and manage your files in cloud storage.\nOperations are inferred from parameters:\n- RESOLVE: Provide fileRef to look up a single file's complete details (blobPath, contentType, etc.)\n- SEARCH: Provide query to search by filename\n- LIST: No specific params → lists all files\n- REMOVE: Provide fileIds array to delete files",
                 parameters: {
                     type: "object",
                     properties: {
-                        fileUrl: {
+                        fileRef: {
                             type: "string",
-                            description: "Optional: The URL of a file to upload to cloud storage (e.g., https://example.com/file.pdf). If provided, the file will be uploaded and then added to the collection. If not provided, you must provide the 'url' parameter for an already-uploaded file."
+                            description: "RESOLVE: Any file reference (blobPath, workspace path, URL, name, or legacy hash) to look up a single file's complete details"
                         },
-                        url: {
-                            type: "string",
-                            description: "Optional: The cloud storage URL of an already-uploaded file (Azure URL). Use this if the file is already in cloud storage. If 'fileUrl' is provided, this will be ignored."
-                        },
-                        gcs: {
-                            type: "string",
-                            description: "Optional: The Google Cloud Storage URL of the file (GCS URL). Only needed if the file is already in cloud storage and you're providing 'url'."
-                        },
-                        filename: {
-                            type: "string",
-                            description: "The filename or title for this file"
-                        },
-                        tags: {
-                            type: "array",
-                            items: { type: "string" },
-                            description: "Optional: Array of tags to help organize and search for this file (e.g., ['pdf', 'report', '2024'])"
-                        },
-                        notes: {
-                            type: "string",
-                            description: "Optional: Notes or description about this file to help you remember what it contains"
-                        },
-                        hash: {
-                            type: "string",
-                            description: "Optional: File hash for deduplication and identification (usually computed automatically during upload)"
-                        },
-                        permanent: {
-                            type: "boolean",
-                            description: "Optional: If true, the file will be stored indefinitely (retention=permanent). Default: false."
-                        },
-                        userMessage: {
-                            type: "string",
-                            description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                    },
-                    required: ["filename", "userMessage"]
-                }
-            }
-        },
-        {
-            type: "function",
-            icon: "🔍",
-            function: {
-                name: "SearchFileCollection",
-                description: "Search your file collection to find files by filename, tags, notes, or date. Returns matching files with their cloud URLs and metadata.",
-                parameters: {
-                    type: "object",
-                    properties: {
                         query: {
                             type: "string",
-                            description: "Search query - can search by filename, tags, or notes content. Note: This is a simple substring search (case-insensitive). Operators like | (OR), & (AND), NOT, or quoted phrases are NOT supported. The query will match if it appears anywhere in the filename, tags, or notes."
+                            description: "SEARCH: Search by filename (case-insensitive substring match)"
                         },
-                        tags: {
+                        fileIds: {
                             type: "array",
                             items: { type: "string" },
-                            description: "Optional: Filter results by specific tags (all tags must match)"
-                        },
-                        limit: {
-                            type: "number",
-                            description: "Optional: Maximum number of results to return (default: 20)"
-                        },
-                        includeAllChats: {
-                            type: "boolean",
-                            description: "Optional: Set to true if the file you want may be in a different chat than the current chat."
-                        },
-                        userMessage: {
-                            type: "string",
-                            description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                    },
-                    required: ["query", "userMessage"]
-                }
-            }
-        },
-        {
-            type: "function",
-            icon: "📋",
-            function: {
-                name: "ListFileCollection",
-                description: "List all files in your collection, optionally filtered by tags or sorted by date. Useful for getting an overview of your stored files or when you don't know the exact file you're looking for.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        tags: {
-                            type: "array",
-                            items: { type: "string" },
-                            description: "Optional: Filter results by specific tags (all tags must match)"
+                            description: "REMOVE: Array of files to remove (prefer blobPath; legacy hash or filename also supported)"
                         },
                         sortBy: {
                             type: "string",
                             enum: ["date", "filename"],
-                            description: "Optional: Sort results by date (newest first) or filename (alphabetical). Default: date"
+                            description: "LIST: Sort by date (newest first) or filename. Default: date"
                         },
                         limit: {
                             type: "number",
-                            description: "Optional: Maximum number of results to return (default: 50)"
-                        },
-                        includeAllChats: {
-                            type: "boolean",
-                            description: "Optional: Set to true if the file you want may be in a different chat than the current chat."
+                            description: "SEARCH/LIST: Maximum results to return"
                         },
                         userMessage: {
                             type: "string",
@@ -130,376 +53,124 @@ export default {
                     required: ["userMessage"]
                 }
             }
-        },
-        {
-            type: "function",
-            icon: "🗑️",
-            function: {
-                name: "RemoveFileFromCollection",
-                description: "Remove one or more files from your collection and delete them from cloud storage.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        fileIds: {
-                            type: "array",
-                            items: { type: "string" },
-                            description: "Array of files to remove (from ListFileCollection or SearchFileCollection): each item can be the hash, the filename, the URL, or the GCS URL."
-                        },
-                        userMessage: {
-                            type: "string",
-                            description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                    },
-                    required: ["fileIds", "userMessage"]
-                }
-            }
-        },
-        {
-            type: "function",
-            icon: "✏️",
-            function: {
-                name: "UpdateFileMetadata",
-                description: "Update metadata for a file in your collection. Use this to rename files, update tags, or add/modify notes. This is an atomic operation - safer than add+delete for renaming.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        file: {
-                            type: "string",
-                            description: "The file to update - can be the current filename, hash, URL, or ID from ListFileCollection"
-                        },
-                        newFilename: {
-                            type: "string",
-                            description: "Optional: New filename/title for the file (renames the file)"
-                        },
-                        tags: {
-                            type: "array",
-                            items: { type: "string" },
-                            description: "Optional: New tags to set for this file (replaces existing tags)"
-                        },
-                        addTags: {
-                            type: "array",
-                            items: { type: "string" },
-                            description: "Optional: Tags to add to the file's existing tags"
-                        },
-                        removeTags: {
-                            type: "array",
-                            items: { type: "string" },
-                            description: "Optional: Tags to remove from the file's existing tags"
-                        },
-                        notes: {
-                            type: "string",
-                            description: "Optional: New notes/description for the file (replaces existing notes)"
-                        },
-                        permanent: {
-                            type: "boolean",
-                            description: "Optional: If true, marks the file as permanent (won't be auto-cleaned). If false, marks as temporary."
-                        },
-                        userMessage: {
-                            type: "string",
-                            description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                    },
-                    required: ["file", "userMessage"]
-                }
-            }
         }
     ],
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
-        const { contextId, contextKey } = args;
-        if (!contextId) {
-            throw new Error("contextId is required. It should be provided via agentContext or contextId parameter.");
+        const fileAccessPlan = Array.isArray(args.fileAccessPlan)
+            ? args.fileAccessPlan
+            : [];
+        if (fileAccessPlan.length === 0) {
+            throw new Error("fileAccessPlan is required.");
         }
-        const chatId = args.chatId || null;
 
-        // Determine which function was called based on which parameters are present
-        // Order matters: check most specific operations first
-        const isUpdate = args.file !== undefined && (
-            args.newFilename !== undefined || 
-            args.tags !== undefined || 
-            args.addTags !== undefined || 
-            args.removeTags !== undefined || 
-            args.notes !== undefined || 
-            args.permanent !== undefined
-        );
-        const isAdd = !isUpdate && (args.fileUrl !== undefined || args.url !== undefined);
-        const isSearch = args.query !== undefined;
-        const isRemove = args.fileIds !== undefined || args.fileId !== undefined;
+        const isResolve = typeof args.fileRef === 'string' && args.fileRef.length > 0;
+        const isSearch = typeof args.query === 'string' && args.query.length > 0;
+        const isRemove = (Array.isArray(args.fileIds) && args.fileIds.length > 0) || (typeof args.fileId === 'string' && args.fileId.length > 0);
 
         try {
-            if (!contextId) {
-                throw new Error("contextId is required for file collection operations");
-            }
-
-            if (isUpdate) {
-                // Update file metadata (rename, tags, notes, permanent)
-                const { file, newFilename, tags, addTags, removeTags, notes, permanent } = args;
-                
-                if (!file) {
-                    throw new Error("file parameter is required - specify the file by filename, hash, URL, or ID");
+            if (isResolve) {
+                // Resolve a file reference to its complete details
+                const { fileRef } = args;
+                if (!fileRef || typeof fileRef !== 'string') {
+                    throw new Error("fileRef is required and must be a string");
                 }
 
-                // Load collection and find the file
-                // Use loadFileCollection without chatIds to find files regardless of inCollection status
-                // This ensures files can be updated even if they're chat-specific
-                const collection = await loadFileCollection({ contextId, contextKey, default: true });
-                const foundFile = findFileInCollection(file, collection);
-                
-                if (!foundFile) {
-                    throw new Error(`File not found: "${file}". Use ListFileCollection to see available files.`);
+                const files = await listFilesForFileAccessPlan(fileAccessPlan);
+                const found = findFileInCollection(fileRef, files);
+
+                resolver.tool = JSON.stringify({ toolUsed: "ResolveFile" });
+
+                if (!found) {
+                    return JSON.stringify({
+                        success: false,
+                        message: `No file found matching "${fileRef}". Use FileCollection LIST to see available files.`
+                    });
                 }
 
-                if (!foundFile.hash) {
-                    throw new Error(`File "${file}" has no hash - cannot update metadata`);
-                }
-
-                // Build the metadata update object
-                const metadataUpdate = {};
-                
-                // Handle filename rename
-                if (newFilename !== undefined) {
-                    metadataUpdate.displayFilename = newFilename;
-                }
-                
-                // Handle tags - three modes: replace all, add, or remove
-                if (tags !== undefined) {
-                    // Replace all tags
-                    metadataUpdate.tags = Array.isArray(tags) ? tags : [];
-                } else if (addTags !== undefined || removeTags !== undefined) {
-                    // Merge with existing tags
-                    let currentTags = Array.isArray(foundFile.tags) ? [...foundFile.tags] : [];
-                    
-                    // Add new tags (avoid duplicates)
-                    if (addTags && Array.isArray(addTags)) {
-                        for (const tag of addTags) {
-                            const normalizedTag = tag.toLowerCase();
-                            if (!currentTags.some(t => t.toLowerCase() === normalizedTag)) {
-                                currentTags.push(tag);
-                            }
-                        }
-                    }
-                    
-                    // Remove tags
-                    if (removeTags && Array.isArray(removeTags)) {
-                        const removeSet = new Set(removeTags.map(t => t.toLowerCase()));
-                        currentTags = currentTags.filter(t => !removeSet.has(t.toLowerCase()));
-                    }
-                    
-                    metadataUpdate.tags = currentTags;
-                }
-                
-                // Handle notes
-                if (notes !== undefined) {
-                    metadataUpdate.notes = notes;
-                }
-                
-                // Handle permanent flag
-                if (permanent !== undefined) {
-                    metadataUpdate.permanent = permanent;
-                }
-                
-                // Always update lastAccessed
-                metadataUpdate.lastAccessed = new Date().toISOString();
-
-                // Perform the atomic update
-                const success = await updateFileMetadata(contextId, foundFile.hash, metadataUpdate, contextKey, chatId);
-                
-                if (!success) {
-                    throw new Error(`Failed to update file metadata for "${file}"`);
-                }
-
-                // Build result with what was updated
-                const updates = [];
-                if (newFilename !== undefined) updates.push(`renamed to "${newFilename}"`);
-                if (tags !== undefined) updates.push(`tags set to [${tags.join(', ')}]`);
-                if (addTags !== undefined) updates.push(`added tags [${addTags.join(', ')}]`);
-                if (removeTags !== undefined) updates.push(`removed tags [${removeTags.join(', ')}]`);
-                if (notes !== undefined) updates.push(`notes updated`);
-                if (permanent !== undefined) updates.push(`marked as ${permanent ? 'permanent' : 'temporary'}`);
-
-                resolver.tool = JSON.stringify({ toolUsed: "UpdateFileMetadata" });
                 return JSON.stringify({
                     success: true,
-                    file: foundFile.displayFilename || foundFile.filename || file,
-                    fileId: foundFile.id,
-                    hash: foundFile.hash,
-                    updates: updates,
-                    message: `File "${foundFile.displayFilename || foundFile.filename || file}" updated: ${updates.join(', ')}`
-                });
-
-            } else if (isAdd) {
-                // Add file to collection
-                const { fileUrl, url, gcs, filename, tags = [], notes = '', hash = null, permanent = false } = args;
-                
-                if (!filename) {
-                    throw new Error("filename is required");
-                }
-                
-                if (!fileUrl && !url) {
-                    throw new Error("Either fileUrl (to upload) or url (already uploaded) is required");
-                }
-
-                // Use the centralized utility function (it will handle upload if fileUrl is provided)
-                const fileEntry = await addFileToCollection(
-                    contextId,
-                    contextKey,
-                    url,
-                    gcs,
-                    filename,
-                    tags,
-                    notes,
-                    hash,
-                    fileUrl,
-                    resolver,
-                    permanent,
-                    chatId
-                );
-
-                resolver.tool = JSON.stringify({ toolUsed: "AddFileToCollection" });
-                return JSON.stringify({
-                    success: true,
-                    fileId: fileEntry.id,
-                    message: `File "${filename}" added to collection`
+                    message: `Resolved file: ${found.displayFilename || found.filename}`,
+                    file: {
+                        hash: found.hash || null,
+                        displayFilename: found.displayFilename || found.filename || null,
+                        url: found.url,
+                        workspacePath: getWorkspacePathForFile(
+                            found,
+                            found._contextId || null,
+                        ),
+                        blobPath: found.name || null,
+                        contentType: found.contentType || null,
+                        folderPath: found.folderPath || null,
+                        size: found.size || null,
+                        lastModified: found.lastModified || null,
+                        permanent: found.permanent || false
+                    }
                 });
 
             } else if (isSearch) {
-                // Search collection
-                const { query, tags: filterTags = [], limit = 20, includeAllChats = false } = args;
-                
+                // Search files in cloud storage
+                const { query, limit = 20 } = args;
+
                 if (!query || typeof query !== 'string') {
                     throw new Error("query is required and must be a string");
                 }
 
-                // Ensure filterTags is always an array
-                const safeFilterTags = Array.isArray(filterTags) ? filterTags : [];
-                const queryLower = query.toLowerCase();
-                
-                // Normalize query for flexible matching: treat spaces, dashes, underscores as equivalent
                 const normalizeForSearch = (str) => str.toLowerCase().replace(/[-_\s]+/g, ' ').trim();
                 const queryNormalized = normalizeForSearch(query);
-                
-                // Determine which chatId to use for filtering (null if includeAllChats is true)
-                const filterChatId = includeAllChats ? null : chatId;
-                
-                // Load primary collection for lastAccessed updates (only update files in primary context)
-                const primaryFiles = await loadFileCollection(
-                    { contextId, contextKey, default: true }, 
-                    { chatIds: filterChatId ? [filterChatId] : null, useCache: false }
-                );
-                const now = new Date().toISOString();
-                
-                // Find matching files in primary collection and update lastAccessed directly
-                for (const file of primaryFiles) {
-                    if (!file.hash) continue;
-                    
-                    // Fallback to filename if displayFilename is not set (for files uploaded before displayFilename was added)
-                    const displayFilename = file.displayFilename || file.filename || '';
-                    const filenameMatch = normalizeForSearch(displayFilename).includes(queryNormalized);
-                    const notesMatch = file.notes && normalizeForSearch(file.notes).includes(queryNormalized);
-                    const tagMatch = Array.isArray(file.tags) && file.tags.some(tag => normalizeForSearch(tag).includes(queryNormalized));
-                    const matchesQuery = filenameMatch || notesMatch || tagMatch;
-                    
-                    const matchesTags = safeFilterTags.length === 0 || 
-                        (Array.isArray(file.tags) && safeFilterTags.every(filterTag => 
-                            file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
-                        ));
-                    
-                    if (matchesQuery && matchesTags) {
-                        // Update lastAccessed directly (atomic operation)
-                        // Don't pass chatId - we're only updating access time, not changing inCollection
-                        await updateFileMetadata(contextId, file.hash, {
-                            lastAccessed: now
-                        }, contextKey);
-                    }
-                }
-                
-                // Load collection for search results (includes all agentContext files)
-                // Filter by chatId if includeAllChats is false and chatId is available
-                const updatedFiles = await loadFileCollection(
-                    args.agentContext, 
-                    { chatIds: filterChatId ? [filterChatId] : null }
-                );
-                
-                // Filter and sort results (for display only, not modifying)
-                let results = updatedFiles.filter(file => {
-                    // Filter by query and tags
-                    // Fallback to filename if displayFilename is not set
+
+                const files = await listFilesForFileAccessPlan(fileAccessPlan);
+
+                let results = files.filter(file => {
                     const displayFilename = file.displayFilename || file.filename || '';
                     const filename = file.filename || '';
-                    
-                    // Check both displayFilename and filename for matches
-                    // Use normalized matching (treating spaces, dashes, underscores as equivalent)
-                    // so "News Corp" matches "News-Corp" and "News_Corp"
-                    const displayFilenameNorm = normalizeForSearch(displayFilename);
+                    const displayNorm = normalizeForSearch(displayFilename);
                     const filenameNorm = normalizeForSearch(filename);
-                    const filenameMatch = displayFilenameNorm.includes(queryNormalized) || 
-                                         (filename && filename !== displayFilename && filenameNorm.includes(queryNormalized));
-                    const notesMatch = file.notes && normalizeForSearch(file.notes).includes(queryNormalized);
-                    const tagMatch = Array.isArray(file.tags) && file.tags.some(tag => normalizeForSearch(tag).includes(queryNormalized));
-                    
-                    const matchesQuery = filenameMatch || notesMatch || tagMatch;
-                    
-                    const matchesTags = safeFilterTags.length === 0 || 
-                        (Array.isArray(file.tags) && safeFilterTags.every(filterTag => 
-                            file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
-                        ));
-                    
-                    return matchesQuery && matchesTags;
+                    return displayNorm.includes(queryNormalized) ||
+                           (filename && filename !== displayFilename && filenameNorm.includes(queryNormalized));
                 });
 
-                // Sort by relevance (displayFilename matches first, then by date)
+                // Sort by relevance (filename matches first, then by date)
                 results.sort((a, b) => {
-                    // Fallback to filename if displayFilename is not set
-                    const aDisplayFilename = a.displayFilename || a.filename || '';
-                    const bDisplayFilename = b.displayFilename || b.filename || '';
-                    const aFilenameMatch = normalizeForSearch(aDisplayFilename).includes(queryNormalized);
-                    const bFilenameMatch = normalizeForSearch(bDisplayFilename).includes(queryNormalized);
-                    if (aFilenameMatch && !bFilenameMatch) return -1;
-                    if (!aFilenameMatch && bFilenameMatch) return 1;
-                    return new Date(b.addedDate) - new Date(a.addedDate);
+                    const aN = normalizeForSearch(a.displayFilename || a.filename || '');
+                    const bN = normalizeForSearch(b.displayFilename || b.filename || '');
+                    const aMatch = aN.includes(queryNormalized);
+                    const bMatch = bN.includes(queryNormalized);
+                    if (aMatch && !bMatch) return -1;
+                    if (!aMatch && bMatch) return 1;
+                    return new Date(b.lastModified || 0) - new Date(a.lastModified || 0);
                 });
 
-                // Limit results
                 results = results.slice(0, limit);
 
                 resolver.tool = JSON.stringify({ toolUsed: "SearchFileCollection" });
-                
-                // Build helpful message when no results found
-                let message;
-                if (results.length === 0) {
-                    const suggestions = [];
-                    if (chatId && !includeAllChats) {
-                        suggestions.push('try includeAllChats=true to search across all chats');
-                    }
-                    suggestions.push('use ListFileCollection to see all available files');
-                    
-                    message = `No files found matching "${query}". Count: 0. Suggestions: ${suggestions.join('; ')}.`;
-                } else {
-                    message = `Found ${results.length} file(s) matching "${query}". Use the hash or displayFilename to reference files in other tools.`;
-                }
-                
+
+                const message = results.length === 0
+                    ? `No files found matching "${query}". Count: 0.`
+                    : `Found ${results.length} file(s) matching "${query}". Prefer blobPath or workspacePath to reference files; displayFilename and legacy hash are also supported.`;
+
                 return JSON.stringify({
                     success: true,
                     count: results.length,
                     message,
                     files: results.map(f => ({
-                        id: f.id,
                         hash: f.hash || null,
                         displayFilename: f.displayFilename || f.filename || null,
                         url: f.url,
-                        gcs: f.gcs || null,
-                        tags: f.tags,
-                        notes: f.notes,
-                        addedDate: f.addedDate
+                        workspacePath: getWorkspacePathForFile(
+                            f,
+                            f._contextId || null,
+                        ),
+                        size: f.size || null,
+                        lastModified: f.lastModified || null,
+                        permanent: f.permanent || false
                     }))
                 });
 
             } else if (isRemove) {
-                // Remove file(s) from this chat's collection (reference counting)
-                // Only delete from cloud if no other chats reference the file
+                // Remove file(s) from cloud storage
                 const { fileIds, fileId } = args;
-                
-                // Normalize input to array
+
                 let targetFiles = [];
                 if (Array.isArray(fileIds)) {
                     targetFiles = fileIds;
@@ -511,29 +182,29 @@ export default {
                     throw new Error("fileIds array is required and must not be empty");
                 }
 
+                // List files to resolve targets
+                const allFiles = await listFilesForFileAccessPlan(fileAccessPlan);
+
                 let notFoundFiles = [];
+                let notWritableFiles = [];
                 let filesToProcess = [];
 
-                // Load collection ONCE to find all files and their data
-                // Do NOT filter by chatId - remove should be able to delete files from any chat
-                // Use loadFileCollection without chatIds to get all files from all contexts
-                const collection = await loadFileCollection(args.agentContext);
-                
-                // Resolve all files and collect their info in a single pass
                 for (const target of targetFiles) {
-                    if (target === '*') continue; // Skip wildcard if passed
-                    
-                    const foundFile = findFileInCollection(target, collection);
-                    
+                    if (target === '*') continue;
+                    const foundFile = findFileInCollection(target, allFiles);
                     if (foundFile) {
-                        // Avoid duplicates (by hash since that's the unique key in Redis)
+                        if (foundFile._writeTarget !== true) {
+                            notWritableFiles.push(
+                                foundFile.displayFilename || foundFile.filename || target,
+                            );
+                            continue;
+                        }
                         if (!filesToProcess.some(f => f.hash === foundFile.hash)) {
                             filesToProcess.push({
-                                id: foundFile.id,
                                 displayFilename: foundFile.displayFilename || foundFile.filename || null,
                                 hash: foundFile.hash || null,
                                 permanent: foundFile.permanent ?? false,
-                                inCollection: foundFile.inCollection || []
+                                contextId: foundFile._contextId || null,
                             });
                         }
                     } else {
@@ -541,218 +212,115 @@ export default {
                     }
                 }
 
-                if (filesToProcess.length === 0 && notFoundFiles.length > 0) {
-                    throw new Error(`No files found matching: ${notFoundFiles.join(', ')}. Try using the file hash, URL, or filename instead of ID. If the file was found in a search, use the hash or filename from the search results.`);
+                if (filesToProcess.length === 0) {
+                    const reasons = [];
+                    if (notFoundFiles.length > 0) {
+                        reasons.push(`No files found matching: ${notFoundFiles.join(', ')}`);
+                    }
+                    if (notWritableFiles.length > 0) {
+                        reasons.push(`Cannot remove read-only files: ${notWritableFiles.join(', ')}`);
+                    }
+                    if (reasons.length > 0) {
+                        throw new Error(`${reasons.join('. ')}. Use blobPath, workspacePath, legacy hash, or filename from a search or list.`);
+                    }
                 }
 
-                // Import helpers for reference counting
-                const { getRedisClient, removeChatIdFromInCollection } = await import('../../../../lib/fileUtils.js');
-                const redisClient = await getRedisClient();
-                const contextMapKey = `FileStoreMap:ctx:${contextId}`;
-                
-                // Track files that will be fully deleted vs just updated
-                const filesToFullyDelete = [];
-                const filesToUpdate = [];
-                
+                // Delete from cloud storage (skip permanent files)
                 for (const fileInfo of filesToProcess) {
-                    if (!fileInfo.hash) continue;
-                    
-                    // Check if file is global ('*') - global files can't be removed per-chat
-                    const isGlobal = Array.isArray(fileInfo.inCollection) && fileInfo.inCollection.includes('*');
-                    
-                    if (isGlobal) {
-                        // Global file - fully remove it (no reference counting for global files)
-                        filesToFullyDelete.push(fileInfo);
-                    } else if (!chatId) {
-                        // No chatId context - fully remove
-                        filesToFullyDelete.push(fileInfo);
-                    } else {
-                        // Check if current chatId is in the file's inCollection
-                        const currentChatInCollection = Array.isArray(fileInfo.inCollection) && fileInfo.inCollection.includes(chatId);
-                        
-                        if (!currentChatInCollection) {
-                            // File doesn't belong to current chat - fully remove it (cross-chat removal)
-                            filesToFullyDelete.push(fileInfo);
-                        } else {
-                            // Remove this chatId from inCollection
-                            const updatedInCollection = removeChatIdFromInCollection(fileInfo.inCollection, chatId);
-                            
-                            if (updatedInCollection.length === 0) {
-                                // No more references - fully delete
-                                filesToFullyDelete.push(fileInfo);
-                            } else {
-                                // Still has references from other chats - just update inCollection
-                                filesToUpdate.push({ ...fileInfo, updatedInCollection });
-                            }
-                        }
-                    }
-                }
-                
-                // Update files that still have references (remove this chatId only)
-                for (const fileInfo of filesToUpdate) {
-                    if (redisClient) {
-                        try {
-                            const existingDataStr = await redisClient.hget(contextMapKey, fileInfo.hash);
-                            if (existingDataStr) {
-                                const existingData = JSON.parse(existingDataStr);
-                                existingData.inCollection = fileInfo.updatedInCollection;
-                                await redisClient.hset(contextMapKey, fileInfo.hash, JSON.stringify(existingData));
-                                logger.info(`Removed chatId ${chatId} from file: ${fileInfo.displayFilename} (still referenced by: ${fileInfo.updatedInCollection.join(', ')})`);
-                            }
-                        } catch (e) {
-                            logger.warn(`Failed to update inCollection for file ${fileInfo.hash}: ${e.message}`);
-                        }
-                    }
-                }
-                
-                // Fully delete files with no remaining references
-                if (redisClient) {
-                    for (const fileInfo of filesToFullyDelete) {
-                        await redisClient.hdel(contextMapKey, fileInfo.hash);
-                    }
-                }
-                
-                // Always invalidate cache immediately so list operations reflect changes
-                invalidateFileCollectionCache(contextId, contextKey);
-
-                // Delete files from cloud storage ASYNC (only for files with no remaining references)
-                // IMPORTANT: Don't delete permanent files from cloud storage - they should persist
-                (async () => {
-                    for (const fileInfo of filesToFullyDelete) {
-                        // Skip deletion if file is marked as permanent
+                    if (!fileInfo.hash || fileInfo.permanent) {
                         if (fileInfo.permanent) {
-                            logger.info(`Skipping cloud deletion for permanent file: ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
-                            continue;
+                            logger.info(`Skipping deletion for permanent file: ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
                         }
-                        
-                        try {
-                            logger.info(`Deleting file from cloud storage (no remaining references): ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
-                            await deleteFileByHash(fileInfo.hash, resolver, contextId);
-                        } catch (error) {
-                            logger.warn(`Failed to delete file ${fileInfo.displayFilename} (hash: ${fileInfo.hash}) from cloud storage: ${error?.message || String(error)}`);
-                        }
+                        continue;
                     }
-                })().catch(err => logger.error(`Async cloud deletion error: ${err}`));
+                    try {
+                        logger.info(`Deleting file from cloud: ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
+                        await deleteFileByHash(fileInfo.hash, resolver, fileInfo.contextId || null);
+                    } catch (error) {
+                        logger.warn(`Failed to delete file ${fileInfo.displayFilename} from cloud: ${error?.message || String(error)}`);
+                    }
+                }
 
                 const removedCount = filesToProcess.length;
-                const removedFiles = filesToProcess.map(f => ({
-                    id: f.id,
-                    displayFilename: f.displayFilename,
-                    hash: f.hash,
-                    fullyDeleted: filesToFullyDelete.some(fd => fd.hash === f.hash)
-                }));
-
-                // Get remaining files count after deletion
-                const remainingCollection = await loadFileCollection({ contextId, contextKey, default: true }, { useCache: false });
-                const remainingCount = remainingCollection.length;
-
-                // Build result message
-                let message = `${removedCount} file(s) removed from collection`;
-                
+                let message = `${removedCount} file(s) removed`;
                 if (notFoundFiles.length > 0) {
                     message += `. Could not find: ${notFoundFiles.join(', ')}`;
                 }
-                
-                message += " (Cloud storage cleanup started in background)";
+                if (notWritableFiles.length > 0) {
+                    message += `. Skipped read-only files: ${notWritableFiles.join(', ')}`;
+                }
 
                 resolver.tool = JSON.stringify({ toolUsed: "RemoveFileFromCollection" });
                 return JSON.stringify({
                     success: true,
-                    removedCount: removedCount,
-                    remainingFiles: remainingCount,
-                    message: message,
-                    removedFiles: removedFiles,
-                    notFoundFiles: notFoundFiles.length > 0 ? notFoundFiles : undefined
+                    removedCount,
+                    message,
+                    removedFiles: filesToProcess.map(f => ({
+                        displayFilename: f.displayFilename,
+                        hash: f.hash
+                    })),
+                    notFoundFiles: notFoundFiles.length > 0 ? notFoundFiles : undefined,
+                    notWritableFiles: notWritableFiles.length > 0 ? notWritableFiles : undefined,
                 });
 
             } else {
-                // List collection (read-only, no locking needed)
-                const { tags: filterTags = [], sortBy = 'date', limit = 50, includeAllChats = false } = args;
-                
-                // Determine which chatId to use for filtering (null if includeAllChats is true)
-                const filterChatId = includeAllChats ? null : chatId;
-                
-                // Use loadFileCollection to include files from all agentContext contexts
-                // Filter by chatId if includeAllChats is false and chatId is available
-                const collection = await loadFileCollection(
-                    args.agentContext, 
-                    { chatIds: filterChatId ? [filterChatId] : null }
-                );
-                let results = collection;
+                // List files from cloud storage
+                const { sortBy = 'date', limit = 50 } = args;
 
-                // Filter by tags if provided
-                if (filterTags.length > 0) {
-                    results = results.filter(file =>
-                        Array.isArray(file.tags) && filterTags.every(filterTag =>
-                            file.tags.some(tag => tag.toLowerCase() === filterTag.toLowerCase())
-                        )
-                    );
-                }
+                const files = await listFilesForFileAccessPlan(fileAccessPlan);
+                let results = [...files];
 
                 // Sort results
-                if (sortBy === 'date') {
-                    results.sort((a, b) => new Date(b.addedDate) - new Date(a.addedDate));
-                } else if (sortBy === 'filename') {
+                if (sortBy === 'filename') {
                     results.sort((a, b) => {
-                        // Fallback to filename if displayFilename is not set
-                        const aDisplayFilename = a.displayFilename || a.filename || '';
-                        const bDisplayFilename = b.displayFilename || b.filename || '';
-                        return aDisplayFilename.localeCompare(bDisplayFilename);
+                        const aName = a.displayFilename || a.filename || '';
+                        const bName = b.displayFilename || b.filename || '';
+                        return aName.localeCompare(bName);
                     });
+                } else {
+                    results.sort((a, b) => new Date(b.lastModified || 0) - new Date(a.lastModified || 0));
                 }
 
-                // Limit results
                 results = results.slice(0, limit);
 
                 resolver.tool = JSON.stringify({ toolUsed: "ListFileCollection" });
-                
-                // Build helpful message
+
                 let message;
                 if (results.length === 0) {
-                    const suggestions = [];
-                    if (chatId && !includeAllChats) {
-                        suggestions.push('try includeAllChats=true to see files from all chats');
-                    }
-                    if (filterTags.length > 0) {
-                        suggestions.push('remove tag filters to see more files');
-                    }
-                    message = suggestions.length > 0 
-                        ? `No files in collection. Suggestions: ${suggestions.join('; ')}.`
-                        : 'No files in collection.';
+                    message = 'No files in storage.';
                 } else {
-                    message = (results.length === collection.length) ? `Showing all ${results.length} file(s). These are ALL of the files that you can access. Use the hash or displayFilename to reference files in other tools.` : `Showing ${results.length} of ${collection.length} file(s). Use the hash or displayFilename to reference files in other tools.`;
+                    message = results.length === files.length
+                        ? `Showing all ${results.length} file(s).`
+                        : `Showing ${results.length} of ${files.length} file(s).`;
                 }
-                
+
                 return JSON.stringify({
                     success: true,
                     count: results.length,
-                    totalFiles: collection.length,
+                    totalFiles: files.length,
                     message,
                     files: results.map(f => ({
-                        id: f.id,
                         hash: f.hash || null,
                         displayFilename: f.displayFilename || f.filename || null,
                         url: f.url,
-                        gcs: f.gcs || null,
-                        tags: f.tags,
-                        notes: f.notes,
-                        addedDate: f.addedDate,
-                        lastAccessed: f.lastAccessed
+                        workspacePath: getWorkspacePathForFile(
+                            f,
+                            f._contextId || null,
+                        ),
+                        size: f.size || null,
+                        lastModified: f.lastModified || null,
+                        permanent: f.permanent || false
                     }))
                 });
             }
 
         } catch (e) {
             logger.error(`Error in file collection operation: ${e.message}`);
-            
-            const errorResult = {
+            resolver.tool = JSON.stringify({ toolUsed: "FileCollection" });
+            return JSON.stringify({
                 success: false,
                 error: e.message || "Unknown error occurred"
-            };
-
-            resolver.tool = JSON.stringify({ toolUsed: "FileCollection" });
-            return JSON.stringify(errorResult);
+            });
         }
     }
 };
-

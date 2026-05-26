@@ -1,35 +1,38 @@
 // sys_update_file_metadata.js
 // GraphQL pathway for updating file metadata (replaces sys_save_memory for renames and metadata updates)
-// Only updates Cortex-managed fields (displayFilename, tags, notes, etc.), not CFH fields (url, gcs, hash, filename)
+// Only updates Cortex-managed fields (displayFilename, etc.), not CFH fields (url, hash, filename)
 
-import { updateFileMetadata, getDefaultContext } from '../../../../lib/fileUtils.js';
+import {
+    getWriteFileAccessTarget,
+    updateFileMetadataInFileAccessPlan,
+} from '../../../../lib/fileUtils.js';
 
 export default {
     inputParameters: {
-        agentContext: [{ contextId: ``, contextKey: ``, default: true }],
+        fileAccessPlan: {
+            type: 'array',
+            items: { objType: 'FileAccessTargetInput' },
+            default: [],
+        },
         hash: ``,
         displayFilename: { type: 'string' }, // Optional - no default
-        tags: { type: 'array', items: { type: 'string' } }, // Optional - no default
-        notes: { type: 'string' }, // Optional - no default
         mimeType: { type: 'string' }, // Optional - no default
-        permanent: { type: 'boolean' }, // Optional - no default
-        inCollection: { type: 'array', items: { type: 'string' } } // Optional - array of chat IDs, or can be boolean true/false (normalized to ['*'] or removed)
+        permanent: { type: 'boolean' } // Optional - no default
     },
     model: 'oai-gpt4o',
     isMutation: true, // Declaratively mark this as a Mutation
 
     resolver: async (_parent, args, _contextValue, _info) => {
-        const { agentContext, hash, displayFilename, tags, notes, mimeType, permanent, inCollection, chatId } = args;
+        const { fileAccessPlan } = args;
+        const { hash, displayFilename, mimeType, permanent } = args;
         
-        const defaultCtx = getDefaultContext(agentContext);
-        if (!defaultCtx) {
+        const writeTarget = getWriteFileAccessTarget(fileAccessPlan);
+        if (!writeTarget) {
             return JSON.stringify({ 
                 success: false, 
-                error: 'agentContext with at least one default context is required' 
+                error: 'fileAccessPlan with a writable target is required'
             });
         }
-        const contextId = defaultCtx.contextId;
-        const contextKey = defaultCtx.contextKey || null;
         
         // Validate required parameters
         if (!hash) {
@@ -45,27 +48,19 @@ export default {
             if (displayFilename !== undefined && displayFilename !== null) {
                 metadata.displayFilename = displayFilename;
             }
-            if (tags !== undefined && tags !== null) {
-                metadata.tags = Array.isArray(tags) ? tags : [];
-            }
-            if (notes !== undefined && notes !== null) {
-                metadata.notes = notes;
-            }
             if (mimeType !== undefined && mimeType !== null) {
                 metadata.mimeType = mimeType;
             }
             if (permanent !== undefined && permanent !== null) {
                 metadata.permanent = Boolean(permanent);
             }
-            // inCollection can be: boolean true/false, or array of chat IDs (e.g., ['*'] for global, ['chat-123'] for specific chat)
-            // Will be normalized by updateFileMetadata: true -> ['*'], false -> undefined (removed), array -> as-is
-            // If not provided, will default based on chatId
-            if (inCollection !== undefined && inCollection !== null) {
-                metadata.inCollection = inCollection;
-            }
-            
+
             // Update metadata (only Cortex-managed fields)
-            const success = await updateFileMetadata(contextId, hash, metadata, contextKey, chatId);
+            const success = await updateFileMetadataInFileAccessPlan(
+                fileAccessPlan,
+                hash,
+                metadata,
+            );
             
             if (success) {
                 return JSON.stringify({ 
@@ -86,4 +81,3 @@ export default {
         }
     }
 }
-
