@@ -166,7 +166,7 @@ Context:
     referenceCount: 0,
   },
   max_tokens: 2048,
-  model: 'oai-gpt4o',
+  model: 'oai-gpt54-mini',
   useInputChunking: false,
   enableDuplicateRequests: false,
   timeout: 30,
