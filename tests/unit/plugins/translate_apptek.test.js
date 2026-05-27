@@ -131,3 +131,19 @@ test('pathway has executePathway function', async (t) => {
     t.truthy(pathway.default.executePathway);
     t.is(typeof pathway.default.executePathway, 'function');
 });
+
+test('executePathway treats missing AppTek output as a fallback-triggering failure', async (t) => {
+    const pathway = await import('../../../pathways/translate_apptek.js');
+
+    const error = await t.throwsAsync(() => pathway.default.executePathway({
+        args: {
+            text: 'Hello, how are you?',
+            to: 'es',
+            fallbackPathway: 'missing_fallback_pathway',
+        },
+        runAllPrompts: async () => null,
+        resolver: { pathway: pathway.default },
+    }));
+
+    t.is(error.message, 'AppTek translation returned no result');
+});

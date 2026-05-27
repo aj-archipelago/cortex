@@ -19,6 +19,9 @@ export default {
         try {
             // Execute the primary AppTek translation
             const result = await runAllPrompts(args);
+            if (result === null || result === undefined) {
+                throw new Error('AppTek translation returned no result');
+            }
             return result;
         } catch (error) {
             // If AppTek translation fails, use the configured fallback pathway
@@ -31,6 +34,10 @@ export default {
                     text: args.text, 
                     to: args.to || pathwayResolver.pathway.inputParameters.to,
                 }, pathwayResolver);
+
+                if (fallbackResult === null || fallbackResult === undefined) {
+                    throw new Error(`${fallbackPathway} returned no result`);
+                }
                 
                 logger.verbose(`Successfully used ${fallbackPathway} as fallback`);
                 return fallbackResult;
