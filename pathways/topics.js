@@ -12,6 +12,10 @@ export default {
     inputParameters: {
         count: 5,
         topics: '',
+        initialFilterPrompt: '',
+        singleSelectPrompt: '',
+        rankingPrompt: '',
+        model: 'oai-gpt4o',
     },
 
     // Set 'list' to true to indicate that the output is expected to be a list.
