@@ -26,6 +26,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node start.js",
+    "cleanup:personal-entities": "node scripts/cleanup-personal-entities.js",
     "test": "ava"
   },
   "author": "",
