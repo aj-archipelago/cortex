@@ -6,10 +6,43 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import sinon from 'sinon';
-import { removeOldImageAndFileContent } from '../../../lib/util.js';
+import { formatSearchResult, normalizeSearchContent, removeOldImageAndFileContent } from '../../../lib/util.js';
 import { computeFileHash, computeBufferHash, generateFileMessageContent, injectFileIntoChatHistory } from '../../../lib/fileUtils.js';
 
 // Test removeOldImageAndFileContent function
+
+test('normalizeSearchContent joins array content before excerpt fallback', t => {
+    t.is(normalizeSearchContent({ content: ['first', '', null, 'second'], excerpt: 'fallback' }), 'first\nsecond');
+    t.is(normalizeSearchContent({ content: [], excerpt: 'fallback' }), 'fallback');
+    t.is(normalizeSearchContent({ content: 'direct content', excerpt: 'fallback' }), 'direct content');
+    t.is(normalizeSearchContent({ content: '   ', excerpt: 'fallback' }), 'fallback');
+    t.is(normalizeSearchContent(null), '');
+});
+
+test('formatSearchResult uses normalized content and supports labels', t => {
+    const result = formatSearchResult({
+        title: 'Example',
+        url: 'https://example.com/item',
+        content: ['alpha', 'beta'],
+    }, 1, 1000, { label: 'doc' });
+
+    t.true(result.includes('[doc 2]'));
+    t.true(result.includes('title: Example'));
+    t.true(result.includes('url: https://example.com/item'));
+    t.true(result.includes('content: alpha\nbeta'));
+});
+
+test('formatSearchResult can omit content', t => {
+    const result = formatSearchResult({
+        title: 'Example',
+        url: 'https://example.com/item',
+        content: 'body text',
+    }, 0, 1000, { skipContent: true });
+
+    t.true(result.includes('[source 1]'));
+    t.true(result.includes('title: Example'));
+    t.false(result.includes('content:'));
+});
 
 test('removeOldImageAndFileContent should return original chat history if empty', t => {
     const chatHistory = [];
@@ -330,7 +363,7 @@ test('injectFileIntoChatHistory should not inject duplicate file by URL', t => {
     t.is(result[0].content.length, 1);
 });
 
-test('injectFileIntoChatHistory should not inject duplicate file by GCS URL', t => {
+test('injectFileIntoChatHistory should allow files with same GCS but different URL', t => {
     const chatHistory = [
         {
             role: 'user',
@@ -347,15 +380,14 @@ test('injectFileIntoChatHistory should not inject duplicate file by GCS URL', t 
         type: 'file',
         file: 'https://example.com/other.pdf',
         url: 'https://example.com/other.pdf',
-        gcs: 'gs://bucket/test.pdf', // Same GCS URL
+        gcs: 'gs://bucket/test.pdf', // Same GCS URL but different primary URL
         originalFilename: 'other.pdf'
     };
-    
+
     const result = injectFileIntoChatHistory(chatHistory, fileContent);
-    
-    // Should be unchanged (no duplicate added)
-    t.is(result.length, 1);
-    t.is(result[0].content.length, 1);
+
+    // Dedup is by url and hash only, not GCS - different url means different file
+    t.is(result.length, 2);
 });
 
 test('injectFileIntoChatHistory should not inject duplicate file by hash', t => {
