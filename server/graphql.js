@@ -17,15 +17,17 @@ import { KeyvAdapter } from '@apollo/utils.keyvadapter';
 import cors from 'cors';
 import { buildModels, buildPathways } from '../config.js';
 import logger from '../lib/logger.js';
+import { getEntityStore } from '../lib/MongoEntityStore.js';
 import { buildModelEndpoints } from '../lib/requestExecutor.js';
 import { startModelSampler } from '../lib/modelSampler.js';
 import { startTestServer } from '../tests/helpers/server.js';
 import { requestState } from './requestState.js';
-import { cancelRequestResolver, submitClientToolResultResolver } from './resolver.js';
+import { cancelRequestResolver, submitClientToolResultResolver, injectAgentMessageResolver } from './resolver.js';
 import subscriptions from './subscriptions.js';
 import { getMessageTypeDefs } from './typeDef.js';
 import { buildRestEndpoints } from './rest.js';
 import { executeWorkspaceResolver, getExecuteWorkspaceTypeDefs } from './executeWorkspace.js';
+import crypto from 'crypto';
 
 // Utility functions
 // Server plugins
@@ -58,6 +60,15 @@ const getPlugins = (config) => {
     return { plugins, cache };
 }
 
+const hashApiKey = (apiKey) => {
+    if (!apiKey) return null;
+    try {
+        return crypto.createHash('sha256').update(String(apiKey)).digest('hex').slice(0, 12);
+    } catch {
+        return null;
+    }
+};
+
 // Type Definitions for GraphQL
 const getTypedefs = (pathways, pathwayManager) => {
     const defaultTypeDefs = `#graphql
@@ -81,6 +92,7 @@ const getTypedefs = (pathways, pathwayManager) => {
     type Mutation {
         cancelRequest(requestId: String!): Boolean
         submitClientToolResult(requestId: String!, toolCallbackId: String!, result: String!, success: Boolean!): Boolean
+        injectAgentMessage(requestId: String!, message: String!): Boolean
     }
 
     ${getExecuteWorkspaceTypeDefs()}
@@ -137,12 +149,13 @@ const getResolvers = (config, pathways, pathwayManager) => {
     const resolvers = {
         Query: {
             ...queryResolvers,
-            executeWorkspace: (parent, args, contextValue, info) => 
+            executeWorkspace: (parent, args, contextValue, info) =>
                 executeWorkspaceResolver(parent, args, contextValue, info, config, pathwayManager)
         },
         Mutation: {
             'cancelRequest': cancelRequestResolver,
             'submitClientToolResult': submitClientToolResultResolver,
+            'injectAgentMessage': injectAgentMessageResolver,
             ...mutationResolvers,
             ...pathwayManagerResolvers.Mutation
         },
@@ -160,7 +173,20 @@ const build = async (config) => {
 
     // build model API endpoints and limiters
     buildModelEndpoints(config);
+
+    // OOB sampler keeps modelGroup member latency stats fresh on idle models.
     startModelSampler(config);
+
+    // Sync config-defined entities to MongoDB and warm cache
+    try {
+        const entityStore = getEntityStore();
+        if (entityStore.isConfigured()) {
+            await entityStore.syncConfigEntities(config.get('entityConfig'));
+            await entityStore.loadAllEntities();
+        }
+    } catch (error) {
+        logger.error(`Entity sync failed (non-fatal): ${error.message}`);
+    }
 
     //build api
     const pathways = config.get('pathways');
@@ -225,8 +251,13 @@ const build = async (config) => {
         app.use((req, res, next) => {
             let providedApiKey = req.headers['cortex-api-key'] || req.query['cortex-api-key'];
             if (!providedApiKey) {
+                // Support OpenAI-style Bearer token
                 providedApiKey = req.headers['authorization'];
                 providedApiKey = providedApiKey?.startsWith('Bearer ') ? providedApiKey.slice(7) : providedApiKey;
+            }
+            if (!providedApiKey) {
+                // Support Anthropic-style x-api-key header
+                providedApiKey = req.headers['x-api-key'];
             }
 
             if (!cortexApiKeys.includes(providedApiKey)) {
@@ -251,6 +282,7 @@ const build = async (config) => {
                         .send('Unauthorized');
                 }
             } else {
+                req.cortexApiKeyId = hashApiKey(providedApiKey);
                 next();
             }
         });

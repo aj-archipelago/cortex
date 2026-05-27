@@ -10,7 +10,7 @@ import { config } from '../config.js';
 const pendingCallbacks = new Map();
 
 // Default timeout for client tool responses (5 minutes)
-// Increased from 60s to 5min to accommodate longer operations like CreateApplet
+// Increased from 60s to 5min to accommodate longer operations like CreateWorkspace
 const DEFAULT_TIMEOUT = 300000;
 
 // Redis setup for cross-instance communication
