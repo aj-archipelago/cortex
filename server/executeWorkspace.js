@@ -91,57 +91,21 @@ const executePathwayWithFallback = async (pathway, pathwayArgs, contextValue, in
         // Spread all pathway args first, then override specific fields
         const cortexArgs = {
             ...pathwayArgs, // Spread all pathway args
-            model: pathway.model || pathwayArgs.model || "labeeb-agent", // Use pathway model or default
+            model: pathway.model || pathwayArgs.model || "jarvis", // Use pathway model or default
             chatHistory: pathwayArgs.chatHistory ? JSON.parse(JSON.stringify(pathwayArgs.chatHistory)) : [],
             systemPrompt: pathway.systemPrompt || pathwayArgs.systemPrompt
         };
         
-        // Transform old parameters to new format for run_workspace_agent
+        // Normalize metadata for run_workspace_agent.
         if (cortexPathwayName === 'run_workspace_agent') {
-            // Remove old aiStyle parameter (no longer used)
-            delete cortexArgs.aiStyle;
-            
-            // Extract researchMode from originalPrompt if not already in pathwayArgs
-            // originalPrompt could be the original object from JSON or a transformed Prompt object
-            if (originalPrompt && typeof originalPrompt === 'object' && originalPrompt.researchMode !== undefined) {
-                cortexArgs.researchMode = originalPrompt.researchMode;
+            // Extract reasoningEffort from originalPrompt if not already in pathwayArgs
+            if (originalPrompt && typeof originalPrompt === 'object' && originalPrompt.reasoningEffort) {
+                cortexArgs.reasoningEffort = originalPrompt.reasoningEffort;
             }
-            
-            // Transform context parameters to agentContext array format (only if agentContext not already provided)
-            if (!cortexArgs.agentContext && (cortexArgs.contextId || cortexArgs.contextKey || cortexArgs.altContextId || cortexArgs.altContextKey)) {
-                const agentContext = [];
-                
-                // Add primary context if present
-                if (cortexArgs.contextId) {
-                    agentContext.push({
-                        contextId: cortexArgs.contextId,
-                        contextKey: cortexArgs.contextKey || null,
-                        default: true
-                    });
-                }
-                
-                // Add alternate context if present
-                if (cortexArgs.altContextId) {
-                    agentContext.push({
-                        contextId: cortexArgs.altContextId,
-                        contextKey: cortexArgs.altContextKey || null,
-                        default: false
-                    });
-                }
-                
-                // If we have at least one context, set agentContext and remove old params
-                if (agentContext.length > 0) {
-                    cortexArgs.agentContext = agentContext;
-                    delete cortexArgs.contextId;
-                    delete cortexArgs.contextKey;
-                    delete cortexArgs.altContextId;
-                    delete cortexArgs.altContextKey;
-                }
-            }
-            
-            // Ensure researchMode defaults to false if not provided
-            if (cortexArgs.researchMode === undefined) {
-                cortexArgs.researchMode = false;
+
+            // Ensure reasoningEffort defaults to empty if not provided
+            if (!cortexArgs.reasoningEffort) {
+                cortexArgs.reasoningEffort = '';
             }
         }
         
@@ -223,22 +187,23 @@ export const executeWorkspaceResolver = async (_, args, contextValue, info, conf
     const startTime = Date.now();
     const requestId = uuidv4();
     const { userId, pathwayName, promptNames, ...pathwayArgs } = args;
-    
-    logger.info(`>>> [${requestId}] executeWorkspace started - userId: ${userId}, pathwayName: ${pathwayName}, promptNames: ${promptNames?.join(',') || 'none'}`);
-    
+    const normalizedUserId = userId.toLowerCase();
+
+    logger.info(`[${requestId}] executeWorkspace started; userId: ${userId}; pathwayName: ${pathwayName}; promptNames: ${promptNames?.join(',') || 'none'}`);
+
     try {
         contextValue.config = config;
-        
+
         // Get the base pathway from the user
         const pathways = await pathwayManager.getLatestPathways();
-        
-        if (!pathways[userId] || !pathways[userId][pathwayName]) {
+
+        if (!pathways[normalizedUserId] || !pathways[normalizedUserId][pathwayName]) {
             const error = new Error(`Pathway '${pathwayName}' not found for user '${userId}'`);
-            logger.error(`!!! [${requestId}] ${error.message} - Available users: ${Object.keys(pathways).join(', ')}`);
+            logger.error(`[${requestId}] ${error.message}; available users: ${Object.keys(pathways).join(', ')}`);
             throw error;
         }
 
-        const basePathway = pathways[userId][pathwayName];
+        const basePathway = pathways[normalizedUserId][pathwayName];
         
         // If promptNames is specified, use getPathways to get individual pathways and execute in parallel
         if (promptNames && promptNames.length > 0) {
@@ -250,7 +215,7 @@ export const executeWorkspaceResolver = async (_, args, contextValue, info, conf
                     `The pathway '${pathwayName}' uses legacy prompt format (array of strings) which doesn't support the promptNames parameter. ` +
                     `Please unpublish and republish your workspace to upgrade to the new format that supports named prompts.`
                 );
-                logger.error(`!!! [${requestId}] ${error.message}`);
+                logger.error(`[${requestId}] ${error.message}`);
                 throw error;
             }
             
@@ -261,7 +226,7 @@ export const executeWorkspaceResolver = async (_, args, contextValue, info, conf
                 
                 if (individualPathways.length === 0) {
                     const error = new Error(`No prompts found in pathway '${pathwayName}'`);
-                    logger.error(`!!! [${requestId}] ${error.message}`);
+                    logger.error(`[${requestId}] ${error.message}`);
                     throw error;
                 }
                 
@@ -285,14 +250,14 @@ export const executeWorkspaceResolver = async (_, args, contextValue, info, conf
                                 promptName: pathway.name || `prompt_${index + 1}`
                             };
                         } catch (error) {
-                            logger.error(`!!! [${requestId}] Error in pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'} - ${error.message}`);
+                            logger.error(`[${requestId}] error in pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}; ${error.message}`);
                             throw error;
                         }
                     })
                 );
                 
                 const duration = Date.now() - startTime;
-                logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned ${results.length} results`);
+                logger.info(`[${requestId}] executeWorkspace completed successfully in ${duration}ms; returned ${results.length} results`);
                 
                 // Return a single result with JSON stringified array of results
                 return {
@@ -312,7 +277,7 @@ export const executeWorkspaceResolver = async (_, args, contextValue, info, conf
                 
                 if (individualPathways.length === 0) {
                     const error = new Error(`No prompts found matching the specified names: ${promptNames.join(', ')}`);
-                    logger.error(`!!! [${requestId}] ${error.message}`);
+                    logger.error(`[${requestId}] ${error.message}`);
                     throw error;
                 }
                 
@@ -339,14 +304,14 @@ export const executeWorkspaceResolver = async (_, args, contextValue, info, conf
                                 promptName: pathway.name || `prompt_${index + 1}`
                             };
                         } catch (error) {
-                            logger.error(`!!! [${requestId}] Error in pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'} - ${error.message}`);
+                            logger.error(`[${requestId}] error in pathway ${index + 1}/${individualPathways.length}: ${pathway.name || 'unnamed'}; ${error.message}`);
                             throw error;
                         }
                     })
                 );
                 
                 const duration = Date.now() - startTime;
-                logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned ${results.length} results`);
+                logger.info(`[${requestId}] executeWorkspace completed successfully in ${duration}ms; returned ${results.length} results`);
                 
                 // Return a single result with JSON stringified array of results (consistent with wildcard case)
                 return {
@@ -373,31 +338,31 @@ export const executeWorkspaceResolver = async (_, args, contextValue, info, conf
         // Check if any prompt has cortexPathwayName (for dynamic pathways)
         let result;
         if (userPathway.prompt && Array.isArray(userPathway.prompt)) {
-            const firstPrompt = userPathway.prompt[0];
-            
+            const firstPrompt = basePathway.prompt[0];
+
             result = await executePathwayWithFallback(userPathway, pathwayArgs, contextValue, info, requestId, firstPrompt, config);
         } else {
             // No prompt array, use legacy execution
             result = await userPathway.rootResolver(null, pathwayArgs, contextValue, info);
         }
         const duration = Date.now() - startTime;
-        logger.info(`<<< [${requestId}] executeWorkspace completed successfully in ${duration}ms - returned 1 result`);
+        logger.info(`[${requestId}] executeWorkspace completed successfully in ${duration}ms; returned 1 result`);
         return result; // Return single result directly
         
     } catch (error) {
         const duration = Date.now() - startTime;
-        logger.error(`!!! [${requestId}] executeWorkspace failed after ${duration}ms`);
-        logger.error(`!!! [${requestId}] Error type: ${error.constructor.name}`);
-        logger.error(`!!! [${requestId}] Error message: ${error.message}`);
-        logger.error(`!!! [${requestId}] Error stack: ${error.stack}`);
+        logger.error(`[${requestId}] executeWorkspace failed after ${duration}ms`);
+        logger.error(`[${requestId}] error type: ${error.constructor.name}`);
+        logger.error(`[${requestId}] error message: ${error.message}`);
+        logger.error(`[${requestId}] error stack: ${error.stack}`);
         
         // Log additional context for debugging "memory access out of bounds" errors
         if (error.message && error.message.includes('memory')) {
-            logger.error(`!!! [${requestId}] MEMORY ERROR DETECTED - Additional context:`);
-            logger.error(`!!! [${requestId}] - Node.js version: ${process.version}`);
-            logger.error(`!!! [${requestId}] - Memory usage: ${JSON.stringify(process.memoryUsage())}`);
-            logger.error(`!!! [${requestId}] - Args size estimate: ${JSON.stringify(args).length} chars`);
-            logger.error(`!!! [${requestId}] - PathwayArgs keys: ${Object.keys(pathwayArgs).join(', ')}`);
+            logger.error(`[${requestId}] memory error detected; additional context:`);
+            logger.error(`[${requestId}] Node.js version: ${process.version}`);
+            logger.error(`[${requestId}] memory usage: ${JSON.stringify(process.memoryUsage())}`);
+            logger.error(`[${requestId}] args size estimate: ${JSON.stringify(args).length} chars`);
+            logger.error(`[${requestId}] pathwayArgs keys: ${Object.keys(pathwayArgs).join(', ')}`);
         }
         
         throw error;
@@ -408,7 +373,7 @@ export const executeWorkspaceResolver = async (_, args, contextValue, info, conf
 export const getExecuteWorkspaceTypeDefs = () => {
     return `
     ${getPathwayTypeDef('ExecuteWorkspace', 'String')}
-    
+
     type ExecuteWorkspaceResult {
         debug: String
         result: String
@@ -419,10 +384,9 @@ export const getExecuteWorkspaceTypeDefs = () => {
         contextId: String
         tool: String
     }
-    
+
     extend type Query {
         executeWorkspace(userId: String!, pathwayName: String!, ${userPathwayInputParameters}): ExecuteWorkspaceResult
     }
     `;
 };
-

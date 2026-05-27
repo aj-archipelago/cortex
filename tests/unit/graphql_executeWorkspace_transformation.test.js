@@ -2,7 +2,7 @@
  * Cortex Pathway Argument Transformation Tests
  * 
  * This test suite validates the argument transformation logic used when executing
- * cortex pathways through the GraphQL executeWorkspace mutation. Specifically, it tests
+ * cortex pathways through the GraphQL executeWorkspace query. Specifically, it tests
  * how the system transforms incoming pathway arguments (text, chatHistory, model) into
  * the format expected by cortex pathways.
  * 
@@ -37,7 +37,7 @@ test('should format cortex pathway arguments correctly with existing chatHistory
     
     // Mock pathway data
     const pathway = {
-        model: 'labeeb-agent',
+        model: 'jarvis',
         systemPrompt: 'Test system prompt'
     };
     
@@ -56,7 +56,7 @@ test('should format cortex pathway arguments correctly with existing chatHistory
     
     // Simulate the transformation logic from the executePathwayWithFallback function
     const cortexArgs = {
-        model: pathway.model || pathwayArgs.model || "labeeb-agent",
+        model: pathway.model || pathwayArgs.model || "jarvis",
         chatHistory: [],
         systemPrompt: pathway.systemPrompt
     };
@@ -106,7 +106,7 @@ test('should format cortex pathway arguments correctly with existing chatHistory
     }
     
     // Verify the transformation
-    t.is(cortexArgs.model, 'labeeb-agent');
+    t.is(cortexArgs.model, 'jarvis');
     t.is(cortexArgs.systemPrompt, 'Test system prompt');
     t.is(cortexArgs.chatHistory.length, 1);
     
@@ -137,7 +137,7 @@ test('should create new user message when no existing chatHistory', (t) => {
     
     // Mock pathway data
     const pathway = {
-        model: 'labeeb-agent',
+        model: 'jarvis',
         systemPrompt: 'Test system prompt'
     };
     
@@ -148,7 +148,7 @@ test('should create new user message when no existing chatHistory', (t) => {
     
     // Simulate the transformation logic from the executePathwayWithFallback function
     const cortexArgs = {
-        model: pathway.model || pathwayArgs.model || "labeeb-agent",
+        model: pathway.model || pathwayArgs.model || "jarvis",
         chatHistory: [],
         systemPrompt: pathway.systemPrompt
     };
@@ -198,7 +198,7 @@ test('should create new user message when no existing chatHistory', (t) => {
     }
     
     // Verify the transformation
-    t.is(cortexArgs.model, 'labeeb-agent');
+    t.is(cortexArgs.model, 'jarvis');
     t.is(cortexArgs.systemPrompt, 'Test system prompt');
     t.is(cortexArgs.chatHistory.length, 1);
     
@@ -234,11 +234,80 @@ test('should use default model when pathway model is not specified', (t) => {
     
     // Simulate the transformation logic
     const cortexArgs = {
-        model: pathway.model || pathwayArgs.model || "labeeb-agent",
+        model: pathway.model || pathwayArgs.model || "jarvis",
         chatHistory: [],
         systemPrompt: pathway.systemPrompt
     };
     
     // Verify default model is used
-    t.is(cortexArgs.model, 'labeeb-agent');
+    t.is(cortexArgs.model, 'jarvis');
+});
+
+test('should propagate reasoning effort for workspace agent prompts', (t) => {
+    const originalPrompt = {
+        name: 'plan',
+        prompt: 'plan the work',
+        cortexPathwayName: 'run_workspace_agent',
+        reasoningEffort: 'high'
+    };
+
+    const pathway = {
+        model: 'jarvis',
+        systemPrompt: 'Test system prompt'
+    };
+
+    const pathwayArgs = {
+        text: 'make a plan'
+    };
+
+    const cortexArgs = {
+        ...pathwayArgs,
+        model: pathway.model || pathwayArgs.model || "jarvis",
+        chatHistory: pathwayArgs.chatHistory ? JSON.parse(JSON.stringify(pathwayArgs.chatHistory)) : [],
+        systemPrompt: pathway.systemPrompt || pathwayArgs.systemPrompt
+    };
+
+    if (originalPrompt && typeof originalPrompt === 'object' && originalPrompt.reasoningEffort) {
+        cortexArgs.reasoningEffort = originalPrompt.reasoningEffort;
+    }
+
+    if (!cortexArgs.reasoningEffort) {
+        cortexArgs.reasoningEffort = '';
+    }
+
+    t.is(cortexArgs.reasoningEffort, 'high');
+});
+
+test('should default reasoning effort for workspace agent prompts', (t) => {
+    const originalPrompt = {
+        name: 'plan',
+        prompt: 'plan the work',
+        cortexPathwayName: 'run_workspace_agent'
+    };
+
+    const pathway = {
+        model: 'jarvis',
+        systemPrompt: 'Test system prompt'
+    };
+
+    const pathwayArgs = {
+        text: 'make a plan'
+    };
+
+    const cortexArgs = {
+        ...pathwayArgs,
+        model: pathway.model || pathwayArgs.model || "jarvis",
+        chatHistory: pathwayArgs.chatHistory ? JSON.parse(JSON.stringify(pathwayArgs.chatHistory)) : [],
+        systemPrompt: pathway.systemPrompt || pathwayArgs.systemPrompt
+    };
+
+    if (originalPrompt && typeof originalPrompt === 'object' && originalPrompt.reasoningEffort) {
+        cortexArgs.reasoningEffort = originalPrompt.reasoningEffort;
+    }
+
+    if (!cortexArgs.reasoningEffort) {
+        cortexArgs.reasoningEffort = '';
+    }
+
+    t.is(cortexArgs.reasoningEffort, '');
 });
