@@ -227,7 +227,8 @@ function validateInfoObject(t, info, testName) {
   // Validate finishReason if present
   if (info.finishReason) {
     t.true(typeof info.finishReason === 'string', `${testName}: finishReason should be a string`);
-    const validReasons = ['stop', 'length', 'tool_calls', 'content_filter', 'function_call'];
+    // OpenAI per-chunk reasons plus the agent loop's own terminal states.
+    const validReasons = ['stop', 'length', 'tool_calls', 'content_filter', 'function_call', 'completed'];
     t.true(validReasons.includes(info.finishReason), `${testName}: finishReason should be a valid reason`);
   }
 }
@@ -467,9 +468,9 @@ createModelTest('sys_entity_agent handles multi-step task with tools', async (t,
     }
   }
 
-  // Validate finish reason
+  // Validate finish reason — accept OpenAI per-chunk reasons plus the agent loop's own terminal states.
   if (infoObject.finishReason) {
-    t.true(['stop', 'length', 'tool_calls', 'content_filter'].includes(infoObject.finishReason), 
+    t.true(['stop', 'length', 'tool_calls', 'content_filter', 'completed'].includes(infoObject.finishReason),
       'Multi-step task should have a valid finish reason');
   }
 
