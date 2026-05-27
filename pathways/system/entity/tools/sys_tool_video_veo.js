@@ -91,7 +91,7 @@ export default {
                     },
                     inputImage: {
                         type: "string",
-                        description: "Optional: A reference image from your available files (from Available Files section or ListFileCollection or SearchFileCollection) to use as the starting frame or style reference for the video. The video will be generated to animate or extend from this image. Provide the hash or filename of the image."
+                        description: "Optional: A reference image from your file collection (use ListFileCollection or SearchFileCollection) to use as the starting frame or style reference for the video. The video will be generated to animate or extend from this image. Provide the hash or filename of the image."
                     },
                     filenamePrefix: {
                         type: "string",
