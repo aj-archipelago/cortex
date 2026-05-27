@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import logger from '../lib/logger.js';
 import { callPathway, gpt3Encode, gpt3Decode } from '../lib/pathwayTools.js';
 import { Prompt } from '../server/prompt.js';
-import { chatArgsHasImageUrl, convertToSingleContentChatHistory } from '../lib/util.js';
+import { chatArgsHasImageUrl, convertToSingleContentChatHistory, normalizeSearchContent } from '../lib/util.js';
 
 const TOKEN_RATIO = 0.75;
 
@@ -152,7 +152,8 @@ export default {
             const targetDocLength = (maxDocsPromptLength / numSearchResults) >> 0;
 
             const getDoc = (doc, index) => {
-                const { title, content, url } = doc;
+                const { title, url } = doc;
+                const content = normalizeSearchContent(doc);
                 let result = [];
                 result.push(`[doc${index + 1}]`);
                 title && result.push(`title: ${title}`);
@@ -189,4 +190,3 @@ export default {
         }
     }
 };
-

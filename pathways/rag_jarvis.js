@@ -1,10 +1,10 @@
 // rag_Jarvis.js
 // RAG module that makes use of data and LLM models 
-import { callPathway, gpt3Encode, gpt3Decode } from '../lib/pathwayTools.js';
+import { callPathway, gpt3Encode } from '../lib/pathwayTools.js';
 import { Prompt } from '../server/prompt.js';
 import { config } from '../config.js';
 import logger from '../lib/logger.js';
-import { chatArgsHasImageUrl, convertToSingleContentChatHistory } from '../lib/util.js';
+import { chatArgsHasImageUrl, convertToSingleContentChatHistory, formatSearchResult } from '../lib/util.js';
 
 const TOKEN_RATIO = 0.75;
 
@@ -198,31 +198,7 @@ export default {
             const numSearchResults = Math.min(searchResults.length, maxSearchResults);
             const targetSourceLength = (maxSourcesPromptLength / numSearchResults) >> 0;
 
-            const getSource = (source, index) => {
-                const { title, content, url } = source;
-                let result = [];
-                result.push(`[source ${index + 1}]`);
-                title && result.push(`title: ${title}`);
-                url && result.push(`url: ${url}`);
-
-                if (content) {
-                    let encodedContent = gpt3Encode(content);
-                    let currentLength = result.join(" ").length; // Calculate the length of the current result string
-
-                    if (currentLength + encodedContent.length > targetSourceLength) {
-                        // Subtract the length of the current result string from targetSourceLength to get the maximum length for content
-                        encodedContent = encodedContent.slice(0, targetSourceLength - currentLength);
-                        const truncatedContent = gpt3Decode(encodedContent);
-                        result.push(`content: ${truncatedContent}`);
-                    } else {
-                        result.push(`content: ${content}`);
-                    }
-                }
-
-                return result.join(" ").trim();
-            }
-
-            let sources = searchResults.map(getSource).join(" \n\n ") || "No relevant sources found.";
+            let sources = searchResults.map((s, i) => formatSearchResult(s, i, targetSourceLength)).join(" \n\n ") || "No relevant sources found.";
             dateFilter && sources.trim() && (sources+=`\n\n above sources are date filtered accordingly. \n\n`)
 
             const result = await pathwayResolver.resolve({ ...args, sources, language:languageStr });
@@ -236,4 +212,3 @@ export default {
         }
     }
 };
-
