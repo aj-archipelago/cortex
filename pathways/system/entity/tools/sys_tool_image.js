@@ -211,16 +211,10 @@ export default {
                                             args.contextId,
                                             args.contextKey || '',
                                             uploadedUrl,
-                                            uploadedGcs,
                                             filename,
-                                            allTags,
-                                            isModification 
-                                                ? `Modified image from prompt: ${args.detailedInstructions || 'image modification'}`
-                                                : `Generated image from prompt: ${args.detailedInstructions || 'image generation'}`,
                                             uploadedHash,
                                             null, // fileUrl - not needed since we already uploaded
                                             pathwayResolver,
-                                            true, // permanent => retention=permanent
                                             chatId
                                         );
                                         

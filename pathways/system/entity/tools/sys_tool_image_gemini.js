@@ -195,16 +195,10 @@ export default {
                                         args.contextId,
                                         args.contextKey || '',
                                         imageUrl,
-                                        imageGcs,
                                         filename,
-                                        allTags,
-                                        isModification 
-                                            ? `Modified image from prompt: ${args.detailedInstructions || 'image modification'}`
-                                            : `Generated image from prompt: ${args.detailedInstructions || 'image generation'}`,
                                         imageHash,
                                         null,
                                         pathwayResolver,
-                                        true, // permanent => retention=permanent
                                         chatId
                                     );
                                     

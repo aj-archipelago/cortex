@@ -180,8 +180,6 @@ export async function migrateHashRecordToScopedStorage({
   const uploadName = getCanonicalFilename(hashResult, `${hash}.bin`);
   const contentType =
     hashResult?.mimeType || getMimeTypeFromUrl(hashResult?.url || "");
-  const retention = hashResult?.permanent ? "permanent" : "temporary";
-
   const targetContainerName = getUserContainerName(
     getDefaultContainerName(),
     userId,
@@ -194,7 +192,6 @@ export async function migrateHashRecordToScopedStorage({
     uploadName,
     Readable.from([buffer]),
     contentType,
-    retention,
     folderPath,
   );
 

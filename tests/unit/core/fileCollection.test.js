@@ -494,8 +494,7 @@ test('addFileToCollection should preserve original displayFilename for converted
             originalFilename, // This should be preserved as displayFilename
             null,
             null,
-            null,
-            false
+            null
         );
         
         // displayFilename should be the original user-provided filename

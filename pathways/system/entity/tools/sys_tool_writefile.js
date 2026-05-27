@@ -169,14 +169,10 @@ export default {
                         contextId,
                         contextKey || null,
                         uploadResult.url,
-                        uploadResult.gcs || null,
                         filename,
-                        tags,
-                        notes,
                         uploadResult.hash || null,
                         null, // fileUrl - not needed since we already uploaded
                         resolver,
-                        true, // permanent => retention=permanent
                         chatId || null
                     );
                 } catch (collectionError) {
@@ -237,4 +233,3 @@ export default {
         }
     }
 };
-

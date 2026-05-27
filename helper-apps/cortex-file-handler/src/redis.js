@@ -198,7 +198,6 @@ const setFileStoreMap = async (hash, value, contextId = null) => {
     delete valueToStore.message;
     
     // Remove shortLivedUrl fields - they're only for responses, not for persistence
-    // Store only permanent URLs (url, gcs, converted.url, converted.gcs)
     delete valueToStore.shortLivedUrl;
     if (valueToStore.converted) {
       const convertedCopy = { ...valueToStore.converted };
@@ -458,11 +457,9 @@ const cleanupRedisFileStoreMapAge = async (
     const maxAgeAgo = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
 
     // Convert to array and sort by timestamp (oldest first)
-    // Skip permanent files - they should never be cleaned up by age
     const entries = Object.entries(map)
       .filter(([_, value]) => {
-        // Only entries with timestamps and not permanent (matches file collection logic)
-        return value?.timestamp && value?.permanent !== true;
+        return value?.timestamp;
       })
       .sort(([_, a], [__, b]) => {
         const timeA = new Date(a.timestamp).getTime();

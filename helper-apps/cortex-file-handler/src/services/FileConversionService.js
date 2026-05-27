@@ -51,7 +51,7 @@ export class FileConversionService extends ConversionService {
         const uploadName = filename || path.basename(filePath);
         const stream = createReadStream(filePath);
         const contentType = mime.lookup(uploadName) || null;
-        const result = await provider.uploadStream({}, uploadName, stream, contentType, 'temporary', folderPath);
+        const result = await provider.uploadStream({}, uploadName, stream, contentType, folderPath);
         fileUrl = result.url;
       } else {
         // Container parameter is ignored - always uses default container from env var

@@ -61,7 +61,6 @@ export class StorageService {
           filename,
           null, // hash
           null, // filename (will use provided filename)
-          'temporary' // retention
         );
         // Ensure shortLivedUrl is included
         const response = {
@@ -363,149 +362,6 @@ export class StorageService {
   }
 
   /**
-   * Set the retention tag for a file (temporary or permanent)
-   * This is a simple tag update operation - no file copying occurs
-   * @param {string} hash - The hash of the file
-   * @param {string} retention - The retention value ('temporary' or 'permanent')
-   * @param {Object} context - Context object for logging
-   * @param {string|null} contextId - Optional context ID for scoped file storage
-   * @returns {Promise<Object>} Object containing updated file info
-   */
-  async setRetention(hash, retention, context = {}, contextId = null) {
-    await this._initialize();
-    
-    if (!hash) {
-      throw new Error("Missing hash parameter");
-    }
-    
-    if (retention !== 'temporary' && retention !== 'permanent') {
-      throw new Error("Retention must be 'temporary' or 'permanent'");
-    }
-
-    // Get Redis functions
-    const { getFileStoreMap, setFileStoreMap } = await import("../../redis.js");
-    
-    // Look up file by hash - getFileStoreMap handles context-scoped maps automatically
-    const hashResult = await getFileStoreMap(hash, false, contextId);
-    
-    if (!hashResult) {
-      throw new Error(`File with hash ${hash} not found`);
-    }
-
-    context.log?.(`Setting retention tag for file ${hash} to ${retention}`);
-
-    // Extract blob name from URL
-    if (!hashResult.url) {
-      throw new Error(`File with hash ${hash} has no valid URL`);
-    }
-
-    // Use the provider for the URL's container so context-scoped uploads in
-    // per-user containers can extract blob names and generate SAS tokens.
-    const containerName = this._extractContainerFromUrl(hashResult.url);
-    const provider = containerName
-      ? await StorageFactory.getInstance().getAzureProvider(containerName)
-      : this.primaryProvider;
-    
-    // Check if provider supports blob tag operations (Azure only)
-    const supportsBlobTags = typeof provider.extractBlobNameFromUrl === 'function' && 
-                             typeof provider.updateBlobTags === 'function' &&
-                             typeof provider.getBlobClient === 'function' &&
-                             typeof provider.generateShortLivedSASToken === 'function';
-    
-    let shortLivedUrl = hashResult.shortLivedUrl || hashResult.url;
-    let convertedResult = hashResult.converted || null;
-
-    if (supportsBlobTags) {
-      // Extract blob name from URL
-      const blobName = provider.extractBlobNameFromUrl(hashResult.url);
-      if (!blobName) {
-        throw new Error(`Could not extract blob name from URL: ${hashResult.url}`);
-      }
-
-      // Update blob index tag
-      // Note: This may fail in Azurite (local emulator) which doesn't fully support blob tags
-      // We'll continue with the operation even if tag update fails
-      context.log?.(`Updating blob index tag for ${blobName} to ${retention}`);
-      try {
-        await provider.updateBlobTags(blobName, retention);
-      } catch (error) {
-        // Log warning but continue - blob tags may not be supported in test environments (e.g., Azurite)
-        context.log?.(`Warning: Failed to update blob tags for ${blobName}: ${error.message}. Continuing with operation.`);
-      }
-
-      // Generate new short-lived URL
-      await provider.ensureInitialized();
-      const shortLivedSasToken = provider.generateShortLivedSASToken(blobName, 5);
-      const urlObj = new URL(hashResult.url);
-      const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
-      shortLivedUrl = `${baseUrl}?${shortLivedSasToken}`;
-
-      // Handle converted file if it exists
-      if (hashResult.converted?.url) {
-        context.log?.(`Updating blob index tag for converted file to ${retention}`);
-        const convertedBlobName = provider.extractBlobNameFromUrl(hashResult.converted.url);
-        if (convertedBlobName) {
-          try {
-            await provider.updateBlobTags(convertedBlobName, retention);
-            const convertedUrlObj = new URL(hashResult.converted.url);
-            const convertedBaseUrl = `${convertedUrlObj.protocol}//${convertedUrlObj.host}${convertedUrlObj.pathname}`;
-            const convertedShortLivedSasToken = provider.generateShortLivedSASToken(convertedBlobName, 5);
-            const convertedShortLivedUrl = `${convertedBaseUrl}?${convertedShortLivedSasToken}`;
-            convertedResult = {
-              url: hashResult.converted.url,
-              shortLivedUrl: convertedShortLivedUrl,
-              gcs: hashResult.converted.gcs,
-              mimeType: hashResult.converted.mimeType || null
-            };
-          } catch (error) {
-            context.log?.(`Warning: Failed to update converted file tag: ${error.message}`);
-            convertedResult = hashResult.converted;
-          }
-        } else {
-          convertedResult = hashResult.converted;
-        }
-      }
-    } else {
-      // For providers that don't support blob tags (e.g., LocalStorageProvider),
-      // just use the existing URLs - retention is tracked in Redis only
-      context.log?.(`Provider does not support blob tags, updating Redis only`);
-      shortLivedUrl = hashResult.shortLivedUrl || hashResult.url;
-      convertedResult = hashResult.converted || null;
-    }
-
-    // Update Redis with new information (including shortLivedUrl and permanent flag)
-    // Store as permanent boolean to match file collection logic
-    const newFileInfo = {
-      ...hashResult,
-      url: hashResult.url, // URL stays the same - same blob, just different tag
-      shortLivedUrl: shortLivedUrl,
-      gcs: hashResult.gcs,
-      permanent: retention === 'permanent', // Store as boolean to match file collection logic
-      timestamp: new Date().toISOString()
-    };
-    
-    if (convertedResult) {
-      newFileInfo.converted = convertedResult;
-    }
-
-    await setFileStoreMap(hash, newFileInfo, contextId);
-    const { redactContextId } = await import("../../utils/logSecurity.js");
-    context.log?.(`Updated Redis map for hash: ${hash}${contextId ? ` (contextId: ${redactContextId(contextId)})` : ""}`);
-
-    return {
-      hash,
-      filename: hashResult.filename,
-      ...(hashResult.displayFilename && { displayFilename: hashResult.displayFilename }),
-      retention: retention,
-      url: hashResult.url,
-      shortLivedUrl: shortLivedUrl,
-      gcs: hashResult.gcs,
-      converted: convertedResult,
-      message: `File retention set to ${retention}`
-    };
-  }
-
-  /**
    * Rename a file in cloud storage and update Redis.
    * Copies the blob to a new name (preserving folder path and hash prefix),
    * deletes the old blob, and updates the Redis entry.
@@ -663,14 +519,12 @@ export class StorageService {
     // Always use the default provider (container parameter ignored)
     const primaryProvider = this.primaryProvider;
 
-    // All files are uploaded with retention=temporary by default
     const primaryResult = await primaryProvider.uploadFile(
       context,
       filePath,
       requestId,
       hash,
       finalFilename,
-      'temporary' // retention tag
     );
 
     let gcsResult = null;

@@ -303,7 +303,6 @@ async function generateImageWithGemini(args, prompt, resolvedImages, pathwayReso
                                 imageHash,
                                 null,
                                 pathwayResolver,
-                                true,
                                 writeTarget.chatId || null,
                                 {
                                     workspaceId: writeTarget.workspaceId || null,
@@ -506,7 +505,6 @@ async function generateVideo(args, pathwayResolver, chatId) {
                             uploadedHash,
                             null,
                             pathwayResolver,
-                            true,
                             writeTarget.chatId || null,
                             {
                                 workspaceId: writeTarget.workspaceId || null,

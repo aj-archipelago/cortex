@@ -82,7 +82,7 @@ export class GCSStorageProvider extends StorageProvider {
     };
   }
 
-  async uploadStream(context, encodedFilename, stream, providedContentType = null, retention = 'temporary', folderPath = null) {
+  async uploadStream(context, encodedFilename, stream, providedContentType = null, folderPath = null) {
     const bucket = this.storage.bucket(this.bucketName);
     let blobName = sanitizeFilename(encodedFilename);
 

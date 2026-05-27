@@ -233,7 +233,6 @@ test("Azure listFolder › should list files in a folder", async (t) => {
         filename,
         stream,
         "text/plain",
-        "temporary",
         folderPath
       );
       testFiles.push(`${testFolder}/${filename}`);
@@ -301,7 +300,6 @@ test("Azure listFolder › should extract hash from filename with hash prefix", 
       filename,
       stream,
       "application/pdf",
-      "temporary",
       testFolder
     );
 
@@ -345,7 +343,6 @@ test("Azure listFolder › should handle files without hash prefix", async (t) =
       filename,
       stream,
       "text/plain",
-      "temporary",
       testFolder
     );
 
@@ -390,7 +387,6 @@ test("Azure uploadStream › should create folder hierarchy with folderPath", as
       filename,
       stream,
       "text/plain",
-      "temporary",
       folderPath
     );
 
@@ -450,7 +446,6 @@ test("GCS listFolder › should list files in a folder", async (t) => {
         filename,
         stream,
         "text/plain",
-        "temporary",
         testFolder
       );
     }
@@ -529,7 +524,6 @@ test("GCS listFolder › should extract hash from filename with hash prefix", as
       filename,
       stream,
       "application/pdf",
-      "temporary",
       testFolder
     );
 
@@ -579,7 +573,6 @@ test("GCS uploadStream › should create folder hierarchy with folderPath", asyn
       filename,
       stream,
       "text/plain",
-      "temporary",
       folderPath
     );
 
@@ -626,7 +619,6 @@ test("Azure listFolder › should handle nested folder paths", async (t) => {
       filename,
       stream,
       "text/plain",
-      "temporary",
       nestedFolder
     );
 
@@ -676,7 +668,6 @@ test("Azure listFolder › should normalize folder paths with leading/trailing s
       filename,
       stream,
       "text/plain",
-      "temporary",
       testFolder
     );
 

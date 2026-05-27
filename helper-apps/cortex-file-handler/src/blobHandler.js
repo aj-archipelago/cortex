@@ -849,9 +849,6 @@ function uploadBlob(
               if (appletId) result.appletId = appletId;
               if (fileScope) result.fileScope = fileScope;
 
-              // All uploads default to temporary (permanent: false) to match file collection logic
-              result.permanent = false;
-              
               // Container parameter is ignored - always uses default container from env var
               
               // Ensure shortLivedUrl is always present
@@ -1070,7 +1067,7 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
 async function saveToAzureStorage(context, encodedFilename, file, containerName = null, contentType = null, folderPath = null) {
   const storageFactory = StorageFactory.getInstance();
   const provider = await storageFactory.getAzureProvider(containerName);
-  return await provider.uploadStream(context, encodedFilename, file, contentType, 'temporary', folderPath);
+  return await provider.uploadStream(context, encodedFilename, file, contentType, folderPath);
 }
 
 // Wrapper that checks if GCS is configured
@@ -1083,7 +1080,7 @@ async function saveToGoogleStorage(context, encodedFilename, file, contentType =
   if (!gcsProvider) {
     throw new Error("GCS provider not available");
   }
-  return await gcsProvider.uploadStream(context, encodedFilename, file, contentType, 'temporary', folderPath);
+  return await gcsProvider.uploadStream(context, encodedFilename, file, contentType, folderPath);
 }
 
 async function uploadFile(
@@ -1215,9 +1212,6 @@ async function uploadFile(
     if (fields && fields.contextId) {
       result.contextId = fields.contextId;
     }
-    
-    // All uploads default to temporary (permanent: false) to match file collection logic
-    result.permanent = false;
     
     // Container parameter is ignored - always uses default container from env var
     

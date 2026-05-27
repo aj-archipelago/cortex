@@ -104,8 +104,8 @@ export class AzureStorageProvider extends StorageProvider {
     await this.ensureInitialized();
 
     // Create container if it doesn't exist (only checked once per instance).
-    // Only cache success — a failed create must retry on the next call so a
-    // transient error doesn't permanently poison this provider instance.
+    // Only cache success; a failed create must retry on the next call so a
+    // transient error does not poison this provider instance.
     if (createContainer && !this._containerEnsured) {
       try {
         await this._containerClient.createIfNotExists();
@@ -190,7 +190,7 @@ export class AzureStorageProvider extends StorageProvider {
     return this.generateSASToken(secondArg, { minutes: thirdArg || 5 });
   }
 
-  async uploadFile(context, filePath, requestId, hash = null, filename = null, retention = 'temporary') {
+  async uploadFile(context, filePath, requestId, hash = null, filename = null) {
     const { containerClient } = await this.getBlobClient();
 
     // Use provided filename or generate LLM-friendly naming
@@ -234,9 +234,6 @@ export class AzureStorageProvider extends StorageProvider {
         ...(contentEncoding ? { blobContentEncoding: contentEncoding } : {}),
         blobCacheControl: 'public, max-age=2592000, immutable',
       },
-      tags: {
-        retention: retention
-      },
     };
     await blockBlobClient.uploadStream(fileStream, undefined, undefined, uploadOptions);
 
@@ -264,7 +261,7 @@ export class AzureStorageProvider extends StorageProvider {
     };
   }
 
-  async uploadStream(context, encodedFilename, stream, providedContentType = null, retention = 'temporary', folderPath = null) {
+  async uploadStream(context, encodedFilename, stream, providedContentType = null, folderPath = null) {
     const { containerClient } = await this.getBlobClient();
     let contentType = providedContentType || mime.lookup(encodedFilename);
 
@@ -310,9 +307,6 @@ export class AzureStorageProvider extends StorageProvider {
         ...(contentType ? { blobContentType: contentType } : {}),
         ...(contentEncoding ? { blobContentEncoding: contentEncoding } : {}),
         blobCacheControl: 'public, max-age=2592000, immutable',
-      },
-      tags: {
-        retention: retention
       },
       maxConcurrency: 50,
       blockSize: 8 * 1024 * 1024,
@@ -613,60 +607,5 @@ export class AzureStorageProvider extends StorageProvider {
       shortLivedUrl: `${newBlobClient.url}?${shortLivedSasToken}`,
       blobName: newBlobName,
     };
-  }
-
-  /**
-   * Update blob index tags (specifically the retention tag)
-   * @param {string} blobName - The blob name
-   * @param {string} retention - The retention value ('temporary' or 'permanent')
-   * @returns {Promise<void>}
-   */
-  async updateBlobTags(blobName, retention) {
-    const { containerClient } = await this.getBlobClient();
-    const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-    
-    // Check if we're using Azurite (local emulator) which may not fully support blob tags
-    const isAzurite = this.connectionString?.includes('UseDevelopmentStorage=true') || 
-                       this.connectionString?.includes('127.0.0.1') ||
-                       this.connectionString?.includes('localhost');
-    
-    // Get current tags first (may return empty object if no tags exist)
-    let currentTags = {};
-    try {
-      const tagsResponse = await blockBlobClient.getTags();
-      // Tags response might be an object with a tags property or a plain object
-      if (tagsResponse && typeof tagsResponse === 'object') {
-        currentTags = tagsResponse?.tags ?? {};
-      }
-    } catch (error) {
-      // If getTags fails (e.g., no tags exist or Azurite doesn't support it), start with empty object
-      if (isAzurite) {
-        // Azurite may not support blob tags - this is expected, so we'll skip tag updates
-        console.log(`[Azurite] Blob tags not supported, skipping tag update for ${blobName}`);
-        return;
-      }
-      currentTags = {};
-    }
-    
-    // Update retention tag
-    const updatedTags = {
-      ...currentTags,
-      retention: retention
-    };
-    
-    try {
-      await blockBlobClient.setTags(updatedTags);
-    } catch (error) {
-      // If setTags fails (e.g., Azurite doesn't support it), log but don't throw
-      // This allows the operation to continue even if tags aren't supported
-      // In test environments, we'll be lenient and not throw errors for tag operations
-      const isTestEnv = process.env.NODE_ENV === 'test' || isAzurite;
-      if (isTestEnv) {
-        console.log(`[Test/Azurite] Blob tags not supported, skipping tag update for ${blobName}: ${error.message}`);
-        return;
-      }
-      // For real Azure in production, re-throw the error as it's unexpected
-      throw error;
-    }
   }
 }

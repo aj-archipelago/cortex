@@ -890,8 +890,7 @@ test('File collection: Update file metadata', async t => {
         const success = await updateFileMetadata(contextId, hash, {
             displayFilename: 'renamed.pdf',
             tags: ['updated', 'document'],
-            notes: 'Updated notes',
-            permanent: true
+            notes: 'Updated notes'
         });
         
         t.is(success, true);
@@ -903,7 +902,6 @@ test('File collection: Update file metadata', async t => {
         t.is(updatedFile.displayFilename, 'renamed.pdf');
         t.deepEqual(updatedFile.tags, ['updated', 'document']);
         t.is(updatedFile.notes, 'Updated notes');
-        t.is(updatedFile.permanent, true);
         
         // Verify CFH fields were preserved
         t.is(updatedFile.url, 'https://example.com/original.pdf');
@@ -999,53 +997,6 @@ test('updateFileMetadata should allow updating inCollection', async (t) => {
     }
 });
 
-test('File collection: Permanent files not deleted on remove', async t => {
-    const contextId = createTestContext();
-    
-    try {
-        // Add a permanent file
-        const addResult = await callPathway('sys_tool_file_collection', {
-            agentContext: [{ contextId, contextKey: null, default: true }],
-            url: 'https://example.com/permanent.pdf',
-            filename: 'permanent.pdf',
-            userMessage: 'Add permanent file'
-        });
-        
-        const addParsed = JSON.parse(addResult);
-        t.is(addParsed.success, true);
-        const fileId = addParsed.fileId;
-        
-        // Mark as permanent
-        const collection = await loadFileCollection(contextId, { useCache: false });
-        const file = collection.find(f => f.id === fileId);
-        const { updateFileMetadata } = await import('../../../../lib/fileUtils.js');
-        await updateFileMetadata(contextId, file.hash, { permanent: true });
-        
-        // Remove from collection
-        const removeResult = await callPathway('sys_tool_file_collection', {
-            agentContext: [{ contextId, contextKey: null, default: true }],
-            fileIds: [fileId],
-            userMessage: 'Remove permanent file'
-        });
-        
-        const removeParsed = JSON.parse(removeResult);
-        t.is(removeParsed.success, true);
-        t.is(removeParsed.removedCount, 1);
-        // Message should indicate permanent files are not deleted from cloud
-        t.true(removeParsed.message.includes('permanent') || removeParsed.message.includes('Cloud storage cleanup'));
-        
-        // Verify file was removed from collection
-        const listResult = await callPathway('sys_tool_file_collection', {
-            agentContext: [{ contextId, contextKey: null, default: true }],
-            userMessage: 'List files'
-        });
-        const listParsed = JSON.parse(listResult);
-        t.is(listParsed.totalFiles, 0);
-    } finally {
-        await cleanup(contextId);
-    }
-});
-
 test('File collection: syncAndStripFilesFromChatHistory only strips collection files', async t => {
     const contextId = createTestContext();
     
@@ -1057,10 +1008,7 @@ test('File collection: syncAndStripFilesFromChatHistory only strips collection f
             contextId,
             null,
             'https://example.com/in-collection.jpg',
-            'gs://bucket/in-collection.jpg',
             'in-collection.jpg',
-            [],
-            '',
             'hash-in-coll'
         );
         
@@ -1134,7 +1082,6 @@ test('File collection: syncAndStripFilesFromChatHistory finds and syncs files wi
             mimeType: 'text/plain',
             addedDate: new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
-            permanent: false,
             tags: [],
             notes: ''
             // Note: inCollection is NOT set
@@ -1149,7 +1096,6 @@ test('File collection: syncAndStripFilesFromChatHistory finds and syncs files wi
             mimeType: 'text/plain',
             addedDate: new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
-            permanent: false,
             tags: [],
             notes: ''
             // Note: inCollection is NOT set
@@ -1164,7 +1110,6 @@ test('File collection: syncAndStripFilesFromChatHistory finds and syncs files wi
             mimeType: 'text/plain',
             addedDate: new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
-            permanent: false,
             tags: [],
             notes: ''
             // Note: inCollection is NOT set
@@ -1522,41 +1467,6 @@ test('File collection: UpdateFileMetadata tool - Update notes', async t => {
     }
 });
 
-test('File collection: UpdateFileMetadata tool - Update permanent flag', async t => {
-    const contextId = createTestContext();
-    
-    try {
-        // Add file (defaults to temporary)
-        const addResult = await callPathway('sys_tool_file_collection', {
-            agentContext: [{ contextId, contextKey: null, default: true }],
-            url: 'https://example.com/test.pdf',
-            filename: 'test.pdf',
-            userMessage: 'Add file'
-        });
-        
-        const addParsed = JSON.parse(addResult);
-        t.is(addParsed.success, true);
-        
-        // Mark as permanent
-        const updateResult = await callPathway('sys_tool_file_collection', {
-            agentContext: [{ contextId, contextKey: null, default: true }],
-            file: 'test.pdf',
-            permanent: true,
-            userMessage: 'Mark as permanent'
-        });
-        
-        const updateParsed = JSON.parse(updateResult);
-        t.is(updateParsed.success, true);
-        
-        // Verify permanent flag was set
-        const collection = await loadFileCollection(contextId, { useCache: false });
-        const file = collection.find(f => f.id === addParsed.fileId);
-        t.is(file.permanent, true);
-    } finally {
-        await cleanup(contextId);
-    }
-});
-
 test('File collection: UpdateFileMetadata tool - Combined updates', async t => {
     const contextId = createTestContext();
     
@@ -1582,7 +1492,6 @@ test('File collection: UpdateFileMetadata tool - Combined updates', async t => {
             newFilename: 'renamed-and-tagged.pdf',
             tags: ['new', 'tags'],
             notes: 'New notes',
-            permanent: true,
             userMessage: 'Full update'
         });
         
@@ -1591,7 +1500,6 @@ test('File collection: UpdateFileMetadata tool - Combined updates', async t => {
         t.true(updateParsed.message.includes('renamed'));
         t.true(updateParsed.message.includes('tags set'));
         t.true(updateParsed.message.includes('notes updated'));
-        t.true(updateParsed.message.includes('permanent'));
         
         // Verify all updates persisted
         const collection = await loadFileCollection(contextId, { useCache: false });
@@ -1599,7 +1507,6 @@ test('File collection: UpdateFileMetadata tool - Combined updates', async t => {
         t.is(file.displayFilename, 'renamed-and-tagged.pdf');
         t.deepEqual(file.tags, ['new', 'tags']);
         t.is(file.notes, 'New notes');
-        t.is(file.permanent, true);
         t.is(file.id, originalFileId); // ID preserved
     } finally {
         await cleanup(contextId);
@@ -2027,7 +1934,6 @@ test('File collection encryption: Core fields are never encrypted', async t => {
         t.truthy(rawData.mimeType || rawData.mimeType === null, 'mimeType should not be encrypted');
         t.truthy(rawData.addedDate, 'addedDate should not be encrypted');
         t.truthy(rawData.lastAccessed, 'lastAccessed should not be encrypted');
-        t.is(typeof rawData.permanent, 'boolean', 'permanent should not be encrypted');
     } finally {
         await cleanup(contextId, contextKey);
     }
@@ -2520,7 +2426,6 @@ test('Converted files: loadFileCollection should use converted values as primary
             displayFilename: 'original.docx',
             mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             hash: hash,
-            permanent: false,
             timestamp: new Date().toISOString(),
             // Include converted block in Redis (as CFH would write it)
             // This will be used to set primary values, but the block itself is not exposed
@@ -2591,10 +2496,10 @@ test('loadFileCollection should merge collections from multiple contexts', async
     
     try {
         // Add file to primary context
-        await addFileToCollection(contextId, null, 'https://example.com/primary.jpg', null, 'primary.jpg', [], '', 'hash-primary');
+        await addFileToCollection(contextId, null, 'https://example.com/primary.jpg', 'primary.jpg', 'hash-primary');
         
         // Add file to alt context
-        await addFileToCollection(altContextId, null, 'https://example.com/alt.jpg', null, 'alt.jpg', [], '', 'hash-alt');
+        await addFileToCollection(altContextId, null, 'https://example.com/alt.jpg', 'alt.jpg', 'hash-alt');
         
         // Load just primary - should have 1 file
         const primaryOnly = await loadFileCollection([{ contextId, contextKey: null, default: true }]);
@@ -2626,11 +2531,11 @@ test('loadFileCollection should dedupe files present in both contexts', async t 
     
     try {
         // Add same file (same hash) to both contexts
-        await addFileToCollection(contextId, null, 'https://example.com/shared.jpg', null, 'shared.jpg', [], '', 'hash-shared');
-        await addFileToCollection(altContextId, null, 'https://example.com/shared.jpg', null, 'shared.jpg', [], '', 'hash-shared');
+        await addFileToCollection(contextId, null, 'https://example.com/shared.jpg', 'shared.jpg', 'hash-shared');
+        await addFileToCollection(altContextId, null, 'https://example.com/shared.jpg', 'shared.jpg', 'hash-shared');
         
         // Add unique file to alt context
-        await addFileToCollection(altContextId, null, 'https://example.com/alt-only.jpg', null, 'alt-only.jpg', [], '', 'hash-alt-only');
+        await addFileToCollection(altContextId, null, 'https://example.com/alt-only.jpg', 'alt-only.jpg', 'hash-alt-only');
         
         // Load from both contexts - should have 2 files (deduped shared file, both contexts unencrypted)
         const merged = await loadFileCollection([
@@ -2658,13 +2563,13 @@ test('File collection: SearchFileCollection filters by chatId by default', async
         const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
         
         // Add file to chat-1
-        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', 'chat1-file.pdf', 'hash-chat1', null, null, chatId1);
         
         // Add file to chat-2
-        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', 'chat2-file.pdf', 'hash-chat2', null, null, chatId2);
         
         // Add global file (no chatId)
-        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', 'global-file.pdf', 'hash-global', null, null, null);
         
         // Search from chat-1 - should only see chat-1 file and global file
         const result1 = await callPathway('sys_tool_file_collection', {
@@ -2726,13 +2631,13 @@ test('File collection: SearchFileCollection with includeAllChats=true shows all 
         const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
         
         // Add file to chat-1
-        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', 'chat1-file.pdf', 'hash-chat1', null, null, chatId1);
         
         // Add file to chat-2
-        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', 'chat2-file.pdf', 'hash-chat2', null, null, chatId2);
         
         // Add global file
-        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', 'global-file.pdf', 'hash-global', null, null, null);
         
         // Search from chat-1 with includeAllChats=true - should see all files
         const result = await callPathway('sys_tool_file_collection', {
@@ -2764,13 +2669,13 @@ test('File collection: ListFileCollection filters by chatId by default', async t
         const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
         
         // Add file to chat-1
-        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', 'chat1-file.pdf', 'hash-chat1', null, null, chatId1);
         
         // Add file to chat-2
-        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', 'chat2-file.pdf', 'hash-chat2', null, null, chatId2);
         
         // Add global file
-        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', 'global-file.pdf', 'hash-global', null, null, null);
         
         // List from chat-1 - should only see chat-1 file and global file
         const result1 = await callPathway('sys_tool_file_collection', {
@@ -2816,13 +2721,13 @@ test('File collection: ListFileCollection with includeAllChats=true shows all fi
         const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
         
         // Add file to chat-1
-        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', 'chat1-file.pdf', 'hash-chat1', null, null, chatId1);
         
         // Add file to chat-2
-        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', 'chat2-file.pdf', 'hash-chat2', null, null, chatId2);
         
         // Add global file
-        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', 'global-file.pdf', 'hash-global', null, null, null);
         
         // List from chat-1 with includeAllChats=true - should see all files
         const result = await callPathway('sys_tool_file_collection', {
@@ -2854,13 +2759,13 @@ test('File collection: RemoveFileFromCollection can remove files from any chat',
         const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
         
         // Add file to chat-1
-        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', null, 'chat1-file.pdf', [], '', 'hash-chat1', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/chat1-file.pdf', 'chat1-file.pdf', 'hash-chat1', null, null, chatId1);
         
         // Add file to chat-2
-        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', null, 'chat2-file.pdf', [], '', 'hash-chat2', null, null, false, chatId2);
+        await addFileToCollection(contextId, null, 'https://example.com/chat2-file.pdf', 'chat2-file.pdf', 'hash-chat2', null, null, chatId2);
         
         // Add global file
-        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', null, 'global-file.pdf', [], '', 'hash-global', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/global-file.pdf', 'global-file.pdf', 'hash-global', null, null, null);
         
         // Search from chat-1 to get the file ID for chat-2's file
         const searchResult = await callPathway('sys_tool_file_collection', {
@@ -2925,9 +2830,9 @@ test('File collection: SearchFileCollection normalizes separators (space/dash/un
         const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
         
         // Add files with different separator conventions
-        await addFileToCollection(contextId, null, 'https://example.com/news-corp-report.pdf', null, 'News-Corp-Report.pdf', [], '', 'hash-dashes', null, null, false, null);
-        await addFileToCollection(contextId, null, 'https://example.com/news_corp_annual.pdf', null, 'News_Corp_Annual.pdf', [], '', 'hash-underscores', null, null, false, null);
-        await addFileToCollection(contextId, null, 'https://example.com/unrelated.pdf', null, 'Unrelated-File.pdf', [], '', 'hash-unrelated', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/news-corp-report.pdf', 'News-Corp-Report.pdf', 'hash-dashes', null, null, null);
+        await addFileToCollection(contextId, null, 'https://example.com/news_corp_annual.pdf', 'News_Corp_Annual.pdf', 'hash-underscores', null, null, null);
+        await addFileToCollection(contextId, null, 'https://example.com/unrelated.pdf', 'Unrelated-File.pdf', 'hash-unrelated', null, null, null);
         
         // Search with space: "News Corp" should match both "News-Corp" and "News_Corp"
         const result = await callPathway('sys_tool_file_collection', {
@@ -2980,21 +2885,21 @@ test('File collection: SearchFileCollection comprehensive test - all search perm
         
         // Setup: Create files in different chats with various metadata
         // Chat-1 files
-        await addFileToCollection(contextId, null, 'https://example.com/report-2024.pdf', null, 'Annual Report 2024.pdf', ['finance', 'annual'], 'Year-end financial report', 'hash-report-2024', null, null, false, chatId1);
-        await addFileToCollection(contextId, null, 'https://example.com/budget.xlsx', null, 'Budget Q1.xlsx', ['finance', 'budget'], 'First quarter budget', 'hash-budget-q1', null, null, false, chatId1);
-        await addFileToCollection(contextId, null, 'https://example.com/meeting-notes.txt', null, 'Meeting Notes.txt', ['meetings'], 'Team meeting notes', 'hash-meeting-notes', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/report-2024.pdf', 'Annual Report 2024.pdf', 'hash-report-2024', null, null, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/budget.xlsx', 'Budget Q1.xlsx', 'hash-budget-q1', null, null, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/meeting-notes.txt', 'Meeting Notes.txt', 'hash-meeting-notes', null, null, chatId1);
         
         // Chat-2 files
-        await addFileToCollection(contextId, null, 'https://example.com/presentation.pdf', null, 'Product Presentation.pdf', ['product', 'sales'], 'Product launch presentation', 'hash-presentation', null, null, false, chatId2);
-        await addFileToCollection(contextId, null, 'https://example.com/roadmap.xlsx', null, 'Product Roadmap.xlsx', ['product', 'planning'], 'Product roadmap for 2024', 'hash-roadmap', null, null, false, chatId2);
+        await addFileToCollection(contextId, null, 'https://example.com/presentation.pdf', 'Product Presentation.pdf', 'hash-presentation', null, null, chatId2);
+        await addFileToCollection(contextId, null, 'https://example.com/roadmap.xlsx', 'Product Roadmap.xlsx', 'hash-roadmap', null, null, chatId2);
         
         // Global files (no chatId)
-        await addFileToCollection(contextId, null, 'https://example.com/company-policy.pdf', null, 'Company Policy.pdf', ['policy', 'hr'], 'Company-wide policies', 'hash-policy', null, null, false, null);
-        await addFileToCollection(contextId, null, 'https://example.com/employee-handbook.pdf', null, 'Employee Handbook.pdf', ['hr', 'handbook'], 'Employee handbook', 'hash-handbook', null, null, false, null);
+        await addFileToCollection(contextId, null, 'https://example.com/company-policy.pdf', 'Company Policy.pdf', 'hash-policy', null, null, null);
+        await addFileToCollection(contextId, null, 'https://example.com/employee-handbook.pdf', 'Employee Handbook.pdf', 'hash-handbook', null, null, null);
         
         // Shared file (same file in both chats)
-        await addFileToCollection(contextId, null, 'https://example.com/shared-doc.pdf', null, 'Shared Document.pdf', ['shared'], 'Document shared across chats', 'hash-shared', null, null, false, chatId1);
-        await addFileToCollection(contextId, null, 'https://example.com/shared-doc.pdf', null, 'Shared Document.pdf', ['shared'], 'Document shared across chats', 'hash-shared', null, null, false, chatId2);
+        await addFileToCollection(contextId, null, 'https://example.com/shared-doc.pdf', 'Shared Document.pdf', 'hash-shared', null, null, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/shared-doc.pdf', 'Shared Document.pdf', 'hash-shared', null, null, chatId2);
         
         // Test 1: Search by filename (partial match) within chat-1
         const result1 = await callPathway('sys_tool_file_collection', {
@@ -3162,7 +3067,7 @@ test('File collection: SearchFileCollection comprehensive test - all search perm
         t.is(parsed13.files[0].displayFilename, 'Company Policy.pdf');
         
         // Test 14: Search with normalized matching (space/dash/underscore)
-        await addFileToCollection(contextId, null, 'https://example.com/test-file.pdf', null, 'Test File Name.pdf', [], '', 'hash-test-normalized', null, null, false, chatId1);
+        await addFileToCollection(contextId, null, 'https://example.com/test-file.pdf', 'Test File Name.pdf', 'hash-test-normalized', null, null, chatId1);
         const result14 = await callPathway('sys_tool_file_collection', {
             agentContext: [{ contextId, contextKey: null, default: true }],
             chatId: chatId1,
@@ -3265,12 +3170,12 @@ test('File collection: SearchFileCollection with compound context (user + worksp
         const { addFileToCollection } = await import('../../../../lib/fileUtils.js');
         
         // Add files to user context
-        await addFileToCollection(userContextId, null, 'https://example.com/user-doc.pdf', null, 'User Document.pdf', ['personal'], 'Personal document', 'hash-user-doc', null, null, false, chatId);
-        await addFileToCollection(userContextId, null, 'https://example.com/user-notes.txt', null, 'User Notes.txt', ['personal', 'notes'], 'Personal notes', 'hash-user-notes', null, null, false, chatId);
+        await addFileToCollection(userContextId, null, 'https://example.com/user-doc.pdf', 'User Document.pdf', 'hash-user-doc', null, null, chatId);
+        await addFileToCollection(userContextId, null, 'https://example.com/user-notes.txt', 'User Notes.txt', 'hash-user-notes', null, null, chatId);
         
         // Add files to workspace context
-        await addFileToCollection(workspaceContextId, null, 'https://example.com/workspace-doc.pdf', null, 'Workspace Document.pdf', ['workspace'], 'Workspace document', 'hash-workspace-doc', null, null, false, chatId);
-        await addFileToCollection(workspaceContextId, null, 'https://example.com/workspace-data.xlsx', null, 'Workspace Data.xlsx', ['workspace', 'data'], 'Workspace data', 'hash-workspace-data', null, null, false, chatId);
+        await addFileToCollection(workspaceContextId, null, 'https://example.com/workspace-doc.pdf', 'Workspace Document.pdf', 'hash-workspace-doc', null, null, chatId);
+        await addFileToCollection(workspaceContextId, null, 'https://example.com/workspace-data.xlsx', 'Workspace Data.xlsx', 'hash-workspace-data', null, null, chatId);
         
         // Define compound agentContext
         const agentContext = [

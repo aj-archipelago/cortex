@@ -684,23 +684,6 @@ test.serial("should persist and return displayFilename in all responses", async 
       "checkHash response should contain same filename as upload"
     );
     
-    // Test setRetention - should return displayFilename
-    const retentionResponse = await axios.get(baseUrl, {
-      params: {
-        hash,
-        setRetention: true,
-        retention: "permanent",
-      },
-      validateStatus: (status) => true,
-    });
-    
-    t.is(retentionResponse.status, 200, "setRetention should succeed");
-    t.is(
-      retentionResponse.data.displayFilename,
-      originalFilename,
-      "setRetention response should contain displayFilename"
-    );
-    
     // Test delete - should return displayFilename
     deleteResponse = await axios.delete(baseUrl, {
       params: {

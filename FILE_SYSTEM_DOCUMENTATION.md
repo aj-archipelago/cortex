@@ -72,13 +72,9 @@ The file handler is an external Azure Function service that manages file storage
 
 #### 1. Single Container Architecture
 - All files stored in a single Azure Blob Storage container
-- Files distinguished by blob index tags, not separate containers
+- Folder paths and Redis metadata provide scoping and lookup
 - No `container` parameter supported - always uses configured container
 
-#### 2. Retention Management
-- **Temporary** (default): Files tagged with `retention=temporary`, auto-deleted after 30 days
-- **Permanent**: Files tagged with `retention=permanent`, retained indefinitely
-- Retention changed via `setRetention` operation (updates blob tag, no file copying)
 
 #### 3. Context Scoping
 - **`contextId`**: Optional parameter for per-user/per-context file isolation
@@ -154,27 +150,6 @@ The file handler is an external Azure Function service that manages file storage
 }
 ```
 
-#### POST/PUT `/file-handler` - Set Retention
-```javascript
-// Body:
-{
-  hash: "abc123",
-  retention: "permanent",   // or "temporary"
-  contextId: "user-456",   // Optional: for scoping
-  setRetention: true
-}
-
-// Response:
-{
-  hash: "abc123",
-  filename: "file.pdf",
-  retention: "permanent",
-  url: "https://storage.../file.pdf",  // Same URL (tag updated)
-  shortLivedUrl: "https://storage.../file.pdf?new-sas",
-  gcs: "gs://bucket/file.pdf"
-}
-```
-
 ---
 
 ## Cortex File Utilities Layer
@@ -232,13 +207,9 @@ deleteFileByHash(hash, pathwayResolver, contextId)
 - Handles 404 gracefully (file already deleted)
 - **Returns**: `true` if deleted, `false` if not found
 
-#### Retention Management
 ```javascript
-setRetentionForHash(hash, retention, contextId, pathwayResolver)
 ```
-- Sets file retention to `'temporary'` or `'permanent'`
 - Best-effort operation (logs warnings on failure)
-- **Used by**: `addFileToCollection` when `permanent=true`
 
 #### Short-Lived URL Resolution
 ```javascript
@@ -290,7 +261,6 @@ Redis Hash Maps
               tags: ["pdf", "report"],
               notes: "Quarterly report",
               hash: "abc123",
-              permanent: true,
               addedDate: "2024-01-15T10:00:00.000Z",
               lastAccessed: "2024-01-15T10:00:00.000Z"
             }
@@ -310,7 +280,6 @@ Redis Hash Maps
 
 #### 3. Field Ownership
 - **CFH-managed fields**: `url`, `gcs`, `filename` (UUID-based, managed by file handler)
-- **Cortex-managed fields**: `id`, `displayFilename`, `tags`, `notes`, `mimeType`, `permanent`, `addedDate`, `lastAccessed`
 - When merging data, CFH fields are preserved, Cortex fields are updated
 
 ### Core Functions
@@ -339,16 +308,13 @@ updateFileMetadata(contextId, hash, metadata)
 ```
 - Updates Cortex-managed metadata fields atomically
 - Preserves all CFH-managed fields
-- Updates only specified fields (displayFilename, tags, notes, mimeType, dates, permanent)
 - **Used for**: Updating lastAccessed, modifying tags/notes without full reload
 
 #### Adding Files
 ```javascript
-addFileToCollection(contextId, contextKey, url, gcs, filename, tags, notes, hash, fileUrl, pathwayResolver, permanent)
 ```
 - Adds file entry to collection via atomic HSET operation
 - If `fileUrl` provided, uploads file first via `uploadFileToCloud()`
-- If `permanent=true`, sets retention to permanent via `setRetentionForHash()`
 - Merges with existing CFH data if file with same hash already exists
 - Returns file entry object with `id`
 
@@ -374,7 +340,6 @@ syncAndStripFilesFromChatHistory(chatHistory, contextId, contextKey)
   tags: string[],               // Searchable tags (Cortex-managed)
   notes: string,                // User notes/description (Cortex-managed)
   hash: string,                 // File hash for deduplication (used as Redis key)
-  permanent: boolean,           // Whether file is permanent (Cortex-managed)
   addedDate: string,            // ISO timestamp when added (Cortex-managed)
   lastAccessed: string          // ISO timestamp of last access (Cortex-managed)
 }
@@ -396,7 +361,6 @@ syncAndStripFilesFromChatHistory(chatHistory, contextId, contextKey)
 1. User provides content and filename
 2. Creates Buffer from content
 3. Calls `uploadFileToCloud()` with `contextId`
-4. Calls `addFileToCollection()` with `permanent=true`
 5. Returns file info with `fileId`
 
 **Key Code**:
@@ -418,7 +382,6 @@ const fileEntry = await addFileToCollection(
 4. Modifies content (line replacement or search/replace)
 5. Uploads modified file via `uploadFileToCloud()` (creates new hash)
 6. Updates collection entry atomically via `updateFileMetadata()` with new URL/hash
-7. Deletes old file version (if not permanent) via `deleteFileByHash()`
 
 **Key Code**:
 ```javascript
@@ -433,7 +396,6 @@ await updateFileMetadata(contextId, foundFile.hash, {
     gcs: uploadResult.gcs,
     hash: uploadResult.hash
 });
-if (!foundFile.permanent) {
     await deleteFileByHash(oldHash, resolver, contextId);
 }
 ```
@@ -443,15 +405,11 @@ if (!foundFile.permanent) {
 - `AddFileToCollection`: Adds file to collection (with optional upload)
 - `SearchFileCollection`: Searches files by filename, tags, notes
 - `ListFileCollection`: Lists all files with filtering/sorting
-- `RemoveFileFromCollection`: Removes files (deletes from cloud if not permanent)
 
 **Key Code**:
 ```javascript
 // Add file
-await addFileToCollection(contextId, contextKey, url, gcs, filename, tags, notes, hash, fileUrl, resolver, permanent);
 
-// Remove file (with permanent check)
-if (!fileInfo.permanent) {
     await deleteFileByHash(fileInfo.hash, resolver, contextId);
 }
 ```
@@ -461,7 +419,6 @@ if (!fileInfo.permanent) {
 1. Generates/modifies image
 2. Gets image URL
 3. Uploads via `uploadFileToCloud()`
-4. Adds to collection with `permanent=true`
 
 #### 5. ReadFile (`sys_tool_readfile.js`)
 **Flow**:
@@ -542,7 +499,6 @@ uploadFileToCloud()
         │
         └─► addFileToCollection()
             │
-            ├─► If permanent=true ──► setRetentionForHash() ──► File Handler POST /file-handler?setRetention=true
             │
             └─► Save to Redis hash map (atomic operation)
                 │
@@ -602,7 +558,6 @@ EditFile Tool
         ├─► Preserve CFH fields (url, gcs, filename)
         ├─► Update Cortex fields (url, gcs, hash)
         └─► If update succeeds:
-            └─► Delete old file (if not permanent)
                 └─► deleteFileByHash() ──► File Handler DELETE /file-handler?hash=oldHash
 ```
 
@@ -616,7 +571,6 @@ RemoveFileFromCollection Tool
     │
     ├─► Load collection ──► findFileInCollection() for each fileId
     │
-    ├─► Capture file info (hash, permanent) from collection
     │
     └─► Redis HDEL FileStoreMap:ctx:<contextId> <hash> (atomic deletion)
         │
@@ -624,9 +578,7 @@ RemoveFileFromCollection Tool
             │
             ├─► For each file:
             │   │
-            │   ├─► If permanent=true ──► Skip deletion (keep in cloud)
             │   │
-            │   └─► If permanent=false ──► deleteFileByHash()
             │       │
             │       └─► File Handler DELETE /file-handler?hash=hash&contextId=contextId
             │           │
@@ -646,14 +598,11 @@ RemoveFileFromCollection Tool
 - **Naming**: UUID-based filenames
 - **Organization**: By `requestId` folders
 - **Access**: SAS tokens (long-lived and short-lived)
-- **Tags**: Blob index tags for retention (`retention=temporary` or `retention=permanent`)
-- **Lifecycle**: Azure automatically deletes `retention=temporary` files after 30 days
 
 #### Google Cloud Storage (Optional)
 - **Enabled**: If `GCP_SERVICE_ACCOUNT_KEY` configured
 - **URL Format**: `gs://bucket/path`
 - **Usage**: Media file chunks, converted files
-- **No short-lived URLs**: GCS URLs are permanent (no SAS equivalent)
 
 #### Local Storage (Fallback)
 - **Used**: If Azure not configured
@@ -711,7 +660,6 @@ RemoveFileFromCollection Tool
     tags: ["pdf", "report"],
     notes: "Quarterly report",
     hash: "abc123",
-    permanent: true,
     addedDate: "2024-01-15T10:00:00.000Z",
     lastAccessed: "2024-01-15T10:00:00.000Z"
   })
@@ -789,33 +737,24 @@ const url = await resolveFileParameter("file.pdf", agentContext);
 - Never accept `agentContext` directly from untrusted client inputs without validation
 - Only the default context should be used for write operations - non-default contexts are read-only
 
-### 2. Permanent Files (`permanent` flag)
 
 **Purpose**: Indicate files that should be kept indefinitely
 
 **Storage**:
-- Stored in file collection entry: `permanent: true`
-- Sets blob index tag: `retention=permanent`
 - Prevents deletion from cloud storage
 
 **Usage**:
 ```javascript
-// Add permanent file
 await addFileToCollection(
     contextId, contextKey, url, gcs, filename, tags, notes, hash,
-    null, resolver, true  // permanent=true
 );
 
 // Check before deletion
-if (!file.permanent) {
     await deleteFileByHash(file.hash, resolver, contextId);
 }
 ```
 
 **Behavior**:
-- Permanent files are **not deleted** from cloud storage when removed from collection
-- Retention set via `setRetentionForHash()` (best-effort)
-- Default: `permanent=false` (temporary, 30-day retention)
 
 ### 3. Hash Deduplication
 
@@ -931,15 +870,11 @@ Deletes file from cloud storage.
 - **Returns**: `true` if deleted, `false` if not found
 - **Handles**: 404 gracefully (file already deleted)
 
-#### `setRetentionForHash(hash, retention, contextId, pathwayResolver)`
-Sets file retention (temporary or permanent).
 - **Parameters**:
   - `hash`: File hash
-  - `retention`: `'temporary'` or `'permanent'`
   - `contextId`: Optional context ID
   - `pathwayResolver`: Optional resolver for logging
 - **Returns**: Response data or `null`
-- **Used by**: `addFileToCollection` when `permanent=true`
 
 #### `ensureShortLivedUrl(fileObject, fileHandlerUrl, contextId, shortLivedMinutes)`
 Resolves file to use short-lived URL.
@@ -1023,7 +958,6 @@ Updates Cortex-managed metadata fields atomically.
 - **Parameters**:
   - `contextId`: Context ID (required)
   - `hash`: File hash (used as Redis key)
-  - `metadata`: Object with fields to update (displayFilename, tags, notes, mimeType, addedDate, lastAccessed, permanent)
 - **Returns**: `true` if successful, `false` on error
 - **Process**:
   1. Loads existing file data from Redis
@@ -1032,7 +966,6 @@ Updates Cortex-managed metadata fields atomically.
   4. Invalidates cache
 - **Used by**: Search operations (updates lastAccessed), EditFile (updates URL/hash)
 
-#### `addFileToCollection(contextId, contextKey, url, gcs, filename, tags, notes, hash, fileUrl, pathwayResolver, permanent)`
 Adds file to collection via atomic operation.
 - **Parameters**:
   - `contextId`: Context ID (required)
@@ -1045,11 +978,9 @@ Adds file to collection via atomic operation.
   - `hash`: File hash (optional, computed if not provided)
   - `fileUrl`: URL to upload (optional, uploads if provided)
   - `pathwayResolver`: Optional resolver for logging
-  - `permanent`: Whether file is permanent (default: false)
 - **Returns**: File entry object with `id`
 - **Process**:
   1. If `fileUrl` provided, uploads file first via `uploadFileToCloud()`
-  2. If `permanent=true`, sets retention to permanent via `setRetentionForHash()`
   3. Creates file entry with `displayFilename` (user-friendly name)
   4. Writes to Redis hash map via atomic HSET
   5. Merges with existing CFH data if hash already exists
@@ -1194,7 +1125,6 @@ Gets MIME type from file extension.
 - Upload: 30 seconds
 - Check hash: 10 seconds
 - Fetch file: 60 seconds
-- Set retention: 15 seconds
 
 ### File Collection Errors
 
@@ -1214,7 +1144,6 @@ Gets MIME type from file extension.
 
 1. **Always pass `contextId`** when available (strongly recommended for multi-tenant)
 2. **Use atomic operations** - `addFileToCollection()`, `updateFileMetadata()` are thread-safe
-3. **Check `permanent` flag** before deleting files from cloud storage
 4. **Handle errors gracefully** - don't throw on non-critical failures
 5. **Use short-lived URLs** for LLM file access (via `ensureShortLivedUrl()`)
 6. **Check for existing files** before uploading (automatic in `uploadFileToCloud`)
@@ -1230,7 +1159,6 @@ The Cortex file system provides:
 ✅ **Encapsulated file handler interactions** - No direct axios calls
 ✅ **Hash-based deduplication** - Avoids duplicate storage
 ✅ **Context scoping** - Per-user file isolation via `FileStoreMap:ctx:<contextId>`
-✅ **Permanent file support** - Indefinite retention
 ✅ **Atomic operations** - Thread-safe collection modifications via Redis hash maps
 ✅ **Short-lived URLs** - Secure file access (5-minute expiration)
 ✅ **Comprehensive error handling** - Graceful failure handling

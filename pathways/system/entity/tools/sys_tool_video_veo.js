@@ -289,16 +289,10 @@ export default {
                                     args.contextId,
                                     args.contextKey || '',
                                     uploadedUrl,
-                                    uploadedGcs,
                                     filename,
-                                    allTags,
-                                    hasInputImage 
-                                        ? `Generated video from image with prompt: ${args.prompt || 'video animation'}`
-                                        : `Generated video from prompt: ${args.prompt || 'video generation'}`,
                                     uploadedHash,
                                     null,
                                     pathwayResolver,
-                                    true, // permanent => retention=permanent
                                     chatId
                                 );
                                 
@@ -383,4 +377,3 @@ export default {
         }
     }
 };
-

@@ -477,7 +477,6 @@ test('sys_entity_agent processes files from compound context (user + workspace)'
             displayFilename: 'user-document.pdf',
             mimeType: 'application/pdf',
             hash: 'user-hash-1',
-            permanent: false,
             timestamp: new Date().toISOString(),
             // No inCollection initially
         };
@@ -490,7 +489,6 @@ test('sys_entity_agent processes files from compound context (user + workspace)'
             displayFilename: 'user-notes.txt',
             mimeType: 'text/plain',
             hash: 'user-hash-2',
-            permanent: false,
             timestamp: new Date().toISOString(),
             // No inCollection initially
         };
@@ -505,7 +503,6 @@ test('sys_entity_agent processes files from compound context (user + workspace)'
             displayFilename: 'workspace-shared.pdf',
             mimeType: 'application/pdf',
             hash: 'workspace-hash-1',
-            permanent: false,
             timestamp: new Date().toISOString(),
             // No inCollection initially
         };
@@ -518,7 +515,6 @@ test('sys_entity_agent processes files from compound context (user + workspace)'
             displayFilename: 'workspace-data.csv',
             mimeType: 'text/csv',
             hash: 'workspace-hash-2',
-            permanent: false,
             timestamp: new Date().toISOString(),
             // No inCollection initially
         };

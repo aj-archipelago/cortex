@@ -104,7 +104,6 @@ export default {
                         folderPath: found.folderPath || null,
                         size: found.size || null,
                         lastModified: found.lastModified || null,
-                        permanent: found.permanent || false
                     }
                 });
 
@@ -163,7 +162,6 @@ export default {
                         ),
                         size: f.size || null,
                         lastModified: f.lastModified || null,
-                        permanent: f.permanent || false
                     }))
                 });
 
@@ -203,7 +201,6 @@ export default {
                             filesToProcess.push({
                                 displayFilename: foundFile.displayFilename || foundFile.filename || null,
                                 hash: foundFile.hash || null,
-                                permanent: foundFile.permanent ?? false,
                                 contextId: foundFile._contextId || null,
                             });
                         }
@@ -225,12 +222,9 @@ export default {
                     }
                 }
 
-                // Delete from cloud storage (skip permanent files)
+                // Delete from cloud storage
                 for (const fileInfo of filesToProcess) {
-                    if (!fileInfo.hash || fileInfo.permanent) {
-                        if (fileInfo.permanent) {
-                            logger.info(`Skipping deletion for permanent file: ${fileInfo.displayFilename} (hash: ${fileInfo.hash})`);
-                        }
+                    if (!fileInfo.hash) {
                         continue;
                     }
                     try {
@@ -309,7 +303,6 @@ export default {
                         ),
                         size: f.size || null,
                         lastModified: f.lastModified || null,
-                        permanent: f.permanent || false
                     }))
                 });
             }

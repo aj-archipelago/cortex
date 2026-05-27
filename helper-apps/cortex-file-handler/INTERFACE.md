@@ -8,11 +8,7 @@ The Cortex File Handler is a service that processes files through various operat
 
 The file handler uses a unified storage approach with Azure Blob Storage:
 - **Single Container**: All files are stored in a single Azure Blob Storage container
-- **Blob Index Tags**: Files are distinguished by blob index tags rather than separate containers
-  - `retention=temporary`: Files that will be automatically deleted after 30 days (default for all uploads)
-  - `retention=permanent`: Files that should be retained indefinitely
-- **Lifecycle Management**: Azure lifecycle management policies automatically delete temporary files after 30 days based on the blob index tag
-- **Set Retention Operation**: Setting a file's retention from temporary to permanent (or vice versa) simply updates the blob index tag (no copying between containers)
+- **Scoped Paths**: Folder paths and Redis metadata provide per-context lookup and isolation
 
 ## Request Methods
 
@@ -119,37 +115,6 @@ The file handler uses a unified storage approach with Azure Blob Storage:
   - For requestId deletion: Array of deleted file URLs
   - For hash deletion: Object containing deletion details with hash, filename, and deletion results
 
-### SET RETENTION (POST/PUT)
-
-- **Purpose**: Set the retention tag for a file (temporary or permanent)
-- **Parameters** (can be in query string or request body):
-  - `hash` (required): Hash of the file
-  - `retention` (required): Retention value - either `'temporary'` or `'permanent'`
-  - `contextId` (optional): Context identifier for per-user/per-context file scoping
-  - `setRetention` (optional): Set to `true` to trigger operation, or use `operation=setRetention` in query string
-- **Behavior**:
-  - Updates the blob index tag to the specified retention value
-  - No file copying is performed - the file stays in the same location
-  - Updates Redis map with new information including shortLivedUrl
-  - Also updates converted file tags if they exist
-  - Preserves file metadata (filename, hash, etc.)
-  - Generates new shortLivedUrl for the file
-- **Response**: Object containing:
-  - `hash`: File hash
-  - `filename`: Original filename
-  - `retention`: The retention value that was set
-  - `url`: Primary storage URL (same as before, file location unchanged)
-  - `shortLivedUrl`: New short-lived URL (5-minute expiration)
-  - `gcs`: GCS URL (if GCS is configured, unchanged)
-  - `converted`: Converted file info (if applicable)
-  - `message`: Success message
-- **Note**: 
-  - This is a simple tag update operation - no file copying occurs
-  - The file URL remains the same, only the blob index tag changes
-  - This operation is fast and idempotent
-  - Both the original file and any converted versions have their tags updated
-  - No locking is required since it's just a tag update
-
 ## Storage Configuration
 
 - **Azure**: Enabled if `AZURE_STORAGE_CONNECTION_STRING` is set
@@ -214,8 +179,6 @@ The file handler uses a unified storage approach with Azure Blob Storage:
   - Organized by requestId folders
   - Azure: Uses SAS tokens for access
     - All files are stored in a single container (configured via `AZURE_STORAGE_CONTAINER_NAME` environment variable)
-    - Files are tagged with `retention=temporary` by default
-    - Files can be set to permanent using the `setRetention` operation (updates tag to `retention=permanent`)
     - Lifecycle management automatically deletes temporary files after 30 days
     - No container specification is supported - all files use the single configured container
   - Local: Served via HTTP on configured port
@@ -338,8 +301,6 @@ GET /file-handler?hash=abc123&checkHash=true&contextId=user-456
 # Delete file with contextId
 DELETE /file-handler?hash=abc123&contextId=user-456
 
-# Set retention with contextId
-POST /file-handler?hash=abc123&retention=permanent&contextId=user-456&setRetention=true
 ```
 
 **Note**: When `contextId` is provided, files are stored in Redis with context-scoped keys. If a context-scoped key doesn't exist, the system falls back to unscoped keys, and if those don't exist, it falls back to legacy container-scoped keys (which are automatically migrated).

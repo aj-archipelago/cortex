@@ -547,7 +547,6 @@ export default {
                             inCollection: updatedInCollection,
                             addedDate: fileToUpdate.addedDate,
                             lastAccessed: new Date().toISOString(),
-                            permanent: fileToUpdate.permanent || false
                         };
                         
                         await writeFileDataToRedis(redisClient, contextMapKey, uploadResult.hash, fileData, contextKey);
@@ -636,4 +635,3 @@ export default {
         }
     }
 };
-

@@ -40,7 +40,7 @@
 
 - Legacy owner-container naming:
   - `listFolder` merges current-container results with legacy-alias-container results.
-  - `delete`/`rename`/`setRetention` by `blobPath` falls back to the legacy-alias container if the current container misses.
+  - `delete`/`rename` by `blobPath` falls back to the legacy-alias container if the current container misses.
 - Generic default-root blob self-heal:
   - Direct `blobPath` lookup, and `checkHash` when Redis misses but a `blobPath` is present, also probe `BASE` (the unscoped default container root).
   - If a blob is found there, CFH returns it, ensures a fresh GCS backup, and, when the canonical target differs, copies it into the canonical current container/path. Redis metadata is written when a hash was supplied.

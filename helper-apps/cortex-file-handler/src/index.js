@@ -369,7 +369,6 @@ async function CortexFileHandler(context, req) {
     fetch,
     load,
     restore,
-    setRetention,
     rename,
     newFilename,
     filename: clientFilename,
@@ -409,8 +408,6 @@ async function CortexFileHandler(context, req) {
 
 
 
-  const shouldSetRetention = setRetention === true || setRetention === "true" ||
-                              (req.query?.operation === "setRetention") || (parsedBody?.operation === "setRetention");
   const shouldRename = rename === true || rename === "true" ||
                         (req.query?.operation === "rename") || (parsedBody?.operation === "rename");
   const shouldListFolder = listFolder === true || listFolder === "true" ||
@@ -424,8 +421,6 @@ async function CortexFileHandler(context, req) {
     operation = "checkHash";
   } else if (shouldClearHash) {
     operation = "clearHash";
-  } else if (shouldSetRetention) {
-    operation = "setRetention";
   } else if (shouldRename) {
     operation = "rename";
   } else if (shouldListFolder) {
@@ -614,126 +609,6 @@ async function CortexFileHandler(context, req) {
       body: { body: deleted },
     };
     return;
-  }
-
-  // Set file retention (temporary or permanent)
-  if (operation === "setRetention") {
-    // Extract parameters from query string or body
-    const fileHash = req.query.hash || parsedBody?.params?.hash || parsedBody?.hash || hash;
-    const fileBlobPath = req.query.blobPath || parsedBody?.params?.blobPath || parsedBody?.blobPath || blobPath;
-    const retention = req.query.retention || parsedBody?.params?.retention || parsedBody?.retention;
-
-    if (!fileHash && !fileBlobPath) {
-      context.res = {
-        status: 400,
-        body: "Missing identifier. Please provide hash or blobPath in query string or request body.",
-      };
-      return;
-    }
-
-    if (!retention) {
-      context.res = {
-        status: 400,
-        body: "Missing retention parameter. Please provide retention ('temporary' or 'permanent') in query string or request body.",
-      };
-      return;
-    }
-
-    // Validate retention value
-    if (retention !== 'temporary' && retention !== 'permanent') {
-      context.res = {
-        status: 400,
-        body: "Invalid retention value. Must be 'temporary' or 'permanent'.",
-      };
-      return;
-    }
-
-    // Prefer hash-based lookup (updates Redis + blob tags), fall back to blobPath (blob tags only)
-    if (fileHash) {
-      try {
-        const result = await storageService.setRetention(fileHash, retention, context, logicalContextId);
-        context.res = {
-          status: 200,
-          body: result,
-        };
-        return;
-      } catch (error) {
-        // If hash lookup failed but we have blobPath, fall through to blobPath handler
-        if (!fileBlobPath) {
-          context.res = {
-            status: error.message.includes("not found") ? 404 : 500,
-            body: error.message,
-          };
-          return;
-        }
-        context.log(`Hash-based setRetention failed for ${fileHash}, trying blobPath: ${fileBlobPath}`);
-      }
-    }
-
-    // Set retention directly by blobPath (no Redis lookup needed)
-    if (fileBlobPath) {
-      try {
-        const { provider } = await getScopedProvider({
-          storageService,
-          resolvedContextId: logicalContextId,
-          userId,
-          workspaceId,
-          appletId,
-          fileScope,
-        });
-        if (provider && provider.updateBlobTags) {
-          await provider.updateBlobTags(fileBlobPath, retention);
-          context.log(`Set retention to ${retention} for blobPath: ${fileBlobPath}`);
-          context.res = {
-            status: 200,
-            body: {
-              message: `Retention set to ${retention}`,
-              blobPath: fileBlobPath,
-              retention,
-            },
-          };
-          return;
-        }
-        context.res = {
-          status: 500,
-          body: "Storage provider does not support blob tags",
-        };
-        return;
-      } catch (error) {
-        if (isNotFoundError(error)) {
-          try {
-            const legacyBlob = await resolveLegacyScopedBlobClient(
-              logicalContextId || storageOwnerId,
-              fileBlobPath,
-            );
-            if (legacyBlob?.provider?.updateBlobTags) {
-              await legacyBlob.provider.updateBlobTags(fileBlobPath, retention);
-              context.log(`Set retention to ${retention} for legacy blobPath: ${fileBlobPath} (${legacyBlob.containerName})`);
-              context.res = {
-                status: 200,
-                body: {
-                  message: `Retention set to ${retention}`,
-                  blobPath: fileBlobPath,
-                  retention,
-                },
-              };
-              return;
-            }
-          } catch (legacyError) {
-            context.res = {
-              status: legacyError.statusCode === 404 ? 404 : 500,
-              body: `Error setting retention for ${fileBlobPath}: ${legacyError.message}`,
-            };
-            return;
-          }
-        }
-        context.res = {
-          status: error.statusCode === 404 ? 404 : 500,
-          body: `Error setting retention for ${fileBlobPath}: ${error.message}`,
-        };
-        return;
-      }
-    }
   }
 
   // Rename a file (rename blob in cloud storage + update Redis)
@@ -972,7 +847,7 @@ async function CortexFileHandler(context, req) {
         );
       }
 
-      // Enrich listing with hash, gcs, displayFilename, and permanent from Redis
+      // Enrich listing with hash, gcs, and displayFilename from Redis
       const enrichContextId = logicalContextId || containerOwnerId || storageOwnerId;
       if (enrichContextId) {
         // Load all Redis records for this context to match files without hashes
@@ -1009,7 +884,6 @@ async function CortexFileHandler(context, req) {
                 if (stored.gcs && !file.gcs) {
                   file.gcs = stored.gcs;
                 }
-                file.permanent = stored.permanent || false;
               }
             } catch { /* skip enrichment for this file */ }
           }
@@ -1106,7 +980,6 @@ async function CortexFileHandler(context, req) {
         finalFilename,
         fileStream,
         remoteContentType,
-        "temporary",
         folderPath,
       );
 
@@ -1126,7 +999,6 @@ async function CortexFileHandler(context, req) {
           finalFilename,
           backupStream,
           remoteContentType,
-          "temporary",
           gcsFolderPath,
         );
       }
@@ -1141,9 +1013,6 @@ async function CortexFileHandler(context, req) {
         ...(primaryBlobName && { blobPath: primaryBlobName }),
         ...(backupUploadUrl && { gcs: backupUploadUrl.url || backupUploadUrl }),
       };
-
-      // All uploads default to temporary (permanent: false) to match file collection logic
-      res.permanent = false;
 
       //Update Redis (using hash or URL as the key)
       // Always respect contextId if provided, even for URL-based lookups
@@ -1349,7 +1218,7 @@ async function CortexFileHandler(context, req) {
               const filename = originalFilePart || hashResult.filename || path.basename(hashResult.gcs);
 
               const stream = fs.createReadStream(downloadedFile);
-              res = await provider.uploadStream(context, filename, stream, null, 'temporary', folderPath);
+              res = await provider.uploadStream(context, filename, stream, null, folderPath);
             } else {
               // Fallback: no original URL, restore to default container
               res = await storageService.uploadFile(

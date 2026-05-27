@@ -189,7 +189,6 @@ export default {
                                         imageHash,
                                         null,
                                         pathwayResolver,
-                                        true, // mark collection metadata as permanent
                                         writeTarget.chatId || null,
                                         {
                                             workspaceId: writeTarget.workspaceId || null,

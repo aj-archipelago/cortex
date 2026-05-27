@@ -35,6 +35,8 @@ const processPathwayParameters = (params) => {
   return processed;
 };
 
+const quoteGraphQlString = (value) => JSON.stringify(String(value));
+
 const getGraphQlType = (value) => {
   // The value might be an object with JSON Schema type specification
   if (isJsonSchemaObject(value)) {
@@ -44,7 +46,7 @@ const getGraphQlType = (value) => {
       return { type: 'Boolean', defaultValue: schema.default === undefined ? undefined : schema.default };
     }
     if (schema.type === 'string') {
-      return { type: 'String', defaultValue: schema.default === undefined ? undefined : `"${schema.default}"` };
+      return { type: 'String', defaultValue: schema.default === undefined ? undefined : quoteGraphQlString(schema.default) };
     }
     if (schema.type === 'integer') {
       return { type: 'Int', defaultValue: schema.default };
@@ -75,12 +77,12 @@ const getGraphQlType = (value) => {
         return { type: '[Boolean]', defaultValue: defaultArray };
       }
       // Unknown item type: pass as serialized JSON string argument
-      return { type: 'String', defaultValue: def === undefined ? '"[]"' : `"${JSON.stringify(def).replace(/"/g, '\\"')}"` };
+      return { type: 'String', defaultValue: def === undefined ? '"[]"' : quoteGraphQlString(JSON.stringify(def)) };
     }
     if (schema.type === 'object' || schema.properties) {
       // Until explicit input types are defined, accept as stringified JSON
       const def = schema.default;
-      return { type: 'String', defaultValue: def === undefined ? '"{}"' : `"${JSON.stringify(def).replace(/"/g, '\\"')}"` };
+      return { type: 'String', defaultValue: def === undefined ? '"{}"' : quoteGraphQlString(JSON.stringify(def)) };
     }
   }
   
@@ -89,7 +91,7 @@ const getGraphQlType = (value) => {
     case 'boolean':
       return {type: 'Boolean', defaultValue: value};
     case 'string':
-      return {type: 'String', defaultValue: `"${value}"`};
+      return {type: 'String', defaultValue: quoteGraphQlString(value)};
     case 'number':
       // Check if it's an integer or float
       return Number.isInteger(value) ? {type: 'Int', defaultValue: value} : {type: 'Float', defaultValue: value};
@@ -105,18 +107,18 @@ const getGraphQlType = (value) => {
         else {
           // Check if it's MultiMessage (content is array) or Message (content is string)
           if (Array.isArray(value[0]?.content)) {
-            return {type: '[MultiMessage]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
+            return {type: '[MultiMessage]', defaultValue: quoteGraphQlString(JSON.stringify(value))};
           }
           // Check if it's AgentContextInput (has contextId and default properties)
           if (value[0] && typeof value[0] === 'object' && 'contextId' in value[0] && 'default' in value[0]) {
-            return {type: '[AgentContextInput]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
+            return {type: '[AgentContextInput]', defaultValue: quoteGraphQlString(JSON.stringify(value))};
           }
           // Check if it's FileAccessTargetInput
           else if (value[0] && typeof value[0] === 'object' && 'kind' in value[0]) {
-            return {type: '[FileAccessTargetInput]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
+            return {type: '[FileAccessTargetInput]', defaultValue: quoteGraphQlString(JSON.stringify(value))};
           }
           else {
-            return {type: '[Message]', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
+            return {type: '[Message]', defaultValue: quoteGraphQlString(JSON.stringify(value))};
           }
         }
       } else {
@@ -125,10 +127,10 @@ const getGraphQlType = (value) => {
           return {type: `[${value.objName}]`, defaultValue: JSON.stringify(value)};
         }
         // Otherwise treat as generic object (stringify it)
-        return {type: 'String', defaultValue: `"${JSON.stringify(value).replace(/"/g, '\\"')}"`};
+        return {type: 'String', defaultValue: quoteGraphQlString(JSON.stringify(value))};
       }
     default:
-      return {type: 'String', defaultValue: `"${value}"`};
+      return {type: 'String', defaultValue: quoteGraphQlString(value)};
   }
 };
 

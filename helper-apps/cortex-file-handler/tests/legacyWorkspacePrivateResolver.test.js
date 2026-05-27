@@ -82,7 +82,6 @@ test("migrateHashRecordToScopedStorage rewrites a legacy workspace-user-private 
         filename,
         stream,
         contentType,
-        retention,
         folderPath,
       ) => {
         const chunks = [];
@@ -93,7 +92,6 @@ test("migrateHashRecordToScopedStorage rewrites a legacy workspace-user-private 
           context,
           filename,
           contentType,
-          retention,
           folderPath,
           body: Buffer.concat(chunks).toString("utf8"),
         });
@@ -119,7 +117,6 @@ test("migrateHashRecordToScopedStorage rewrites a legacy workspace-user-private 
       filename: "file.pdf",
       displayFilename: "file.pdf",
       mimeType: "application/pdf",
-      permanent: true,
     },
     sourceContextId,
     resolvedContextId,
@@ -150,7 +147,6 @@ test("migrateHashRecordToScopedStorage rewrites a legacy workspace-user-private 
     context,
     filename: "file.pdf",
     contentType: "application/pdf",
-    retention: "permanent",
     folderPath: "applets/workspace-456",
     body: "legacy pdf bytes",
   });

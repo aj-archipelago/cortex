@@ -16,15 +16,14 @@ export default {
         },
         hash: ``,
         displayFilename: { type: 'string' }, // Optional - no default
-        mimeType: { type: 'string' }, // Optional - no default
-        permanent: { type: 'boolean' } // Optional - no default
+        mimeType: { type: 'string' } // Optional - no default
     },
     model: 'oai-gpt4o',
     isMutation: true, // Declaratively mark this as a Mutation
 
     resolver: async (_parent, args, _contextValue, _info) => {
         const { fileAccessPlan } = args;
-        const { hash, displayFilename, mimeType, permanent } = args;
+        const { hash, displayFilename, mimeType } = args;
         
         const writeTarget = getWriteFileAccessTarget(fileAccessPlan);
         if (!writeTarget) {
@@ -51,10 +50,6 @@ export default {
             if (mimeType !== undefined && mimeType !== null) {
                 metadata.mimeType = mimeType;
             }
-            if (permanent !== undefined && permanent !== null) {
-                metadata.permanent = Boolean(permanent);
-            }
-
             // Update metadata (only Cortex-managed fields)
             const success = await updateFileMetadataInFileAccessPlan(
                 fileAccessPlan,
