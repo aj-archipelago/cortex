@@ -5,9 +5,10 @@ import logger from '../../../../lib/logger.js';
 export default {
     prompt: [],
     timeout: 30,
-    toolDefinition: { 
+    toolDefinition: {
         type: "function",
         icon: "🔗",
+        toolCost: 1,
         function: {
             name: "ValidateUrl",
             description: "This tool validates URLs by performing a HEAD request to check if they are accessible and return valid responses. Use this to verify that links and image URLs are valid before including them in responses.",
@@ -134,4 +135,3 @@ export default {
         }
     }
 };
-
