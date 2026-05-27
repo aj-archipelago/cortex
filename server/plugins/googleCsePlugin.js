@@ -90,8 +90,9 @@ class GoogleCsePlugin extends ModelPlugin {
     }
 
     logRequestData(data, responseData, prompt) {
-        // Keep verbose logging consistent
-        logger.verbose(`${this.parseResponse(responseData)}`);
+        const responseText = this.parseResponse(responseData);
+        const { length, units } = this.getLength(responseText || '');
+        logger.info(`[Google CSE response received containing ${length} ${units}]`);
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
 }
