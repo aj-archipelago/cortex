@@ -445,7 +445,7 @@ The first valid model found in this order will be used. If none of these models 
 **Example:**
 ```js
 export default {
-    model: 'oai-gpt4o',  // Static model for this pathway
+    model: 'oai-gpt54-mini',  // Static model for this pathway
     prompt: '{{text}}',
     // ...
 };
@@ -498,11 +498,11 @@ The model swap occurs in the `promptAndParse()` method of `PathwayResolver`:
 1. **In a pathway's `executePathway` function:**
 ```js
 export default {
-    model: 'oai-gpt4o',
+    model: 'oai-gpt54-mini',
     executePathway: async ({args, runAllPrompts}) => {
         // Switch to a different model based on input length
         if (args.text && args.text.length > 10000) {
-            args.modelOverride = 'oai-gpt4-turbo';  // Use faster model for long text
+            args.modelOverride = 'oai-gpt55';  // Use the frontier model for long text
         }
         return await runAllPrompts();
     }
@@ -517,7 +517,7 @@ export default {
         const initialResult = await runAllPrompts();
         
         // Second pass with a different model
-        args.modelOverride = 'oai-gpt4o';
+        args.modelOverride = 'oai-gpt55';
         args.text = initialResult;
         return await runAllPrompts();
     }
@@ -530,9 +530,9 @@ export default {
     executePathway: async ({args, runAllPrompts}) => {
         // Select model based on language or complexity
         if (args.language === 'ja' || args.complexity === 'high') {
-            args.modelOverride = 'oai-gpt4o';
+            args.modelOverride = 'oai-gpt55';
         } else {
-            args.modelOverride = 'oai-gpt4-turbo';
+            args.modelOverride = 'oai-gpt54-mini';
         }
         return await runAllPrompts();
     }
@@ -602,46 +602,54 @@ Cortex is designed to be highly extensible. This allows you to customize the API
 Where `default.json` holds all of your specific configuration:
 ```js
 {
-    "defaultModelName": "oai-gpturbo",
+    "defaultModelName": "oai-gpt54-mini",
     "models": {
-        "oai-td3": {
-            "type": "OPENAI-COMPLETION",
-            "url": "https://api.openai.com/v1/completions",
-            "headers": {
-                "Authorization": "Bearer {{OPENAI_API_KEY}}",
-                "Content-Type": "application/json"
-            },
-            "params": {
-                "model": "text-davinci-003"
-            },
-            "requestsPerSecond": 10,
-            "maxTokenLength": 4096
+        "oai-gpt54-mini": {
+            "type": "OPENAI-RESPONSES",
+            "emulateOpenAIChatModel": "gpt-5.4-mini",
+            "endpoints": [
+                {
+                    "name": "GPT 5.4 Mini",
+                    "url": "https://api.openai.com/v1/responses",
+                    "headers": {
+                        "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "params": {
+                        "model": "gpt-5.4-mini"
+                    },
+                    "requestsPerSecond": 50
+                }
+            ],
+            "maxTokenLength": 1050000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true,
+            "metadata": {
+                "displayName": "GPT 5.4 Mini",
+                "category": "chat",
+                "isDefault": true
+            }
         },
-        "oai-gpturbo": {
-            "type": "OPENAI-CHAT",
-            "url": "https://api.openai.com/v1/chat/completions",
-            "headers": {
-                "Authorization": "Bearer {{OPENAI_API_KEY}}",
-                "Content-Type": "application/json"
-            },
-            "params": {
-                "model": "gpt-3.5-turbo"
-            },
-            "requestsPerSecond": 10,
-            "maxTokenLength": 8192
-        },
-        "oai-gpt4": {
-            "type": "OPENAI-CHAT",
-            "url": "https://api.openai.com/v1/chat/completions",
-            "headers": {
-                "Authorization": "Bearer {{OPENAI_API_KEY}}",
-                "Content-Type": "application/json"
-            },
-            "params": {
-                "model": "gpt-4"
-            },
-            "requestsPerSecond": 10,
-            "maxTokenLength": 8192
+        "claude-47-opus-vertex": {
+            "type": "CLAUDE-4-VERTEX",
+            "emulateOpenAIChatModel": "claude-opus-4-7",
+            "endpoints": [
+                {
+                    "name": "Claude 4.7 Opus",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/project-id/locations/global/publishers/anthropic/models/claude-opus-4-7",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "maxTokenLength": 1000000,
+            "maxReturnTokens": 128000,
+            "supportsStreaming": true,
+            "metadata": {
+                "displayName": "Claude 4.7 Opus",
+                "category": "chat"
+            }
         }
     },
     "enableCache": false,
@@ -666,16 +674,20 @@ Configuration of Cortex is done via a [convict](https://github.com/mozilla/node-
 
 Models are configured in the `models` section of the config. Each model can have the following types:
 
-- `OPENAI-CHAT`: For OpenAI chat models (legacy GPT-3.5)
-- `OPENAI-VISION`: For multimodal models (GPT-4o, GPT-4o-mini) supporting text, images, and other content types
-- `OPENAI-REASONING`: For O1 and O3-mini reasoning models with vision capabilities
+- `OPENAI-RESPONSES`: For current OpenAI Responses API models
+- `OPENAI-VISION`: For older OpenAI chat-completions multimodal models
+- `OPENAI-REASONING`: For older OpenAI reasoning models
 - `OPENAI-COMPLETION`: For OpenAI completion models
 - `OPENAI-WHISPER`: For Whisper transcription
-- `GEMINI-1.5-CHAT`: For Gemini 1.5 Pro chat models
-- `GEMINI-1.5-VISION`: For Gemini vision models (including 2.0 Flash experimental)
-- `CLAUDE-3-VERTEX`: For Claude-3 and 3.5 models (Haiku, Opus, Sonnet)
-- `CLAUDE-4-VERTEX`: For Claude-4 models (Sonnet 4, Sonnet 4.5, Opus 4.1, Haiku 4.5) with enhanced support for PDFs and text files
-- `GROK-VISION`: For XAI Grok models (Grok-3, Grok-4, fast-reasoning, code-fast) with multimodal/vision and reasoning
+- `GEMINI-3-REASONING-VISION`: For current Gemini chat and vision models with reasoning controls
+- `GEMINI-3-IMAGE`: For Gemini image generation models
+- `GEMINI-MUSIC`: For Lyria music generation
+- `GEMINI-TTS`: For Gemini text-to-speech
+- `CLAUDE-4-VERTEX`: For current Claude 4.x models on Vertex AI
+- `REPLICATE-API`: For Replicate-hosted image, video, music, and speech models
+- `VEO-VIDEO`: For Veo video generation models
+- `GROK-VISION`: For XAI Grok chat/completions models with multimodal/vision and reasoning
+- `GROK-RESPONSES`: For XAI Responses API models
 - `AZURE-TRANSLATE`: For Azure translation services
 
 Each model configuration can include:
@@ -700,8 +712,8 @@ Each model configuration can include:
     "maxImageSize": 5242880,
     "supportsStreaming": true,
     "supportsVision": true,
-    "emulateOpenAIChatModel": "gpt-4o",
-    "emulateOpenAICompletionModel": "gpt-3.5-turbo",
+    "emulateOpenAIChatModel": "gpt-5.4-mini",
+    "emulateOpenAICompletionModel": "ollama-completion",
     "restStreaming": {
         "inputParameters": {
             "stream": false
@@ -721,8 +733,8 @@ Each model configuration can include:
 
 **REST Endpoint Emulation**: To expose a model through OpenAI-compatible REST endpoints (`/v1/chat/completions` or `/v1/completions`), add one of these properties:
 
-- `emulateOpenAIChatModel`: Exposes the model as a chat completion model (e.g., `"gpt-4o"`, `"gpt-5"`, `"claude-4-sonnet"`)
-- `emulateOpenAICompletionModel`: Exposes the model as a text completion model (e.g., `"gpt-3.5-turbo"`, `"ollama-completion"`)
+- `emulateOpenAIChatModel`: Exposes the model as a chat completion model (e.g., `"gpt-5.4-mini"`, `"gpt-5.5"`, `"claude-opus-4-7"`)
+- `emulateOpenAICompletionModel`: Exposes the model as a text completion model (e.g., `"ollama-completion"`)
 
 When `enableRestEndpoints` is `true`, Cortex automatically:
 1. Generates REST streaming pathways for models with `emulateOpenAIChatModel` or `emulateOpenAICompletionModel`
@@ -738,30 +750,38 @@ When `enableRestEndpoints` is `true`, Cortex automatically:
 **Example**:
 ```json
 {
-    "oai-gpt4o": {
-        "type": "OPENAI-VISION",
-        "emulateOpenAIChatModel": "gpt-4o",
+    "oai-gpt54-mini": {
+        "type": "OPENAI-RESPONSES",
+        "emulateOpenAIChatModel": "gpt-5.4-mini",
         "restStreaming": {
             "inputParameters": {
-                "stream": false
+                "stream": true,
+                "tools": ""
             },
             "timeout": 120
         },
-        "url": "https://api.openai.com/v1/chat/completions",
-        "headers": {
-            "Authorization": "Bearer {{OPENAI_API_KEY}}",
-            "Content-Type": "application/json"
-        },
-        "params": {
-            "model": "gpt-4o"
-        },
-        "maxTokenLength": 131072,
+        "endpoints": [
+            {
+                "name": "GPT 5.4 Mini",
+                "url": "https://api.openai.com/v1/responses",
+                "headers": {
+                    "Authorization": "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "gpt-5.4-mini"
+                },
+                "requestsPerSecond": 50
+            }
+        ],
+        "maxTokenLength": 1050000,
+        "maxReturnTokens": 128000,
         "supportsStreaming": true
     }
 }
 ```
 
-This configuration will make the model available as `gpt-4o` through the `/v1/chat/completions` endpoint when `enableRestEndpoints` is `true`.
+This configuration will make the model available as `gpt-5.4-mini` through the `/v1/chat/completions` endpoint when `enableRestEndpoints` is `true`.
 
 **Rate Limiting**: The `requestsPerSecond` parameter controls the rate limiting for each model endpoint. If not specified, Cortex defaults to **100 requests per second** per endpoint. This rate limiting is implemented using the Bottleneck library with a token bucket algorithm that includes:
 - Minimum time between requests (`minTime`)
@@ -790,7 +810,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-4",  # Or any model configured in Cortex
+    model="gpt-5.4-mini",  # Or any model configured in Cortex
     messages=[{"role": "user", "content": "Hello!"}]
 )
 ```

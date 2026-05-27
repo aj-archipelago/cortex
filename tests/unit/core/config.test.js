@@ -45,7 +45,7 @@ test('config enableRestEndpoints', (t) => {
 });
 
 test('config openaiDefaultModel', (t) => {
-    const expectedDefault = 'gpt-3.5-turbo';
+    const expectedDefault = 'gpt-5.4-mini';
     t.is(config.get('openaiDefaultModel'), expectedDefault);
 });
 

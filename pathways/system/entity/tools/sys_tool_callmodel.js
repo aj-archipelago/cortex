@@ -16,7 +16,7 @@ export default {
     inputParameters: {
         userPrompt: "",
         systemPrompt: "",
-        model: "oai-gpt41"
+        model: "oai-gpt54-mini"
     },
     
     toolDefinition: {
@@ -39,7 +39,7 @@ export default {
                     },
                     model: {
                         type: "string",
-                        description: "The model to use. You currently have the following models available to call: oai-gpt4o, oai-gpt41, oai-o3, oai-o3-mini, claude-35-sonnet-vertex, gemini-flash-20-vision, gemini-pro-25-vision."
+                        description: "The model to use. Current examples include oai-gpt54-mini, oai-gpt55, claude-47-opus-vertex, claude-46-sonnet-vertex, gemini-flash-35-vision, and gemini-pro-31-vision."
                     },
                     userMessage: {
                         type: "string",

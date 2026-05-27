@@ -1,10 +1,16 @@
 import test from 'ava';
+import fs from 'fs';
+import path from 'path';
 import sysModelMetadata, {
     buildMetadataEntry,
     getPricingAliases,
     inferCategory,
     inferProvider,
 } from '../../../pathways/system/sys_model_metadata.js';
+
+const publicExampleConfig = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), 'config/default.example.json'), 'utf8'),
+);
 
 test('inferProvider maps known model type prefixes', (t) => {
     t.is(inferProvider('OPENAI-RESPONSES'), 'openai');
@@ -216,6 +222,54 @@ test('buildMetadataEntry marks model groups', (t) => {
 
     t.true(entry.isModelGroup);
     t.is(entry.modelId, 'group-a');
+});
+
+test('public example config exposes only current model definitions', (t) => {
+    const modelIds = Object.keys(publicExampleConfig.models);
+    const requiredCurrentModels = [
+        'oai-gpt55',
+        'oai-gpt54',
+        'oai-gpt54-mini',
+        'oai-gpt54-nano',
+        'claude-47-opus-vertex',
+        'claude-46-sonnet-vertex',
+        'claude-45-haiku-vertex',
+        'gemini-flash-35-vision',
+        'gemini-pro-31-vision',
+        'gemini-flash-31-image',
+        'google-gemini-3.1-flash-tts',
+        'google-lyria-3-music',
+        'google-lyria-3-pro-music',
+        'veo-3.1-generate',
+        'veo-3.1-fast-generate',
+        'veo-3.1-lite-generate',
+        'replicate-qwen3-tts',
+        'replicate-elevenlabs-v3',
+        'replicate-minimax-speech-2.8-hd',
+        'replicate-minimax-speech-2.8-turbo',
+        'replicate-seedream-5-lite',
+    ];
+    const deprecatedDefinitions = [
+        'oai-gpturbo',
+        'oai-gpt4',
+        'oai-gpt4o',
+        'oai-gpt41',
+        'gemini-pro-chat',
+        'gemini-pro-25-vision',
+        'claude-3-haiku-vertex',
+        'claude-35-sonnet-vertex',
+    ];
+
+    t.is(publicExampleConfig.defaultModelName, 'oai-gpt54-mini');
+    for (const modelId of requiredCurrentModels) {
+        t.true(modelIds.includes(modelId), `${modelId} should be defined`);
+        t.truthy(publicExampleConfig.models[modelId].metadata?.displayName, `${modelId} should be visible`);
+    }
+    for (const modelId of deprecatedDefinitions) {
+        t.false(modelIds.includes(modelId), `${modelId} should not be a model definition`);
+        t.truthy(publicExampleConfig.modelRedirects[modelId], `${modelId} should redirect`);
+    }
+    t.true(publicExampleConfig.models['oai-gpt54-mini'].metadata.isDefault);
 });
 
 test('sys_model_metadata pathway keeps JSON response configuration', (t) => {

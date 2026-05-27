@@ -137,7 +137,7 @@ export default {
     inputParameters: {
         category: '',
     },
-    model: 'oai-gpt41-mini',
+    model: 'oai-gpt54-mini',
     executePathway: async ({ args }) => {
         try {
             const allModels = config.get('models');
