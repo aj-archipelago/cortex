@@ -29,6 +29,14 @@ const buildStubGooglePathway = () => ({
   }
 });
 
+const buildCapturingStubGooglePathway = (capture) => ({
+  name: 'google_cse',
+  rootResolver: async (_parent, args) => {
+    capture.args = args;
+    return { result: JSON.stringify(mockGoogleResponse) };
+  }
+});
+
 // Build a minimal resolver object to pass to executePathway
 const buildResolver = () => ({
   errors: [],
@@ -62,6 +70,12 @@ const injectStubPathway = (config) => {
   config.load({ pathways: modified });
 };
 
+const injectCapturingStubPathway = (config, capture) => {
+  const existing = config.get('pathways') || {};
+  const modified = { ...existing, google_cse: buildCapturingStubGooglePathway(capture) };
+  config.load({ pathways: modified });
+};
+
 // Test: normalization to SearchResponse
 
 test('sys_tool_google_search normalizes Google items into SearchResponse', async (t) => {
@@ -91,6 +105,29 @@ test('sys_tool_google_search normalizes Google items into SearchResponse', async
   t.truthy(resolver.tool);
   const toolMeta = JSON.parse(resolver.tool);
   t.is(toolMeta.toolUsed, 'GoogleSearch');
+
+  restoreEnv(t);
+});
+
+test('sys_tool_google_search accepts query as an alias for q', async (t) => {
+  setEnv(t);
+  const { config, tool } = await loadModules();
+  const capture = {};
+  injectCapturingStubPathway(config, capture);
+
+  const parameters = tool.toolDefinition.function.parameters;
+  t.truthy(parameters.properties.query);
+  t.deepEqual(parameters.required, []);
+
+  const resolver = buildResolver();
+  const args = { query: 'pokemon', userMessage: 'testing' };
+
+  const resultStr = await tool.executePathway({ args, runAllPrompts: null, resolver });
+  const result = JSON.parse(resultStr);
+
+  t.is(result._type, 'SearchResponse');
+  t.is(capture.args.q, 'pokemon');
+  t.is(capture.args.text, 'pokemon');
 
   restoreEnv(t);
 });
