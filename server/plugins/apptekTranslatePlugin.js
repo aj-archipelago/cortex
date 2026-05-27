@@ -47,7 +47,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
         // Check if source and target languages are the same
         if (to && sourceLanguage && sourceLanguage !== 'auto' && sourceLanguage === to) {
             const logMessage = `ApptekTranslatePlugin: Source language (${sourceLanguage}) matches target language (${to}). Skipping translation.`;
-            logger.verbose(logMessage)
+            logger.info(logMessage)
             return text;
         }
 
@@ -67,7 +67,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
             cortexRequest.url = url.toString();
             
             const glossaryLogMessage = `ApptekTranslatePlugin: Using glossary ID: ${requestParameters.params.glossaryId}`;
-            logger.verbose(glossaryLogMessage)
+            logger.info(glossaryLogMessage)
         }
 
         return this.executeRequest(cortexRequest);
@@ -111,7 +111,7 @@ class ApptekTranslatePlugin extends ModelPlugin {
                     text,
                 });
                 
-                logger.verbose(`Successfully used language pathway as fallback: ${JSON.stringify({ detectedLanguage })}`);
+                logger.info(`Successfully used language pathway as fallback: ${JSON.stringify({ detectedLanguage })}`);
                 if (!detectedLanguage) {
                     throw new Error('Language detection failed using fallback language pathway');
                 }
@@ -132,8 +132,11 @@ class ApptekTranslatePlugin extends ModelPlugin {
 
     // Override the logging function to display the request and response
     logRequestData(data, responseData, prompt) {
-        logger.verbose(`Input: ${data}`);
-        logger.verbose(`Output: ${this.parseResponse(responseData)}`);
+        const requestLength = this.getLength(data || '');
+        logger.info(`[AppTek Translate request sent containing ${requestLength.length} ${requestLength.units}]`);
+        const responseText = this.parseResponse(responseData);
+        const responseLength = this.getLength(responseText || '');
+        logger.info(`[AppTek Translate response received containing ${responseLength.length} ${responseLength.units}]`);
 
         if (prompt?.debugInfo) {
             prompt.debugInfo += `\nInput: ${data}\nOutput: ${responseData}`;

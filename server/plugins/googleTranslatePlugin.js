@@ -109,8 +109,10 @@ class GoogleTranslatePlugin extends ModelPlugin {
         const modelInput = data.q ? data.q[0] : (data.contents ? data.contents[0] : '');
         const translatedText = this.parseResponse(responseData);
         
-        logger.verbose(`Input: ${modelInput}`);
-        logger.verbose(`Output: ${translatedText}`);
+        const requestLength = this.getLength(modelInput || '');
+        logger.info(`[Google Translate request sent containing ${requestLength.length} ${requestLength.units}]`);
+        const responseLength = this.getLength(translatedText || '');
+        logger.info(`[Google Translate response received containing ${responseLength.length} ${responseLength.units}]`);
 
         if (prompt?.debugInfo) {
             prompt.debugInfo += `\nInput: ${modelInput}\nOutput: ${translatedText}`;
