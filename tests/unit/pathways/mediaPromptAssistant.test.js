@@ -9,8 +9,8 @@ function createResolver() {
   };
 }
 
-test("media prompt assistant uses the default OpenAI vision model", (t) => {
-  t.is(mediaPromptAssistant.model, "oai-gpt4o");
+test("media prompt assistant uses GPT 5.4 mini", (t) => {
+  t.is(mediaPromptAssistant.model, "oai-gpt54-mini");
 });
 
 test("media prompt assistant optimizes supplied prompts with model and reference context", async (t) => {
