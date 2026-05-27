@@ -12,8 +12,17 @@ import {
   deleteGCS,
   getBlobClient,
   AZURE_STORAGE_CONTAINER_NAME,
+  constructFolderPath,
   getDefaultContainerName,
+  getScopedContainerOwnerId,
+  getScopedLogicalContextId,
 } from "../src/blobHandler.js";
+import {
+  getLegacyUserContainerName,
+  getUserContainerName,
+  getExtensionsForMimeType,
+  isAcceptedMimeType,
+} from "../src/constants.js";
 import { urlExists } from "../src/helper.js";
 import CortexFileHandler from "../src/index.js";
 import { setFileStoreMap } from "../src/redis.js";
@@ -28,6 +37,74 @@ function isGCSConfigured() {
     process.env.GCP_SERVICE_ACCOUNT_KEY
   );
 }
+
+test("constructFolderPath supports scoped applet folders", (t) => {
+  t.is(
+    constructFolderPath({
+      contextId: "applet-user:applet123:user456",
+      fileScope: "applet-user",
+    }),
+    "applets/applet123",
+  );
+  t.is(
+    constructFolderPath({
+      contextId: "applet-shared:applet123",
+      fileScope: "applet-shared",
+    }),
+    "applet-shared",
+  );
+});
+
+test("accepts legacy WAV mime aliases for remote media", (t) => {
+  t.true(isAcceptedMimeType("audio/wav"));
+  t.true(isAcceptedMimeType("audio/x-wav"));
+  t.deepEqual(getExtensionsForMimeType("audio/x-wav"), [".wav"]);
+});
+
+test("applet-user routing keeps a logical scoped context but stores in the user container", (t) => {
+  const logicalContextId = getScopedLogicalContextId({
+    userId: "user456",
+    appletId: "applet123",
+    fileScope: "applet-user",
+  });
+  const containerOwnerId = getScopedContainerOwnerId({
+    contextId: logicalContextId,
+    userId: "user456",
+    appletId: "applet123",
+    fileScope: "applet-user",
+  });
+  const containerName = getUserContainerName(
+    getDefaultContainerName(),
+    containerOwnerId,
+  );
+
+  t.is(logicalContextId, "applet-user:applet123:user456");
+  t.is(containerOwnerId, "user456");
+  t.true(containerName.startsWith(`${getDefaultContainerName()}-`));
+  t.false(containerName.includes("applet-user-applet123-user456"));
+});
+
+test("getUserContainerName preserves scope separators safely", (t) => {
+  const containerName = getUserContainerName(
+    getDefaultContainerName(),
+    "applet-user:applet123:user456",
+  );
+
+  t.true(containerName.startsWith(`${getDefaultContainerName()}-`));
+  t.true(containerName.includes("applet-user-applet123-user456"));
+  t.false(containerName.includes(":"));
+});
+
+test("getLegacyUserContainerName preserves pre-scoped container mapping", (t) => {
+  const containerName = getLegacyUserContainerName(
+    getDefaultContainerName(),
+    "workspace-456:user-123",
+  );
+
+  t.true(containerName.startsWith(`${getDefaultContainerName()}-`));
+  t.true(containerName.endsWith("workspace-456user-123"));
+  t.false(containerName.includes(":"));
+});
 
 // Helper function to check file size in GCS
 async function getGCSFileSize(gcsUrl) {

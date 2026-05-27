@@ -78,6 +78,7 @@ export const ACCEPTED_MIME_TYPES = {
 
   // Audio types
   "audio/wav": [".wav"],
+  "audio/x-wav": [".wav"],
   "audio/mpeg": [".mp3"],
   "audio/aac": [".aac"],
   "audio/ogg": [".ogg"],
@@ -171,3 +172,66 @@ export const getDefaultContainerName = () => {
 // Export constant - evaluated at module load time, but getContainerName() handles defaults
 export const AZURE_STORAGE_CONTAINER_NAME = getContainerName();
 export const GCS_BUCKETNAME = process.env.GCS_BUCKETNAME || "cortextempfiles";
+
+function buildContainerName(baseName, sanitized) {
+  if (!sanitized) return baseName;
+  return `${baseName}-${sanitized}`;
+}
+
+function sanitizeContainerContextId(contextId) {
+  return contextId
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 50);
+}
+
+function sanitizeLegacyContainerContextId(contextId) {
+  return contextId
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '')
+    .slice(0, 50);
+}
+
+/**
+ * Derive a per-user blob container name from the base name and a contextId.
+ * MIRROR: Keep in sync with vendor/cortex/lib/blobContainerUtils.js getUserContainerName()
+ * Returns baseName unchanged if no contextId is provided.
+ * @param {string} baseName - Base container name (e.g. 'cortexfiles-local')
+ * @param {string} [contextId] - User/entity context ID
+ * @returns {string} Per-user container name
+ */
+export function getUserContainerName(baseName, contextId) {
+  if (!contextId) return baseName;
+  return buildContainerName(baseName, sanitizeContainerContextId(contextId));
+}
+
+/**
+ * Legacy compound-context container naming used before scoped contexts preserved
+ * separators. Keep this for storage compatibility when probing older blobs.
+ * @param {string} baseName - Base container name (e.g. 'cortexfiles-local')
+ * @param {string} [contextId] - Legacy compound context ID
+ * @returns {string} Legacy container name
+ */
+export function getLegacyUserContainerName(baseName, contextId) {
+  if (!contextId) return baseName;
+  return buildContainerName(
+    baseName,
+    sanitizeLegacyContainerContextId(contextId),
+  );
+}
+
+/**
+ * Return current and legacy-compatible container names for the same context ID.
+ * Current naming is listed first; legacy aliases are included only when distinct.
+ * @param {string} baseName - Base container name
+ * @param {string} [contextId] - Context ID
+ * @returns {string[]} Candidate container names
+ */
+export function getUserContainerNameCandidates(baseName, contextId) {
+  if (!contextId) return [baseName];
+  const current = getUserContainerName(baseName, contextId);
+  const legacy = getLegacyUserContainerName(baseName, contextId);
+  return legacy === current ? [current] : [current, legacy];
+}

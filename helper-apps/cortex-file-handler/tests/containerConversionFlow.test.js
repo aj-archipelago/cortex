@@ -11,7 +11,6 @@ import { port } from "../src/start.js";
 import {
   uploadBlob,
   AZURE_STORAGE_CONTAINER_NAME,
-  saveFileToBlob,
 } from "../src/blobHandler.js";
 import { FileConversionService } from "../src/services/FileConversionService.js";
 import CortexFileHandler from "../src/index.js";

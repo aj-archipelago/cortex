@@ -3,7 +3,9 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
-import { generateShortId } from "../../utils/filenameUtils.js";
+import { generateShortId, sanitizeFilename } from "../../utils/filenameUtils.js";
+import { sanitizeTargetBlobPath } from "../../utils/targetBlobPathUtils.js";
+import { AZURITE_ACCOUNT_NAME, getDefaultContainerName, getUserContainerName } from "../../constants.js";
 
 export class StorageService {
   constructor(factory) {
@@ -150,10 +152,13 @@ export class StorageService {
 
   async deleteFile(url) {
     await this._initialize();
-    
-    // Always use primary provider - single container only
-    const provider = this.primaryProvider;
-    
+
+    // Get the correct provider for the URL's container (may be per-user)
+    const containerName = this._extractContainerFromUrl(url);
+    const provider = containerName
+      ? await StorageFactory.getInstance().getAzureProvider(containerName)
+      : this.primaryProvider;
+
     if (typeof provider.deleteFile === "function") {
       return await provider.deleteFile(url);
     }
@@ -175,6 +180,82 @@ export class StorageService {
   }
 
   /**
+   * Scan cloud storage for orphaned blobs matching a hash and delete them.
+   * Used when the Redis entry is gone but the blob may still exist.
+   * Blobs are named {hash}_{filename}, so we list the user's folder tree
+   * and match by hash prefix.
+   */
+  async _deleteOrphanedBlobs(hash, contextId) {
+    const deleted = [];
+
+    // Determine which Azure provider + folder prefix to scan.
+    // Per-user containers (getUserContainerName) store files at the container
+    // root (e.g., chats/{chatId}/{hash}_{file}), so we list everything ('').
+    // Legacy shared containers store files under users/{contextId}/.
+    const baseName = getDefaultContainerName();
+    const perUserContainer = getUserContainerName(baseName, contextId);
+    const isPerUser = perUserContainer !== baseName;
+
+    const azureProvider = isPerUser
+      ? await StorageFactory.getInstance().getAzureProvider(perUserContainer)
+      : this.primaryProvider;
+    const folderPrefix = isPerUser ? '' : `users/${contextId}`;
+
+    // Scan Azure storage for orphaned blobs matching this hash
+    if (azureProvider && typeof azureProvider.listFolder === 'function') {
+      try {
+        const files = await azureProvider.listFolder(folderPrefix);
+        for (const file of files) {
+          if (file.hash === hash) {
+            try {
+              const result = await azureProvider.deleteFile(file.url);
+              if (result) {
+                console.log(`Deleted orphaned primary blob: ${file.name}`);
+                deleted.push({ provider: 'primary', result: file.name });
+              } else {
+                console.warn(`Primary blob not found for orphan cleanup: ${file.name}`);
+              }
+            } catch (err) {
+              console.error(`Failed to delete orphaned primary blob ${file.name}: ${err.message}`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`Error scanning primary storage for orphaned blobs: ${err.message}`);
+      }
+    }
+
+    // Scan backup storage (GCS) — listFolder returns signed HTTPS URLs,
+    // but deleteFile expects gs:// URLs, so construct from file.name
+    if (this.backupProvider && typeof this.backupProvider.listFolder === 'function') {
+      try {
+        const files = await this.backupProvider.listFolder(folderPrefix);
+        for (const file of files) {
+          if (file.hash === hash) {
+            try {
+              // Construct gs:// URL from the blob name since listFolder returns signed HTTPS URLs
+              const gcsUrl = `gs://${this.backupProvider.bucketName}/${file.name}`;
+              const result = await this.backupProvider.deleteFile(gcsUrl);
+              if (result) {
+                console.log(`Deleted orphaned backup blob: ${file.name}`);
+                deleted.push({ provider: 'backup', result: file.name });
+              } else {
+                console.warn(`Backup blob not found for orphan cleanup: ${file.name}`);
+              }
+            } catch (err) {
+              console.error(`Failed to delete orphaned backup blob ${file.name}: ${err.message}`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`Error scanning backup storage for orphaned blobs: ${err.message}`);
+      }
+    }
+
+    return deleted;
+  }
+
+  /**
    * Delete a single file by its hash from both primary and backup storage
    * @param {string} hash - The hash of the file to delete
    * @param {string|null} contextId - Optional context ID for context-scoped files
@@ -182,52 +263,69 @@ export class StorageService {
    */
   async deleteFileByHash(hash, contextId = null) {
     await this._initialize();
-    
+
     if (!hash) {
       throw new Error("Missing hash parameter");
     }
 
     const results = [];
 
-    // Get and remove file information from Redis map
+    // Get file information from Redis (skip lazy cleanup — we're deleting, not reading)
     const { getFileStoreMap, removeFromFileStoreMap } = await import("../../redis.js");
-    const hashResult = await getFileStoreMap(hash, false, contextId);
-    
-    if (hashResult) {
-      // Remove from Redis
-      await removeFromFileStoreMap(hash, contextId);
-    }
-    
+    const hashResult = await getFileStoreMap(hash, true, contextId);
+
     if (!hashResult) {
-      throw new Error(`File with hash ${hash} not found`);
+      // No URL info in Redis — but the blob may still exist in cloud storage
+      // (e.g., previous delete removed Redis entry but failed to delete the blob).
+      // Scan the user's folder for orphaned blobs matching this hash and clean them up.
+      await removeFromFileStoreMap(hash, contextId);
+
+      if (contextId) {
+        const orphansDeleted = await this._deleteOrphanedBlobs(hash, contextId);
+        if (orphansDeleted.length > 0) {
+          console.log(`Cleaned up ${orphansDeleted.length} orphaned blob(s) for hash ${hash}`);
+          return { hash, deleted: orphansDeleted, orphanCleanup: true, results: orphansDeleted };
+        }
+      }
+
+      return { hash, alreadyDeleted: true, results };
     }
 
-    // Delete from primary storage
+    // Delete from primary storage FIRST (before removing from Redis)
+    // This ensures we can retry if cloud deletion fails
+    let primaryDeleted = false;
     if (hashResult.url) {
       try {
-        // Log the URL being deleted for debugging (redact SAS token for security)
         const { redactSasToken } = await import('../../utils/logSecurity.js');
         console.log(`Deleting file from primary storage - hash: ${hash}, url: ${redactSasToken(hashResult.url)}`);
-        
-        // Always use primary provider - single container only
-        const provider = this.primaryProvider;
-        
+
+        // Get the correct provider for the URL's container (may be per-user)
+        const containerName = this._extractContainerFromUrl(hashResult.url);
+        const provider = containerName
+          ? await StorageFactory.getInstance().getAzureProvider(containerName)
+          : this.primaryProvider;
         const primaryResult = await provider.deleteFile(hashResult.url);
         if (primaryResult) {
           console.log(`Successfully deleted from primary storage - hash: ${hash}, result: ${primaryResult}`);
           results.push({ provider: 'primary', result: primaryResult });
+          primaryDeleted = true;
         } else {
-          // deleteFile returned null, which means the URL was invalid or blob not found
-          console.warn(`Invalid or empty URL for hash ${hash}: ${redactSasToken(hashResult.url)}`);
-          results.push({ provider: 'primary', error: 'Invalid URL (container-only or empty blob name)' });
+          // deleteFile returned null — blob not found, treat as already deleted
+          console.warn(`Primary blob not found for hash ${hash}: ${redactSasToken(hashResult.url)}`);
+          results.push({ provider: 'primary', result: 'not_found' });
+          primaryDeleted = true; // Not found = already gone, safe to remove from Redis
         }
       } catch (error) {
         console.error(`Error deleting file from primary storage:`, error);
         results.push({ provider: 'primary', error: error.message });
+        // primaryDeleted stays false — don't remove from Redis so delete can be retried
       }
+    } else {
+      primaryDeleted = true; // No URL to delete
     }
 
     // Delete from backup storage (GCS)
+    let backupDeleted = false;
     if (hashResult.gcs && this.backupProvider) {
       try {
         console.log(`Deleting file from backup storage - hash: ${hash}, gcs: ${hashResult.gcs}`);
@@ -237,22 +335,24 @@ export class StorageService {
           results.push({ provider: 'backup', result: backupResult });
         } else {
           console.warn(`Backup deletion returned null for hash ${hash}: ${hashResult.gcs}`);
-          results.push({ provider: 'backup', error: 'Deletion returned null' });
+          results.push({ provider: 'backup', result: 'not_found' });
         }
+        backupDeleted = true;
       } catch (error) {
         console.error(`Error deleting file from backup storage:`, error);
         results.push({ provider: 'backup', error: error.message });
       }
     } else {
-      if (!hashResult.gcs) {
-        console.log(`No GCS URL found for hash ${hash}, skipping backup deletion`);
-      } else if (!this.backupProvider) {
-        console.log(`Backup provider not configured, skipping backup deletion for hash ${hash}`);
-      }
+      backupDeleted = true; // Nothing to delete
     }
 
-    // Note: Hash was already removed from Redis atomically at the beginning
-    // No need to remove again
+    // Only remove from Redis after cloud deletion succeeds (or blobs confirmed gone)
+    // This prevents orphaned blobs that can never be cleaned up via hash-based delete
+    if (primaryDeleted) {
+      await removeFromFileStoreMap(hash, contextId);
+    } else {
+      console.warn(`Keeping Redis entry for hash ${hash} — primary storage deletion failed, retry will be possible`);
+    }
 
     return {
       hash,
@@ -299,8 +399,12 @@ export class StorageService {
       throw new Error(`File with hash ${hash} has no valid URL`);
     }
 
-    // Always use primary provider - single container only
-    const provider = this.primaryProvider;
+    // Use the provider for the URL's container so context-scoped uploads in
+    // per-user containers can extract blob names and generate SAS tokens.
+    const containerName = this._extractContainerFromUrl(hashResult.url);
+    const provider = containerName
+      ? await StorageFactory.getInstance().getAzureProvider(containerName)
+      : this.primaryProvider;
     
     // Check if provider supports blob tag operations (Azure only)
     const supportsBlobTags = typeof provider.extractBlobNameFromUrl === 'function' && 
@@ -330,8 +434,8 @@ export class StorageService {
       }
 
       // Generate new short-lived URL
-      const { containerClient } = await provider.getBlobClient();
-      const shortLivedSasToken = provider.generateShortLivedSASToken(containerClient, blobName, 5);
+      await provider.ensureInitialized();
+      const shortLivedSasToken = provider.generateShortLivedSASToken(blobName, 5);
       const urlObj = new URL(hashResult.url);
       const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
       shortLivedUrl = `${baseUrl}?${shortLivedSasToken}`;
@@ -345,7 +449,7 @@ export class StorageService {
             await provider.updateBlobTags(convertedBlobName, retention);
             const convertedUrlObj = new URL(hashResult.converted.url);
             const convertedBaseUrl = `${convertedUrlObj.protocol}//${convertedUrlObj.host}${convertedUrlObj.pathname}`;
-            const convertedShortLivedSasToken = provider.generateShortLivedSASToken(containerClient, convertedBlobName, 5);
+            const convertedShortLivedSasToken = provider.generateShortLivedSASToken(convertedBlobName, 5);
             const convertedShortLivedUrl = `${convertedBaseUrl}?${convertedShortLivedSasToken}`;
             convertedResult = {
               url: hashResult.converted.url,
@@ -401,9 +505,154 @@ export class StorageService {
     };
   }
 
-  async uploadFileWithProviders(context, filePath, requestId, hash = null, filename = null) {
+  /**
+   * Rename a file in cloud storage and update Redis.
+   * Copies the blob to a new name (preserving folder path and hash prefix),
+   * deletes the old blob, and updates the Redis entry.
+   * @param {string} hash - The file hash (Redis key)
+   * @param {string} newFilename - The new display filename
+   * @param {Object} context - Context object for logging
+   * @param {string|null} contextId - Optional context ID for scoped file storage
+   * @param {Object} options - Optional source/target blob path overrides
+   * @returns {Promise<Object>} Updated file info
+   */
+  async renameFile(hash, newFilename, context = {}, contextId = null, options = {}) {
     await this._initialize();
-    
+
+    if (!hash) throw new Error("Missing hash parameter");
+    if (!newFilename || !newFilename.trim()) throw new Error("Missing newFilename parameter");
+
+    const {
+      sourceBlobPath = "",
+      targetBlobPath = "",
+    } = typeof options === "string"
+      ? { targetBlobPath: options }
+      : options || {};
+    const sanitizedTargetBlobPath = targetBlobPath
+      ? sanitizeTargetBlobPath(targetBlobPath)
+      : "";
+    if (targetBlobPath && !sanitizedTargetBlobPath) {
+      throw new Error("Invalid targetBlobPath parameter");
+    }
+
+    const { getFileStoreMap, setFileStoreMap } = await import("../../redis.js");
+    const hashResult = await getFileStoreMap(hash, false, contextId);
+    if (!hashResult) throw new Error(`File with hash ${hash} not found`);
+
+    const trimmedName = newFilename.trim();
+    const sanitized = sanitizeFilename(trimmedName);
+
+    // --- Rename in primary (Azure) storage ---
+    let newUrl = hashResult.url;
+    let newShortLivedUrl = hashResult.shortLivedUrl || hashResult.url;
+    let newPrimaryBlobName = hashResult.blobPath || hashResult.blobName || "";
+
+    if (hashResult.url && hashResult.url.startsWith('http')) {
+      // Get the correct provider for the URL's container (may be per-user)
+      const containerName = this._extractContainerFromUrl(hashResult.url);
+      const provider = containerName
+        ? await StorageFactory.getInstance().getAzureProvider(containerName)
+        : this.primaryProvider;
+
+      const oldBlobName = sourceBlobPath || provider.extractBlobNameFromUrl(hashResult.url);
+      if (oldBlobName) {
+        const newBlobName = sanitizedTargetBlobPath
+          || this._computeNewBlobName(oldBlobName, sanitized);
+        context.log?.(`Renaming blob: ${oldBlobName} → ${newBlobName}`);
+        const result = await provider.renameBlob(oldBlobName, newBlobName);
+        newUrl = result.url;
+        newShortLivedUrl = result.shortLivedUrl || result.url;
+        newPrimaryBlobName = newBlobName;
+      }
+    }
+
+    // --- Rename in backup (GCS) storage ---
+    let newGcs = hashResult.gcs;
+    if (hashResult.gcs && this.backupProvider && typeof this.backupProvider.renameBlob === 'function') {
+      try {
+        const gcsUrl = this.backupProvider.ensureUnencodedGcsUrl
+          ? this.backupProvider.ensureUnencodedGcsUrl(hashResult.gcs)
+          : hashResult.gcs;
+        const oldGcsBlobName = gcsUrl.replace("gs://", "").split("/").slice(1).join("/");
+        const newGcsBlobName = sanitizedTargetBlobPath
+          || this._computeNewBlobName(oldGcsBlobName, sanitized);
+
+        context.log?.(`Renaming GCS blob: ${oldGcsBlobName} → ${newGcsBlobName}`);
+        const gcsResult = await this.backupProvider.renameBlob(oldGcsBlobName, newGcsBlobName);
+        newGcs = gcsResult.url;
+      } catch (err) {
+        context.log?.(`Warning: GCS rename failed: ${err.message}`);
+      }
+    }
+
+    // --- Update Redis ---
+    const updatedInfo = {
+      ...hashResult,
+      url: newUrl,
+      gcs: newGcs,
+      filename: sanitized,
+      ...(newPrimaryBlobName ? {
+        blobPath: newPrimaryBlobName,
+        blobName: newPrimaryBlobName,
+      } : {}),
+      timestamp: new Date().toISOString(),
+    };
+    // Remove displayFilename — the blob name is now the source of truth
+    delete updatedInfo.displayFilename;
+    delete updatedInfo.shortLivedUrl;
+    await setFileStoreMap(hash, updatedInfo, contextId);
+
+    return {
+      hash,
+      filename: sanitized,
+      url: newUrl,
+      shortLivedUrl: newShortLivedUrl,
+      gcs: newGcs,
+      ...(newPrimaryBlobName ? { blobPath: newPrimaryBlobName } : {}),
+      message: `File renamed to "${trimmedName}"`,
+    };
+  }
+
+  /**
+   * Extract container name from an Azure blob URL.
+   * Handles both real Azure and Azurite URL formats.
+   */
+  _extractContainerFromUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      let pathParts = urlObj.pathname.split('/').filter(p => p.length > 0);
+      if (pathParts[0] === AZURITE_ACCOUNT_NAME) {
+        pathParts = pathParts.slice(1);
+      }
+      return pathParts[0] || null;
+    } catch { return null; }
+  }
+
+  /**
+   * Compute a new blob name by replacing the filename portion while preserving
+   * the folder path and hash prefix.
+   * @param {string} oldBlobName - Current blob name (e.g., "chats/abc/hash_old.png")
+   * @param {string} sanitizedNewName - Sanitized new filename (e.g., "new name.png")
+   * @param {boolean} urlEncode - Whether to encodeURIComponent the filename (Azure yes, GCS no)
+   */
+  _computeNewBlobName(oldBlobName, sanitizedNewName) {
+    const lastSlash = oldBlobName.lastIndexOf('/');
+    const folderPath = lastSlash >= 0 ? oldBlobName.substring(0, lastSlash) : '';
+    const oldFilePart = lastSlash >= 0 ? oldBlobName.substring(lastSlash + 1) : oldBlobName;
+
+    // Inspect the hash prefix from the blob name
+    const hashMatch = oldFilePart.match(/^([a-f0-9]+)_/i);
+    const hashPrefix = hashMatch ? hashMatch[1] : null;
+
+    // Blob names are stored unencoded; Azure SDK handles URL-encoding.
+    // Do NOT encodeURIComponent here — that would double-encode.
+    const newFileBase = hashPrefix ? `${hashPrefix}_${sanitizedNewName}` : sanitizedNewName;
+    return folderPath ? `${folderPath}/${newFileBase}` : newFileBase;
+  }
+
+  async uploadFileWithProviders(context, filePath, requestId, hash = null, filename = null, gcsFolderPath = null) {
+    await this._initialize();
+
     // Use provided filename or generate one
     const finalFilename = filename || (() => {
       const fileExtension = path.extname(filePath);
@@ -432,6 +681,7 @@ export class StorageService {
         requestId,
         hash,
         finalFilename,
+        gcsFolderPath,
       );
     }
 
@@ -441,10 +691,10 @@ export class StorageService {
       // Fallback: generate short-lived URL if not provided
       if (primaryProvider.generateShortLivedSASToken) {
         try {
-          const { containerClient } = await primaryProvider.getBlobClient();
+          await primaryProvider.ensureInitialized();
           const blobName = primaryResult.blobName || primaryProvider.extractBlobNameFromUrl(result.url);
           if (blobName) {
-            const shortLivedSasToken = primaryProvider.generateShortLivedSASToken(containerClient, blobName, 5);
+            const shortLivedSasToken = primaryProvider.generateShortLivedSASToken(blobName, 5);
             const urlObj = new URL(result.url);
             const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
             result.shortLivedUrl = `${baseUrl}?${shortLivedSasToken}`;

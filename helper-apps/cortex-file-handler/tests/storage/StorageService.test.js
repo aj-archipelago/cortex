@@ -187,12 +187,9 @@ test("should handle delete file by hash when file not found", async (t) => {
   const service = new StorageService(factory);
   const nonExistentHash = "non-existent-hash-456";
 
-  try {
-    await service.deleteFileByHash(nonExistentHash);
-    t.fail("Should have thrown an error for non-existent hash");
-  } catch (error) {
-    t.true(error.message.includes("not found"));
-  }
+  const result = await service.deleteFileByHash(nonExistentHash);
+  t.true(result.alreadyDeleted, "Should indicate file was already deleted");
+  t.is(result.hash, nonExistentHash);
 });
 
 test("should handle delete file by hash with missing hash parameter", async (t) => {

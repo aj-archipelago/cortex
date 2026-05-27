@@ -156,6 +156,21 @@ test("respects custom chunk duration", async (t) => {
   t.deepEqual(chunkOffsets, [0, 5], "Should have correct offset points");
 });
 
+test("supports opt-in overlapped media chunks", async (t) => {
+  const { chunkPromises, chunkOffsets, uniqueOutputPath } = await splitMediaFile(
+    t.context.testFile10s,
+    5,
+    undefined,
+    1,
+  );
+
+  t.is(chunkPromises.length, 2, "Should create correct number of chunks");
+  t.deepEqual(chunkOffsets, [0, 4], "Second chunk should include 1s overlap");
+
+  await Promise.all(chunkPromises);
+  await fs.rm(uniqueOutputPath, { recursive: true, force: true });
+});
+
 // Test URL-based file processing
 test("processes media file from URL", async (t) => {
   const url = "https://example.com/media/test.mp3";

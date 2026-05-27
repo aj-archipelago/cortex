@@ -8,11 +8,20 @@ import FormData from "form-data";
 import XLSX from "xlsx";
 import nock from "nock";
 import { port } from "../src/start.js";
+import { gcsUrlExists } from "../src/blobHandler.js";
+import { getDefaultContainerName, getUserContainerName } from "../src/constants.js";
 import { cleanupHashAndFile, createTestMediaFile, startTestServer, stopTestServer, setupTestDirectory } from "./testUtils.helper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const baseUrl = `http://localhost:${port}/api/CortexFileHandler`;
+
+function isGCSConfigured() {
+  return (
+    process.env.GCP_SERVICE_ACCOUNT_KEY_BASE64 ||
+    process.env.GCP_SERVICE_ACCOUNT_KEY
+  );
+}
 
 // Helper function to create test files
 async function createTestFile(content, extension) {
@@ -48,6 +57,35 @@ async function uploadFile(filePath, requestId = null, hash = null) {
   });
 
   return response;
+}
+
+async function uploadScopedFile(filePath, {
+  contextId = null,
+  userId = null,
+  workspaceId = null,
+  appletId = null,
+  fileScope = null,
+  hash = null,
+} = {}) {
+  const form = new FormData();
+  if (contextId) form.append("contextId", contextId);
+  if (userId) form.append("userId", userId);
+  if (workspaceId) form.append("workspaceId", workspaceId);
+  if (appletId) form.append("appletId", appletId);
+  if (fileScope) form.append("fileScope", fileScope);
+  if (hash) form.append("hash", hash);
+  form.append("file", fs.createReadStream(filePath));
+
+  return await axios.post(baseUrl, form, {
+    headers: {
+      ...form.getHeaders(),
+      "Content-Type": "multipart/form-data",
+    },
+    validateStatus: (status) => true,
+    timeout: 30000,
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+  });
 }
 
 // Setup: Create test directory and start server
@@ -260,6 +298,109 @@ test.serial("should fetch remote file", async (t) => {
   t.true(scope.isDone(), "All external requests should be mocked and used");
 });
 
+test.serial("applet-user uploads use the user container and stay isolated by applet folder", async (t) => {
+  const fileA = await createTestFile("alpha applet content", "txt");
+  const fileB = await createTestFile("beta applet content", "txt");
+  const userId = `user-${uuidv4().slice(0, 8)}`;
+  const appletA = `applet-${uuidv4().slice(0, 6)}`;
+  const appletB = `applet-${uuidv4().slice(0, 6)}`;
+  const hashA = "aaaaaaaaaaaaaaaa";
+  const hashB = "bbbbbbbbbbbbbbbb";
+  const contextIdA = `applet-user:${appletA}:${userId}`;
+  const contextIdB = `applet-user:${appletB}:${userId}`;
+
+  let responseA;
+  let responseB;
+
+  try {
+    responseA = await uploadScopedFile(fileA, {
+      contextId: contextIdA,
+      userId,
+      appletId: appletA,
+      fileScope: "applet-user",
+      hash: hashA,
+    });
+    responseB = await uploadScopedFile(fileB, {
+      contextId: contextIdB,
+      userId,
+      appletId: appletB,
+      fileScope: "applet-user",
+      hash: hashB,
+    });
+
+    t.is(responseA.status, 200);
+    t.is(responseB.status, 200);
+
+    const userContainerName = getUserContainerName(
+      getDefaultContainerName(),
+      userId,
+    );
+
+    if (!responseA.data.url.startsWith("http://localhost:7071/files/")) {
+      t.true(responseA.data.url.includes(`/${userContainerName}/`));
+      t.true(responseB.data.url.includes(`/${userContainerName}/`));
+      t.false(responseA.data.url.includes(`applet-user-${appletA}-${userId}`));
+      t.false(responseB.data.url.includes(`applet-user-${appletB}-${userId}`));
+    }
+    t.is(responseA.data.folderPath, `applets/${appletA}`);
+    t.is(responseB.data.folderPath, `applets/${appletB}`);
+    t.is(responseA.data.contextId, contextIdA);
+    t.is(responseB.data.contextId, contextIdB);
+
+    const listA = await axios.get(baseUrl, {
+      params: {
+        listFolder: true,
+        userId,
+        appletId: appletA,
+        fileScope: "applet-user",
+      },
+      validateStatus: () => true,
+      timeout: 30000,
+    });
+    const listB = await axios.get(baseUrl, {
+      params: {
+        listFolder: true,
+        userId,
+        appletId: appletB,
+        fileScope: "applet-user",
+      },
+      validateStatus: () => true,
+      timeout: 30000,
+    });
+
+    if (listA.status === 200 && listB.status === 200) {
+      t.is(listA.data.folderPath, `applets/${appletA}`);
+      t.is(listB.data.folderPath, `applets/${appletB}`);
+      t.is(listA.data.count, 1);
+      t.is(listB.data.count, 1);
+      t.is(listA.data.files[0].hash, hashA);
+      t.is(listB.data.files[0].hash, hashB);
+    } else {
+      t.is(listA.status, 500);
+      t.is(listB.status, 500);
+      t.is(listA.data, "Storage provider does not support folder listing");
+      t.is(listB.data, "Storage provider does not support folder listing");
+    }
+  } finally {
+    if (responseA?.data?.hash) {
+      await axios.delete(baseUrl, {
+        params: { hash: responseA.data.hash, contextId: contextIdA },
+        validateStatus: () => true,
+        timeout: 10000,
+      });
+    }
+    if (responseB?.data?.hash) {
+      await axios.delete(baseUrl, {
+        params: { hash: responseB.data.hash, contextId: contextIdB },
+        validateStatus: () => true,
+        timeout: 10000,
+      });
+    }
+    fs.unlinkSync(fileA);
+    fs.unlinkSync(fileB);
+  }
+});
+
 // Test: Redis caching behavior for remote files
 test.serial("should cache remote files in Redis", async (t) => {
   const requestId = uuidv4();
@@ -386,4 +527,83 @@ test.serial("should handle long filenames", async (t) => {
       await cleanupHashAndFile(null, response.data.url, baseUrl);
     }
   }
+});
+
+// Test: blobPath lookup should return a short-lived URL
+test.serial("should return short-lived URL for blobPath lookup", async (t) => {
+  const fileContent = "blobPath test content";
+  const filePath = await createTestFile(fileContent, "txt");
+  const requestId = uuidv4();
+  let response;
+
+  try {
+    // Upload a file first
+    response = await uploadFile(filePath, requestId);
+    t.is(response.status, 200, "Upload should succeed");
+
+    // Extract the blob path from the upload URL
+    const uploadUrl = response.data.url;
+    let extractedBlobPath;
+
+    if (uploadUrl.includes("127.0.0.1:10000")) {
+      // Azurite URL: http://127.0.0.1:10000/devstoreaccount1/container/blobpath
+      const urlObj = new URL(uploadUrl);
+      const parts = urlObj.pathname.split("/").filter(Boolean);
+      // Skip account name and container name
+      extractedBlobPath = parts.slice(2).join("/");
+    } else if (uploadUrl.includes("blob.core.windows.net")) {
+      // Azure URL: https://account.blob.core.windows.net/container/blobpath
+      const urlObj = new URL(uploadUrl.split("?")[0]);
+      const parts = urlObj.pathname.split("/").filter(Boolean);
+      // Skip container name
+      extractedBlobPath = parts.slice(1).join("/");
+    } else {
+      // Local URL: http://localhost:port/files/requestId/filename
+      const urlObj = new URL(uploadUrl);
+      const parts = urlObj.pathname.split("/").filter(Boolean);
+      // Skip "files" prefix
+      extractedBlobPath = parts.slice(1).join("/");
+    }
+
+    t.truthy(extractedBlobPath, "Should extract blob path from URL");
+
+    // Look up by blobPath (no hash)
+    const lookupResponse = await axios.get(baseUrl, {
+      params: { blobPath: extractedBlobPath },
+      validateStatus: (status) => true,
+    });
+
+    t.is(lookupResponse.status, 200, "blobPath lookup should succeed");
+    t.truthy(lookupResponse.data.shortLivedUrl, "Should return shortLivedUrl");
+    t.truthy(lookupResponse.data.url, "Should return url");
+    if (isGCSConfigured()) {
+      t.truthy(lookupResponse.data.gcs, "Should return a GCS backup URL");
+      t.true(
+        await gcsUrlExists(lookupResponse.data.gcs),
+        "Returned GCS backup URL should exist",
+      );
+    }
+
+    // Verify the short-lived URL is accessible and returns correct content
+    const fileResponse = await axios.get(lookupResponse.data.shortLivedUrl, {
+      validateStatus: (status) => true,
+    });
+    t.is(fileResponse.status, 200, "Short-lived URL should be accessible");
+    t.true(fileResponse.data.includes(fileContent), "Should return correct file content");
+  } finally {
+    fs.unlinkSync(filePath);
+    if (response?.data?.url) {
+      await cleanupHashAndFile(null, response.data.url, baseUrl);
+    }
+  }
+});
+
+// Test: blobPath lookup should return 404 for non-existent blob
+test.serial("should return 404 for non-existent blobPath", async (t) => {
+  const response = await axios.get(baseUrl, {
+    params: { blobPath: `non-existent-${uuidv4()}/fake-file.txt` },
+    validateStatus: (status) => true,
+  });
+
+  t.is(response.status, 404, "Should return 404 for non-existent blobPath");
 });

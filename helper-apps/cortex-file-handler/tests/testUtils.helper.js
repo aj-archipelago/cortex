@@ -4,6 +4,7 @@ import fs from "fs/promises";
 import path from "path";
 
 import { app, port } from "../src/start.js";
+import { client as redisClient } from "../src/redis.js";
 
 export async function cleanupHashAndFile(hash, uploadedUrl, baseUrl) {
   // Only perform hash operations if hash is provided
@@ -105,11 +106,16 @@ export async function startTestServer(options = {}) {
     throw new Error("Test server is already running");
   }
 
+  // Clear mock Redis state from previous test files to prevent leakage
+  if (typeof redisClient._reset === 'function') {
+    redisClient._reset();
+  }
+
   // Start the server for tests
   server = app.listen(port, () => {
     console.log(`Test server started on port ${port}`);
   });
-  
+
   // Wait for server to be ready
   await new Promise((resolve) => setTimeout(resolve, 1000));
 
@@ -140,9 +146,15 @@ export async function stopTestServer(beforeClose) {
   if (beforeClose) {
     await beforeClose();
   }
-  
+
   if (server) {
-    server.close();
+    // Force-close keep-alive connections so the port is released immediately.
+    // Without this, server.close() waits for idle keep-alive connections to
+    // drain, causing EADDRINUSE when the next test file starts.
+    if (typeof server.closeAllConnections === 'function') {
+      server.closeAllConnections();
+    }
+    await new Promise((resolve) => server.close(resolve));
     server = null;
   }
 }

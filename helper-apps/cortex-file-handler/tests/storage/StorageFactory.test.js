@@ -117,52 +117,54 @@ test("should get azure provider with default container when no container specifi
   t.truthy(provider.containerName);
 });
 
-test("should get azure provider (container parameter ignored)", async (t) => {
+test("should get azure provider with custom container name", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
   }
 
   const factory = new StorageFactory();
-  
-  // Container parameter is ignored - always uses default container from env
-  const provider = await factory.getAzureProvider("any-container-name");
+
+  // Custom container names are used for per-user containers
+  const provider = await factory.getAzureProvider("custom-container");
   t.truthy(provider);
-  // Should use the default container from env, not the parameter
-  const { getContainerName } = await import("../../src/constants.js");
-  t.is(provider.containerName, getContainerName());
+  t.is(provider.containerName, "custom-container");
 });
 
-test("should ignore container parameter and use default container", async (t) => {
+test("should return different providers for different container names", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
   }
 
   const factory = new StorageFactory();
-  
-  // Container parameter is ignored - always uses default container
-  const provider1 = await factory.getAzureProvider("invalid-container");
+
+  const provider1 = await factory.getAzureProvider("container-a");
   const provider2 = await factory.getAzureProvider();
-  
-  // Both should return the same provider instance (same default container)
-  t.is(provider1, provider2);
+
+  // Different containers should yield different provider instances
+  t.not(provider1, provider2);
+  t.is(provider1.containerName, "container-a");
 });
 
-test("should cache provider instance (single container)", async (t) => {
+test("should cache provider instance per container name", async (t) => {
   if (!process.env.AZURE_STORAGE_CONNECTION_STRING) {
     t.pass("Skipping test - Azure not configured");
     return;
   }
 
   const factory = new StorageFactory();
-  
-  // All calls should return the same provider instance (single container)
+
+  // Same container name should return the same cached instance
   const provider1 = await factory.getAzureProvider();
   const provider2 = await factory.getAzureProvider();
-  const provider3 = await factory.getAzureProvider("ignored-container");
-  
-  // All should return the same instance
   t.is(provider1, provider2);
-  t.is(provider1, provider3);
+
+  // Different container name returns a different instance
+  const provider3 = await factory.getAzureProvider("other-container");
+  t.not(provider1, provider3);
+
+  // But asking for that same name again returns the cached one
+  const provider4 = await factory.getAzureProvider("other-container");
+  t.is(provider3, provider4);
 });

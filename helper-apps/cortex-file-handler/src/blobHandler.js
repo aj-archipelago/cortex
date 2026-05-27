@@ -7,7 +7,6 @@ import { v4 as uuidv4 } from "uuid";
 import Busboy from "busboy";
 import { PassThrough } from "stream";
 import { Storage } from "@google-cloud/storage";
-import { BlobServiceClient } from "@azure/storage-blob";
 import axios from "axios";
 import mime from "mime-types";
 
@@ -17,10 +16,11 @@ import {
   generateBlobName,
 } from "./utils/filenameUtils.js";
 import { publicFolder, port, ipAddress } from "./start.js";
-import { 
-  CONVERTED_EXTENSIONS, 
+import {
+  CONVERTED_EXTENSIONS,
   AZURITE_ACCOUNT_NAME,
   getDefaultContainerName,
+  getUserContainerName,
   GCS_BUCKETNAME,
   AZURE_STORAGE_CONTAINER_NAME
 } from "./constants.js";
@@ -80,6 +80,244 @@ if (!GCP_PROJECT_ID || !GCP_SERVICE_ACCOUNT) {
 function isEncoded(str) {
   // Checks for any percent-encoded sequence
   return /%[0-9A-Fa-f]{2}/.test(str);
+}
+
+/**
+ * Construct folder path for file storage based on user/chat context.
+ * MIRROR: Keep in sync with vendor/cortex/lib/fileUtils.js constructFolderPath()
+ * @param {Object} options - Options for folder path construction
+ * @param {string} options.userId - Container owner ID
+ * @param {string} options.chatId - Chat ID (if file is chat-scoped)
+ * @param {string} options.workspaceId - Workspace ID (for workspace-user-legacy or workspace-shared-legacy scopes)
+ * @param {string} options.appletId - Applet ID (for applet-user scopes)
+ * @param {string} options.contextId - Optional scoped context ID
+ * @param {string} options.fileScope - File scope: 'all', 'global', 'media', 'chat', 'workspace-user-legacy', 'applet-user', 'applet-shared', 'profile', 'articles', 'workspace-shared-legacy'
+ * @returns {string|null} Folder path or null if no valid path can be constructed
+ */
+// IDs must be alphanumeric, hyphens, or underscores — rejects traversal and injection.
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+
+function isValidId(id) {
+  return typeof id === 'string' && id.length > 0 && id.length <= 128 && SAFE_ID.test(id);
+}
+
+function sanitizeSubPath(subPath) {
+  if (!subPath || typeof subPath !== 'string') return null;
+
+  const segments = subPath
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (segments.length === 0 || segments.some((segment) => !isValidId(segment))) {
+    return null;
+  }
+
+  return segments.join('/');
+}
+
+function parseAppletUserContextId(contextId = null) {
+  if (typeof contextId !== "string" || !contextId.startsWith("applet-user:")) {
+    return { appletId: null, userId: null };
+  }
+
+  const parts = contextId.split(":");
+  if (parts.length < 3) {
+    return { appletId: null, userId: null };
+  }
+
+  return {
+    appletId: parts[1] || null,
+    userId: parts.slice(2).join(":") || null,
+  };
+}
+
+function resolveAppletScopeId({
+  appletId = null,
+  workspaceId = null,
+  contextId = null,
+} = {}) {
+  if (appletId && isValidId(appletId)) {
+    return appletId;
+  }
+
+  const parsed = parseAppletUserContextId(contextId);
+  if (parsed.appletId && isValidId(parsed.appletId)) {
+    return parsed.appletId;
+  }
+
+  if (workspaceId && isValidId(workspaceId)) {
+    return workspaceId;
+  }
+
+  return null;
+}
+
+function buildAppletUserContextId(userId = null, appletId = null) {
+  if (!userId || !appletId) {
+    return null;
+  }
+  return `applet-user:${appletId}:${userId}`;
+}
+
+function buildAppletSharedContextId(appletId = null) {
+  if (!appletId) {
+    return null;
+  }
+  return `applet-shared:${appletId}`;
+}
+
+function constructFolderPath({
+  userId,
+  chatId,
+  workspaceId,
+  appletId = null,
+  contextId = null,
+  fileScope,
+}) {
+  // For workspace-shared-legacy scope, userId is not required — workspaceId is the owner
+  if (fileScope === 'workspace-shared-legacy') {
+    if (!workspaceId || !isValidId(workspaceId)) return null;
+    return '';  // root of per-workspace container
+  }
+
+  const ownerId = contextId || userId || null;
+  if (!ownerId) {
+    return null;
+  }
+
+  // Validate path-part IDs to prevent traversal / cross-tenant access.
+  // ownerId is used only for container selection and may be a compound scoped context ID.
+  if (chatId && !isValidId(chatId)) return null;
+  if (workspaceId && !isValidId(workspaceId)) return null;
+  if (appletId && !isValidId(appletId)) return null;
+
+  // Folder names encode the logical scope within the selected container.
+  // applet-user stays in the user's container under an applet-specific folder.
+  switch (fileScope) {
+    case 'all':
+      // Root of the scoped container — lists everything
+      return '';
+    case 'global':
+      return 'global';
+    case 'media':
+      return 'media';
+    case 'chat':
+      if (!chatId) {
+        return 'global';
+      }
+      return `chats/${chatId}`;
+    case 'workspace-user-legacy':
+      if (!workspaceId) {
+        return 'global';
+      }
+      return `applets/${workspaceId}`;
+    case 'applet-user': {
+      const scopedAppletId = resolveAppletScopeId({
+        appletId,
+        workspaceId,
+        contextId,
+      });
+      if (!scopedAppletId) {
+        return null;
+      }
+      return `applets/${scopedAppletId}`;
+    }
+    case 'applet-shared':
+      return 'applet-shared';
+    case 'profile':
+      return 'profile';
+    case 'articles':
+      return 'articles';
+    case 'applets':
+      return 'applets';
+    case 'skills':
+      return 'skills';
+    case 'automations':
+      return 'automations';
+    default:
+      return 'global';
+  }
+}
+
+function getScopedLogicalContextId({
+  contextId = null,
+  userId = null,
+  workspaceId = null,
+  appletId = null,
+  fileScope = null,
+} = {}) {
+  if (fileScope === 'workspace-shared-legacy') {
+    return workspaceId || contextId || null;
+  }
+
+  if (fileScope === 'applet-user') {
+    if (
+      typeof contextId === 'string'
+      && contextId.startsWith('applet-user:')
+    ) {
+      return contextId;
+    }
+
+    const parsedContext = parseAppletUserContextId(contextId);
+    const parsedUser = parseAppletUserContextId(userId);
+    const resolvedUserId =
+      parsedContext.userId
+      || parsedUser.userId
+      || userId
+      || contextId
+      || null;
+    const resolvedAppletId = resolveAppletScopeId({
+      appletId: parsedContext.appletId || parsedUser.appletId || appletId,
+      workspaceId,
+      contextId,
+    });
+
+    return buildAppletUserContextId(resolvedUserId, resolvedAppletId);
+  }
+
+  if (fileScope === 'applet-shared') {
+    if (contextId) {
+      return contextId;
+    }
+
+    if (typeof userId === 'string' && userId.startsWith('applet-shared:')) {
+      return userId;
+    }
+
+    return buildAppletSharedContextId(
+      resolveAppletScopeId({ appletId, workspaceId, contextId }),
+    );
+  }
+
+  return contextId || userId || null;
+}
+
+function getScopedContainerOwnerId({
+  contextId = null,
+  userId = null,
+  workspaceId = null,
+  appletId = null,
+  fileScope = null,
+} = {}) {
+  if (fileScope === 'workspace-shared-legacy') {
+    return workspaceId || null;
+  }
+
+  if (fileScope === 'applet-user') {
+    const parsed = parseAppletUserContextId(contextId);
+    const scopedUserId = parsed.userId || userId || null;
+    return scopedUserId;
+  }
+
+  return getScopedLogicalContextId({
+    contextId,
+    userId,
+    workspaceId,
+    appletId,
+    fileScope,
+  });
 }
 
 // Helper function to ensure GCS URLs are never encoded
@@ -216,9 +454,8 @@ async function generateShortLivedUrlForConvertedFile(context, convertedUrl, logS
     if (primaryProvider.generateShortLivedSASToken && primaryProvider.extractBlobNameFromUrl) {
       const blobName = primaryProvider.extractBlobNameFromUrl(convertedUrl);
       if (blobName) {
-        const { containerClient } = await primaryProvider.getBlobClient();
+        await primaryProvider.ensureInitialized();
         const sasToken = primaryProvider.generateShortLivedSASToken(
-          containerClient,
           blobName,
           5
         );
@@ -236,37 +473,9 @@ async function generateShortLivedUrlForConvertedFile(context, convertedUrl, logS
 }
 
 export const getBlobClient = async () => {
-  const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  // Always use default container from env var
-  const finalContainerName = getDefaultContainerName();
-
-  if (!connectionString || !finalContainerName) {
-    throw new Error(
-      "Missing Azure Storage connection string or container name environment variable",
-    );
-  }
-
-  const blobServiceClient =
-    BlobServiceClient.fromConnectionString(connectionString);
-
-  const serviceProperties = await blobServiceClient.getProperties();
-  if (!serviceProperties.defaultServiceVersion) {
-    serviceProperties.defaultServiceVersion = "2020-02-10";
-    await blobServiceClient.setProperties(serviceProperties);
-  }
-
-  const containerClient = blobServiceClient.getContainerClient(finalContainerName);
-
-  return { blobServiceClient, containerClient };
+  const provider = await StorageFactory.getInstance().getAzureProvider();
+  return await provider.getBlobClient();
 };
-
-async function saveFileToBlob(chunkPath, requestId, filename = null) {
-  // Use provider for consistency with cache control headers
-  // Container parameter is ignored - always uses default container from env var
-  const storageFactory = StorageFactory.getInstance();
-  const provider = await storageFactory.getAzureProvider();
-  return await provider.uploadFile({}, chunkPath, requestId, null, filename);
-}
 
 //deletes blob that has the requestId
 async function deleteBlob(requestId) {
@@ -359,9 +568,16 @@ function uploadBlob(
             fields[fieldname] = value; // Store all fields
           });
 
+          // Promise that resolves once busboy has finished parsing the
+          // entire multipart stream (all fields + file data consumed).
+          // Used inside processFile to ensure late-arriving fields
+          // (e.g. hash appended after the file) are available.
+          let resolveBusboyFinished;
+          const busboyFinished = new Promise((r) => { resolveBusboyFinished = r; });
+
           busboy.on("file", async (fieldname, file, info) => {
             if (errorOccurred) return;
-            
+
             hasFile = true;
 
             // Validate file
@@ -373,14 +589,10 @@ function uploadBlob(
               return;
             }
 
-            // Simple approach: small delay to allow container field to be processed
-            console.log("File received, giving fields time to process...");
-            await new Promise(resolve => setTimeout(resolve, 20));
-            // Container parameter is ignored - always uses default container from env var
-            
-            if (errorOccurred) return; // Check again after waiting
-
-            // Container parameter is ignored - always uses default container from env var
+            // Fields that precede the file part are already available.
+            // Fields after the file part (e.g. hash) will arrive once
+            // the file data is consumed — processFile handles this by
+            // awaiting busboyFinished after the upload completes.
             await processFile(fieldname, file, info);
           });
 
@@ -396,11 +608,45 @@ function uploadBlob(
               return;
             }
 
+            // Extract folder-related fields from form data
+            const userId = fields.userId || null;
+            const chatId = fields.chatId || null;
+            const workspaceId = fields.workspaceId || null;
+            const contextId = fields.contextId || null;
+            const appletId = fields.appletId || null;
+            const fileScope = fields.fileScope || null;
+            const logicalContextId = getScopedLogicalContextId({
+              contextId,
+              userId,
+              workspaceId,
+              appletId,
+              fileScope,
+            });
+
+            // Construct folder path for folder-based storage
+            let folderPath = constructFolderPath({
+              userId,
+              chatId,
+              workspaceId,
+              appletId,
+              contextId: logicalContextId,
+              fileScope,
+            });
+
+            // Optional subPath appends a subdirectory within the fileScope folder.
+            const subPath = fields.subPath || null;
+            if (subPath && folderPath !== null) {
+              const sanitizedSub = sanitizeSubPath(subPath);
+              if (sanitizedSub) {
+                folderPath = folderPath ? `${folderPath}/${sanitizedSub}` : sanitizedSub;
+              }
+            }
+
             // Prepare for streaming to cloud destinations
             const displayFilename = info.filename; // Preserve original filename for metadata
             const fileExtension = path.extname(displayFilename);
             const shortId = generateShortId();
-            const uploadName = `${shortId}${fileExtension}`;
+            const uploadName = folderPath ? sanitizeFilename(displayFilename) : `${shortId}${fileExtension}`;
             // Extract content-type from busboy info (preserves charset if provided)
             const contentType = info.mimeType || null;
             const azureStream = !saveToLocal ? new PassThrough() : null;
@@ -475,6 +721,17 @@ function uploadBlob(
               }
             });
 
+            const containerOwnerId = getScopedContainerOwnerId({
+              contextId: logicalContextId,
+              userId,
+              workspaceId,
+              appletId,
+              fileScope,
+            });
+            const userContainerName = containerOwnerId
+              ? getUserContainerName(getDefaultContainerName(), containerOwnerId)
+              : null;
+
             // Start cloud uploads immediately
             let azurePromise;
             if (!saveToLocal) {
@@ -482,8 +739,9 @@ function uploadBlob(
                 context,
                 uploadName,
                 azureStream,
-                null, // containerName ignored
+                userContainerName,
                 contentType,
+                folderPath, // Pass folder path for folder-based storage
               ).catch(async (err) => {
                 cloudUploadError = err;
                 // Fallback: try from disk if available
@@ -493,18 +751,24 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToAzureStorage(context, uploadName, diskStream, null, contentType);
+                  return saveToAzureStorage(context, uploadName, diskStream, userContainerName, contentType, folderPath);
                 }
                 throw err;
               });
             }
             let gcsPromise;
             if (gcsStream) {
+              // GCS uses a shared bucket, so prefix with the scoped container owner
+              // to preserve the same isolation boundaries as Azure containers.
+              const gcsFolderPath = containerOwnerId
+                ? `${containerOwnerId}/${folderPath || ''}`.replace(/\/+$/, '')
+                : folderPath;
               gcsPromise = saveToGoogleStorage(
                 context,
                 uploadName,
                 gcsStream,
                 contentType,
+                gcsFolderPath,
               ).catch(async (err) => {
                 cloudUploadError = err;
                 if (diskWritePromise) {
@@ -513,7 +777,7 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToGoogleStorage(context, uploadName, diskStream, contentType);
+                  return saveToGoogleStorage(context, uploadName, diskStream, contentType, gcsFolderPath);
                 }
                 throw err;
               });
@@ -549,18 +813,42 @@ function uploadBlob(
                   return acc;
                 }, {}),
               };
+              // Wait for busboy to finish parsing the entire request so
+              // that form fields appended after the file (e.g. hash) are
+              // available.  The file data is already consumed, so busboy
+              // can parse the remaining fields without backpressure.
+              await busboyFinished;
+
               if (hash) result.hash = hash;
-              
+
               // Store MIME type from upload (used by Cortex for file type detection)
               if (contentType) {
                 result.mimeType = contentType;
               }
               
-              // Extract contextId from form fields if present
-              if (fields && fields.contextId) {
-                result.contextId = fields.contextId;
+              // Persist metadata in the same scoped Redis namespace that owns
+              // the uploaded blob, even when callers only send userId/workspaceId.
+              const uploadContextId = getScopedContainerOwnerId({
+                contextId: logicalContextId,
+                userId,
+                workspaceId,
+                appletId,
+                fileScope,
+              });
+              const mapContextId = logicalContextId || uploadContextId;
+              if (mapContextId) {
+                result.contextId = mapContextId;
               }
-              
+
+              // Include folder metadata in result (for transparency/debugging)
+              if (folderPath) {
+                result.folderPath = folderPath;
+              }
+              if (userId) result.userId = userId;
+              if (workspaceId) result.workspaceId = workspaceId;
+              if (appletId) result.appletId = appletId;
+              if (fileScope) result.fileScope = fileScope;
+
               // All uploads default to temporary (permanent: false) to match file collection logic
               result.permanent = false;
               
@@ -638,12 +926,13 @@ function uploadBlob(
                   if (conversion.converted) {
                     context.log("Saving converted file (busboy)...");
                     // Save converted file to primary storage
+                    // Pass folderPath so converted file is stored next to original
                     const convertedSaveResult =
                       await conversionService._saveConvertedFile(
                         conversion.convertedPath,
                         requestId,
                         null,
-                        null, // containerName ignored
+                        folderPath,
                       );
 
                     // Optionally save to GCS
@@ -653,6 +942,8 @@ function uploadBlob(
                         await conversionService._uploadChunkToGCS(
                           conversion.convertedPath,
                           requestId,
+                          null,
+                          folderPath,
                         );
                     }
 
@@ -709,6 +1000,7 @@ function uploadBlob(
           };
 
           busboy.on("error", (error) => {
+            resolveBusboyFinished();
             if (errorOccurred) return;
             errorOccurred = true;
             const err = new Error("No file provided in request");
@@ -717,6 +1009,7 @@ function uploadBlob(
           });
 
           busboy.on("finish", () => {
+            resolveBusboyFinished();
             if (!hasFile) {
               errorOccurred = true;
               const err = new Error("No file provided in request");
@@ -774,14 +1067,14 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
 }
 
 // Helper function to handle Azure blob storage
-async function saveToAzureStorage(context, encodedFilename, file, containerName = null, contentType = null) {
+async function saveToAzureStorage(context, encodedFilename, file, containerName = null, contentType = null, folderPath = null) {
   const storageFactory = StorageFactory.getInstance();
   const provider = await storageFactory.getAzureProvider(containerName);
-  return await provider.uploadStream(context, encodedFilename, file, contentType);
+  return await provider.uploadStream(context, encodedFilename, file, contentType, 'temporary', folderPath);
 }
 
 // Wrapper that checks if GCS is configured
-async function saveToGoogleStorage(context, encodedFilename, file, contentType = null) {
+async function saveToGoogleStorage(context, encodedFilename, file, contentType = null, folderPath = null) {
   if (!gcs) {
     throw new Error("Google Cloud Storage is not initialized");
   }
@@ -790,7 +1083,7 @@ async function saveToGoogleStorage(context, encodedFilename, file, contentType =
   if (!gcsProvider) {
     throw new Error("GCS provider not available");
   }
-  return await gcsProvider.uploadStream(context, encodedFilename, file, contentType);
+  return await gcsProvider.uploadStream(context, encodedFilename, file, contentType, 'temporary', folderPath);
 }
 
 async function uploadFile(
@@ -955,7 +1248,7 @@ async function uploadFile(
               conversion.convertedPath,
               requestId,
               null,
-              containerName,
+              null,
             );
           context.log("Converted file saved to primary storage");
 
@@ -1249,17 +1542,24 @@ async function ensureGCSUpload(context, existingFile) {
   return existingFile;
 }
 
-async function uploadChunkToGCS(chunkPath, requestId, filename = null) {
+async function uploadChunkToGCS(chunkPath, requestId, filename = null, folderPath = null) {
   if (!gcs) return null;
-  const dirName = requestId || uuidv4();
-  // Use provided filename or generate LLM-friendly naming
   let gcsFileName;
-  if (filename) {
-    gcsFileName = `${dirName}/${filename}`;
+  if (folderPath) {
+    // Store in the same folder structure as the original file
+    const normalizedFolder = folderPath.replace(/^\/+|\/+$/g, '');
+    const name = filename || path.basename(chunkPath);
+    gcsFileName = normalizedFolder ? `${normalizedFolder}/${name}` : name;
   } else {
-    const fileExtension = path.extname(chunkPath);
-    const shortId = generateShortId();
-    gcsFileName = `${dirName}/${shortId}${fileExtension}`;
+    const dirName = requestId || uuidv4();
+    // Use provided filename or generate LLM-friendly naming
+    if (filename) {
+      gcsFileName = `${dirName}/${filename}`;
+    } else {
+      const fileExtension = path.extname(chunkPath);
+      const shortId = generateShortId();
+      gcsFileName = `${dirName}/${shortId}${fileExtension}`;
+    }
   }
   await gcs
     .bucket(GCS_BUCKETNAME)
@@ -1268,7 +1568,6 @@ async function uploadChunkToGCS(chunkPath, requestId, filename = null) {
 }
 
 export {
-  saveFileToBlob,
   deleteBlob,
   deleteGCS,
   uploadBlob,
@@ -1280,8 +1579,13 @@ export {
   uploadChunkToGCS,
   downloadFromGCS,
   getMimeTypeFromUrl,
+  constructFolderPath,
+  sanitizeSubPath,
+  getScopedLogicalContextId,
+  getScopedContainerOwnerId,
   // Re-export container constants
   getDefaultContainerName,
+  getUserContainerName,
   GCS_BUCKETNAME,
   AZURE_STORAGE_CONTAINER_NAME,
 };

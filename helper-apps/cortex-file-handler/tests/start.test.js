@@ -361,7 +361,7 @@ test.serial("should validate requestId for delete operation", async (t) => {
   t.is(response.status, 400, "Should return 400 for missing requestId");
   t.is(
     response.data,
-    "Please pass either a requestId or hash in the query string or request body",
+    "Please pass either a requestId, hash, or blobPath in the query string or request body",
     "Should return proper error message",
   );
 });
