@@ -1,3 +1,14 @@
+/**
+ * Store Secret tool.
+ *
+ * Allows an entity to securely store API keys, tokens, and other credentials.
+ * Secrets are encrypted at rest and injected into the workspace as environment
+ * variables and a /workspace/.env file.
+ *
+ * This is a system-category tool, so it is available only when explicitly added
+ * to an entity's tool list.
+ */
+
 import { getEntityStore } from '../../../../lib/MongoEntityStore.js';
 import { config } from '../../../../config.js';
 import { encrypt, decrypt } from '../../../../lib/crypto.js';
@@ -33,17 +44,17 @@ export default {
         toolCost: 1,
         function: {
             name: 'StoreSecret',
-            description: `Securely store an API key, token, or credential. The secret is encrypted and made available in the entity workspace as an environment variable and in /workspace/.env.
+            description: `Securely store an API key, token, or credential. The secret is encrypted and made available in the workspace as an environment variable and in /workspace/.env.
 
-Use this when a user gives you an API key or token so future workspace commands can reference it by name. Set value to null to delete a secret.
+Use this when a user gives you an API key or token so future workspace commands can reference it by name without handling plaintext again. Set value to null to delete a secret.
 
-Secret names must be UPPER_SNAKE_CASE, for example GITHUB_TOKEN or API_KEY.`,
+Secret names must be UPPER_SNAKE_CASE, for example GITHUB_TOKEN or OPENAI_API_KEY.`,
             parameters: {
                 type: 'object',
                 properties: {
                     name: {
                         type: 'string',
-                        description: 'Secret name in UPPER_SNAKE_CASE',
+                        description: 'Secret name in UPPER_SNAKE_CASE, for example GITHUB_TOKEN or API_KEY',
                     },
                     value: {
                         type: 'string',
@@ -70,7 +81,7 @@ Secret names must be UPPER_SNAKE_CASE, for example GITHUB_TOKEN or API_KEY.`,
             if (!name || !/^[A-Z_][A-Z0-9_]*$/i.test(name)) {
                 return JSON.stringify({
                     success: false,
-                    error: `Invalid secret name: "${name}". Use UPPER_SNAKE_CASE.`,
+                    error: `Invalid secret name: "${name}". Use UPPER_SNAKE_CASE, for example GITHUB_TOKEN.`,
                 });
             }
 
