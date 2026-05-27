@@ -159,6 +159,42 @@ export class LocalStorageProvider extends StorageProvider {
     await fs.promises.copyFile(sourcePath, destinationPath);
   }
 
+  extractBlobNameFromUrl(url) {
+    const filePath = this.urlToFilePath(url);
+    if (!filePath) return null;
+    return path.relative(this.publicFolder, filePath);
+  }
+
+  async renameBlob(oldBlobName, newBlobName) {
+    if (!oldBlobName || !newBlobName) {
+      throw new Error("Missing blob name parameter");
+    }
+
+    const sourcePath = path.join(this.publicFolder, oldBlobName);
+    const destinationPath = path.join(this.publicFolder, newBlobName);
+
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`File not found: ${oldBlobName}`);
+    }
+
+    await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
+    await fs.promises.rename(sourcePath, destinationPath);
+
+    try {
+      await fs.promises.rmdir(path.dirname(sourcePath));
+    } catch {
+      // Ignore non-empty parent directories.
+    }
+
+    const normalizedBlobName = newBlobName.split(path.sep).join("/");
+    const url = `http://${ipAddress}:${port}/files/${normalizedBlobName}`;
+    return {
+      url,
+      shortLivedUrl: url,
+      blobName: normalizedBlobName,
+    };
+  }
+
   async cleanup(urls) {
     if (!urls || !urls.length) return;
 
