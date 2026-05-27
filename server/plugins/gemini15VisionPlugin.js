@@ -5,6 +5,46 @@ import { addCitationsToResolver } from '../../lib/pathwayTools.js';
 import logger from '../../lib/logger.js';
 import mime from 'mime-types';
 
+function parseFunctionCallArgs(args) {
+    if (typeof args !== 'string') {
+        return args || {};
+    }
+
+    try {
+        const parsed = JSON.parse(args);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+            ? parsed
+            : { value: parsed };
+    } catch {
+        return {};
+    }
+}
+
+function normalizeGeminiFunctionCallArgs(messages) {
+    if (!Array.isArray(messages)) return messages;
+
+    return messages.map((message) => {
+        if (!Array.isArray(message?.parts)) return message;
+
+        let changed = false;
+        const parts = message.parts.map((part) => {
+            const functionCall = part?.functionCall || part?.function_call;
+            if (!functionCall || typeof functionCall.args !== 'string') return part;
+
+            changed = true;
+            const normalizedPart = { ...part };
+            const key = part.functionCall ? 'functionCall' : 'function_call';
+            normalizedPart[key] = {
+                ...functionCall,
+                args: parseFunctionCallArgs(functionCall.args),
+            };
+            return normalizedPart;
+        });
+
+        return changed ? { ...message, parts } : message;
+    });
+}
+
 class Gemini15VisionPlugin extends Gemini15ChatPlugin {
 
     constructor(pathway, model) {
@@ -14,6 +54,24 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         this.toolCallsBuffer = [];
         this.contentBuffer = '';
         this.hadToolCalls = false;
+        this._currentResponseId = null;
+    }
+
+    resolveMimeType(fileUrl, explicitMimeType = null, fallback = 'image/jpeg') {
+        if (explicitMimeType) {
+            return explicitMimeType;
+        }
+
+        if (!fileUrl) {
+            return fallback;
+        }
+
+        try {
+            const parsed = new URL(fileUrl);
+            return mime.lookup(parsed.pathname) || mime.lookup(fileUrl) || fallback;
+        } catch (e) {
+            return mime.lookup(fileUrl) || fallback;
+        }
     }
 
     // Override the convertMessagesToGemini method to handle multimodal vision messages
@@ -26,11 +84,11 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
     
         // Check if the messages are already in the Gemini format
         if (messages[0] && Object.prototype.hasOwnProperty.call(messages[0], 'parts')) {
-            modifiedMessages = messages;
+            modifiedMessages = normalizeGeminiFunctionCallArgs(messages);
         } else {
             messages.forEach(message => {
                 const { role, author, content } = message;
-    
+
                 if (role === 'system') {
                     if (Array.isArray(content)) {
                         content.forEach(item => systemParts.push({ text: item }));
@@ -39,15 +97,57 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                     }
                     return;
                 }
-    
+
+                // Handle assistant messages with tool_calls (OpenAI format → Gemini functionCall)
+                if (role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
+                    const parts = [];
+                    // Add any text content first
+                    if (content && typeof content === 'string' && content.trim()) {
+                        parts.push({ text: content });
+                    }
+                    // Convert each tool_call to a Gemini functionCall part
+                    for (const tc of message.tool_calls) {
+                        if (tc?.function?.name) {
+                            let args;
+                            try {
+                                args = typeof tc.function.arguments === 'string'
+                                    ? JSON.parse(tc.function.arguments)
+                                    : (tc.function.arguments || {});
+                            } catch (e) {
+                                args = {};
+                            }
+                            const fcPart = {
+                                functionCall: {
+                                    name: tc.function.name,
+                                    args,
+                                }
+                            };
+                            // Preserve thoughtSignature for Gemini 3+ models
+                            if (tc.thoughtSignature) {
+                                fcPart.thoughtSignature = tc.thoughtSignature;
+                            }
+                            parts.push(fcPart);
+                        }
+                    }
+                    if (parts.length > 0) {
+                        modifiedMessages.push({ role: 'model', parts });
+                        lastAuthor = 'model';
+                    }
+                    return; // Skip normal content processing for this message
+                }
+
                 // Convert content to Gemini format, trying to maintain compatibility
                 const convertPartToGemini = (inputPart) => {
                     try {
                         // First try to parse as JSON if it's a string
                         const part = typeof inputPart === 'string' ? JSON.parse(inputPart) : inputPart;
-                        const {type, text, image_url, gcs, url} = part;
+                        const {type, text, image_url, gcs, url, mimeType, mime_type} = part;
                         // Check for URL in multiple places: gcs, image_url.url, or direct url property
                         let fileUrl = gcs || image_url?.url || url;
+                        const resolvedMimeType = this.resolveMimeType(
+                            fileUrl,
+                            mimeType || mime_type || image_url?.mimeType || image_url?.mime_type,
+                        );
 
                         if (typeof part === 'string') {
                             return { text: inputPart };
@@ -65,7 +165,7 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                                 }
                                 return {
                                     fileData: {
-                                        mimeType: mime.lookup(fileUrl) || 'image/jpeg',
+                                        mimeType: resolvedMimeType,
                                         fileUri: fileUrl
                                     }
                                 };
@@ -95,7 +195,7 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                                 // No need to fetch and convert to base64
                                 return {
                                     fileData: {
-                                        mimeType: mime.lookup(fileUrl) || 'image/jpeg',
+                                        mimeType: resolvedMimeType,
                                         fileUri: fileUrl
                                     }
                                 };
@@ -170,6 +270,8 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
             });
         }
     
+        modifiedMessages = normalizeGeminiFunctionCallArgs(modifiedMessages);
+
         // Gemini requires an odd number of messages
         if (modifiedMessages.length % 2 === 0) {
             modifiedMessages = modifiedMessages.slice(1);
@@ -229,6 +331,59 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         return converted;
     }
 
+    // Strip/normalize JSON Schema fields not accepted by Gemini function declarations
+    sanitizeSchemaForGemini(schema) {
+        if (!schema || typeof schema !== 'object') {
+            return schema;
+        }
+
+        if (Array.isArray(schema)) {
+            return schema.map(item => this.sanitizeSchemaForGemini(item));
+        }
+
+        const cleaned = {};
+
+        for (const [key, value] of Object.entries(schema)) {
+            if (key === '$schema' || key === 'propertyNames') {
+                continue;
+            }
+
+            if (key === 'const') {
+                cleaned.enum = [value];
+                continue;
+            }
+
+            if (key === 'exclusiveMinimum') {
+                cleaned.minimum = value;
+                continue;
+            }
+
+            if (key === 'exclusiveMaximum') {
+                cleaned.maximum = value;
+                continue;
+            }
+
+            // Normalize JSON Schema type arrays into Gemini's Schema shape:
+            // nullable tuples become nullable, and multi-type unions become anyOf.
+            if (key === 'type' && Array.isArray(value)) {
+                const nonNull = value.filter(t => t !== 'null');
+                if (value.length !== nonNull.length) {
+                    cleaned.nullable = true;
+                }
+                if (nonNull.length === 1) {
+                    cleaned.type = nonNull[0];
+                } else if (nonNull.length > 1) {
+                    cleaned.anyOf = nonNull.map(type => ({ type }));
+                }
+                continue;
+            }
+
+            cleaned[key] = this.sanitizeSchemaForGemini(value);
+        }
+
+        return cleaned;
+    }
+
     // Convert OpenAI tools to Gemini format
     convertOpenAIToolsToGemini(openAITools) {
         if (!openAITools || !Array.isArray(openAITools)) {
@@ -245,7 +400,8 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                 };
                 
                 // Convert numeric enums to string enums for Gemini compatibility
-                const convertedParameters = this.convertEnumToStrings(parameters);
+                const sanitizedParameters = this.sanitizeSchemaForGemini(parameters);
+                const convertedParameters = this.convertEnumToStrings(sanitizedParameters);
                 
                 return {
                     name: tool.function.name,
@@ -381,6 +537,18 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
                 return cortexResponse;
             }
 
+            if (finishReason === 'UNEXPECTED_TOOL_CALL') {
+                const textContent = content?.parts?.find(part => part?.text)?.text || '';
+                const finishMessage = candidate.finishMessage || 'Model tried to call an undeclared function';
+                logger.warn(`Gemini returned UNEXPECTED_TOOL_CALL: ${finishMessage}`);
+                return new CortexResponse({
+                    output_text: textContent || 'I encountered an issue processing that request. Please try rephrasing your question.',
+                    finishReason: "stop",
+                    usage: data.usageMetadata || null,
+                    metadata: { model: this.modelName }
+                });
+            }
+
             // Check for tool calls
             if (content?.parts) {
                 const toolCalls = [];
@@ -442,12 +610,17 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         requestProgress = requestProgress || {};
         requestProgress.data = requestProgress.data || null;
         
-        // Reset tool calls flag for new stream
-        if (!requestProgress.started) {
+        // Reset state for a genuinely new stream (new responseId = new model response).
+        // Gemini includes a unique responseId in every SSE event of the same response.
+        // Only reset when a NEW responseId is seen, so tool calls accumulate across
+        // events within the same model response (e.g. Gemini 3 Flash sends each
+        // functionCall as a separate SSE event).
+        const responseId = eventData.responseId;
+        if (responseId && responseId !== this._currentResponseId) {
+            this._currentResponseId = responseId;
             this.hadToolCalls = false;
             this.toolCallsBuffer = [];
-            // Don't clear contentBuffer here - it should accumulate across all chunks
-            // this.contentBuffer = '';
+            this.contentBuffer = '';
         }
         
         // Create a helper function to generate message chunks
@@ -580,6 +753,20 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
             }, "stop"));
             requestProgress.progress = 1;
             // Clear buffers
+            this.toolCallsBuffer = [];
+            this.contentBuffer = '';
+            return requestProgress;
+        }
+
+        // Handle UNEXPECTED_TOOL_CALL - model tried to call a function not in the declared tools
+        if (eventData.candidates?.[0]?.finishReason === "UNEXPECTED_TOOL_CALL") {
+            const finishMessage = eventData.candidates[0].finishMessage || 'Model tried to call an undeclared function';
+            logger.warn(`Gemini streaming returned UNEXPECTED_TOOL_CALL: ${finishMessage}`);
+            requestProgress.data = JSON.stringify(createChunk({
+                content: '\n\nI encountered an issue processing that request. Please try rephrasing your question.'
+            }, "stop"));
+            requestProgress.progress = 1;
+            // Clear buffers - don't dispatch the invalid tool call
             this.toolCallsBuffer = [];
             this.contentBuffer = '';
             return requestProgress;

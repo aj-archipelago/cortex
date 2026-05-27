@@ -83,6 +83,22 @@ class OpenAIChatPlugin extends ModelPlugin {
         ...(tools && tools.length > 0 ? { tools, tool_choice: parameters.tool_choice || 'auto' } : {}),
         ...(functions && functions.length > 0 ? { functions } : {}),
         };
+
+        if (stream === true && [
+            'OPENAI-CHAT',
+            'OPENAI-CHAT-EXTENSION',
+            'OPENAI-VISION',
+            'OPENAI-REASONING',
+            'OPENAI-REASONING-VISION',
+        ].includes(this.model?.type)) {
+            requestParameters.stream_options = {
+                ...(this.promptParameters?.stream_options || {}),
+                ...(parameters.stream_options || {}),
+                include_usage: parameters.stream_options?.include_usage ?? this.promptParameters?.stream_options?.include_usage ?? true,
+            };
+        }
+
+        this.expectStreamUsage = Boolean(requestParameters.stream_options?.include_usage);
     
         return requestParameters;
     }
@@ -184,7 +200,6 @@ class OpenAIChatPlugin extends ModelPlugin {
                         requestProgress.progress = 1;
                         break;
                     default:
-                        requestProgress.progress = 1;
                         break;
                 }
             }
@@ -205,9 +220,7 @@ class OpenAIChatPlugin extends ModelPlugin {
                     return JSON.stringify(item);
                 }).join(', ') : message.content);
                 const { length, units } = this.getLength(content);
-                const displayContent = this.shortenContent(content);
 
-                logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${displayContent}"`);
                 totalLength += length;
                 totalUnits = units;
             });
@@ -219,19 +232,14 @@ class OpenAIChatPlugin extends ModelPlugin {
             }).join(', ') : message.content;
             const { length, units } = this.getLength(content);
             logger.info(`[request sent containing ${length} ${units}]`);
-            logger.verbose(`${this.shortenContent(content)}`);
         }
     
-        if (stream) {
-            logger.info(`[response received as an SSE stream]`);
-        } else {           
+        if (!stream) {
             if (typeof responseData === 'string') {
                 const { length, units } = this.getLength(responseData);
                 logger.info(`[response received containing ${length} ${units}]`);
-                logger.verbose(`${this.shortenContent(responseData)}`);
             } else {
                 logger.info(`[response received containing object]`);
-                logger.verbose(`${JSON.stringify(responseData)}`);
             }
         }
 

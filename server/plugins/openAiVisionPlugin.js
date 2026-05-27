@@ -172,16 +172,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                     content = message.content;
                 }
                 const { length, units } = this.getLength(content);
-                const displayContent = this.shortenContent(content);
-
-                let logMessage = `message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${displayContent}"`;
-                
-                // Add tool calls to log if they exist
-                if (message.role === 'assistant' && message.tool_calls) {
-                    logMessage += `, tool_calls: ${JSON.stringify(message.tool_calls)}`;
-                }
-                
-                logger.verbose(logMessage);
                 totalLength += length;
                 totalUnits = units;
             });
@@ -200,18 +190,13 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             }
             const { length, units } = this.getLength(content);
             logger.info(`[request sent containing ${length} ${units}]`);
-            logger.verbose(`${this.shortenContent(content)}`);
         }
-        if (stream) {
-            logger.info(`[response received as an SSE stream]`);
-        } else {           
+        if (!stream) {
             if (typeof responseData === 'string') {
                 const { length, units } = this.getLength(responseData);
                 logger.info(`[response received containing ${length} ${units}]`);
-                logger.verbose(`${this.shortenContent(responseData)}`);
             } else {
                 logger.info(`[response received containing object]`);
-                logger.verbose(`${JSON.stringify(responseData)}`);
             }
         }
 
@@ -369,6 +354,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                 switch (finishReason.toLowerCase()) {
                     case 'tool_calls':
                         // Process complete tool calls when we get the finish reason
+                        let invokedToolCallback = false;
                         if (this.pathwayToolCallback && this.toolCallsBuffer.length > 0 && pathwayResolver) {
                             // Filter out undefined elements from the tool calls buffer
                             const validToolCalls = this.toolCallsBuffer.filter(tc => tc && tc.function && tc.function.name);
@@ -380,8 +366,12 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                             this.pathwayToolCallback(pathwayResolver?.args, toolMessage, pathwayResolver);
                             // Signal to pathwayResolver that tool callback was invoked - prevents [DONE] from ending stream
                             requestProgress.toolCallbackInvoked = true;
+                            invokedToolCallback = true;
                         }
-                        // Don't set progress to 1 for tool calls to keep stream open
+                        // If no server-side tool callback is handling this, close the stream
+                        if (!invokedToolCallback) {
+                            requestProgress.progress = 1;
+                        }
                         // Clear tool buffer after processing, but keep content buffer
                         this.toolCallsBuffer = [];
                         break;
@@ -397,7 +387,6 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                     default: // Includes 'stop' and other normal finish reasons
                         // Look to see if we need to add citations to the response
                         addCitationsToResolver(pathwayResolver, this.contentBuffer);
-                        requestProgress.progress = 1;
                         // Clear buffers on finish
                         this.toolCallsBuffer = [];
                         this.contentBuffer = '';

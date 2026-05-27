@@ -1,6 +1,7 @@
 import test from 'ava';
 import { PathwayResolver } from '../../../server/pathwayResolver.js';
 import OpenAIChatPlugin from '../../../server/plugins/openAiChatPlugin.js';
+import OpenAIVisionPlugin from '../../../server/plugins/openAiVisionPlugin.js';
 import GeminiChatPlugin from '../../../server/plugins/geminiChatPlugin.js';
 import Gemini15ChatPlugin from '../../../server/plugins/gemini15ChatPlugin.js';
 import Claude3VertexPlugin from '../../../server/plugins/claude3VertexPlugin.js';
@@ -13,7 +14,8 @@ function createResolverWithPlugin(pluginClass, modelName = 'test-model') {
     OpenAIChatPlugin: 'OPENAI-VISION',
     GeminiChatPlugin: 'GEMINI-VISION',
     Gemini15ChatPlugin: 'GEMINI-1.5-VISION',
-    Claude3VertexPlugin: 'CLAUDE-3-VERTEX'
+    Claude3VertexPlugin: 'CLAUDE-3-VERTEX',
+    OpenAIVisionPlugin: 'OPENAI-VISION'
   };
 
   const modelType = pluginToModelType[pluginClass.name];
@@ -72,7 +74,26 @@ test('OpenAI Chat Plugin - processStreamEvent handles content chunks correctly',
   };
   
   progress = plugin.processStreamEvent(endEvent, {});
-  t.is(progress.progress, 1);
+  t.is(progress.progress, undefined);
+});
+
+test('OpenAI Vision Plugin - waits for DONE on stop finish reason', async t => {
+  const resolver = createResolverWithPlugin(OpenAIVisionPlugin);
+  const plugin = resolver.modelExecutor.plugin;
+
+  const endEvent = {
+    data: JSON.stringify({
+      id: 'test-id',
+      choices: [{
+        delta: {},
+        finish_reason: 'stop'
+      }]
+    })
+  };
+
+  const progress = plugin.processStreamEvent(endEvent, {});
+  t.is(progress.data, endEvent.data);
+  t.is(progress.progress, undefined);
 });
 
 test('Gemini Chat Plugin - processStreamEvent handles content chunks correctly', async t => {
@@ -154,5 +175,3 @@ test('Claude 3 Vertex Plugin - processStreamEvent handles message types', async 
   progress = plugin.processStreamEvent(stopEvent, {});
   t.is(progress.progress, 1);
 });
-
-

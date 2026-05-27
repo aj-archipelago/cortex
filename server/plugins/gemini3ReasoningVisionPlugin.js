@@ -113,7 +113,11 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
                     if (responseData?.content !== undefined) {
                         const contentStr = responseData.content;
                         try {
-                            responseData = JSON.parse(contentStr);
+                            const parsed = JSON.parse(contentStr);
+                            // Gemini 3 requires response to be a Struct (plain object), not an array, null, or primitive
+                            // Ref: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/Content
+                            responseData = (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+                                ? { result: parsed } : parsed;
                         } catch (e) {
                             responseData = { output: contentStr };
                         }
@@ -141,18 +145,19 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
         let thinkingLevel = parameters?.thinkingLevel ?? parameters?.thinking_level;
         let includeThoughts = parameters?.includeThoughts ?? parameters?.include_thoughts ?? false;
 
-        // Convert OpenAI reasoningEffort to Gemini 3 thinkingLevel
-        // OpenAI supports: 'high', 'medium', 'low', 'none'
-        // Gemini 3 supports: 'high' or 'low' (thinking cannot be disabled)
-        // Mapping: 'high' or 'medium' → 'high', 'low' or 'minimal' → 'low', 'none' → 'low'
+        // Convert reasoningEffort to Gemini 3 thinkingLevel using the model's
+        // reasoningEffortMap from config (same pattern as OpenAI reasoning plugins).
+        // Flash map: none→minimal, low→low, medium→medium, high→high
+        // Pro map:   none→low, low→low, medium→high, high→high (no minimal/medium support)
         const reasoningEffort = parameters?.reasoningEffort ?? this.promptParameters?.reasoningEffort;
         if (reasoningEffort && thinkingLevel === undefined) {
             const effort = typeof reasoningEffort === 'string' ? reasoningEffort.toLowerCase() : String(reasoningEffort).toLowerCase();
-            if (effort === 'high' || effort === 'medium') {
-                // High or medium reasoning effort → high thinking level
-                thinkingLevel = 'high';
+            const effortMap = this.model.reasoningEffortMap;
+            if (effortMap && effortMap[effort]) {
+                thinkingLevel = effortMap[effort];
+            } else if (['minimal', 'low', 'medium', 'high'].includes(effort)) {
+                thinkingLevel = effort;
             } else {
-                // Low, minimal, or none → low thinking level (Gemini 3 doesn't support disabling thinking)
                 thinkingLevel = 'low';
             }
         }
@@ -163,12 +168,14 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
         } else if (thinkingLevel === undefined && cortexRequest?.pathway?.thinking_level !== undefined) {
             thinkingLevel = cortexRequest.pathway.thinking_level;
         } else if (thinkingLevel === undefined && cortexRequest?.pathway?.reasoningEffort !== undefined) {
-            // Also check pathway for reasoningEffort
-            const pathwayEffort = typeof cortexRequest.pathway.reasoningEffort === 'string' 
-                ? cortexRequest.pathway.reasoningEffort.toLowerCase() 
+            const pathwayEffort = typeof cortexRequest.pathway.reasoningEffort === 'string'
+                ? cortexRequest.pathway.reasoningEffort.toLowerCase()
                 : String(cortexRequest.pathway.reasoningEffort).toLowerCase();
-            if (pathwayEffort === 'high' || pathwayEffort === 'medium') {
-                thinkingLevel = 'high';
+            const effortMap = this.model.reasoningEffortMap;
+            if (effortMap && effortMap[pathwayEffort]) {
+                thinkingLevel = effortMap[pathwayEffort];
+            } else if (['minimal', 'low', 'medium', 'high'].includes(pathwayEffort)) {
+                thinkingLevel = pathwayEffort;
             } else {
                 thinkingLevel = 'low';
             }
@@ -186,16 +193,11 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
                 baseParameters.generationConfig.thinkingConfig = {};
             }
             
-            // Gemini 3 uses thinkingLevel: 'low' or 'high'
+            // Set thinkingLevel — valid values depend on model (configured via reasoningEffortMap)
             if (thinkingLevel !== undefined) {
                 const level = typeof thinkingLevel === 'string' ? thinkingLevel.toLowerCase() : String(thinkingLevel).toLowerCase();
-                // Validate and set thinkingLevel (only 'low' or 'high' are valid)
-                if (level === 'low' || level === 'high') {
-                    baseParameters.generationConfig.thinkingConfig.thinkingLevel = level;
-                } else {
-                    // Default to 'low' if invalid value
-                    baseParameters.generationConfig.thinkingConfig.thinkingLevel = 'low';
-                }
+                const validLevels = ['minimal', 'low', 'medium', 'high'];
+                baseParameters.generationConfig.thinkingConfig.thinkingLevel = validLevels.includes(level) ? level : 'low';
             }
             
             // includeThoughts: true to get thought summaries
@@ -292,16 +294,12 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
             
             if (responseData.thoughts && responseData.thoughts.length > 0) {
                 logger.info(`[response contains ${responseData.thoughts.length} thought summary(ies)]`);
-                responseData.thoughts.forEach((thought, index) => {
-                    logger.verbose(`[thought ${index + 1}]: ${this.shortenContent(thought)}`);
-                });
             }
             
             if (responseData.artifacts && responseData.artifacts.length > 0) {
                 logger.info(`[response contains ${responseData.artifacts.length} image artifact(s)]`);
             }
             
-            logger.verbose(`${this.shortenContent(responseData.output_text || '')}`);
             return;
         }
 
@@ -312,4 +310,3 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
 }
 
 export default Gemini3ReasoningVisionPlugin;
-

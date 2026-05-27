@@ -21,8 +21,6 @@ class OllamaCompletionPlugin extends ModelPlugin {
     if (promptText) {
       logger.info(`[ollama completion request sent to model ${model}]`);
       const { length, units } = this.getLength(promptText);
-      const preview = this.shortenContent(promptText);
-      logger.verbose(`prompt ${units}: ${length}, content: "${preview}"`);
       logger.info(`[completion request contained ${length} ${units}]`);
     }
 
@@ -32,7 +30,6 @@ class OllamaCompletionPlugin extends ModelPlugin {
       const responseText = this.parseResponse(responseData);
       const { length, units } = this.getLength(responseText);
       logger.info(`[response received containing ${length} ${units}]`);
-      logger.verbose(`${this.shortenContent(responseText)}`);
     }
 
     prompt &&

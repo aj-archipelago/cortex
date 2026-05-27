@@ -26,11 +26,7 @@ class OllamaChatPlugin extends ModelPlugin {
       messages.forEach((message, index) => {
         const content = message.content;
         const { length, units } = this.getLength(content);
-        const preview = this.shortenContent(content);
 
-        logger.verbose(
-          `message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`
-        );
         totalLength += length;
         totalUnits = units;
       });
@@ -43,7 +39,6 @@ class OllamaChatPlugin extends ModelPlugin {
       const responseText = this.parseResponse(responseData);
       const { length, units } = this.getLength(responseText);
       logger.info(`[response received containing ${length} ${units}]`);
-      logger.verbose(`${this.shortenContent(responseText)}`);
     }
 
     prompt &&

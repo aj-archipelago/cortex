@@ -170,6 +170,8 @@ class GeminiChatPlugin extends ModelPlugin {
         
         if (messages && messages.length > 1) {
             logger.info(`[chat request contains ${messages.length} messages]`);
+            let totalLength = 0;
+            let totalUnits;
             messages.forEach((message, index) => {
                 const messageContent = message.parts.reduce((acc, part) => {
                     if (part.text) {
@@ -177,30 +179,28 @@ class GeminiChatPlugin extends ModelPlugin {
                     }
                     return acc;
                 } , '');
-                const words = messageContent.split(" ");
                 const { length, units } = this.getLength(messageContent);
-                const preview = words.length < 41 ? messageContent : words.slice(0, 20).join(" ") + " ... " + words.slice(-20).join(" ");
-    
-                logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
+                totalLength += length;
+                totalUnits = units;
             });
+            logger.info(`[chat request contained ${totalLength} ${totalUnits}]`);
         } else if (messages && messages.length === 1) {
-            logger.verbose(`${messages[0].parts[0].text}`);
+            const messageContent = messages[0].parts.reduce((acc, part) => part.text ? acc + part.text : acc, '');
+            const { length, units } = this.getLength(messageContent);
+            logger.info(`[request sent containing ${length} ${units}]`);
         }
 
         // check if responseData is an array or string
         if (typeof responseData === 'string') {
             const { length, units } = this.getLength(responseData);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${responseData}`);
         } else if (Array.isArray(responseData)) {
             const { mergedResult, safetyRatings } = mergeResults(responseData);
             if (safetyRatings?.length) {
                 logger.warn(`response was blocked because the input or response potentially violates policies`);
-                logger.verbose(`Safety Ratings: ${JSON.stringify(safetyRatings, null, 2)}`);
             }
             const { length, units } = this.getLength(mergedResult);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${mergedResult}`);
         } else {
             logger.info(`[response received as an SSE stream]`);
         }

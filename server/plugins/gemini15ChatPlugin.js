@@ -188,6 +188,11 @@ class Gemini15ChatPlugin extends ModelPlugin {
                 }
                 logger.warn(`Gemini returned MALFORMED_FUNCTION_CALL with no text content`);
                 return 'I encountered an issue processing that request. Please try rephrasing your question.';
+            } else if (finishReason === 'UNEXPECTED_TOOL_CALL') {
+                const textContent = content?.parts?.find(part => part?.text)?.text;
+                const finishMessage = data.candidates[0].finishMessage || 'Model tried to call an undeclared function';
+                logger.warn(`Gemini returned UNEXPECTED_TOOL_CALL: ${finishMessage}`);
+                return textContent || 'I encountered an issue processing that request. Please try rephrasing your question.';
             } else {
                 const returnString = `Response was not completed.  Finish reason: ${finishReason}, Safety ratings: ${JSON.stringify(safetyRatings, null, 2)}`;
                 throw new Error(returnString);
@@ -321,6 +326,8 @@ class Gemini15ChatPlugin extends ModelPlugin {
         
         if (messages && messages.length > 1) {
             logger.info(`[chat request contains ${messages.length} messages]`);
+            let totalLength = 0;
+            let totalUnits;
             messages.forEach((message, index) => {
                 const messageContent = message.parts.reduce((acc, part) => {
                     if (part.text) {
@@ -333,10 +340,10 @@ class Gemini15ChatPlugin extends ModelPlugin {
                     return acc;
                 } , '');
                 const { length, units } = this.getLength(messageContent);
-                const preview = this.shortenContent(messageContent);
-    
-                logger.verbose(`message ${index + 1}: role: ${message.role}, ${units}: ${length}, content: "${preview}"`);
+                totalLength += length;
+                totalUnits = units;
             });
+            logger.info(`[chat request contained ${totalLength} ${totalUnits}]`);
         } else if (messages && messages.length === 1) {
             const messageContent = messages[0].parts.reduce((acc, part) => {
                 if (part.text) {
@@ -348,23 +355,21 @@ class Gemini15ChatPlugin extends ModelPlugin {
                 }
                 return acc;
             } , '');
-            logger.verbose(`${this.shortenContent(messageContent)}`);
+            const { length, units } = this.getLength(messageContent);
+            logger.info(`[request sent containing ${length} ${units}]`);
         }
 
         // check if responseData is an array or string
         if (typeof responseData === 'string') {
             const { length, units } = this.getLength(responseData);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${this.shortenContent(responseData)}`);
         } else if (Array.isArray(responseData)) {
             const { mergedResult, safetyRatings } = mergeResults(responseData);
             if (safetyRatings?.length) {
                 logger.warn(`response was blocked because the input or response potentially violates policies`);
-                logger.verbose(`Safety Ratings: ${JSON.stringify(safetyRatings, null, 2)}`);
             }
             const { length, units } = this.getLength(mergedResult);
             logger.info(`[response received containing ${length} ${units}]`);
-            logger.verbose(`${this.shortenContent(mergedResult)}`);
         } else {
             logger.info(`[response received as an SSE stream]`);
         }

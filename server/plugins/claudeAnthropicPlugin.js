@@ -15,11 +15,15 @@ import Claude4VertexPlugin from "./claude4VertexPlugin.js";
  * - Streaming via stream:true in body, not URL suffix
  */
 class ClaudeAnthropicPlugin extends Claude4VertexPlugin {
-  
+
   constructor(pathway, model) {
     super(pathway, model);
   }
-  
+
+  get supportsImageUrls() {
+    return this.model.supportsImageUrls ?? true;
+  }
+
   async getRequestParameters(text, parameters, prompt) {
     // Get base request parameters from parent (includes message conversion)
     const requestParameters = await super.getRequestParameters(

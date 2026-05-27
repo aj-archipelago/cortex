@@ -4,6 +4,40 @@ import { mockPathwayResolverMessages } from '../../helpers/mocks.js';
 import { config } from '../../../config.js';
 import fs from 'fs';
 import path from 'path';
+import axios from 'axios';
+
+const originalAxiosHead = axios.head;
+const originalAxiosGet = axios.get;
+const sampleJpegBuffer = Buffer.concat([
+  Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+  Buffer.alloc(256, 0),
+  Buffer.from([0xff, 0xd9]),
+]);
+const samplePdfBuffer = Buffer.concat([
+  Buffer.from('%PDF-1.4\n'),
+  Buffer.alloc(256, 65),
+  Buffer.from('\n%%EOF'),
+]);
+
+test.before(() => {
+  axios.head = async (url) => ({
+    headers: {
+      'content-type': String(url).endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+    },
+  });
+  axios.get = async (url) => {
+    const isPdf = String(url).endsWith('.pdf');
+    return {
+      headers: { 'content-type': isPdf ? 'application/pdf' : 'image/jpeg' },
+      data: isPdf ? samplePdfBuffer : sampleJpegBuffer,
+    };
+  };
+});
+
+test.after.always(() => {
+  axios.head = originalAxiosHead;
+  axios.get = originalAxiosGet;
+});
 
 // Helper function to load test data from files
 function loadTestData(filename) {
@@ -17,6 +51,66 @@ function loadTestData(filename) {
 }
 
 const { pathway, model } = mockPathwayResolverMessages;
+
+// Model with budgetTokensMap for thinking tests (pre-4.6 style)
+const modelWithBudgetMap = {
+    ...model,
+    budgetTokensMap: { low: 1024, medium: 4096, high: 16384, xhigh: 65536 },
+};
+
+// --- Thinking + tool_choice interaction tests ---
+
+test('thinking is disabled when tool_choice forces a specific tool', async (t) => {
+    const plugin = new Claude4VertexPlugin(pathway, modelWithBudgetMap);
+    const params = await plugin.getRequestParameters('test', {
+        reasoningEffort: 'high',
+        tool_choice: JSON.stringify({ type: 'function', function: { name: 'store_memory' } }),
+        tools: JSON.stringify([{ type: 'function', function: { name: 'store_memory', parameters: {} } }]),
+    }, pathway.prompt);
+    t.is(params.thinking.type, 'disabled');
+    t.falsy(params.output_config);
+});
+
+test('thinking is disabled when tool_choice is "required"', async (t) => {
+    const plugin = new Claude4VertexPlugin(pathway, modelWithBudgetMap);
+    const params = await plugin.getRequestParameters('test', {
+        reasoningEffort: 'high',
+        tool_choice: 'required',
+        tools: JSON.stringify([{ type: 'function', function: { name: 'some_tool', parameters: {} } }]),
+    }, pathway.prompt);
+    t.is(params.thinking.type, 'disabled');
+});
+
+test('thinking is preserved when tool_choice is "auto"', async (t) => {
+    const plugin = new Claude4VertexPlugin(pathway, modelWithBudgetMap);
+    const params = await plugin.getRequestParameters('test', {
+        reasoningEffort: 'high',
+        tool_choice: 'auto',
+        tools: JSON.stringify([{ type: 'function', function: { name: 'some_tool', parameters: {} } }]),
+    }, pathway.prompt);
+    t.not(params.thinking.type, 'disabled');
+});
+
+test('thinking is disabled with forced tool_choice even with adaptive thinking', async (t) => {
+    const plugin = new Claude4VertexPlugin(pathway, model);
+    const params = await plugin.getRequestParameters('test', {
+        thinking: JSON.stringify({ type: 'adaptive' }),
+        tool_choice: JSON.stringify({ type: 'function', function: { name: 'recall_memory' } }),
+        tools: JSON.stringify([{ type: 'function', function: { name: 'recall_memory', parameters: {} } }]),
+    }, pathway.prompt);
+    t.is(params.thinking.type, 'disabled');
+});
+
+test('temperature is not forced to 1 when thinking is disabled by tool_choice', async (t) => {
+    const plugin = new Claude4VertexPlugin(pathway, modelWithBudgetMap);
+    const params = await plugin.getRequestParameters('test', {
+        reasoningEffort: 'high',
+        tool_choice: 'required',
+        tools: JSON.stringify([{ type: 'function', function: { name: 'some_tool', parameters: {} } }]),
+    }, pathway.prompt);
+    t.is(params.thinking.type, 'disabled');
+    t.not(params.temperature, 1);
+});
 
 test('constructor', (t) => {
     const plugin = new Claude4VertexPlugin(pathway, model);
@@ -459,4 +553,3 @@ test('convertMessagesToClaudeVertex with multi-part content array', async (t) =>
   t.true(base64Data.length > 100); // Check if the data is sufficiently long
   t.true(base64Regex.test(base64Data)); // Check if the data matches the base64 regex
 });
-

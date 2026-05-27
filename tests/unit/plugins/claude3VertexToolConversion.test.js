@@ -8,6 +8,25 @@ const { pathway, modelName, model } = mockPathwayResolverMessages;
 // Helper function to create a plugin instance
 const createPlugin = () => new Claude3VertexPlugin(pathway, model);
 
+test('Claude3 strips unsupported thinking controls', async (t) => {
+    const plugin = createPlugin();
+    const prompt = mockPathwayResolverMessages.pathway.prompt;
+    const parameters = {
+        messages: [{ role: 'user', content: 'Hello' }],
+        reasoningEffort: 'high',
+        thinkingType: 'adaptive',
+        thinkingBudgetTokens: 3000
+    };
+
+    const result = await plugin.getRequestParameters('test', parameters, prompt);
+
+    t.is(result.reasoningEffort, undefined);
+    t.is(result.thinkingType, undefined);
+    t.is(result.thinkingBudgetTokens, undefined);
+    t.is(result.thinking, undefined);
+    t.is(result.output_config, undefined);
+});
+
 // Test OpenAI tools block conversion
 test('OpenAI tools block conversion', async (t) => {
     const plugin = createPlugin();
@@ -473,7 +492,7 @@ test('Prevent duplicate tool definitions', async (t) => {
     
     // Verify the tool_use call is still properly converted
     t.truthy(result.messages, 'Messages should be defined');
-    t.is(result.messages.length, 1, 'Should have 1 message after conversion');
+    t.is(result.messages.length, 2, 'Should have 2 messages after conversion');
     
     // Check the converted message
     const message = result.messages[0];
@@ -486,4 +505,84 @@ test('Prevent duplicate tool definitions', async (t) => {
         name: 'memory_lookup',
         input: { query: 'search memory' }
     });
+
+    const toolResultMessage = result.messages[1];
+    t.is(toolResultMessage.role, 'user', 'Tool result should be from user');
+    const toolResult = toolResultMessage.content.find(item => item.type === 'tool_result');
+    t.truthy(toolResult, 'Should insert a tool_result');
+    t.is(toolResult.tool_use_id, 'tool_1', 'Tool result should match tool_use id');
+});
+
+test('Interrupted tool call preserves user interrupt text while inserting synthetic tool result', async (t) => {
+  const plugin = createPlugin();
+  const prompt = mockPathwayResolverMessages.pathway.prompt;
+  const interruptText = 'Request interrupted by user for tool use';
+
+  const messages = [
+    {
+      role: 'system',
+      content: 'You are a helpful assistant'
+    },
+    {
+      role: 'user',
+      content: 'Can you call memory_lookup?'
+    },
+    {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'tool_1',
+          name: 'memory_lookup',
+          input: { query: 'what did you find?' }
+        }
+      ]
+    },
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: interruptText
+        }
+      ]
+    }
+  ];
+
+  prompt.messages = messages;
+  const cortexRequest = { messages };
+  const result = await plugin.getRequestParameters('test', {}, prompt, cortexRequest);
+
+  t.is(result.messages.length, 4, 'Should include tool result and preserved interrupt text');
+  t.is(result.messages[1].role, 'assistant');
+  t.is(result.messages[2].role, 'user');
+  const toolResult = result.messages[2].content.find(item => item.type === 'tool_result');
+  t.truthy(toolResult, 'Should insert a synthetic tool result');
+  t.is(toolResult.tool_use_id, 'tool_1');
+
+  t.is(result.messages[3].role, 'user');
+  t.deepEqual(result.messages[3].content[0], {
+    type: 'text',
+    text: interruptText
+  });
+});
+
+test('Stream closes on message_delta stop_reason tool_use without message_stop', (t) => {
+  const plugin = createPlugin();
+  plugin.pathwayToolCallback = null;
+  plugin.requestId = 'test-request';
+
+  const requestProgress = { requestId: plugin.requestId };
+  const event = {
+    data: JSON.stringify({
+      type: 'message_delta',
+      delta: { stop_reason: 'tool_use' }
+    })
+  };
+
+  const result = plugin.processStreamEvent(event, requestProgress);
+
+  t.is(result.progress, 1);
+  const parsed = JSON.parse(result.data);
+  t.is(parsed.choices[0].finish_reason, 'tool_calls');
 });
