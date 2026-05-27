@@ -47,83 +47,7 @@ export default {
                         items: {
                             type: "string"
                         },
-                        description: "Array of files to analyze (from ListFileCollection or SearchFileCollection): each can be the hash, the filename, the URL, or the GCS URL. You can find available files in the availableFiles section."
-                    },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                    }
-                },
-                required: ["detailedInstructions", "userMessage"]
-            }
-        }
-    },
-    {
-        type: "function",
-        enabled: false,
-        icon: "📝",
-        function: {
-            name: "AnalyzeText",
-            description: "Use specifically for reading, analyzing, and answering questions about text files (including csv, json, html, etc.).",
-            parameters: {
-                type: "object",
-                properties: {
-                    detailedInstructions: {
-                        type: "string",
-                        description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
-                        },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                },
-                required: ["detailedInstructions", "userMessage"]
-            }
-        }
-    },
-    {
-        type: "function",
-        enabled: false,
-        icon: "📝",
-        function: {
-            name: "AnalyzeMarkdown",
-            description: "Use specifically for reading, analyzing, and answering questions about markdown files.",
-            parameters: {
-                type: "object",
-                properties: {
-                    detailedInstructions: {
-                        type: "string",
-                        description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
-                        },
-                    userMessage: {
-                        type: "string",
-                        description: "A user-friendly message that describes what you're doing with this tool"
-                        }
-                },
-                required: ["detailedInstructions", "userMessage"]
-            }
-        }
-    },   
-    {
-        type: "function",
-        enabled: false,
-        icon: "🖼️",
-        function: {
-            name: "AnalyzeImage",
-            description: "Use specifically for reading, analyzing, and answering questions about image files (jpg, gif, bmp, png, etc). This cannot be used for creating or transforming images.",
-            parameters: {
-                type: "object",
-                properties: {
-                    detailedInstructions: {
-                        type: "string",
-                        description: "Detailed instructions about what you need the tool to do - questions you need answered about the files, etc."
-                    },
-                    files: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        },
-                        description: "Array of files to analyze (from ListFileCollection or SearchFileCollection): each can be the hash, the filename, the URL, or the GCS URL. You can find available files in the availableFiles section."
+                        description: "Array of files to analyze. Prefer blobPath, workspacePath like /workspace/files/..., URL, or GCS URL from the file object. Legacy hashes and filenames are supported as fallbacks."
                     },
                     userMessage: {
                         type: "string",
@@ -152,7 +76,7 @@ export default {
                         items: {
                             type: "string"
                         },
-                        description: "Array of files to analyze. Each can be: (1) A YouTube URL (youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., youtube.com/embed/...), (2) A direct video/audio file URL, (3) A file from the collection (hash, filename, URL, or GCS URL from ListFileCollection or SearchFileCollection). You can find available files in the availableFiles section."
+                        description: "Array of files to analyze. Each can be: (1) A YouTube URL (youtube.com/watch?v=..., youtu.be/..., youtube.com/shorts/..., youtube.com/embed/...), (2) a direct video/audio file URL, (3) a file reference such as blobPath, workspacePath like /workspace/files/..., URL, GCS URL, legacy hash, or filename."
                     },
                     userMessage: {
                         type: "string",
@@ -177,15 +101,12 @@ export default {
                 : (args.file ? [args.file] : []);
             
             if (filesToProcess.length > 0) {
-                // Use agentContext if available, otherwise fall back to creating it from contextId/contextKey
-                const agentContext = args.agentContext || (args.contextId ? [{
-                    contextId: args.contextId,
-                    contextKey: args.contextKey || null,
-                    default: true
-                }] : null);
-                
-                if (!agentContext || !Array.isArray(agentContext) || agentContext.length === 0) {
-                    const errorMessage = `Files not found: agentContext is required to look up files in the collection.`;
+                const fileAccessPlan = Array.isArray(args.fileAccessPlan)
+                    ? args.fileAccessPlan
+                    : null;
+
+                if (!fileAccessPlan || fileAccessPlan.length === 0) {
+                    const errorMessage = `Files not found: fileAccessPlan is required to look up files in the collection.`;
                     resolver.tool = JSON.stringify({ toolUsed: "vision" });
                     return JSON.stringify({ 
                         error: errorMessage,
@@ -198,7 +119,7 @@ export default {
                 const errors = [];
                 
                 for (const fileParam of filesToProcess) {
-                    const fileContent = await generateFileMessageContent(fileParam, agentContext);
+                    const fileContent = await generateFileMessageContent(fileParam, fileAccessPlan);
                     if (!fileContent) {
                         errors.push(`File not found: "${fileParam}"`);
                         continue;
@@ -210,7 +131,7 @@ export default {
                 if (fileContents.length === 0) {
                     const errorMessage = errors.length > 0 
                         ? errors.join('; ')
-                        : 'No files found. Use ListFileCollection or SearchFileCollection to find available files.';
+                        : 'No files found. Use FileCollection to find available files.';
                     resolver.tool = JSON.stringify({ toolUsed: "vision" });
                     return JSON.stringify({ 
                         error: errorMessage,

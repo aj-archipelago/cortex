@@ -80,7 +80,7 @@ export default {
         icon: "📊",
         function: {
             name: "CreateChart",
-            description: "Creates a single chart or diagram that will render in the UI to visualize data or concepts. You can create all the standard Mermaid chart types (flowcharts, sequence diagrams, gantt charts, etc.) as well as bar charts and line and scatter plots. This tool also validates the syntax and ensures proper formatting. Call this tool any time you need to create a chart outside of your coding agent. If you need to create multiple charts, you can call this tool multiple times in parallel to create multiple charts.",
+            description: "Creates a single chart or diagram that will render in the UI to visualize data or concepts. You can create all the standard Mermaid chart types (flowcharts, sequence diagrams, gantt charts, etc.) as well as bar charts and line and scatter plots. This tool also validates the syntax and ensures proper formatting. Call this tool any time you need to create a chart. If you need to create multiple charts, you can call this tool multiple times in parallel to create multiple charts.",
             parameters: {
                 type: "object",
                 properties: {
@@ -228,4 +228,4 @@ Focus only on fixing the syntax issues mentioned in the error details. Return on
         // Return a fallback response
         return `Failed to generate valid mermaid chart after ${maxRetries} attempts. Last error: ${lastError}`;
     }
-} 
+}
