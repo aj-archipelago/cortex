@@ -550,7 +550,7 @@ test('isLegacyPromptFormat identifies legacy format (array of strings)', t => {
     
     // Set up pathway with legacy prompts
     t.context.pathwayManager.pathways = {
-        [userId]: {
+        [userId.toLowerCase()]: {
             [pathwayName]: {
                 prompt: [
                     'First prompt text',
@@ -571,7 +571,7 @@ test('isLegacyPromptFormat identifies new format (array of objects)', t => {
     
     // Set up pathway with new format prompts
     t.context.pathwayManager.pathways = {
-        [userId]: {
+        [userId.toLowerCase()]: {
             [pathwayName]: {
                 prompt: [
                     { name: 'First Prompt', prompt: 'First prompt text' },
@@ -592,7 +592,7 @@ test('isLegacyPromptFormat handles empty array (defaults to new format)', t => {
     
     // Set up pathway with empty prompts array
     t.context.pathwayManager.pathways = {
-        [userId]: {
+        [userId.toLowerCase()]: {
             [pathwayName]: {
                 prompt: []
             }
@@ -609,7 +609,7 @@ test('isLegacyPromptFormat handles mixed format (treats as legacy)', t => {
     
     // Set up pathway with mixed format prompts
     t.context.pathwayManager.pathways = {
-        [userId]: {
+        [userId.toLowerCase()]: {
             [pathwayName]: {
                 prompt: [
                     'Legacy string prompt',
@@ -647,7 +647,7 @@ test('isLegacyPromptFormat handles objects with missing prompt property (treats 
     
     // Set up pathway with invalid objects
     t.context.pathwayManager.pathways = {
-        [userId]: {
+        [userId.toLowerCase()]: {
             [pathwayName]: {
                 prompt: [
                     { name: 'Missing prompt property' },
@@ -667,7 +667,7 @@ test('isLegacyPromptFormat handles objects with null prompt property (treats as 
     
     // Set up pathway with null prompt properties
     t.context.pathwayManager.pathways = {
-        [userId]: {
+        [userId.toLowerCase()]: {
             [pathwayName]: {
                 prompt: [
                     { name: 'Null prompt', prompt: null },
@@ -687,7 +687,7 @@ test('isLegacyPromptFormat handles array with null elements (treats as legacy)',
     
     // Set up pathway with null elements
     t.context.pathwayManager.pathways = {
-        [userId]: {
+        [userId.toLowerCase()]: {
             [pathwayName]: {
                 prompt: [
                     null,
@@ -708,7 +708,7 @@ test('isLegacyPromptFormat handles single string element', t => {
     
     // Set up pathway with single string element
     t.context.pathwayManager.pathways = {
-        [userId]: {
+        [userId.toLowerCase()]: {
             [pathwayName]: {
                 prompt: ['Only prompt']
             }
@@ -725,7 +725,7 @@ test('isLegacyPromptFormat handles single object element', t => {
     
     // Set up pathway with single object element
     t.context.pathwayManager.pathways = {
-        [userId]: {
+        [userId.toLowerCase()]: {
             [pathwayName]: {
                 prompt: [{ name: 'Only prompt', prompt: 'Only prompt text' }]
             }
@@ -746,6 +746,58 @@ test('isLegacyPromptFormat throws error when pathway not found', t => {
     t.throws(() => {
         t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
     }, { message: `Pathway 'nonExistentPathway' not found for user 'testUser'` });
+});
+
+test('case-insensitive userId lookup in isLegacyPromptFormat', t => {
+    t.context.pathwayManager.pathways = {
+        'user@example.com': {
+            testPathway: {
+                prompt: ['Some prompt']
+            }
+        }
+    };
+
+    t.true(t.context.pathwayManager.isLegacyPromptFormat('User@Example.com', 'testPathway'));
+    t.true(t.context.pathwayManager.isLegacyPromptFormat('user@example.com', 'testPathway'));
+    t.true(t.context.pathwayManager.isLegacyPromptFormat('USER@EXAMPLE.COM', 'testPathway'));
+});
+
+test('case-insensitive userId lookup in getPathway', async t => {
+    t.context.pathwayManager.pathways = {
+        'user@example.com': {
+            myPathway: {
+                prompt: [{ name: 'test', prompt: 'test prompt' }],
+                systemPrompt: 'system'
+            }
+        }
+    };
+
+    t.context.pathwayManager.getLatestPathways = async () => t.context.pathwayManager.pathways;
+
+    const result = await t.context.pathwayManager.getPathway('User@Example.com', 'myPathway');
+    t.truthy(result);
+});
+
+test('putPathway normalizes userId to lowercase', async t => {
+    t.context.pathwayManager.getLatestPathways = async () => t.context.pathwayManager.pathways;
+    t.context.pathwayManager.savePathways = async () => {};
+    t.context.pathwayManager.loadPathways = async () => t.context.pathwayManager.pathways;
+
+    await t.context.pathwayManager.putPathway('myPathway', { prompt: ['test'] }, 'TestUser@Example.com', 'secret123');
+
+    t.truthy(t.context.pathwayManager.pathways['testuser@example.com']);
+    t.truthy(t.context.pathwayManager.pathways['testuser@example.com']['myPathway']);
+    t.falsy(t.context.pathwayManager.pathways['TestUser@Example.com']);
+});
+
+test('_createPromptObject preserves reasoningEffort metadata', t => {
+    const prompt = t.context.pathwayManager._createPromptObject(
+        { name: 'Reasoning Prompt', prompt: 'Think carefully', reasoningEffort: 'high' },
+        'system',
+    );
+
+    t.is(prompt.reasoningEffort, 'high');
+    t.is(prompt.researchMode, undefined);
 });
 
 test('getPathways throws error for non-array promptNames', async t => {
