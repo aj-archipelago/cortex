@@ -11,9 +11,9 @@
     "start:prod": "NODE_ENV=production bun run index.ts"
   },
   "dependencies": {
-    "@hono/node-server": "1.13.7",
+    "@hono/node-server": "2.0.4",
     "@paralleldrive/cuid2": "2.2.2",
-    "hono": "4.6.13",
+    "hono": "4.12.23",
     "socket.io": "4.8.1"
   },
   "devDependencies": {

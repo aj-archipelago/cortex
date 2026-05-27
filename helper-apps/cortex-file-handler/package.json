@@ -27,7 +27,7 @@
     "papaparse": "^5.4.1",
     "pdfjs-dist": "^4.2.67",
     "public-ip": "^6.0.1",
-    "uuid": "^9.0.0",
+    "uuid": "11.1.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -51,5 +51,8 @@
       "--experimental-modules"
     ],
     "serial": true
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }
