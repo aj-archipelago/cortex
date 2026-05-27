@@ -128,6 +128,44 @@ test('executeWorkspace does not throw for new format with promptNames', async t 
     t.true(mockPathwayManager.getPathways.calledOnce);
 });
 
+test('executeWorkspace normalizes user ID for custom pathway lookup', async t => {
+    const mockPathwayManager = {
+        getLatestPathways: sinon.stub().resolves({
+            'test-user': {
+                'test-pathway': {
+                    prompt: [
+                        { name: 'specific-prompt', prompt: 'New format prompt' }
+                    ],
+                    systemPrompt: 'Test system prompt'
+                }
+            }
+        }),
+        isLegacyPromptFormat: sinon.stub().returns(false),
+        getPathways: sinon.stub().resolves([
+            {
+                name: 'specific-prompt',
+                prompt: [{ messages: ['message1'] }],
+                rootResolver: sinon.stub().resolves({ result: 'test result' })
+            }
+        ]),
+        getResolvers: sinon.stub().returns({ Mutation: {} })
+    };
+
+    const resolvers = getResolvers(mockConfig, {}, mockPathwayManager);
+    const executeWorkspaceResolver = resolvers.Query.executeWorkspace;
+
+    const result = await executeWorkspaceResolver(null, {
+        userId: 'Test-User',
+        pathwayName: 'test-pathway',
+        promptNames: ['specific-prompt'],
+        text: 'test input'
+    }, { config: mockConfig }, {});
+
+    t.truthy(result);
+    t.true(mockPathwayManager.getLatestPathways.calledOnce);
+    t.true(mockPathwayManager.getPathways.calledOnce);
+});
+
 test('executeWorkspace does not check format when promptNames not provided', async t => {
     // Mock pathwayManager with legacy format
     const mockPathwayManager = {
