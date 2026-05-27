@@ -99,6 +99,88 @@ test('buildMetadataEntry exposes safe model and media metadata', (t) => {
     t.is(entry.params, undefined);
 });
 
+test('buildMetadataEntry exposes media UI control metadata without provider config', (t) => {
+    const entry = buildMetadataEntry('media-model', {
+        type: 'REPLICATE-IMAGE',
+        requestsPerSecond: 20,
+        endpoints: [
+            {
+                url: 'https://provider.example/private',
+                headers: { Authorization: 'secret' },
+                params: { model: 'provider-media-model' },
+            },
+        ],
+        metadata: {
+            displayName: 'Media Model',
+            pathwayName: 'image_media',
+            resultKey: 'image_media',
+            mediaDefaults: {
+                inputImages: [0, 3],
+                aspectRatio: '16:9',
+                imageSize: '2K',
+            },
+            mediaDefaultOverrides: {
+                imageSize: { '1:1': '1K' },
+            },
+            availableAspectRatios: ['1:1', '16:9'],
+            availableDurations: [5, 10],
+            availableOutputFormats: ['png', 'jpeg'],
+            mediaControls: ['quality', 'seed'],
+            referenceImageRoles: ['subject', 'style'],
+            referenceImageRoleLimits: { subject: 1, style: 2 },
+            videoFrameReferenceRoles: ['start_frame', 'end_frame'],
+            videoInputModes: ['generate', 'extend'],
+            preferredUrlFormat: 'gcs',
+            mediaToggles: ['optimizePrompt'],
+            availableResolutions: ['720p', '1080p'],
+            availableImageSizes: ['1K', '2K'],
+            availableVoices: ['Kore', 'Puck'],
+            availableLanguages: ['en-US', 'ar-AR'],
+            supportedReasoningEfforts: ['none', 'low'],
+            pricing: { image: 0.01 },
+        },
+    });
+
+    t.like(entry, {
+        modelId: 'media-model',
+        displayName: 'Media Model',
+        provider: 'replicate',
+        category: 'image',
+        pathwayName: 'image_media',
+        resultKey: 'image_media',
+        mediaDefaults: {
+            inputImages: [0, 3],
+            aspectRatio: '16:9',
+            imageSize: '2K',
+        },
+        mediaDefaultOverrides: {
+            imageSize: { '1:1': '1K' },
+        },
+        availableAspectRatios: ['1:1', '16:9'],
+        availableDurations: [5, 10],
+        availableOutputFormats: ['png', 'jpeg'],
+        mediaControls: ['quality', 'seed'],
+        referenceImageRoles: ['subject', 'style'],
+        referenceImageRoleLimits: { subject: 1, style: 2 },
+        videoFrameReferenceRoles: ['start_frame', 'end_frame'],
+        videoInputModes: ['generate', 'extend'],
+        preferredUrlFormat: 'gcs',
+        mediaToggles: ['optimizePrompt'],
+        availableResolutions: ['720p', '1080p'],
+        availableImageSizes: ['1K', '2K'],
+        availableVoices: ['Kore', 'Puck'],
+        availableLanguages: ['en-US', 'ar-AR'],
+        supportedReasoningEfforts: ['none', 'low'],
+        pricing: { image: 0.01 },
+    });
+    t.deepEqual(entry.pricingAliases, ['provider-media-model']);
+    t.is(entry.requestsPerSecond, undefined);
+    t.is(entry.endpoints, undefined);
+    t.is(entry.headers, undefined);
+    t.is(entry.url, undefined);
+    t.is(entry.params, undefined);
+});
+
 test('buildMetadataEntry marks unavailable required environment values', (t) => {
     const previous = process.env.TEST_REQUIRED_ENV;
     delete process.env.TEST_REQUIRED_ENV;
