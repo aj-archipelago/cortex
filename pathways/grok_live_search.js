@@ -9,9 +9,9 @@ export default {
             ]}),
         ],
 
-    // Default to the new Responses API model (xai-grok-4-1-fast-responses)
-    // The legacy xai-grok-4-fast-non-reasoning model with search_parameters is deprecated
-    model: 'xai-grok-4-1-fast-responses',
+    // Default to the current Responses API search wrapper.
+    // Legacy Grok search model ids now redirect to this 4.20-backed pathway.
+    model: 'xai-grok-4-20-responses',
     useInputChunking: false,
     inputParameters: {
         stream: true,
