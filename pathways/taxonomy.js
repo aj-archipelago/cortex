@@ -6,13 +6,13 @@ import { Prompt } from "../server/prompt.js";
 import { PathwayResolver } from '../server/pathwayResolver.js';
 import { callPathway } from '../lib/pathwayTools.js';
 
-function getFilteredTaxonomyItems(taxonomyResult, taxonomySet) {
+export function getFilteredTaxonomyItems(taxonomyResult, taxonomySet) {
     // Normalize taxonomy item
     function normalizeTaxonomyItem(item) {
         return item.trim().toLowerCase().replace(/[.,]/g, '');
     }
 
-    const taxonomyItems = taxonomySet.split(',');
+    const taxonomyItems = taxonomySet.split(',').map(item => item.trim()).filter(Boolean);
     const filteredTaxonomyResult = taxonomyResult.reduce((acc, item) => {
         const normalizedItem = normalizeTaxonomyItem(item);
         const matchingItemIndex = taxonomyItems
@@ -45,6 +45,10 @@ export default {
         count: 5,
         taxonomyItems: '',
         taxonomyType: 'topic',
+        initialFilterPrompt: '',
+        singleSelectPrompt: '',
+        rankingPrompt: '',
+        model: 'oai-gpt4o',
     },
 
     // Set 'list' to true to indicate that the output is expected to be a list.
@@ -57,6 +61,9 @@ export default {
         const taxonomyItems = args.taxonomyItems;
         const taxonomyType = args.taxonomyType || 'topic';
         let text = args.text;
+        const initialFilterPrompt = args.initialFilterPrompt;
+        const singleSelectPrompt = args.singleSelectPrompt;
+        const rankingPrompt = args.rankingPrompt;
 
         // Summarize the input text
         text = await callPathway('summary', { ...args, targetLength: 0 });
@@ -85,7 +92,10 @@ export default {
             pathwayResolver.pathwayPrompt = [
                 new Prompt({
                     messages: [
-                        { "role": "system", "content": `Assistant is an AI editorial assistant for an online news agency tasked with identifying ${taxonomyType}s from a pre-determined list that fit a news article summary. When User posts a news article summary and a list of possible ${taxonomyType}s, assistant will carefully examine the ${taxonomyType}s in the list. If any of them are a high confidence match for the article, assistant will return the matching ${taxonomyType}s as a comma separated list. Assistant must only identify a ${taxonomyType} if assistant is sure the ${taxonomyType} is a good match for the article. Any ${taxonomyType}s that assistant returns must be in the list already - assistant cannot add new ${taxonomyType}s. If there are no good matches, assistant will respond with <none>. Assistant will return only the ${taxonomyType}s and no other notes or commentary.`},
+                        {
+                            "role": "system",
+                            "content": initialFilterPrompt?.replace(/\${taxonomyType}/g, taxonomyType) || `You are an AI editorial assistant for an online news agency, tasked with identifying the most appropriate ${taxonomyType}s from a pre-determined list based on a news article summary. When given a news article summary and a list of possible ${taxonomyType}s, carefully examine the ${taxonomyType}s in the list and select up to the top 10 that are highly relevant to the article content.\n\nPlease adhere to the following instructions:\n- Only identify a ${taxonomyType} if you are confident it is a good match for the article.\n- Return the matching ${taxonomyType}s as a comma-separated list.\n- Only use the ${taxonomyType}s provided in the list; do not add new ${taxonomyType}s.\n- If there are no suitable matches, respond with <none>.\n- Provide only the ${taxonomyType}s and no additional notes or commentary.`,
+                        },
                         { "role": "user", "content": `Article Summary: {{{text}}}\n\nPossible ${taxonomyType}s: ${taxonomyItemSet}\n\n`},
                     ]
                 }),
@@ -104,7 +114,10 @@ export default {
             pathwayResolver.pathwayPrompt = [
                 new Prompt({
                     messages: [
-                        { "role": "system", "content": `Assistant is an AI editorial assistant for an online news agency tasked with identifying a single ${taxonomyType} from a list that best fits a news article summary. When User posts a news article summary and a list of possible ${taxonomyType}s, assistant will carefully examine the ${taxonomyType}s in the list and return the one ${taxonomyType} that best represents the news article summary. Assistant will use high judgement when picking the correct ${taxonomyType}. Assistant will return only the ${taxonomyType} and no other notes or commentary.` },
+                        {
+                            "role": "system",
+                            "content": singleSelectPrompt?.replace(/\${taxonomyType}/g, taxonomyType) || `Assistant is an AI editorial assistant for an online news agency tasked with identifying a single ${taxonomyType} from a list that best fits a news article summary. When User posts a news article summary and a list of possible ${taxonomyType}s, assistant will carefully examine the ${taxonomyType}s in the list and return the one ${taxonomyType} that best represents the news article summary. Assistant will use high judgement when picking the correct ${taxonomyType}. Assistant will return only the ${taxonomyType} and no other notes or commentary.`,
+                        },
                         { "role": "user", "content": `Article Summary: {{{text}}}\n\nPossible ${taxonomyType}s: ${taxonomyItemResults.join(', ')}\n\n`},
                     ]
                 }),
@@ -113,7 +126,10 @@ export default {
             pathwayResolver.pathwayPrompt = [
                 new Prompt({
                     messages: [
-                        { "role": "system", "content": `Assistant is an AI editorial assistant for an online news agency tasked with identifying ${taxonomyType}s from a list that best fit a news article summary. When User posts a news article summary and a list of possible ${taxonomyType}s, assistant will carefully examine the ${taxonomyType}s in the list and return them in order of relevance to the article summary (best fit first). Assistant will return only the list of ${taxonomyType}s and no other notes or commentary. Assistant will not add ${taxonomyType}s to the list and will select only from User's posted ${taxonomyType}s.` },
+                        {
+                            "role": "system",
+                            "content": rankingPrompt?.replace(/\${taxonomyType}/g, taxonomyType) || `Assistant is an AI editorial assistant for an online news agency tasked with identifying ${taxonomyType}s from a list that best fit a news article summary. When User posts a news article summary and a list of possible ${taxonomyType}s, assistant will carefully examine the ${taxonomyType}s in the list and return them in order of relevance to the article summary (best fit first). Assistant will return only the list of ${taxonomyType}s and no other notes or commentary. Assistant will not add ${taxonomyType}s to the list and will select only from User's posted ${taxonomyType}s.`,
+                        },
                         { "role": "user", "content": `Article Summary: {{{text}}}\n\nPossible ${taxonomyType}s: ${taxonomyItemResults.join(', ')}\n\n`},
                     ]
                 }),
