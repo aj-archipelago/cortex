@@ -27,7 +27,8 @@ export default {
         updateContext: false,
         contextKey: ``
     },
-    model: 'oai-gpt41-mini',
+    model: 'cortex-default-small-fast',
+    reasoningEffort: 'none',
     useInputChunking: false,
     enableDuplicateRequests: false,
     requestLoggingDisabled: true,

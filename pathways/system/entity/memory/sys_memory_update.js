@@ -28,7 +28,8 @@ export default {
         operations: "[]",
         contextKey: ``
     },
-    model: 'oai-gpt41',
+    model: 'cortex-default-small-fast',
+    reasoningEffort: 'none',
     useInputChunking: false,
     enableDuplicateRequests: false,
     json: true,

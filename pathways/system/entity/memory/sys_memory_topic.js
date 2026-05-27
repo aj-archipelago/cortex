@@ -16,7 +16,8 @@ export default {
         aiName: "Jarvis",
         language: "English",
     },
-    model: 'oai-gpt4o',
+    model: 'cortex-default-small-fast',
+    reasoningEffort: 'none',
     useInputChunking: false,
     ...config.get('entityConstants')
 }
