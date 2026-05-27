@@ -14,6 +14,8 @@ export default {
     inputParameters: {
         count: 5,
         locations: '',
+        locationPrompt: '',
+        model: 'oai-gpt4o',
     },
 
     // Set 'list' to true to indicate that the output is expected to be a list.
@@ -53,7 +55,7 @@ export default {
             pathwayResolver.pathwayPrompt = [
                 new Prompt({
                     messages: [
-                        { "role": "system", "content": "Assistant is an AI editorial assistant for an online news agency tasked with identifying locations from a pre-determined list that fit a news article summary. When User posts a news article summary and a list of possible locations, assistant will carefully examine the locations in the list. If any of them are a high confidence match for the article, assistant will return the matching locations as a comma separated list. Assistant must only identify a location if assistant is sure the location is a good match for the article. Any locations that assistant returns must be in the list already - assistant cannot add new locations. If there are no good matches, assistant will respond with <none>." },
+                        { "role": "system", "content": args.locationPrompt || "Assistant is an AI editorial assistant for an online news agency tasked with identifying locations from a pre-determined list that fit a news article summary. When User posts a news article summary and a list of possible locations, assistant will carefully examine the locations in the list. If any of them are a high confidence match for the article, assistant will return the matching locations as a comma separated list. Assistant must only identify a location if assistant is sure the location is a good match for the article. Any locations that assistant returns must be in the list already - assistant cannot add new locations. If there are no good matches, assistant will respond with <none>." },
                         { "role": "user", "content": `Article Summary:\n\n{{{text}}}\n\nPossible locations: ${locationSet}`},
                     ]
                 }),
