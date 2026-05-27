@@ -18,6 +18,7 @@ import cors from 'cors';
 import { buildModels, buildPathways } from '../config.js';
 import logger from '../lib/logger.js';
 import { buildModelEndpoints } from '../lib/requestExecutor.js';
+import { startModelSampler } from '../lib/modelSampler.js';
 import { startTestServer } from '../tests/helpers/server.js';
 import { requestState } from './requestState.js';
 import { cancelRequestResolver, submitClientToolResultResolver } from './resolver.js';
@@ -159,6 +160,7 @@ const build = async (config) => {
 
     // build model API endpoints and limiters
     buildModelEndpoints(config);
+    startModelSampler(config);
 
     //build api
     const pathways = config.get('pathways');
@@ -287,4 +289,3 @@ export {
     build,
     getResolvers
 };
-

@@ -63,6 +63,27 @@ var config = convict({
         default: 'oai-gpt4o',
         env: 'DEFAULT_MODEL_NAME'
     },
+    modelRedirects: {
+        format: Object,
+        default: {
+            "xai-grok-3": "xai-grok-4-20-reasoning",
+            "xai-grok-4": "xai-grok-4-3",
+            "xai-grok-4-fast-reasoning": "xai-grok-4-20-reasoning",
+            "xai-grok-4-fast-non-reasoning": "xai-grok-4-20-non-reasoning",
+            "xai-grok-4-1-fast-responses": "xai-grok-4-20-responses",
+            "xai-grok-4-responses": "xai-grok-4-20-responses"
+        },
+        env: 'MODEL_REDIRECTS'
+    },
+    modelGroups: {
+        // Map of alias -> { members: [...], metadata?: {...} }. The alias
+        // resolves at request time to the highest-priority member that's
+        // healthy and not meaningfully slower than the fastest. See
+        // lib/requestExecutor.js (pickGroupMember), lib/modelSampler.js, and
+        // pathways/system/sys_model_metadata.js.
+        format: Object,
+        default: {}
+    },
     defaultEntityName: {
         format: String,
         default: "Jarvis",
@@ -102,6 +123,12 @@ var config = convict({
         format: String,
         default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/google/models/gemini-2.5-flash',
         env: 'GEMINI_FLASH_URL'
+    },
+    geminiApiKey: {
+        format: String,
+        default: null,
+        env: 'GEMINI_API_KEY',
+        sensitive: true
     },
     entityConfig: {
         format: Object,
@@ -383,6 +410,33 @@ var config = convict({
                     "Content-Type": "application/json"
                 },
             },
+            "replicate-seedance-2.0": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/bytedance/seedance-2.0/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
+            "replicate-kling-v2.5-turbo-pro": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/kwaivgi/kling-v2.5-turbo-pro/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
+            "replicate-grok-imagine-video": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/xai/grok-imagine-video/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
             "replicate-flux-11-pro": {
                 "type": "REPLICATE-API",
                 "url": "https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions",
@@ -476,6 +530,24 @@ var config = convict({
             "replicate-seedream-4": {
                 "type": "REPLICATE-API",
                 "url": "https://api.replicate.com/v1/models/bytedance/seedream-4/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
+            "replicate-seedream-4.5": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/bytedance/seedream-4.5/predictions",
+                "headers": {
+                    "Prefer": "wait",
+                    "Authorization": "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+            },
+            "replicate-seedream-5-lite": {
+                "type": "REPLICATE-API",
+                "url": "https://api.replicate.com/v1/models/bytedance/seedream-5-lite/predictions",
                 "headers": {
                     "Prefer": "wait",
                     "Authorization": "Token {{REPLICATE_API_KEY}}",
@@ -661,24 +733,9 @@ var config = convict({
                 "maxReturnTokens": 65535,
                 "supportsStreaming": true
             },
-            "xai-grok-3": {
+            "xai-grok-4-3": {
                 "type": "GROK-VISION",
-                "url": "https://api.x.ai/v1/chat/completions",
-                "headers": {
-                    "Authorization": "Bearer {{XAI_API_KEY}}",
-                    "Content-Type": "application/json"
-                },
-                "params": {
-                    "model": "grok-3-latest"
-                },
-                "requestsPerSecond": 10,
-                "maxTokenLength": 131072,
-                "maxReturnTokens": 32000,
-                "supportsStreaming": true
-            },
-            "xai-grok-4": {
-                "type": "GROK-VISION",
-                "emulateOpenAIChatModel": "grok-4",
+                "emulateOpenAIChatModel": "grok-4.3",
                 "restStreaming": {
                     "inputParameters": {
                         "stream": false,
@@ -691,10 +748,137 @@ var config = convict({
                     "Content-Type": "application/json"
                 },
                 "params": {
-                    "model": "grok-4-0709"
+                    "model": "grok-4.3"
                 },
                 "requestsPerSecond": 10,
-                "maxTokenLength": 256000,
+                "maxTokenLength": 1000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true,
+                "reasoningEffortMap": {
+                    "none": "none",
+                    "low": "low",
+                    "medium": "medium",
+                    "high": "high"
+                }
+            },
+            "xai-grok-4-20-reasoning": {
+                "type": "GROK-VISION",
+                "emulateOpenAIChatModel": "grok-4.20-0309-reasoning",
+                "restStreaming": {
+                    "inputParameters": {
+                        "stream": false,
+                        "search_parameters": ""
+                    }
+                },
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4.20-0309-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-20-non-reasoning": {
+                "type": "GROK-VISION",
+                "emulateOpenAIChatModel": "grok-4.20-0309-non-reasoning",
+                "restStreaming": {
+                    "inputParameters": {
+                        "stream": false,
+                        "search_parameters": ""
+                    }
+                },
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4.20-0309-non-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-20-multi-agent": {
+                "type": "GROK-RESPONSES",
+                "emulateOpenAIChatModel": "grok-4.20-multi-agent-0309",
+                "restStreaming": {
+                    "inputParameters": {
+                        "stream": true,
+                        "tools": "",
+                        "inline_citations": true
+                    }
+                },
+                "url": "https://api.x.ai/v1/responses",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4.20-multi-agent-0309"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-20-responses": {
+                "type": "GROK-RESPONSES",
+                "emulateOpenAIChatModel": "grok-4.20-0309-search",
+                "restStreaming": {
+                    "inputParameters": {
+                        "stream": true,
+                        "tools": "",
+                        "inline_citations": true
+                    }
+                },
+                "url": "https://api.x.ai/v1/responses",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4.20-0309-non-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-1-fast-reasoning": {
+                "type": "GROK-VISION",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-1-fast-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
+                "maxReturnTokens": 128000,
+                "supportsStreaming": true
+            },
+            "xai-grok-4-1-fast-non-reasoning": {
+                "type": "GROK-VISION",
+                "emulateOpenAIChatModel": "grok-4-1-fast-non-reasoning",
+                "url": "https://api.x.ai/v1/chat/completions",
+                "headers": {
+                    "Authorization": "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json"
+                },
+                "params": {
+                    "model": "grok-4-1-fast-non-reasoning"
+                },
+                "requestsPerSecond": 10,
+                "maxTokenLength": 2000000,
                 "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
@@ -710,96 +894,6 @@ var config = convict({
                 },
                 "requestsPerSecond": 10,
                 "maxTokenLength": 2000000,
-                "maxReturnTokens": 128000,
-                "supportsStreaming": true
-            },
-            "xai-grok-4-fast-reasoning": {
-                "type": "GROK-VISION",
-                "emulateOpenAIChatModel": "grok-4-fast-reasoning",
-                "restStreaming": {
-                    "inputParameters": {
-                        "stream": false,
-                        "search_parameters": ""
-                    }
-                },
-                "url": "https://api.x.ai/v1/chat/completions",
-                "headers": {
-                    "Authorization": "Bearer {{XAI_API_KEY}}",
-                    "Content-Type": "application/json"
-                },
-                "params": {
-                    "model": "grok-4-fast-reasoning"
-                },
-                "requestsPerSecond": 10,
-                "maxTokenLength": 2000000,
-                "maxReturnTokens": 128000,
-                "supportsStreaming": true
-            },
-            "xai-grok-4-fast-non-reasoning": {
-                "type": "GROK-VISION",
-                "emulateOpenAIChatModel": "grok-4-fast-non-reasoning",
-                "restStreaming": {
-                    "inputParameters": {
-                        "stream": false,
-                        "search_parameters": ""
-                    }
-                },
-                "url": "https://api.x.ai/v1/chat/completions",
-                "headers": {
-                    "Authorization": "Bearer {{XAI_API_KEY}}",
-                    "Content-Type": "application/json"
-                },
-                "params": {
-                    "model": "grok-4-fast-non-reasoning"
-                },
-                "requestsPerSecond": 10,
-                "maxTokenLength": 256000,
-                "maxReturnTokens": 128000,
-                "supportsStreaming": true
-            },
-            "xai-grok-4-1-fast-responses": {
-                "type": "GROK-RESPONSES",
-                "emulateOpenAIChatModel": "grok-4-1-fast",
-                "restStreaming": {
-                    "inputParameters": {
-                        "stream": true,
-                        "tools": "",
-                        "inline_citations": true
-                    }
-                },
-                "url": "https://api.x.ai/v1/responses",
-                "headers": {
-                    "Authorization": "Bearer {{XAI_API_KEY}}",
-                    "Content-Type": "application/json"
-                },
-                "params": {
-                    "model": "grok-4-1-fast"
-                },
-                "requestsPerSecond": 10,
-                "maxTokenLength": 256000,
-                "maxReturnTokens": 128000,
-                "supportsStreaming": true
-            },
-            "xai-grok-4-responses": {
-                "type": "GROK-RESPONSES",
-                "emulateOpenAIChatModel": "grok-4-responses",
-                "restStreaming": {
-                    "inputParameters": {
-                        "stream": true,
-                        "tools": "",
-                        "inline_citations": true
-                    }
-                },
-                "url": "https://api.x.ai/v1/responses",
-                "headers": {
-                    "Authorization": "Bearer {{XAI_API_KEY}}",
-                    "Content-Type": "application/json"
-                },
-                "params": {
-                    "model": "grok-4"
-                },
-                "requestsPerSecond": 10,
-                "maxTokenLength": 256000,
                 "maxReturnTokens": 128000,
                 "supportsStreaming": true
             },
@@ -1111,7 +1205,7 @@ var config = convict({
         default: '',
         env: 'AZURE_BLOB_CONTAINER_NAME',
         doc: 'Azure Blob container for user files (blob mount in ACI workspaces)'
-    }
+    },
 });
 
 // Read in environment variables and set up service configuration
@@ -1119,9 +1213,6 @@ const configFile = config.get('cortexConfigFile');
 
 //Save default entity constants
 const defaultEntityConstants = config.get('entityConstants');
-
-//Save default entityConfig
-const defaultEntityConfig = config.get('entityConfig');
 
 // Load config file
 if (configFile && fs.existsSync(configFile)) {
@@ -1136,28 +1227,6 @@ if (configFile && fs.existsSync(configFile)) {
     } else {
         logger.info(`Using default model with OPENAI_API_KEY environment variable`)
     }
-}
-
-// Ensure merged default entity is preserved
-if (config.get('entityConfig') && defaultEntityConfig &&
-   (Object.keys(config.get('entityConfig')).length > Object.keys(defaultEntityConfig).length)) {
-    const mergedEntities = config.get('entityConfig');
-
-    // Turn off defaults from original default list
-    for (const [key, entity] of Object.entries(mergedEntities)) {
-        if (defaultEntityConfig[key] && entity.isDefault) {
-            delete mergedEntities[key];
-        }
-    }
-
-    // If no default found, make first entity default
-    let hasDefault = Object.values(mergedEntities).some(entity => entity.isDefault);
-    if (!hasDefault && Object.keys(mergedEntities).length > 0) {
-        const firstKey = Object.keys(mergedEntities)[0];
-        mergedEntities[firstKey].isDefault = true;
-    }
-
-    config.set('entityConfig', mergedEntities);
 }
 
 // Merge default entity constants with config entity constants
@@ -1305,14 +1374,22 @@ const buildPathways = async (config) => {
                 const defaultInputParams = modelName === 'oai-gpt4o' 
                     ? {
                         messages: [],
+                        responses_input_json: '',
                         tools: '',
                         tool_choice: 'auto',
-                        functions: ''
+                        functions: '',
+                        reasoningEffort: '',
+                        thinkingType: { type: 'string' },
+                        thinkingBudgetTokens: { type: 'integer' }
                     }
                     : {
                         messages: [{role: '', content: []}],
+                        responses_input_json: '',
                         tools: '',
-                        tool_choice: 'auto'
+                        tool_choice: 'auto',
+                        reasoningEffort: '',
+                        thinkingType: { type: 'string' },
+                        thinkingBudgetTokens: { type: 'integer' }
                     };
                 
                 // Merge with any custom input parameters
@@ -1423,7 +1500,8 @@ const buildPathways = async (config) => {
                     // Add tool to entityTools registry
                     entityTools[name] = {
                         definition: toolDef,
-                        pathwayName: key
+                        pathwayName: key,
+                        ...(pathway.timeout && { timeout: pathway.timeout * 1000 }), // pathway timeout (seconds → ms)
                     };
 
                     logger.info(`Registered tool ${name} from pathway ${key}`);

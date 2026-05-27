@@ -71,6 +71,24 @@ test('getPromptTokenRatio', (t) => {
     t.is(modelPlugin.getPromptTokenRatio(), DEFAULT_PROMPT_TOKEN_RATIO, 'getPromptTokenRatio should return default prompt token ratio');
 });
 
+test('getLength normalizes non-string logging payloads before token counting', (t) => {
+    const { modelPlugin } = t.context;
+
+    t.notThrows(() => modelPlugin.getLength({
+        output_text: '{"status":"succeeded"}',
+        artifacts: [{ type: 'image', url: 'https://example.com/image.png' }],
+    }));
+    t.notThrows(() => modelPlugin.getLength([
+        { type: 'text', text: 'hello' },
+        { type: 'image_url', image_url: { url: 'https://example.com/image.png' } },
+    ]));
+    t.notThrows(() => modelPlugin.getLength(123));
+
+    t.is(modelPlugin.normalizeLengthInput({ output_text: 'hello', artifacts: [] }), 'hello');
+    t.is(modelPlugin.normalizeLengthInput([{ type: 'text', text: 'hello' }]), '[{"type":"text","text":"hello"}]');
+    t.is(modelPlugin.normalizeLengthInput(123), '123');
+});
+
 test('getModelMaxPromptTokens', (t) => {
     const { modelPlugin } = t.context;
     

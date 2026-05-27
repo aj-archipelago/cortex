@@ -22,9 +22,13 @@ export default {
         // Check if prompt optimization is enabled
         if (optimizePrompt && finalPrompt) {
             try {
-                // Call the prompt optimizer pathway
-                const optimizerResult = await callPathway('image_prompt_optimizer_gemini_25', {
-                    userPrompt: finalPrompt,
+                // Call the shared media prompt assistant pathway
+                const optimizerResult = await callPathway('media_prompt_assistant', {
+                    prompt: finalPrompt,
+                    mediaType: 'image',
+                    model: args.model || 'gemini-pro-3-image',
+                    references: inputImages,
+                    referenceCount: inputImages.length,
                     hasInputImages: inputImages.length > 0
                 }, resolver);
                 
@@ -94,4 +98,3 @@ export default {
         {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE'}
     ],
 }
-

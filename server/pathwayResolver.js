@@ -1,5 +1,5 @@
 import { ModelExecutor } from './modelExecutor.js';
-import { modelEndpoints } from '../lib/requestExecutor.js';
+import { modelEndpoints, resolveModelName } from '../lib/requestExecutor.js';
 import { v4 as uuidv4 } from 'uuid';
 import { encode } from '../lib/encodeCache.js';
 import { getFirstNToken, getLastNToken, getSemanticChunks } from './chunker.js';
@@ -8,6 +8,7 @@ import { Prompt } from './prompt.js';
 import { getv, setv } from '../lib/keyValueStorageClient.js';
 import { getvWithDoubleDecryption, setvWithDoubleEncryption } from '../lib/keyValueStorageClient.js';
 import { requestState } from './requestState.js';
+import { normalizeUsage } from './rest/restUtils.js';
 import { callPathway, addCitationsToResolver } from '../lib/pathwayTools.js';
 import logger from '../lib/logger.js';
 import { publishRequestProgress } from '../lib/redisSubscription.js';
@@ -37,7 +38,8 @@ class PathwayResolver {
             args?.model,
             pathway.inputParameters?.model,
             config.get('defaultModelName')
-            ].find(modelName => modelName && Object.prototype.hasOwnProperty.call(this.endpoints, modelName));
+            ].map(name => name ? resolveModelName(name) : name)
+            .find(modelName => modelName && Object.prototype.hasOwnProperty.call(this.endpoints, modelName));
         this.model = this.endpoints[this.modelName];
 
         if (!this.model) {
@@ -48,7 +50,12 @@ class PathwayResolver {
 
         if (this.modelName !== (specifiedModelName)) {
             if (specifiedModelName) {
-                this.logWarning(`Specified model ${specifiedModelName} not found in config, using ${this.modelName} instead.`);
+                const modelGroups = config.get('modelGroups') || {};
+                const isResolvedModelGroup = Object.prototype.hasOwnProperty.call(modelGroups, specifiedModelName)
+                    && resolveModelName(specifiedModelName) === this.modelName;
+                if (!isResolvedModelGroup) {
+                    this.logWarning(`Specified model ${specifiedModelName} not found in config, using ${this.modelName} instead.`);
+                }
             } else {
                 this.logWarning(`No model specified in the pathway, using ${this.modelName}.`);
             }
@@ -272,6 +279,44 @@ class PathwayResolver {
         return merged;
     }
 
+    captureStreamUsage(payload) {
+        if (!payload || typeof payload !== 'string' || payload.trim() === '[DONE]') {
+            return;
+        }
+
+        let parsed;
+        try {
+            parsed = JSON.parse(payload);
+        } catch {
+            return;
+        }
+
+        const rawUsage = parsed.usage
+            || parsed.message?.usage
+            || parsed.response?.usage
+            || parsed.usageMetadata
+            || parsed.response?.usageMetadata;
+        const usage = normalizeUsage(rawUsage);
+        if (!usage) return;
+
+        const current = this._streamUsage || {};
+        const mergedUsage = {
+            ...current,
+            ...usage,
+        };
+        if (mergedUsage.total_tokens == null
+            && mergedUsage.input_tokens != null
+            && mergedUsage.output_tokens != null) {
+            mergedUsage.total_tokens = mergedUsage.input_tokens + mergedUsage.output_tokens;
+        }
+
+        this._streamUsage = mergedUsage;
+        this.pathwayResultData = {
+            ...(this.pathwayResultData || {}),
+            usage: [mergedUsage],
+        };
+    }
+
     async handleStream(response) {
         let streamErrorOccurred = false;
         let streamErrorMessage = null;
@@ -302,6 +347,7 @@ class PathwayResolver {
                         logger.debug(`data: ${event.data}`)
 
                         receivedSSEData = true; // Only mark SSE data when we get actual 'event' type
+                        this.captureStreamUsage(event.data);
 
                         // Check for error events in the stream data
                         try {
@@ -763,14 +809,14 @@ class PathwayResolver {
      * @throws {Error} If the new model is not found in the endpoints
      */
     swapModel(newModelName) {
-        // Validate that the new model exists in endpoints
-        if (!this.endpoints[newModelName]) {
-            throw new Error(`Model ${newModelName} not found in config`);
+        const resolvedName = resolveModelName(newModelName);
+        if (!this.endpoints[resolvedName]) {
+            throw new Error(`Model ${resolvedName} not found in config`);
         }
 
         // Update model references
-        this.modelName = newModelName;
-        this.model = this.endpoints[newModelName];
+        this.modelName = resolvedName;
+        this.model = this.endpoints[resolvedName];
 
         // Create new ModelExecutor with the new model
         this.modelExecutor = new ModelExecutor(this.pathway, this.model);
