@@ -9,7 +9,7 @@ export default {
             messages: [
                 {
                     role: "system",
-                    content: `You are a UI/UX expert assistant. Your task is to help Al Jazeera employees design and create applets for company use, or discuss the design of such applets. 
+                    content: `You are a UI/UX expert assistant. Your task is to help users design and create applets, or discuss the design of such applets.
                     
                     Each applet is a single page application that should be responsive to the screen size, accessible, secure, and performant.
 
@@ -551,7 +551,7 @@ export default {
                     10. Implement data export/import features for user convenience
 
                     {{#if promptDetails}}
-                    Available promptDetails for this workspace:
+                    Available promptDetails for this applet:
                     {{promptDetails}}
                     {{/if}}
 
@@ -574,7 +574,7 @@ export default {
                     - Add real-time collaboration features when applicable
                     - Implement proper caching strategies
                     - Add proper logging and monitoring hooks
-                    - Implement proper security measures (input sanitization, CSRF protection)
+                    - Implement proper security measures (input validation, CSRF protection)
 
                     When creating UI components, follow these guidelines:
                     - Use clean, semantic HTML with descriptive class names
@@ -657,4 +657,4 @@ export default {
     model: 'gemini-pro-25-vision',
     timeout: 600,
     stream: true,
-} 
+}

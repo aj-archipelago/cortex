@@ -10,6 +10,7 @@ export default {
     toolDefinition: [{
         type: "function",
         icon: "💾",
+        toolCost: 1,
         function: {
             name: "StoreMemory",
             description: "Use this tool to store information to your memory. Use this when the user asks you to remember something, or when you want to save important information from the conversation for future reference.",
@@ -88,9 +89,10 @@ export default {
                 return JSON.stringify({ error: `Invalid section: ${section}. Must be one of: ${validSections.join(', ')}` });
             }
             
-            // Use memory-specific priority if it's a valid number (1, 2, or 3), otherwise use default
-            const priority = (typeof memory.priority === 'number' && [1, 2, 3].includes(memory.priority))
-                ? memory.priority
+            // Use memory-specific priority if it's valid (1, 2, or 3), otherwise use default.
+            const parsedPriority = Number.parseInt(memory.priority, 10);
+            const priority = [1, 2, 3].includes(parsedPriority)
+                ? parsedPriority
                 : defaultPriority;
             
             // Format as: priority|timestamp|content

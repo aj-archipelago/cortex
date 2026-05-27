@@ -10,8 +10,10 @@ export default {
         })
     ],
     model: 'oai-gpt4o-mini',
+    inputParameters: {
+        reasoningEffort: 'none',
+    },
     temperature: 0.0,
     enableCache: true,
     enableDuplicateRequests: false,
 }
-
