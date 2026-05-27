@@ -34,6 +34,21 @@ test('RequestMonitor: getAverageCallDuration', async t => {
   t.truthy(average > 1400 && average < 1600);
 });
 
+test('RequestMonitor: keeps ping latency separate from live latency', t => {
+  const rm = new RequestMonitor();
+
+  rm.recordTTFB(100, 'ping');
+  rm.recordTTFB(1000, 'live');
+  rm.callStartTimes.set('ping-call', new Date(Date.now() - 10));
+  rm.endCall('ping-call', 'ping');
+
+  t.is(rm.getAverageTTFB('ping'), 100);
+  t.is(rm.getAverageTTFB(), 1000);
+  t.true(rm.getAverageCallDuration('ping') > 0);
+  t.is(rm.getAverageCallDuration(), 0);
+  t.true(Number.isFinite(rm.getSampleAge('ping')));
+});
+
 test('RequestMonitor: incrementError429Count', t => {
   const rm = new RequestMonitor();
 
