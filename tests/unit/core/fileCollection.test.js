@@ -2,13 +2,22 @@
 // Tests for file collection utility functions
 
 import test from 'ava';
-import { 
+import {
     extractFilesFromChatHistory,
-    formatFilesForTemplate,
     extractFilenameFromUrl,
     ensureFilenameExtension,
-    determineMimeTypeFromUrl
+    determineMimeTypeFromUrl,
+    findFileInCollection,
+    getWriteFileAccessTarget,
+    getWorkspacePathForFile,
+    constructFolderPath,
 } from '../../../lib/fileUtils.js';
+
+function createFileAccessPlan(contextId) {
+    return contextId
+        ? [{ kind: 'user-global', userContextId: contextId, write: true }]
+        : null;
+}
 
 // Test extractFilesFromChatHistory
 test('extractFilesFromChatHistory should extract files from array content', t => {
@@ -100,97 +109,113 @@ test('extractFilesFromChatHistory should handle invalid JSON gracefully', t => {
     t.is(files.length, 0);
 });
 
-
-// Test formatFilesForTemplate
-test('formatFilesForTemplate should format files correctly', t => {
+test('findFileInCollection should resolve workspace-style paths', t => {
     const collection = [
         {
             id: 'file-1',
-            url: 'https://example.com/image.jpg',
-            gcs: 'gs://bucket/image.jpg',
-            displayFilename: 'image.jpg',
+            name: 'chats/chat123/abc123_report.pdf',
+            filename: 'report.pdf',
+            displayFilename: 'report.pdf',
             hash: 'abc123',
-            addedDate: '2024-01-01T00:00:00Z',
-            lastAccessed: '2024-01-02T00:00:00Z',
-            tags: ['photo'],
-            notes: 'Test image'
+            url: 'https://example.blob.core.windows.net/container/chats/chat123/abc123_report.pdf?sig=xyz',
+            lastModified: '2024-01-01T00:00:00Z',
         },
+    ];
+
+    const found = findFileInCollection('/workspace/files/chats/chat123/abc123_report.pdf', collection);
+    t.truthy(found);
+    t.is(found.hash, 'abc123');
+
+    // file:// URL (as it arrives in chat history from workspace)
+    const foundFileUrl = findFileInCollection('file:///workspace/files/chats/chat123/abc123_report.pdf', collection);
+    t.truthy(foundFileUrl);
+    t.is(foundFileUrl.hash, 'abc123');
+});
+
+test('findFileInCollection should accept /files and relative files paths', t => {
+    const collection = [
         {
             id: 'file-2',
-            url: 'https://example.com/doc.pdf',
-            displayFilename: 'doc.pdf',
+            name: 'global/def456_image.png',
+            filename: 'image.png',
+            displayFilename: 'image.png',
             hash: 'def456',
-            addedDate: '2024-01-02T00:00:00Z',
-            lastAccessed: '2024-01-03T00:00:00Z'
-        }
+            url: 'https://example.blob.core.windows.net/container/global/def456_image.png?sig=xyz',
+            lastModified: '2024-01-02T00:00:00Z',
+        },
     ];
-    
-    const result = formatFilesForTemplate(collection);
-    // Should not include header or notes
-    t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
-    t.false(result.includes('Test image'));
-    // Should include hash, displayFilename, url, date, and tags
-    t.true(result.includes('def456 | doc.pdf | https://example.com/doc.pdf'));
-    t.true(result.includes('abc123 | image.jpg | https://example.com/image.jpg'));
-    t.true(result.includes('photo')); // tags should be included
-    t.true(result.includes('Jan')); // date should be included
-    // Should be sorted by lastAccessed (most recently accessed first)
-    const docIndex = result.indexOf('def456');
-    const imageIndex = result.indexOf('abc123');
-    t.true(docIndex < imageIndex, 'More recently accessed file should appear first');
+
+    t.is(findFileInCollection('/files/global/def456_image.png', collection)?.hash, 'def456');
+    t.is(findFileInCollection('files/global/def456_image.png', collection)?.hash, 'def456');
 });
 
-test('formatFilesForTemplate should handle empty collection', t => {
-    t.is(formatFilesForTemplate([]), 'No files available.');
-    t.is(formatFilesForTemplate(null), 'No files available.');
-});
-
-test('formatFilesForTemplate should handle files without optional fields', t => {
+test('findFileInCollection should fall back to basename when folder is wrong', t => {
     const collection = [
         {
-            id: 'file-1',
-            url: 'https://example.com/image.jpg',
-            displayFilename: 'image.jpg',
-            addedDate: '2024-01-01T00:00:00Z'
-        }
+            id: 'file-old',
+            name: 'chats/old/aaa111_report.pdf',
+            filename: 'report.pdf',
+            displayFilename: 'report.pdf',
+            hash: 'aaa111',
+            url: 'https://example.blob.core.windows.net/container/chats/old/aaa111_report.pdf?sig=old',
+            lastModified: '2024-01-01T00:00:00Z',
+        },
+        {
+            id: 'file-new',
+            name: 'chats/new/bbb222_report.pdf',
+            filename: 'report.pdf',
+            displayFilename: 'report.pdf',
+            hash: 'bbb222',
+            url: 'https://example.blob.core.windows.net/container/chats/new/bbb222_report.pdf?sig=new',
+            lastModified: '2024-02-01T00:00:00Z',
+        },
     ];
-    
-    const result = formatFilesForTemplate(collection);
-    // Should not include header
-    t.false(result.includes('Hash | Filename | URL | Date Added | Notes'));
-    // Should include displayFilename, url, and date even without hash or tags
-    t.true(result.includes('image.jpg'));
-    t.true(result.includes('https://example.com/image.jpg'));
-    // Date should be included (may be 2023 or 2024 due to timezone conversion)
-    t.true(result.includes('2023') || result.includes('2024'));
-    t.false(result.includes('Azure URL'));
-    t.false(result.includes('GCS URL'));
+
+    const found = findFileInCollection('/workspace/files/chats/wrong/report.pdf', collection);
+    t.truthy(found);
+    t.is(found.hash, 'bbb222');
 });
 
-test('formatFilesForTemplate should limit to 10 files and show note', t => {
-    const collection = Array.from({ length: 15 }, (_, i) => ({
-        id: `file-${i}`,
-        displayFilename: `file${i}.txt`,
-        hash: `hash${i}`,
-        url: `https://example.com/file${i}.txt`,
-        addedDate: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`,
-        lastAccessed: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00Z`
-    }));
-    
-    const result = formatFilesForTemplate(collection);
-    // Should only show 10 files - count file lines (excluding the note line)
-    const lines = result.split('\n');
-    // Count file lines (lines with | that are not the note line)
-    const fileLines = lines.filter(line => 
-        line.includes('|') && !line.includes('more file(s) available')
-    );
-    const fileCount = fileLines.length;
-    t.is(fileCount, 10);
-    // Should include compact note about more files
-    t.true(result.includes('more file(s) available'));
-    t.true(result.includes('5 more file(s) available'));
-    t.true(result.includes('ListFileCollection or SearchFileCollection'));
+test('getWorkspacePathForFile should prefer blob name with hash prefix', t => {
+    const file = {
+        name: 'chats/chat123/abc123_report.pdf',
+        filename: 'report.pdf',
+        displayFilename: 'report.pdf',
+    };
+
+    const workspacePath = getWorkspacePathForFile(file, null);
+    t.is(workspacePath, '/workspace/files/chats/chat123/abc123_report.pdf');
 });
+
+test('getWriteFileAccessTarget should return null when no file access target is writable', t => {
+    const target = getWriteFileAccessTarget([
+        { kind: 'user-global', userContextId: 'user-readonly', write: false },
+    ]);
+
+    t.is(target, null);
+});
+
+test('getWriteFileAccessTarget keeps app-private writes scoped to the applet folder in the user container', t => {
+    const target = getWriteFileAccessTarget([
+        {
+            kind: 'app-private',
+            userContextId: 'user-456',
+            workspaceId: 'workspace-123',
+            appletId: 'applet-123',
+            write: true,
+        },
+    ]);
+
+    t.truthy(target);
+    t.is(target.contextId, 'applet-user:applet-123:user-456');
+    t.is(target.userContextId, 'user-456');
+    t.is(target.appletId, 'applet-123');
+    t.is(target.workspaceId, 'workspace-123');
+    t.is(target.readFileScope, 'applet-user');
+    t.is(target.writeFileScope, 'applet-user');
+    t.true(target.write);
+});
+
 
 test('extractFilesFromChatHistory should handle mixed content types', t => {
     const chatHistory = [
@@ -453,24 +478,20 @@ test('getActualContentMimeType should use URL, not displayFilename', async t => 
 });
 
 test('addFileToCollection should preserve original displayFilename for converted files', async t => {
-    const { addFileToCollection } = await import('../../../lib/fileUtils.js');
+    const { addFileToCollection, getRedisClient } = await import('../../../lib/fileUtils.js');
     
-    // Simulate adding a file where URL points to converted content (.md) 
+    // Simulate adding a file where URL points to converted content (.md)
     // but user wants to keep original filename (.docx)
     const contextId = `test-converted-${Date.now()}`;
     const url = 'https://example.com/converted-file.md'; // Converted to markdown
-    const gcs = 'gs://bucket/converted-file.md';
     const originalFilename = 'original-document.docx'; // User's original filename
-    
+
     try {
         const fileEntry = await addFileToCollection(
             contextId,
             null,
             url,
-            gcs,
             originalFilename, // This should be preserved as displayFilename
-            [],
-            '',
             null,
             null,
             null,
@@ -482,17 +503,21 @@ test('addFileToCollection should preserve original displayFilename for converted
         
         // mimeType should be determined from URL (actual content)
         t.is(fileEntry.mimeType, 'text/markdown', 'mimeType should be from URL, not displayFilename');
+
+        const redisClient = await getRedisClient();
+        if (!redisClient) {
+            return;
+        }
         
         // Verify it was saved correctly
         const { loadFileCollection } = await import('../../../lib/fileUtils.js');
-        const collection = await loadFileCollection(contextId, { useCache: false });
+        const collection = await loadFileCollection(createFileAccessPlan(contextId), { useCache: false });
         t.is(collection.length, 1);
         t.is(collection[0].displayFilename, 'original-document.docx');
         t.is(collection[0].mimeType, 'text/markdown');
         t.is(collection[0].url, url);
     } finally {
         // Cleanup
-        const { getRedisClient } = await import('../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
         if (redisClient) {
             await redisClient.del(`FileStoreMap:ctx:${contextId}`);
@@ -520,7 +545,7 @@ test('syncAndStripFilesFromChatHistory should leave all files when no contextId'
     ];
     
     // No contextId - should leave files in place
-    const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, null, null);
+    const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, null);
     
     t.is(processedHistory[0].content[0].type, 'image_url');
     t.is(processedHistory[0].content[0].image_url.url, 'https://example.com/image.jpg');
@@ -546,7 +571,7 @@ test('syncAndStripFilesFromChatHistory should leave files when collection is emp
     ];
     
     // Empty collection - files should stay in place (not stripped)
-    const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, contextId, null);
+    const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, createFileAccessPlan(contextId));
     
     t.is(processedHistory[0].content[0].type, 'image_url');
     t.is(processedHistory[0].content[0].image_url.url, 'https://example.com/image.jpg');
@@ -555,10 +580,10 @@ test('syncAndStripFilesFromChatHistory should leave files when collection is emp
 test('syncAndStripFilesFromChatHistory should handle empty chat history', async t => {
     const { syncAndStripFilesFromChatHistory } = await import('../../../lib/fileUtils.js');
     
-    const { chatHistory: result1 } = await syncAndStripFilesFromChatHistory([], 'context', null);
+    const { chatHistory: result1 } = await syncAndStripFilesFromChatHistory([], createFileAccessPlan('context'));
     t.deepEqual(result1, []);
     
-    const { chatHistory: result2 } = await syncAndStripFilesFromChatHistory(null, 'context', null);
+    const { chatHistory: result2 } = await syncAndStripFilesFromChatHistory(null, createFileAccessPlan('context'));
     t.deepEqual(result2, []);
 });
 
@@ -585,7 +610,7 @@ test('syncAndStripFilesFromChatHistory should preserve non-file content', async 
         }
     ];
     
-    const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, contextId, null);
+    const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, createFileAccessPlan(contextId));
     
     // Text content should be preserved
     t.is(processedHistory[0].content[0].type, 'text');
@@ -599,4 +624,32 @@ test('syncAndStripFilesFromChatHistory should preserve non-file content', async 
     t.is(processedHistory[1].content, 'I see an image');
 });
 
+// ============================================================================
+// constructFolderPath
+// ============================================================================
 
+test('constructFolderPath produces stable folder storage paths', t => {
+    const cases = [
+        [{}, null],
+        [{ userId: 'u1' }, 'global'],
+        [{ userId: 'u1', fileScope: 'global' }, 'global'],
+        [{ userId: 'u1', fileScope: 'all' }, ''],
+        [{ userId: 'u1', chatId: 'c1', fileScope: 'chat' }, 'chats/c1'],
+        [{ userId: 'u1', fileScope: 'chat' }, 'global'],
+        [{ userId: 'u1', workspaceId: 'w1', fileScope: 'workspace-user-legacy' }, 'applets/w1'],
+        [{ contextId: 'applet-user:applet1:u1', fileScope: 'applet-user' }, 'applets/applet1'],
+        [{ userId: 'u1', appletId: 'applet1', fileScope: 'applet-user' }, 'applets/applet1'],
+        [{ userId: 'u1', fileScope: 'workspace-user-legacy' }, 'global'],
+        [{ userId: 'u1', fileScope: 'profile' }, 'profile'],
+        [{ userId: 'u1', fileScope: 'articles' }, 'articles'],
+        [{ userId: 'u1', fileScope: 'applets' }, 'applets'],
+        [{ workspaceId: 'w1', fileScope: 'workspace-shared-legacy' }, ''],
+        [{ fileScope: 'workspace-shared-legacy' }, null],
+        [{ userId: '../escape', fileScope: 'global' }, 'global'],
+        [{ userId: 'u1', chatId: '../bad', fileScope: 'chat' }, null],
+    ];
+
+    for (const [input, expected] of cases) {
+        t.is(constructFolderPath(input), expected, `Mismatch for input ${JSON.stringify(input)}`);
+    }
+});
