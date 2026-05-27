@@ -1,0 +1,13 @@
+{
+  "name": "transcribe-bench",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "LLM-as-judge benchmark for comparing ASR provider transcripts.",
+  "dependencies": {
+    "@aj-archipelago/subvibe": "^1.0.12"
+  },
+  "scripts": {
+    "bench": "node bench.mjs"
+  }
+}
