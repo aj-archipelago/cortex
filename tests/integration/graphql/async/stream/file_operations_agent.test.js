@@ -1,6 +1,6 @@
 // file_operations_agent.test.js
 // End-to-end integration tests for file operations with sys_entity_agent
-// Tests scenarios where files are uploaded directly to file handler (like Labeeb does)
+// Tests scenarios where files are uploaded directly to file handler (like a client does)
 // and then processed by sys_entity_agent
 
 import test from 'ava';
@@ -39,7 +39,7 @@ function getFileHandlerUrl() {
     return 'http://localhost:7071';
 }
 
-// Helper to upload file directly to file handler (like Labeeb does)
+// Helper to upload file directly to file handler (like a client does)
 async function uploadFileToHandler(content, filename, contextId) {
     const fileHandlerUrl = getFileHandlerUrl();
     if (!fileHandlerUrl || fileHandlerUrl === 'null') {
@@ -55,7 +55,7 @@ async function uploadFileToHandler(content, filename, contextId) {
     fs.writeFileSync(tempFilePath, content);
 
     try {
-        // Compute hash from content (client-side, like Labeeb does)
+        // Compute hash from content (client-side, like a client does)
         const contentBuffer = Buffer.from(content);
         const hash = await computeBufferHash(contentBuffer);
         
@@ -241,7 +241,7 @@ test('sys_entity_agent processes multiple files uploaded directly to file handle
     const chatId = `test-chat-${Date.now()}`;
     
     try {
-        // Upload 3 files directly to file handler (like Labeeb does)
+        // Upload 3 files directly to file handler (like a client does)
         // These will have contextId but no inCollection set
         const file1 = await uploadFileToHandler(
             'File 1 Content\nThis is the first test file with some content.',
@@ -468,7 +468,7 @@ test('sys_entity_agent processes files from compound context (user + workspace)'
         }
 
         // Create files in user context (encrypted)
-        // No inCollection set initially (like Labeeb uploads)
+        // No inCollection set initially (like direct uploads)
         const userFile1 = {
             id: `user-file-1-${Date.now()}`,
             url: 'https://example.com/user-document.pdf',
@@ -496,7 +496,7 @@ test('sys_entity_agent processes files from compound context (user + workspace)'
         };
         
         // Create files in workspace context (unencrypted)
-        // No inCollection set initially (like Labeeb uploads)
+        // No inCollection set initially (like direct uploads)
         const workspaceFile1 = {
             id: `workspace-file-1-${Date.now()}`,
             url: 'https://example.com/workspace-shared.pdf',
@@ -602,7 +602,7 @@ test('sys_entity_agent processes files from compound context (user + workspace)'
         
         t.truthy(result, 'Should return result');
         t.truthy(result.chatHistory, 'Should have processed chatHistory');
-        t.truthy(result.availableFiles, 'Should have availableFiles');
+        t.false('availableFiles' in result, 'File availability is exposed through file tools, not chat-history sync');
         
         // Verify files were stripped (replaced with placeholders)
         const processedContent = result.chatHistory[0].content;
@@ -836,4 +836,3 @@ test('sys_entity_agent processes real files from compound context (user + worksp
         }
     }
 });
-

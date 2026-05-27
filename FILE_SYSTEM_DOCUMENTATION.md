@@ -1002,7 +1002,7 @@ Loads merged file collection from one or more contexts.
   3. For each additional context, loads collection via `loadFileCollectionAll()` with its `contextKey`
   4. Deduplicates: earlier contexts take precedence if same file exists in multiple
   5. Returns merged collection (with `_contextId` stripped before returning)
-- **Used by**: `syncAndStripFilesFromChatHistory`, `getAvailableFiles`, `resolveFileParameter`, file tools
+- **Used by**: `syncAndStripFilesFromChatHistory`, `resolveFileParameter`, file tools
 
 #### `saveFileCollection(contextId, contextKey, collection)`
 Saves file collection to Redis hash map (optimized - only updates changed entries).
@@ -1055,19 +1055,16 @@ Adds file to collection via atomic operation.
   5. Merges with existing CFH data if hash already exists
 - **Used by**: WriteFile, Image tools, FileCollection tool
 
-#### `syncAndStripFilesFromChatHistory(chatHistory, agentContext)`
-Processes chat history files based on collection membership.
+#### `syncAndStripFilesFromChatHistory(chatHistory, fileAccessPlan)`
+Replaces file-like chat history payloads with compact placeholders when file access is available.
 - **Parameters**:
   - `chatHistory`: Chat history array to process
-  - `agentContext`: Array of context objects, each with `{ contextId, contextKey, default }` (required)
-- **Returns**: `{ chatHistory, availableFiles }` - processed chat history and formatted file list
+  - `fileAccessPlan`: Array of resolved file access targets (required)
+- **Returns**: `{ chatHistory }` - processed chat history
 - **Process**:
-  1. Loads merged file collection from all contexts in `agentContext`
-  2. For each file in chat history:
-     - If in collection: strip from message, update lastAccessed and inCollection in owning context (using that context's key)
-     - If not in collection: leave in message as-is
-  3. Returns processed history and available files string
-  4. Uses atomic operations per file, updating the context that owns each file (identified by `_contextId` tag)
+  1. Verifies a file access plan is available
+  2. Replaces user-message file and image payloads with compact placeholders
+  3. Leaves non-file content unchanged
 - **Used by**: `sys_entity_agent` to process incoming chat history
 
 ### File Resolution
@@ -1124,18 +1121,6 @@ Extracts file metadata from chat history messages.
   2. Extracts from `image_url`, `file`, or direct URL objects
   3. Returns normalized format
 - **Used by**: File extraction utilities
-
-#### `getAvailableFiles(chatHistory, agentContext)`
-Gets formatted list of available files from collection.
-- **Parameters**:
-  - `chatHistory`: Unused (kept for API compatibility)
-  - `agentContext`: Array of context objects, each with `{ contextId, contextKey, default }` (required)
-- **Returns**: Formatted string of available files (last 10 most recent)
-- **Process**:
-  1. Loads merged file collection from all contexts in `agentContext`
-  2. Formats files via `formatFilesForTemplate()`
-  3. Returns compact one-line format per file
-- **Used by**: Template rendering to show available files
 
 ### Utility Functions
 
@@ -1262,4 +1247,3 @@ All file operations flow through `lib/fileUtils.js`, ensuring consistency, maint
 - **File Collection System**: Redis hash maps for user file metadata
 - **Atomic Operations**: Thread-safe via Redis HSET/HDEL/HGET operations
 - **Context Isolation**: Per-context hash maps for multi-tenant support
-

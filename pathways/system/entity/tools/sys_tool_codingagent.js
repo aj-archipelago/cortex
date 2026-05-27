@@ -63,7 +63,7 @@ export default {
                         items: {
                             type: "string"
                         },
-                        description: "A list of input files (from Available Files section or ListFileCollection or SearchFileCollection) that the coding agent must use to complete the task. Each file should be the hash or filename. Omit this parameter if no input files are needed."
+                        description: "A list of input files (from ListFileCollection or SearchFileCollection) that the coding agent must use to complete the task. Each file should be the hash or filename. Omit this parameter if no input files are needed."
                     },
                     userMessage: {
                         type: "string",

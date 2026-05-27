@@ -984,10 +984,10 @@ test('updateFileMetadata should allow updating inCollection', async (t) => {
         t.is(success3, true);
         
         // Verify file still exists but inCollection is undefined (not in collection)
-        // When loading without chatIds, undefined files are included (Labeeb uploads, etc.)
+        // When loading without chatIds, undefined files are included (direct uploads, etc.)
         const collection4 = await loadFileCollection(contextId, { useCache: false });
         const file4 = collection4.find(f => f.id === fileId);
-        t.truthy(file4, 'File should still exist (false → undefined, treated same as Labeeb uploads)');
+        t.truthy(file4, 'File should still exist (false → undefined, treated same as direct uploads)');
         t.falsy(file4.inCollection, 'File should have undefined inCollection (not in collection)');
         
         // Not in chat-specific collection (undefined files don't match any chatId)
@@ -1086,7 +1086,8 @@ test('File collection: syncAndStripFilesFromChatHistory only strips collection f
         ];
         
         // Process chat history
-        const { chatHistory: processed, availableFiles } = await syncAndStripFilesFromChatHistory(chatHistory, createAgentContext(contextId));
+        const result = await syncAndStripFilesFromChatHistory(chatHistory, createAgentContext(contextId));
+        const { chatHistory: processed } = result;
         
         // Verify only collection file was stripped
         const content = processed[0].content;
@@ -1105,32 +1106,31 @@ test('File collection: syncAndStripFilesFromChatHistory only strips collection f
         const collection = await loadFileCollection(contextId, { useCache: false });
         t.is(collection.length, 1);
         
-        // Available files should list the collection file
-        t.true(availableFiles.includes('in-collection.jpg'));
+        t.false('availableFiles' in result, 'available files are discovered through file tools, not chat-history sync');
     } finally {
         await cleanup(contextId);
     }
 });
 
-test('File collection: syncAndStripFilesFromChatHistory finds and syncs files without inCollection (Labeeb uploads)', async t => {
+test('File collection: syncAndStripFilesFromChatHistory finds and syncs files without inCollection (direct uploads)', async t => {
     const contextId = createTestContext();
     const chatId = `test-chat-${Date.now()}`;
     
     try {
         const { syncAndStripFilesFromChatHistory, writeFileDataToRedis, getRedisClient, loadFileCollection } = await import('../../../../lib/fileUtils.js');
         
-        // Create 3 files directly in Redis without inCollection set (simulating Labeeb uploads)
+        // Create 3 files directly in Redis without inCollection set (simulating direct uploads)
         const redisClient = await getRedisClient();
         t.truthy(redisClient, 'Redis client should be available');
         
         const contextMapKey = `FileStoreMap:ctx:${contextId}`;
         
         const file1 = {
-            url: 'https://example.com/labeeb-file-1.txt',
-            gcs: 'gs://bucket/labeeb-file-1.txt',
-            hash: 'hash-labeeb-1',
-            filename: 'labeeb-file-1.txt',
-            displayFilename: 'labeeb-file-1.txt',
+            url: 'https://example.com/direct-file-1.txt',
+            gcs: 'gs://bucket/direct-file-1.txt',
+            hash: 'hash-direct-1',
+            filename: 'direct-file-1.txt',
+            displayFilename: 'direct-file-1.txt',
             mimeType: 'text/plain',
             addedDate: new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
@@ -1141,11 +1141,11 @@ test('File collection: syncAndStripFilesFromChatHistory finds and syncs files wi
         };
         
         const file2 = {
-            url: 'https://example.com/labeeb-file-2.txt',
-            gcs: 'gs://bucket/labeeb-file-2.txt',
-            hash: 'hash-labeeb-2',
-            filename: 'labeeb-file-2.txt',
-            displayFilename: 'labeeb-file-2.txt',
+            url: 'https://example.com/direct-file-2.txt',
+            gcs: 'gs://bucket/direct-file-2.txt',
+            hash: 'hash-direct-2',
+            filename: 'direct-file-2.txt',
+            displayFilename: 'direct-file-2.txt',
             mimeType: 'text/plain',
             addedDate: new Date().toISOString(),
             lastAccessed: new Date().toISOString(),
@@ -1156,11 +1156,11 @@ test('File collection: syncAndStripFilesFromChatHistory finds and syncs files wi
         };
         
         const file3 = {
-            url: 'https://example.com/labeeb-file-3.txt',
-            gcs: 'gs://bucket/labeeb-file-3.txt',
-            hash: 'hash-labeeb-3',
-            filename: 'labeeb-file-3.txt',
-            displayFilename: 'labeeb-file-3.txt',
+            url: 'https://example.com/direct-file-3.txt',
+            gcs: 'gs://bucket/direct-file-3.txt',
+            hash: 'hash-direct-3',
+            filename: 'direct-file-3.txt',
+            displayFilename: 'direct-file-3.txt',
             mimeType: 'text/plain',
             addedDate: new Date().toISOString(),
             lastAccessed: new Date().toISOString(),

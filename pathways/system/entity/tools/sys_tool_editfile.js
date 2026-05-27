@@ -85,7 +85,7 @@ export default {
                     properties: {
                         file: {
                             type: "string",
-                            description: "The file to modify: can be the file ID, filename, URL, or hash from your file collection. You can find available files in the Available Files section or ListFileCollection or SearchFileCollection."
+                            description: "The file to modify: can be the file ID, filename, URL, or hash from your file collection. Use ListFileCollection or SearchFileCollection to find available files."
                         },
                         startLine: {
                             type: "number",
@@ -119,7 +119,7 @@ export default {
                     properties: {
                         file: {
                             type: "string",
-                            description: "The file to modify: can be the file ID, filename, URL, or hash from your file collection. You can find available files in the Available Files section or ListFileCollection or SearchFileCollection."
+                            description: "The file to modify: can be the file ID, filename, URL, or hash from your file collection. Use ListFileCollection or SearchFileCollection to find available files."
                         },
                         oldString: {
                             type: "string",
