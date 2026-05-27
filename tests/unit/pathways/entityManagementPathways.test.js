@@ -160,5 +160,21 @@ test('StoreSecret tool definition is explicitly system-scoped', t => {
     t.is(definition.category, 'system');
     t.is(definition.function.name, 'StoreSecret');
     t.true(definition.function.description.includes('/workspace/.env'));
+    t.true(definition.function.description.includes('without handling plaintext again'));
+    t.true(definition.function.parameters.properties.name.description.includes('GITHUB_TOKEN'));
     t.deepEqual(definition.function.parameters.required, ['name', 'userMessage']);
+});
+
+test('StoreSecret rejects invalid names with concrete guidance', async t => {
+    const result = JSON.parse(await storeSecret.executePathway({
+        args: {
+            entityId: 'entity-1',
+            name: 'not valid',
+            value: 'secret-value',
+        },
+    }));
+
+    t.false(result.success);
+    t.true(result.error.includes('UPPER_SNAKE_CASE'));
+    t.true(result.error.includes('GITHUB_TOKEN'));
 });
