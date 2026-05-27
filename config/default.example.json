@@ -14,7 +14,7 @@
         },
         "azure-bing-agent": {
             "type": "AZURE-FOUNDRY-AGENTS",
-            "url": "https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry",
+            "url": "https://example-foundry-resource.services.ai.azure.com/api/projects/example-project",
             "agentId": "asst_assistantid",
             "headers": {
                 "Content-Type": "application/json"
@@ -146,6 +146,49 @@
             "maxTokenLength": 131072,
             "maxReturnTokens": 4096,
             "supportsStreaming": true
+        },
+        "oai-gpt-image-2": {
+            "type": "OPENAI-DALLE3",
+            "endpoints": [
+                {
+                    "name": "GPT Image 2",
+                    "url": "https://example-openai-resource.openai.azure.com/openai/deployments/gpt-image-2/images/generations?api-version=2024-02-01",
+                    "headers": {
+                        "api-key": "{{AZURE_OPENAI_API_KEY}}",
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 2
+                }
+            ],
+            "metadata": {
+                "displayName": "GPT Image 2",
+                "category": "image",
+                "isDefault": true,
+                "pathwayName": "image_gpt_image_2",
+                "resultKey": "image_gpt_image_2",
+                "preferredUrlFormat": "azure",
+                "mediaDefaults": {
+                    "inputImages": [
+                        0,
+                        10
+                    ],
+                    "quality": "high",
+                    "aspectRatio": "1:1",
+                    "image_size": "1K"
+                },
+                "availableAspectRatios": [
+                    "1:1",
+                    "16:9",
+                    "9:16",
+                    "4:3",
+                    "3:4"
+                ],
+                "availableImageSizes": [
+                    "1K",
+                    "2K",
+                    "4K"
+                ]
+            }
         },
         "local-llama13B": {
             "type": "LOCAL-CPP-MODEL",
