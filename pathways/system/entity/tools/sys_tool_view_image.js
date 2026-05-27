@@ -1,15 +1,28 @@
 // sys_tool_view_image.js
 // Tool pathway that allows agents to view image files from the file collection
 import logger from '../../../../lib/logger.js';
-import { loadFileCollection, findFileInCollection, ensureShortLivedUrl } from '../../../../lib/fileUtils.js';
+import {
+    ensureShortLivedUrl,
+    findFileInFileAccessPlan,
+    normalizeFileAccessPlan,
+} from '../../../../lib/fileUtils.js';
 import { config } from '../../../../config.js';
+
+const IMAGE_EXT_RE = /\.(jpg|jpeg|png|gif|bmp|webp|svg)(?:$|[?#])/i;
+
+function isImageLike(fileRef, fileObj = {}) {
+    const mimeType = fileObj.mimeType || fileObj.contentType || '';
+    return mimeType.startsWith('image/') ||
+        IMAGE_EXT_RE.test(fileObj.filename || fileObj.displayFilename || fileRef || fileObj.url || fileObj.gcs || '');
+}
 
 export default {
     prompt: [],
     timeout: 30,
-    toolDefinition: { 
+    toolDefinition: {
         type: "function",
         icon: "👀",
+        toolCost: 1,
         function: {
             name: "ViewImages",
             description: "View one or more image files from your file collection. This injects the images into the conversation so you can see them. Use this when you need to look at image files that are in your collection but not currently visible in the conversation.",
@@ -21,7 +34,7 @@ export default {
                         items: {
                             type: "string"
                         },
-                        description: "Array of files to view (from ListFileCollection or SearchFileCollection): each can be the hash, the filename, the URL, or the GCS URL. You can find available files in the availableFiles section."
+                        description: "Array of files to view. Prefer blobPath, workspacePath like /workspace/files/..., or URL from the file object. Hashes and filenames are supported as legacy fallbacks when no direct path/URL is available."
                     },
                     userMessage: {
                         type: "string",
@@ -40,22 +53,21 @@ export default {
             throw new Error("Files parameter is required and must be a non-empty array");
         }
 
-        if (!args.agentContext || !Array.isArray(args.agentContext) || args.agentContext.length === 0) {
-            throw new Error("agentContext is required");
+        const fileAccessPlan = normalizeFileAccessPlan(args.fileAccessPlan);
+        if (fileAccessPlan.length === 0) {
+            throw new Error("fileAccessPlan is required");
         }
 
         try {
-            // Load the file collection from all agentContext contexts
-            const collection = await loadFileCollection(args.agentContext);
-            
+            const fileHandlerUrl = config.get('whisperMediaApiUrl');
+
             const imageUrls = [];
             const errors = [];
             const foundFilenames = [];
 
             // Process each file
             for (const file of files) {
-                // Find the file in the collection
-                const foundFile = findFileInCollection(file, collection);
+                const foundFile = await findFileInFileAccessPlan(file, fileAccessPlan, { fileHandlerUrl });
                 
                 if (!foundFile) {
                     errors.push(`File not found: ${file}`);
@@ -64,8 +76,7 @@ export default {
 
                 // Check if it's an image by MIME type
                 const mimeType = foundFile.mimeType || foundFile.contentType || '';
-                const isImage = mimeType.startsWith('image/') || 
-                              /\.(jpg|jpeg|png|gif|bmp|webp|svg)$/i.test(foundFile.filename || '');
+                const isImage = isImageLike(file, foundFile);
 
                 if (!isImage) {
                     errors.push(`File "${foundFile.filename || file}" is not an image file (MIME type: ${mimeType || 'unknown'})`);
@@ -73,8 +84,11 @@ export default {
                 }
 
                 // Resolve to short-lived URL if possible
-                const fileHandlerUrl = config.get('whisperMediaApiUrl');
-                const fileWithShortLivedUrl = await ensureShortLivedUrl(foundFile, fileHandlerUrl, args.contextId || null);
+                const fileWithShortLivedUrl = await ensureShortLivedUrl(
+                    foundFile,
+                    fileHandlerUrl,
+                    foundFile._contextId || null,
+                );
 
                 // Add to imageUrls array
                 imageUrls.push({
@@ -82,7 +96,8 @@ export default {
                     url: fileWithShortLivedUrl.url,
                     gcs: fileWithShortLivedUrl.gcs,
                     image_url: { url: fileWithShortLivedUrl.url },
-                    hash: fileWithShortLivedUrl.hash
+                    hash: fileWithShortLivedUrl.hash,
+                    originalFilename: foundFile.filename || file
                 });
 
                 foundFilenames.push(foundFile.filename || file);
@@ -115,4 +130,3 @@ export default {
         }
     }
 };
-
