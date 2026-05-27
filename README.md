@@ -962,8 +962,6 @@ The repo includes helper apps used by larger Cortex deployments:
 - `helper-apps/cortex-doc-to-pdf`: document conversion service and examples.
 - `helper-apps/cortex-realtime-voice-server`: realtime voice support.
 - `helper-apps/cortex-markitdown`: document-to-markdown helper.
-- `helper-apps/cortex-autogen2`: experimental multi-agent helper code.
-- `helper-apps/transcribe-bench`: transcription benchmarking tooling.
 - `helper-apps/mogrt-handler`: motion graphics template handling.
 
 Some helper apps have their own README files and deployment assumptions.
