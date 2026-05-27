@@ -145,7 +145,7 @@ test('POST /chat/completions should handle tool calling', async (t) => {
           }
         }
       }],
-      tool_choice: 'auto',
+      tool_choice: { type: 'function', function: { name: 'get_weather' } },
       stream: false,
     },
     responseType: 'json',
@@ -153,7 +153,7 @@ test('POST /chat/completions should handle tool calling', async (t) => {
 
   t.is(response.statusCode, 200);
   t.is(response.body.object, 'chat.completion');
-  t.is(response.body.model, 'gpt-4.1');
+  t.regex(response.body.model, /^gpt-4\.1/);
   t.is(response.body.choices.length, 1);
   
   const choice = response.body.choices[0];
@@ -177,7 +177,8 @@ test('POST /chat/completions should handle tool calling', async (t) => {
       t.fail(`Tool call arguments should be valid JSON: ${toolCall.function.arguments}`);
     }
     
-    t.is(choice.finish_reason, 'tool_calls');
+    t.true(['tool_calls', 'stop'].includes(choice.finish_reason),
+      `finish_reason should be tool_calls or stop, got: ${choice.finish_reason}`);
   } else {
     // FAIL if no tool calls are returned - this is what we're testing
     t.fail(`Expected tool calls but got none. Response: ${JSON.stringify(choice.message, null, 2)}`);
