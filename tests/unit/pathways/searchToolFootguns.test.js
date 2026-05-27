@@ -1,6 +1,7 @@
 import test from 'ava';
 
 import googleSearchTool from '../../../pathways/system/entity/tools/sys_tool_google_search.js';
+import grokLiveSearch from '../../../pathways/grok_live_search.js';
 import grokXSearchTool from '../../../pathways/system/entity/tools/sys_tool_grok_x_search.js';
 import validateUrlTool from '../../../pathways/system/entity/tools/sys_tool_validate_url.js';
 
@@ -20,6 +21,10 @@ test('SearchXPlatform uses current Grok Responses model', t => {
 
     t.true(source.includes("model: 'xai-grok-4-20-responses'"));
     t.false(source.includes("model: 'xai-grok-4-1-fast-responses'"));
+});
+
+test('grok_live_search defaults to current Grok Responses model', t => {
+    t.is(grokLiveSearch.model, 'xai-grok-4-20-responses');
 });
 
 test('ValidateUrl has explicit low tool cost', t => {
