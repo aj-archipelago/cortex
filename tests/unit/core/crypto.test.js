@@ -104,3 +104,18 @@ test('decrypt should handle plain text that looks like encrypted format (3 parts
     // Should return as-is because it doesn't match expected format
     t.is(result, plainText);
 });
+
+test('decrypt should return already-deserialized objects without warning', t => {
+    const plainObject = { message: 'test', number: 42 };
+    t.deepEqual(decrypt(plainObject, systemKey), plainObject);
+});
+
+test('decrypt should return null for null and undefined without warning', t => {
+    t.is(decrypt(null, systemKey), null);
+    t.is(decrypt(undefined, systemKey), null);
+});
+
+test('decrypt should return numbers and booleans as-is', t => {
+    t.is(decrypt(42, systemKey), 42);
+    t.is(decrypt(true, systemKey), true);
+});
