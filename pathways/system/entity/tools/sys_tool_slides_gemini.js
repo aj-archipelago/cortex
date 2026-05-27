@@ -1,7 +1,15 @@
 // sys_tool_slides_gemini.js
 // Entity tool that creates slides, infographics, and presentations using Gemini 3 Pro image generation
 import { callPathway } from '../../../../lib/pathwayTools.js';
-import { uploadImageToCloud, addFileToCollection, resolveFileParameter, buildFileCreationResponse } from '../../../../lib/fileUtils.js';
+import {
+    uploadImageToCloud,
+    addFileToCollection,
+    resolveFileParameter,
+    buildFileCreationResponse,
+    buildFileLocation,
+    promptToFilename,
+    getWriteFileAccessTarget,
+} from '../../../../lib/fileUtils.js';
 
 export default {
     prompt: [],
@@ -25,7 +33,7 @@ export default {
                 properties: {
                     detailedInstructions: {
                         type: "string",
-                        description: "A very detailed prompt describing the slide, infographic, or presentation content you want to create. Be specific about the layout, design style, content structure, color scheme, typography preferences, and any specific elements you want included (e.g., 'Create a professional slide with a title at the top, three bullet points in the middle, and a chart on the right side. Use a blue and white color scheme with modern sans-serif fonts.'). For infographics, specify the data visualization needs, layout structure, and visual hierarchy. The more detailed and descriptive the prompt, the better the result."
+                        description: "A very detailed, SELF-CONTAINED prompt describing the slide content. CRITICAL: The image generation model has NO access to conversation history, uploaded files, or prior tool results. You MUST embed ALL data, text, numbers, labels, and values directly in these instructions. For charts or data visualizations, list EVERY data point explicitly (e.g., 'Bar chart showing: example.com: 16, sample.org: 12, demo.net: 11, ...'). Never refer to 'the data above' or 'the attached file' - the model cannot see them. Also specify layout, design style, color scheme, and typography (e.g., 'Professional slide with a horizontal bar chart, blue and white color scheme, modern sans-serif fonts, title at top.'). The more complete and self-contained the prompt, the better the result."
                     },
                     filenamePrefix: {
                         type: "string",
@@ -47,7 +55,7 @@ export default {
                         items: {
                             type: "string"
                         },
-                        description: "Optional: Array of file references (hashes, filenames, or URLs) from the file collection to use as reference images for the slide design. These images will be used as style references or incorporated into the slide. Maximum 3 images."
+                        description: "Optional: Array of file references (hashes, filenames, URLs, or workspace paths like /workspace/files/...) from the file collection to use as reference images for the slide design. These images will be used as style references or incorporated into the slide. Maximum 3 images."
                     },
                     aspectRatio: {
                         type: "string",
@@ -62,6 +70,8 @@ export default {
     executePathway: async ({args, runAllPrompts, resolver}) => {
         const pathwayResolver = resolver;
         const chatId = args.chatId || null;
+        const fileAccessPlan = Array.isArray(args.fileAccessPlan) ? args.fileAccessPlan : [];
+        const writeTarget = getWriteFileAccessTarget(fileAccessPlan);
 
         try {   
             let model = "gemini-pro-3-image";
@@ -72,8 +82,8 @@ export default {
             // Fail early if any provided image cannot be resolved
             const resolvedInputImages = [];
             if (args.inputImages && Array.isArray(args.inputImages)) {
-                if (!args.agentContext || !Array.isArray(args.agentContext) || args.agentContext.length === 0) {
-                    throw new Error("agentContext is required when using the 'inputImages' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
+                if (fileAccessPlan.length === 0) {
+                    throw new Error("fileAccessPlan is required when using the 'inputImages' parameter. Use ListFileCollection or SearchFileCollection to find available files.");
                 }
                 
                 // Limit to 3 images maximum
@@ -81,7 +91,7 @@ export default {
                 
                 for (let i = 0; i < imagesToProcess.length; i++) {
                     const imageRef = imagesToProcess[i];
-                    const resolved = await resolveFileParameter(imageRef, args.agentContext, { preferGcs: true });
+                    const resolved = await resolveFileParameter(imageRef, fileAccessPlan, { preferGcs: true });
                     if (!resolved) {
                         throw new Error(`File not found: "${imageRef}". Use ListFileCollection or SearchFileCollection to find available files.`);
                     }
@@ -136,8 +146,23 @@ export default {
                 for (const artifact of pathwayResolver.pathwayResultData.artifacts) {
                     if (artifact.type === 'image' && artifact.data && artifact.mimeType) {
                         try {
+                            const extension = artifact.mimeType.split('/')[1] || 'png';
+                            const uploadFilename = promptToFilename(prompt, extension, {
+                                prefix: args.filenamePrefix || 'presentation-slide',
+                                index: uploadedImages.length,
+                            });
+
                             // Upload image to cloud storage (returns {url, gcs, hash})
-                            const uploadResult = await uploadImageToCloud(artifact.data, artifact.mimeType, pathwayResolver, args.contextId);
+                            const fileLocation = writeTarget
+                                ? buildFileLocation(writeTarget.contextId, {
+                                    userId: writeTarget.userContextId || null,
+                                    chatId: writeTarget.chatId || null,
+                                    workspaceId: writeTarget.workspaceId || null,
+                                    appletId: writeTarget.appletId || null,
+                                    fileScope: writeTarget.writeFileScope || null,
+                                })
+                                : null;
+                            const uploadResult = await uploadImageToCloud(artifact.data, artifact.mimeType, pathwayResolver, fileLocation, uploadFilename);
                             
                             const imageUrl = uploadResult.url || uploadResult;
                             const imageGcs = uploadResult.gcs || null;
@@ -153,40 +178,24 @@ export default {
                             };
                             
                             // Add uploaded image to file collection if contextId is available
-                            if (args.contextId && imageUrl) {
+                            if (writeTarget?.contextId && imageUrl) {
                                 try {
-                                    // Generate filename from mimeType (e.g., "image/png" -> "png")
-                                    const extension = artifact.mimeType.split('/')[1] || 'png';
-                                    // Use hash for uniqueness if available, otherwise use timestamp and index
-                                    const uniqueId = imageHash ? imageHash.substring(0, 8) : `${Date.now()}-${uploadedImages.length}`;
-                                    
-                                    // Determine filename prefix
-                                    const defaultPrefix = 'presentation-slide';
-                                    const filenamePrefix = args.filenamePrefix || defaultPrefix;
-                                    
-                                    // Sanitize the prefix to ensure it's a valid filename component
-                                    const sanitizedPrefix = filenamePrefix.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-                                    const filename = `${sanitizedPrefix}-${uniqueId}.${extension}`;
-                                    
-                                    // Merge provided tags with default tags
-                                    const defaultTags = ['presentation', 'generated'];
-                                    const providedTags = Array.isArray(args.tags) ? args.tags : [];
-                                    const allTags = [...defaultTags, ...providedTags.filter(tag => !defaultTags.includes(tag))];
-                                    
                                     // Use the centralized utility function to add to collection - capture returned entry
                                     const fileEntry = await addFileToCollection(
-                                        args.contextId,
-                                        args.contextKey || '',
+                                        writeTarget.contextId,
+                                        writeTarget.contextKey || '',
                                         imageUrl,
-                                        imageGcs,
-                                        filename,
-                                        allTags,
-                                        `Generated presentation content from prompt: ${args.detailedInstructions || 'presentation generation'}`,
+                                        uploadFilename,
                                         imageHash,
                                         null,
                                         pathwayResolver,
-                                        true, // permanent => retention=permanent
-                                        chatId
+                                        true, // mark collection metadata as permanent
+                                        writeTarget.chatId || null,
+                                        {
+                                            workspaceId: writeTarget.workspaceId || null,
+                                            appletId: writeTarget.appletId || null,
+                                            fileScope: writeTarget.writeFileScope || null,
+                                        }
                                     );
                                     
                                     // Use the file entry data for the return message
@@ -212,26 +221,9 @@ export default {
                 // Check if we successfully uploaded any images
                 const successfulImages = uploadedImages.filter(img => img.url);
                 if (successfulImages.length > 0) {
-                    // Build imageUrls array in the format expected by pathwayTools.js for toolImages injection
-                    // This format matches ViewImages tool so images get properly injected into chat history
-                    const imageUrls = successfulImages.map((img) => {
-                        const url = img.fileEntry?.url || img.url;
-                        const gcs = img.fileEntry?.gcs || img.gcs;
-                        const hash = img.fileEntry?.hash || img.hash;
-                        
-                        return {
-                            type: "image_url",
-                            url: url,
-                            gcs: gcs || null,
-                            image_url: { url: url },
-                            hash: hash || null
-                        };
-                    });
-                    
                     return buildFileCreationResponse(successfulImages, {
                         mediaType: 'image',
-                        action: 'Slide/infographic generation',
-                        legacyUrls: imageUrls
+                        action: 'Slide/infographic generation'
                     });
                 } else {
                     throw new Error('Slide generation failed: Content was generated but could not be uploaded to storage');
@@ -281,4 +273,3 @@ export default {
         }
     }
 };
-
