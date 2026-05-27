@@ -479,6 +479,8 @@ export class StorageService {
       let pathParts = urlObj.pathname.split('/').filter(p => p.length > 0);
       if (pathParts[0] === AZURITE_ACCOUNT_NAME) {
         pathParts = pathParts.slice(1);
+      } else if (!urlObj.hostname.includes('blob.core.windows.net')) {
+        return null;
       }
       return pathParts[0] || null;
     } catch { return null; }

@@ -382,10 +382,10 @@ const removeFromFileStoreMap = async (hash, contextId = null) => {
     
     let result = 0;
     
-    // First, try to delete from unscoped map
-    if (!contextId) {
-      result = await client.hdel("FileStoreMap", hash);
-    }
+    // Always try to delete from the unscoped map. Older callers and legacy
+    // uploads may have written there even when the delete request has a
+    // logical contextId.
+    result = await client.hdel("FileStoreMap", hash);
     
     // Also try to delete from context-scoped map if contextId is provided
     if (contextId) {
