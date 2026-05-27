@@ -1200,6 +1200,11 @@ async function uploadWorkspaceArchiveFromLegacyShare(entityId, workspace, archiv
         throw new Error(`Cannot copy non-standard legacy checkpoint path from Azure Files: ${archivePath}`);
     }
 
+    const { accountName, accountKey } = getWorkspaceFilesStorageAccount();
+    if (!accountName || !accountKey) {
+        throw new Error('Workspace Azure Files storage credentials are required for legacy checkpoint migration');
+    }
+
     if (_workspaceLegacyShareUploadOverride) {
         return await _workspaceLegacyShareUploadOverride({
             entityId,
@@ -1208,11 +1213,6 @@ async function uploadWorkspaceArchiveFromLegacyShare(entityId, workspace, archiv
             blobPath,
             shareName,
         });
-    }
-
-    const { accountName, accountKey } = getWorkspaceFilesStorageAccount();
-    if (!accountName || !accountKey) {
-        throw new Error('Workspace Azure Files storage credentials are required for legacy checkpoint migration');
     }
 
     const {
@@ -1615,8 +1615,6 @@ async function recoverWorkspaceAuthWithBootstrapSecret(entityId, entityConfig) {
 
 async function fetchWorkspaceJson(url, secret, endpoint, options = {}) {
     const timeoutMs = options.timeoutMs || 30000;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     let response;
     try {
         response = await fetch(`${url}${endpoint}`, {
@@ -1626,12 +1624,10 @@ async function fetchWorkspaceJson(url, secret, endpoint, options = {}) {
                 'Content-Type': 'application/json',
             },
             ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-            signal: controller.signal,
+            signal: AbortSignal.timeout(timeoutMs),
         });
     } catch (e) {
         throw new Error(`${endpoint} fetch failed: ${e.message}`);
-    } finally {
-        clearTimeout(timeout);
     }
     const body = await response.json().catch(() => ({}));
     return { response, body };
