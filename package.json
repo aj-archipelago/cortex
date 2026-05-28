@@ -1,6 +1,6 @@
 {
   "name": "@aj-archipelago/cortex",
-  "version": "1.4.34",
+  "version": "1.5.0",
   "description": "Open-source AI backend control plane for model routing, agent tools, OpenAI-compatible APIs, and private workspaces.",
   "private": false,
   "repository": {
