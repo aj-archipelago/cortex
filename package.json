@@ -1,7 +1,7 @@
 {
   "name": "@aj-archipelago/cortex",
   "version": "1.4.34",
-  "description": "Cortex is a GraphQL API for AI. It provides a simple, extensible interface for using AI services from OpenAI, Azure and others.",
+  "description": "Open-source AI backend control plane for model routing, agent tools, OpenAI-compatible APIs, and private workspaces.",
   "private": false,
   "repository": {
     "type": "git",
@@ -10,10 +10,17 @@
   "keywords": [
     "cortex",
     "AI",
+    "ai-agent",
+    "ai-workspace",
     "router",
+    "model router",
+    "llm-router",
     "GPT",
     "agents",
     "entities",
+    "MCP",
+    "openai-compatible",
+    "anthropic-compatible",
     "prompt engineering",
     "LLM",
     "OpenAI",
