@@ -1,17 +1,28 @@
 # Cortex
 
-Cortex is an open model router and agent runtime for teams that do not want their AI stack trapped inside one provider, one SDK, or one brittle prompt chain.
+[![npm version](https://img.shields.io/npm/v/@aj-archipelago/cortex.svg)](https://www.npmjs.com/package/@aj-archipelago/cortex)
+[![License: MIT](https://img.shields.io/badge/license-MIT-2f855a.svg)](LICENSE)
+[![Node.js 20+](https://img.shields.io/badge/node-20%2B-2f855a.svg)](package.json)
 
-It gives you one programmable control plane for:
+Cortex is an open-source AI backend control plane: model routing, agent tools, OpenAI-compatible APIs, and private workspaces behind one programmable runtime.
 
-- **Any model, any time, any protocol.** Route OpenAI, Azure OpenAI, Gemini, Claude on Vertex, Grok, Replicate-hosted media models, Ollama, local models, and custom provider plugins through GraphQL, REST, OpenAI-compatible chat/completions/responses, and Anthropic-style messages APIs.
-- **Live model routing.** Use model groups, redirects, per-request model overrides, endpoint health, duplicate-request hedging, and background latency sampling so "the default model" can be a strategy instead of a hardcoded string.
-- **Agentic harnesses that can work.** `sys_entity_agent` combines entity configuration, tools, MCP discovery, client-side tools, request-scoped tools, streaming progress, tool-result compaction, and memory-aware context into one reusable agent pathway.
-- **Private containerized workspaces.** Cortex can attach an entity to its own isolated workspace: a Docker or Azure Container Instances sandbox with shell access, file APIs, checkpoint/restore, warm-pool provisioning, and secret injection.
+It is built for teams that want the modern AI stack without welding their product to one provider SDK, one brittle prompt chain, or one proprietary agent loop.
 
-Pathways are still here. They are useful. But the modern Cortex story is bigger: Cortex is the layer between your product and a chaotic model/provider/tool landscape. It lets you move fast without welding your application to yesterday's API.
+![Cortex architecture: applications connect to one Cortex runtime for model routing, agent tools, entity memory, and isolated workspaces.](docs/assets/cortex-architecture.svg)
+
+## What You Get
+
+- **One API for many providers.** Route OpenAI, Azure OpenAI, Gemini, Claude on Vertex, Grok, Replicate-hosted media models, Ollama, local models, and custom provider plugins through GraphQL, REST, OpenAI-compatible chat/completions/responses, and Anthropic-style messages APIs.
+- **Routing that can adapt.** Use model groups, redirects, per-request model overrides, endpoint health, duplicate-request hedging, and background latency sampling so "the default model" can be a strategy instead of a hardcoded string.
+- **An agent harness you can own.** `sys_entity_agent` combines entity configuration, tools, MCP discovery, client-side tools, request-scoped tools, streaming progress, tool-result compaction, and memory-aware context into one reusable agent pathway.
+- **Private workspaces for real work.** Attach each entity to an isolated Docker or Azure Container Instances workspace with shell access, file APIs, checkpoint/restore, warm-pool provisioning, and secret injection.
+- **Simple extension points.** Add a capability with one pathway file, then graduate to `executePathway` when you need validation, orchestration, custom tools, provider-specific handling, or richer result metadata.
 
 ## Why Cortex Exists
+
+The frontier AI product pattern is getting clearer: multi-model routing, agentic tool loops, entity personalization, memory, MCP-style tool discovery, client-side tool callbacks, and dedicated agent workspaces. Big products and funded startups are converging on those pieces because serious AI apps need more than a chat wrapper.
+
+Cortex puts those pieces in one open backend that you can run, inspect, customize, and embed.
 
 Model APIs keep changing. Capabilities move between providers. Latency shifts by region and hour. Agent tool catalogs grow until the model drowns in schemas. Workspace execution needs isolation, persistence, and recoverability. Product teams still need one stable API.
 
@@ -24,18 +35,74 @@ Cortex turns that mess into infrastructure:
 - An agent harness that can discover tools only when needed, execute them, stream progress, compact results, and continue the reasoning loop.
 - A workspace layer that can provision private sandboxes locally or in Azure and restore durable state after idle reaping.
 
-## Start Here
+## Why Cortex Instead Of...
+
+| Alternative                 | Good at                                    | Where Cortex is different                                                                                     |
+| --------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Provider SDKs               | Direct access to one provider's newest API | Cortex keeps product code behind a stable runtime while providers, models, and protocols change.              |
+| Model proxies               | Unifying model calls and keys              | Cortex also has pathways, entities, tools, streaming progress, memory-aware agents, and workspaces.           |
+| Prompt-chain frameworks     | Fast experimentation inside an app         | Cortex is a backend service with GraphQL, REST, auth, routing, cancellation, caching, and operational policy. |
+| Proprietary agent platforms | Polished hosted loops                      | Cortex gives you the loop, tool surface, and workspace architecture in code you can own.                      |
+
+## Start Here In 5 Minutes
 
 If you are new to Cortex, pick the lane closest to what you are building:
 
-| If you want to... | Start with... | Why |
-| --- | --- | --- |
-| Put one stable API in front of many model providers | [Model Configuration](#model-configuration) and [REST](#rest) | Define models once, expose GraphQL or OpenAI-compatible REST, and move callers with redirects/groups later. |
-| Build an agent with tools | [Agents And Entities](#agents-and-entities), then [Pathways](#pathways) | Entities define identity and tool access; pathways define the callable skills behind that agent. |
-| Give agents private compute | [Workspace Architecture](#workspace-architecture) | Workspaces give each entity a container for shell commands, files, checkpoints, and long-running work. |
-| Add a new capability | [Pathways](#pathways) | Most Cortex extensions are one pathway file plus, optionally, `executePathway` for orchestration. |
+| If you want to...                                   | Start with...                                                           | Why                                                                                                         |
+| --------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Put one stable API in front of many model providers | [Model Configuration](#model-configuration) and [REST](#rest)           | Define models once, expose GraphQL or OpenAI-compatible REST, and move callers with redirects/groups later. |
+| Build an agent with tools                           | [Agents And Entities](#agents-and-entities), then [Pathways](#pathways) | Entities define identity and tool access; pathways define the callable skills behind that agent.            |
+| Give agents private compute                         | [Workspace Architecture](#workspace-architecture)                       | Workspaces give each entity a container for shell commands, files, checkpoints, and long-running work.      |
+| Add a new capability                                | [Pathways](#pathways)                                                   | Most Cortex extensions are one pathway file plus, optionally, `executePathway` for orchestration.           |
 
-The shortest path is: run Cortex, call one pathway, then add one custom pathway. You do not need to understand every provider plugin or workspace knob before Cortex is useful.
+The shortest path is:
+
+1. Run Cortex locally.
+2. Call a built-in pathway through GraphQL.
+3. Enable OpenAI-compatible REST and call a model or agent.
+4. Add one custom pathway.
+5. Turn on entities, tools, and workspaces when your product needs them.
+
+You do not need to understand every provider plugin or workspace knob before Cortex is useful.
+
+## Try It
+
+```sh
+git clone git@github.com:aj-archipelago/cortex.git
+cd cortex
+npm install
+export OPENAI_API_KEY=<your key>
+CORTEX_ENABLE_REST=true npm start
+```
+
+By default Cortex starts GraphQL at `http://localhost:4000/graphql`. From another terminal:
+
+```sh
+curl http://localhost:4000/healthcheck
+```
+
+Then call a pathway through Cortex's generated REST API:
+
+```sh
+curl http://localhost:4000/rest/summary \
+  -H 'content-type: application/json' \
+  -d '{
+    "text": "Cortex routes model requests, runs pathways, and powers agentic tools."
+  }'
+```
+
+Or call the same pathway through Cortex's generated GraphQL schema:
+
+```sh
+curl http://localhost:4000/graphql \
+  -H 'content-type: application/json' \
+  -d '{
+    "query": "query($text: String!) { summary(text: $text) { result } }",
+    "variables": {
+      "text": "Cortex routes model requests, runs pathways, and powers agentic tools."
+    }
+  }'
+```
 
 ## What Cortex Is Not
 
@@ -99,66 +166,6 @@ The workspace stack includes:
 - Idle checkpointing and idle reaping so sleeping workspaces stop burning compute while preserving useful state.
 
 This follows the same pattern that has emerged in OpenClaw/NanoClaw-style systems: each agent gets a private, containerized machine room, not a shared scratchpad pretending to be isolation.
-
-## Quick Start
-
-Requirements:
-
-- Node.js 20 or newer is recommended.
-- At least one provider key, usually `OPENAI_API_KEY`.
-- Docker if you want local workspace containers.
-
-```sh
-git clone git@github.com:aj-archipelago/cortex.git
-cd cortex
-npm install
-export OPENAI_API_KEY=<your key>
-npm start
-```
-
-By default Cortex starts GraphQL at:
-
-```text
-http://localhost:4000/graphql
-```
-
-Health check:
-
-```sh
-curl http://localhost:4000/healthcheck
-```
-
-First GraphQL request:
-
-```sh
-curl http://localhost:4000/graphql \
-  -H 'content-type: application/json' \
-  -d '{
-    "query": "query($text: String!) { summary(text: $text) { result } }",
-    "variables": {
-      "text": "Cortex routes model requests, runs pathways, and powers agentic tools."
-    }
-  }'
-```
-
-First REST request, if you want OpenAI-compatible endpoints:
-
-```sh
-CORTEX_ENABLE_REST=true npm start
-```
-
-Then call it from another terminal:
-
-```sh
-curl http://localhost:4000/v1/chat/completions \
-  -H 'content-type: application/json' \
-  -d '{
-    "model": "gpt-5.4-mini",
-    "messages": [
-      { "role": "user", "content": "Say hello from Cortex in one sentence." }
-    ]
-  }'
-```
 
 ## Install As A Package
 
@@ -246,13 +253,11 @@ curl http://localhost:4000/v1/chat/completions \
 OpenAI-compatible model call:
 
 ```sh
-curl http://localhost:4000/v1/chat/completions \
+curl http://localhost:4000/v1/responses \
   -H 'content-type: application/json' \
   -d '{
     "model": "gpt-5.4-mini",
-    "messages": [
-      { "role": "user", "content": "Explain model groups in one paragraph." }
-    ]
+    "input": "Explain model groups in one paragraph."
   }'
 ```
 

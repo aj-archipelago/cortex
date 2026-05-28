@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 560">
+  <title id="title">Cortex AI backend control plane architecture</title>
+  <desc id="desc">Applications connect to Cortex, which routes model requests, runs agent tool loops, manages entity memory, and provisions isolated workspaces.</desc>
+  <defs>
+    <linearGradient id="cortex-bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="54%" stop-color="#172554" />
+      <stop offset="100%" stop-color="#064e3b" />
+    </linearGradient>
+    <filter id="soft-shadow" color-interpolation-filters="sRGB" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#020617" flood-opacity="0.28" />
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#93c5fd" />
+    </marker>
+    <style>
+      .bg {
+        fill: url(#cortex-bg);
+      }
+      .eyebrow {
+        fill: #a7f3d0;
+        font: 600 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .headline {
+        fill: #f8fafc;
+        font: 800 48px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .subhead {
+        fill: #dbeafe;
+        font: 500 22px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .node {
+        fill: rgba(15, 23, 42, 0.72);
+        stroke: rgba(226, 232, 240, 0.36);
+        stroke-width: 1.5;
+        filter: url(#soft-shadow);
+      }
+      .center {
+        fill: rgba(14, 165, 233, 0.18);
+        stroke: #7dd3fc;
+        stroke-width: 2;
+        filter: url(#soft-shadow);
+      }
+      .label {
+        fill: #f8fafc;
+        font: 700 25px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .detail {
+        fill: #cbd5e1;
+        font: 500 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .small {
+        fill: #bfdbfe;
+        font: 600 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .flow {
+        fill: none;
+        stroke: #93c5fd;
+        stroke-width: 3;
+        marker-end: url(#arrow);
+      }
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="560" rx="24" />
+
+  <text class="eyebrow" x="62" y="70">OPEN-SOURCE AI BACKEND CONTROL PLANE</text>
+  <text class="headline" x="62" y="124">Cortex</text>
+  <text class="subhead" x="62" y="162">Model routing, agent tools, entity memory, and isolated workspaces in one runtime.</text>
+
+  <rect class="node" x="62" y="222" width="220" height="132" rx="14" />
+  <text class="label" x="92" y="274">Your App</text>
+  <text class="detail" x="92" y="309">GraphQL</text>
+  <text class="detail" x="92" y="335">REST and SDKs</text>
+
+  <rect class="center" x="418" y="196" width="364" height="184" rx="18" />
+  <text class="label" x="470" y="258">Cortex Runtime</text>
+  <text class="detail" x="470" y="296">Pathways and entities</text>
+  <text class="detail" x="470" y="322">Streaming progress</text>
+  <text class="detail" x="470" y="348">Auth, caching, policy</text>
+
+  <path class="flow" d="M 282 288 C 335 288, 356 288, 408 288" />
+
+  <rect class="node" x="894" y="58" width="244" height="108" rx="14" />
+  <text class="label" x="924" y="106">Models</text>
+  <text class="detail" x="924" y="138">OpenAI, Gemini, Claude</text>
+
+  <rect class="node" x="894" y="188" width="244" height="108" rx="14" />
+  <text class="label" x="924" y="236">Tools</text>
+  <text class="detail" x="924" y="268">MCP and client tools</text>
+
+  <rect class="node" x="894" y="318" width="244" height="108" rx="14" />
+  <text class="label" x="924" y="366">Memory</text>
+  <text class="detail" x="924" y="398">Entity personalization</text>
+
+  <rect class="node" x="894" y="448" width="244" height="72" rx="14" />
+  <text class="label" x="924" y="493">Workspaces</text>
+
+  <path class="flow" d="M 782 252 C 828 205, 842 138, 884 112" />
+  <path class="flow" d="M 782 276 C 825 260, 842 246, 884 242" />
+  <path class="flow" d="M 782 310 C 828 334, 842 366, 884 372" />
+  <path class="flow" d="M 782 342 C 826 416, 840 476, 884 484" />
+
+  <text class="small" x="62" y="484">Provider-compatible APIs outside. Owned routing, tools, and execution policy inside.</text>
+</svg>
