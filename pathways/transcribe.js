@@ -12,5 +12,4 @@ export default {
         maxWordsPerLine: 0,
     },
     timeout: 3600, // in seconds
-    enableDuplicateRequests: false,
 };

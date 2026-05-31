@@ -6,7 +6,6 @@ import { Prompt } from '../../../server/prompt.js';
 export default {
     emulateOpenAIChatModel: 'cortex-agent',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     useSingleTokenStream: false,
 
     inputParameters: {

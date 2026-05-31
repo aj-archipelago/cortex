@@ -11,7 +11,6 @@ const TOKEN_RATIO = 1.0;
 export default {
     prompt: [],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     inputParameters: {
         privateData: false,
         useMemory: false,    

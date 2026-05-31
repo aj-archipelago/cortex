@@ -36,7 +36,6 @@ All arrays should contain relevant items found in a category, or an empty array 
         model: 'oai-gpt4o',
     },
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     manageTokenLength: false,
     json: true,

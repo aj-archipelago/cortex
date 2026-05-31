@@ -88,11 +88,6 @@ var config = convict({
         default: true,
         env: 'CORTEX_ENABLE_CACHE'
     },
-    enableDuplicateRequests: {
-        format: Boolean,
-        default: true,
-        env: 'CORTEX_ENABLE_DUPLICATE_REQUESTS'
-    },
     enableGraphqlCache: {
         format: Boolean,
         default: false,
@@ -636,7 +631,6 @@ const buildPathways = async (config) => {
                     useInputChunking: false,
                     emulateOpenAIChatModel: modelConfig.emulateOpenAIChatModel,
                     ...(restConfig.geminiSafetySettings && { geminiSafetySettings: restConfig.geminiSafetySettings }),
-                    ...(restConfig.enableDuplicateRequests !== undefined && { enableDuplicateRequests: restConfig.enableDuplicateRequests }),
                     ...(restConfig.timeout && { timeout: restConfig.timeout })
                 };
             }

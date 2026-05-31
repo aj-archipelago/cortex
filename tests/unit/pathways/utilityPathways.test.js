@@ -10,7 +10,6 @@ test('pass pathway returns the input text template with a configured model', (t)
 test('translate_json_values requests JSON output and disables chunking', (t) => {
     t.true(translateJsonValues.json);
     t.false(translateJsonValues.useInputChunking);
-    t.false(translateJsonValues.enableDuplicateRequests);
     t.true(translateJsonValues.enableCache);
     t.is(translateJsonValues.model, 'oai-gpt4o');
 

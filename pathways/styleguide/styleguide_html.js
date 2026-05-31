@@ -96,7 +96,6 @@ export default {
     inputFormat: 'html',
     useInputChunking: true,
     inputChunkSize: 500,
-    enableDuplicateRequests: false,
     useParallelChunkProcessing: false,
     model: 'oai-gpt4o',
     inputParameters: {

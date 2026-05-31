@@ -20,7 +20,6 @@ export default {
         ]}),
     ],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     model: 'oai-gpt4o',
     inputParameters: {
         privateData: false,    

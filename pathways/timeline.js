@@ -48,5 +48,4 @@ export default {
         date: new Date().toDateString(),
     },
     temperature: 0.0,
-    enableDuplicateRequests: false,
 }

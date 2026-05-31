@@ -8,7 +8,6 @@ import { getSearchResultId } from '../../../../lib/util.js';
 export default {
     prompt: [],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     inputParameters: {
         text: '',
         filter: '',

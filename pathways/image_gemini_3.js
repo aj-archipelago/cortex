@@ -89,7 +89,6 @@ export default {
     max_tokens: 64576,
     model: 'gemini-pro-3-image',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     geminiSafetySettings: [
         {category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE'},

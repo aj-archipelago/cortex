@@ -10,7 +10,5 @@ export default {
     ],
     //inputChunkSize: 500,
     model: 'oai-gpt4o',
-    enableDuplicateRequests: true,
-    duplicateRequestAfter: 20,
 
 }

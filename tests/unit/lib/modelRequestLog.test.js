@@ -26,7 +26,6 @@ test('buildModelRequestLogBase summarizes OpenAI Responses requests without prom
             modelType: 'OPENAI-RESPONSES',
             endpoint: 'EUS2',
             retry: 0,
-            duplicateIndex: 0,
         },
         axiosConfigObj: {
             responseType: 'stream',

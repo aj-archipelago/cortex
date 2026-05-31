@@ -27,6 +27,5 @@ Output only the translated subtitles in a <SUBTITLES> tag with no other text or 
     },
     useInputChunking: false,
     model: 'oai-gpt4o',
-    enableDuplicateRequests: false,
     timeout: 3600,
 }

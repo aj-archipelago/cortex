@@ -6,7 +6,6 @@ import { chatArgsHasImageUrl, removeOldImageAndFileContent } from '../../../lib/
 export default {
     prompt: [],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     inputParameters: {
         privateData: false,
         useMemory: true,    

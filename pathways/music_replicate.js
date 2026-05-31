@@ -1,7 +1,6 @@
 export default {
   prompt: ["{{text}}"],
 
-  enableDuplicateRequests: false,
   inputParameters: {
     model: "replicate-elevenlabs-music",
     duration: 10,

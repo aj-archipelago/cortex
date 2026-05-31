@@ -1,7 +1,6 @@
 export default {
   prompt: ["{{text}}"],
 
-  enableDuplicateRequests: false,
   inputParameters: {
     model: "replicate-qwen-image", // Options: "replicate-qwen-image", "replicate-qwen-image-edit-plus", or "replicate-qwen-image-edit-2511"
     negativePrompt: "",

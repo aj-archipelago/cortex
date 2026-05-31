@@ -6,7 +6,6 @@ import styleguideHtml from "../../../pathways/styleguide/styleguide_html.js";
 
 test("azure_video_translate exposes the Azure video translation parameter surface", (t) => {
   t.is(azureVideoTranslate.model, "azure-video-translate");
-  t.false(azureVideoTranslate.enableDuplicateRequests);
   t.false(azureVideoTranslate.enableCache);
   t.is(azureVideoTranslate.timeout, 60 * 60);
 

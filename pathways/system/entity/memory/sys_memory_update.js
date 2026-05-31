@@ -31,7 +31,6 @@ export default {
     model: 'cortex-default-small-fast',
     reasoningEffort: 'none',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     json: true,
     timeout: 300,
     executePathway: async ({args, runAllPrompts}) => {

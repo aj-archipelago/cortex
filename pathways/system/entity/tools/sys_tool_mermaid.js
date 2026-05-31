@@ -73,7 +73,6 @@ export default {
     },
     model: 'oai-gpt5-chat',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     toolDefinition: [{
         type: "function",

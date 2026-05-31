@@ -14,6 +14,5 @@ export default {
     },
     inputChunkSize: 500,
     model: 'oai-gpturbo',
-    enableDuplicateRequests: false,
 
 }

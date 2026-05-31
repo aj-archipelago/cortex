@@ -28,7 +28,6 @@ async function sendMessageToQueue(data) {
 
 export default {
     useInputChunking: false,
-    enableDuplicateRequests: false,
     inputParameters: {
         codeRequestId: "",
         text: "",

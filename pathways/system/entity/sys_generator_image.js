@@ -8,7 +8,6 @@ import { insertToolCallAndResults } from './memory/shared/sys_memory_helpers.js'
 export default {
     prompt: [],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     inputParameters: {
         privateData: false,
         useMemory: true,    

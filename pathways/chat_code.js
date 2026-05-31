@@ -15,5 +15,4 @@ export default {
     },
     tokenRatio: 0.75,
     useInputChunking: false,
-    enableDuplicateRequests: false,
 }

@@ -23,7 +23,6 @@ export default {
     // inputFormat: 'html',
     useInputChunking: true,
     inputChunkSize: 500,
-    enableDuplicateRequests: false,
     useParallelChunkProcessing: true,
     model: 'oai-gpt4o',
     executePathway: async ({ args, runAllPrompts }) => {

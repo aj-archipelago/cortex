@@ -11,7 +11,6 @@ export default {
     ],
     model: 'oai-gpt4o',
     tokenRatio: 0.75,
-    enableDuplicateRequests: false,
 }
 
 

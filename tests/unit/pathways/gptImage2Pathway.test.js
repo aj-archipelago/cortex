@@ -10,7 +10,6 @@ import sysModelMetadata from "../../../pathways/system/sys_model_metadata.js";
 test("image_gpt_image_2 declares the Azure OpenAI image pathway contract", (t) => {
   t.is(imageGptImage2.model, "oai-gpt-image-2");
   t.is(imageGptImage2.timeout, 600);
-  t.false(imageGptImage2.enableDuplicateRequests);
   t.is(imageGptImage2.inputParameters.text, "");
   t.is(imageGptImage2.inputParameters.size, "");
   t.is(imageGptImage2.inputParameters.quality, "");
@@ -117,7 +116,7 @@ test("default example exposes GPT Image 2 metadata without service-specific cred
 
   t.truthy(model);
   t.is(model.type, "OPENAI-DALLE3");
-  t.is(model.endpoints[0].headers["api-key"], "{{AZURE_OPENAI_API_KEY}}");
+  t.is(model.endpoints[0].headers.Authorization, "Bearer {{OPENAI_API_KEY}}");
   t.false(model.endpoints[0].url.includes("archipelago"));
   t.is(model.metadata.displayName, "GPT Image 2");
   t.is(model.metadata.category, "image");

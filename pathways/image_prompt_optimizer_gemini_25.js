@@ -144,6 +144,5 @@ Examples of how to reference input images:
     max_tokens: 4096,
     model: 'oai-gpt41',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 30,
 }

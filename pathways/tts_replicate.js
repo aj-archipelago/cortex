@@ -38,6 +38,5 @@ export default {
 
   max_tokens: 8192,
   useInputChunking: false,
-  enableDuplicateRequests: false,
   timeout: 60 * 10,
 };
