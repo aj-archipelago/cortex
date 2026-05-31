@@ -71,9 +71,10 @@ You do not need to understand every provider plugin or workspace knob before Cor
 git clone git@github.com:aj-archipelago/cortex.git
 cd cortex
 npm install
-export OPENAI_API_KEY=<your key>
 CORTEX_ENABLE_REST=true npm start
 ```
+
+Set `OPENAI_API_KEY` in your shell, `.env`, or `.env.local` before starting. Cortex loads `.env` and `.env.local` automatically for local runs; explicit shell variables win.
 
 By default Cortex starts GraphQL at `http://localhost:4000/graphql`. From another terminal:
 
