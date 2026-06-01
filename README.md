@@ -1003,8 +1003,9 @@ npm run test:integration
 
 Integration tests load `.env`, enable REST routes for the test process, and
 may require provider keys, Redis, MongoDB, workspace services, or other local
-infrastructure. Live REST model-call coverage is opt-in with
-`CORTEX_RUN_REST_LIVE_TESTS=true`. For the REST integration subset only, use:
+infrastructure. Some live REST compatibility groups are further gated by
+`CORTEX_RUN_REST_LIVE_TESTS=true` or vendor-specific live-test flags. For the
+REST integration subset only, use:
 
 ```sh
 npm run test:integration:rest
