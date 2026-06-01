@@ -150,6 +150,48 @@ const stubEntityStore = (overrides = {}) => {
   };
 };
 
+const setupConfiguredAgent = (t) => {
+  const originals = setupConfig();
+  t.teardown(() => restoreConfig(originals));
+  return originals;
+};
+
+const configuredEntityTools = (entityId) => getToolsForEntity(config.get('entityConfig')[entityId]);
+
+const setupToolCallbackHarness = (t, {
+  chatHistory = [{ role: 'user', content: 'use tool' }],
+  argsOverrides = {},
+  promptAndParse,
+  resolverOverrides = {},
+} = {}) => {
+  const originals = setupConfiguredAgent(t);
+  const { entityTools, entityToolsOpenAiFormat } = configuredEntityTools(originals.entityId);
+  let promptArgs;
+
+  const resolver = buildResolver({
+    promptAndParse: promptAndParse || (async (args) => {
+      promptArgs = args;
+      return 'tool-handled';
+    }),
+    ...resolverOverrides,
+  });
+
+  return {
+    originals,
+    args: {
+      chatHistory,
+      entityTools,
+      entityToolsOpenAiFormat,
+      ...argsOverrides,
+    },
+    resolver,
+    getPromptArgs: () => promptArgs,
+    setPromptArgs: (value) => {
+      promptArgs = value;
+    },
+  };
+};
+
 test('extractNewMcpConfigFromToolResult reads client tool config updates', (t) => {
   const config = {
     atlassian: {
@@ -393,8 +435,7 @@ test('applyNewMcpConfigToResolver hot-loads MCP clients and tools', async (t) =>
 });
 
 test.serial('executePathway returns sys_generator_error output on 500 base model error', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+  const originals = setupConfiguredAgent(t);
 
   const resolver = buildResolver();
   const args = {
@@ -414,8 +455,7 @@ test.serial('executePathway returns sys_generator_error output on 500 base model
 });
 
 test.serial('executePathway does not derive file access from contextId/contextKey', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+  const originals = setupConfiguredAgent(t);
 
   const resolver = buildResolver();
   let promptArgs;
@@ -440,8 +480,7 @@ test.serial('executePathway does not derive file access from contextId/contextKe
 });
 
 test.serial('executePathway leaves entityId blank when caller omits it', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+  const originals = setupConfiguredAgent(t);
 
   const defaultEntity = {
     id: 'default-workspace-entity',
@@ -478,8 +517,7 @@ test.serial('executePathway leaves entityId blank when caller omits it', async (
 });
 
 test.serial('executePathway falls back when sys_generator_error fails after null model response', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+  const originals = setupConfiguredAgent(t);
 
   const brokenPathways = {
     ...config.get('pathways'),
@@ -507,8 +545,7 @@ test.serial('executePathway falls back when sys_generator_error fails after null
 });
 
 test.serial('executePathway repairs a stale explicit entityId to the canonical personal entity', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+  const originals = setupConfiguredAgent(t);
 
   const restoreEntityStore = stubEntityStore({
     isConfigured: () => true,
@@ -558,8 +595,7 @@ test.serial('executePathway repairs a stale explicit entityId to the canonical p
 });
 
 test.serial('executePathway clears stale explicit entityId when no user context exists', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+  const originals = setupConfiguredAgent(t);
 
   const restoreEntityStore = stubEntityStore({
     isConfigured: () => true,
@@ -607,8 +643,7 @@ test.serial('executePathway clears stale explicit entityId when no user context 
 });
 
 test.serial('executePathway clears stale explicit entityId when personal entity repair is unavailable', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+  const originals = setupConfiguredAgent(t);
 
   const restoreEntityStore = stubEntityStore({
     isConfigured: () => true,
@@ -645,8 +680,7 @@ test.serial('executePathway clears stale explicit entityId when personal entity 
 });
 
 test.serial('executePathway preserves disabled explicit entity failures instead of repairing them', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+  const originals = setupConfiguredAgent(t);
 
   const restoreEntityStore = stubEntityStore({
     isConfigured: () => true,
@@ -693,129 +727,45 @@ test.serial('executePathway preserves disabled explicit entity failures instead 
   t.true(result.includes('missing required environment variables'));
 });
 
-test.serial('toolCallback surfaces 400 error JSON from tool result', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+for (const { name, toolName, expectedContent } of [
+  {
+    name: 'surfaces 400 error JSON from tool result',
+    toolName: 'ErrorJson',
+    expectedContent: '400 Bad Request',
+  },
+  {
+    name: 'captures 500 error thrown by tool pathway',
+    toolName: 'Throws500',
+    expectedContent: '500 Internal Server Error',
+  },
+  {
+    name: 'captures tool null result as error',
+    toolName: 'NullResult',
+    expectedContent: 'returned null result',
+  },
+]) {
+  test.serial(`toolCallback ${name}`, async (t) => {
+    const { args, resolver, getPromptArgs } = setupToolCallbackHarness(t);
 
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
+    const result = await sysEntityAgent.toolCallback(
+      args,
+      { tool_calls: [buildToolCall(toolName)] },
+      resolver
+    );
 
-  let promptArgs;
-  const resolver = buildResolver({
-    promptAndParse: async (args) => {
-      promptArgs = args;
-      return 'tool-handled';
-    },
+    t.is(result, 'tool-handled');
+    const toolMessage = args.chatHistory.find((entry) => entry.role === 'tool');
+    t.truthy(toolMessage);
+    t.true(toolMessage.content.includes(expectedContent));
+    t.truthy(getPromptArgs());
+    t.true(getPromptArgs().chatHistory.some((entry) => (
+      entry.role === 'tool' && entry.content.includes(expectedContent)
+    )));
   });
-
-  const args = {
-    chatHistory: [{ role: 'user', content: 'use tool' }],
-    entityTools,
-    entityToolsOpenAiFormat,
-  };
-
-  const message = { tool_calls: [buildToolCall('ErrorJson')] };
-  const result = await sysEntityAgent.toolCallback(args, message, resolver);
-
-  t.is(result, 'tool-handled');
-  const toolMessage = args.chatHistory.find((entry) => entry.role === 'tool');
-  t.truthy(toolMessage);
-  t.true(toolMessage.content.includes('400 Bad Request'));
-  t.truthy(promptArgs);
-  t.true(promptArgs.chatHistory.some((entry) => (
-    entry.role === 'tool' && entry.content.includes('400 Bad Request')
-  )));
-});
-
-test.serial('toolCallback captures 500 error thrown by tool pathway', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-
-  let promptArgs;
-  const resolver = buildResolver({
-    promptAndParse: async (args) => {
-      promptArgs = args;
-      return 'tool-handled';
-    },
-  });
-
-  const args = {
-    chatHistory: [{ role: 'user', content: 'use tool' }],
-    entityTools,
-    entityToolsOpenAiFormat,
-  };
-
-  const message = { tool_calls: [buildToolCall('Throws500')] };
-  const result = await sysEntityAgent.toolCallback(args, message, resolver);
-
-  t.is(result, 'tool-handled');
-  const toolMessage = args.chatHistory.find((entry) => entry.role === 'tool');
-  t.truthy(toolMessage);
-  t.true(toolMessage.content.includes('500 Internal Server Error'));
-  t.truthy(promptArgs);
-  t.true(promptArgs.chatHistory.some((entry) => (
-    entry.role === 'tool' && entry.content.includes('500 Internal Server Error')
-  )));
-});
-
-test.serial('toolCallback captures tool null result as error', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-
-  let promptArgs;
-  const resolver = buildResolver({
-    promptAndParse: async (args) => {
-      promptArgs = args;
-      return 'tool-handled';
-    },
-  });
-
-  const args = {
-    chatHistory: [{ role: 'user', content: 'use tool' }],
-    entityTools,
-    entityToolsOpenAiFormat,
-  };
-
-  const message = { tool_calls: [buildToolCall('NullResult')] };
-  const result = await sysEntityAgent.toolCallback(args, message, resolver);
-
-  t.is(result, 'tool-handled');
-  const toolMessage = args.chatHistory.find((entry) => entry.role === 'tool');
-  t.truthy(toolMessage);
-  t.true(toolMessage.content.includes('returned null result'));
-  t.truthy(promptArgs);
-  t.true(promptArgs.chatHistory.some((entry) => (
-    entry.role === 'tool' && entry.content.includes('returned null result')
-  )));
-});
+}
 
 test.serial('toolCallback handles missing tool call arguments gracefully with empty args', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-
-  let promptArgs;
-  const resolver = buildResolver({
-    promptAndParse: async (args) => {
-      promptArgs = args;
-      return 'tool-handled';
-    },
-  });
-
-  const args = {
-    chatHistory: [{ role: 'user', content: 'use tool' }],
-    entityTools,
-    entityToolsOpenAiFormat,
-  };
-
+  const { args, resolver, getPromptArgs } = setupToolCallbackHarness(t);
   const message = {
     tool_calls: [{
       id: 'bad-tool-call',
@@ -831,27 +781,15 @@ test.serial('toolCallback handles missing tool call arguments gracefully with em
   t.truthy(toolMessage);
   // The tool executes with empty args and returns its normal result (400 Bad Request)
   t.true(toolMessage.content.includes('400 Bad Request'));
-  t.truthy(promptArgs);
+  t.truthy(getPromptArgs());
 });
 
 test.serial('toolCallback returns error response when promptAndParse throws', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-
-  const resolver = buildResolver({
+  const { args, resolver } = setupToolCallbackHarness(t, {
     promptAndParse: async () => {
       throw new Error('Model crashed after tool calls');
     },
   });
-
-  const args = {
-    chatHistory: [{ role: 'user', content: 'use tool' }],
-    entityTools,
-    entityToolsOpenAiFormat,
-  };
 
   const message = { tool_calls: [buildToolCall('ErrorJson')] };
   const result = await sysEntityAgent.toolCallback(args, message, resolver);
@@ -861,11 +799,8 @@ test.serial('toolCallback returns error response when promptAndParse throws', as
 });
 
 test.serial('executePathway returns error response when tool recursion times out', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
+  const originals = setupConfiguredAgent(t);
+  const { entityToolsOpenAiFormat } = configuredEntityTools(originals.entityId);
 
   const resolver = buildResolver({
     promptAndParse: async () => {
@@ -891,31 +826,16 @@ test.serial('executePathway returns error response when tool recursion times out
 });
 
 test.serial('toolCallback injects max tool call message once limit reached', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-
-  let promptArgs;
-  const resolver = buildResolver({
-    toolCallCount: 50,
-    promptAndParse: async (args) => {
-      promptArgs = args;
-      return 'tool-handled';
+  const { args, resolver, getPromptArgs } = setupToolCallbackHarness(t, {
+    resolverOverrides: {
+      toolCallCount: 50,
     },
   });
-
-  const args = {
-    chatHistory: [{ role: 'user', content: 'use tool' }],
-    entityTools,
-    entityToolsOpenAiFormat,
-  };
 
   const message = { tool_calls: [buildToolCall('ErrorJson')] };
   await sysEntityAgent.toolCallback(args, message, resolver);
 
-  const systemMessage = promptArgs.chatHistory.find((entry) => (
+  const systemMessage = getPromptArgs().chatHistory.find((entry) => (
     entry.role === 'user' &&
     typeof entry.content === 'string' &&
     entry.content.includes('Maximum tool call limit reached')
@@ -936,13 +856,13 @@ test('withTimeout resolves when promise completes before timeout', async (t) => 
 });
 
 test('withTimeout rejects when promise takes longer than timeout', async (t) => {
-  const slowPromise = new Promise((resolve) => setTimeout(() => resolve('too late'), 200));
+  const slowPromise = new Promise(() => {});
   
   const error = await t.throwsAsync(
-    withTimeout(slowPromise, 50, 'Operation timed out after 50ms')
+    withTimeout(slowPromise, 1, 'Operation timed out after 1ms')
   );
   
-  t.is(error.message, 'Operation timed out after 50ms');
+  t.is(error.message, 'Operation timed out after 1ms');
 });
 
 test('withTimeout clears timeout when promise resolves', async (t) => {
@@ -971,21 +891,6 @@ test.serial('toolCallback compacts oversized tool results in chat history', asyn
   // chatHistory already large. Fresh tool results from a tool call are envelope-shaped by
   // buildToolResultContent before they ever hit this block, so the test
   // exercises the safety net by seeding chatHistory directly.
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(
-    config.get('entityConfig')[originals.entityId]
-  );
-
-  let promptArgs;
-  const resolver = buildResolver({
-    promptAndParse: async (args) => {
-      promptArgs = args;
-      return 'tool-handled';
-    },
-  });
-
   // 60 KB seeded tool message (mimics a legacy or externally supplied
   // oversized tool envelope).
   const oversizedContent = JSON.stringify({ data: 'x'.repeat(60000) });
@@ -996,16 +901,14 @@ test.serial('toolCallback compacts oversized tool results in chat history', asyn
     content: oversizedContent,
   };
 
-  const args = {
+  const { args, resolver, getPromptArgs, setPromptArgs } = setupToolCallbackHarness(t, {
     chatHistory: [
       { role: 'user', content: 'previous' },
       { role: 'assistant', content: '', tool_calls: [{ id: 'prior-call', type: 'function', function: { name: 'PriorTool', arguments: '{}' } }] },
       oversizedToolMessage,
       { role: 'user', content: 'follow up' },
     ],
-    entityTools,
-    entityToolsOpenAiFormat,
-  };
+  });
 
   // Issue any tool call to drive toolCallback through the truncation path.
   const message = { tool_calls: [buildToolCall('ErrorJson')] };
@@ -1013,7 +916,7 @@ test.serial('toolCallback compacts oversized tool results in chat history', asyn
 
   // The seeded tool message in promptArgs.chatHistory should now be compacted
   // into a valid envelope instead of substring-truncated into invalid JSON.
-  const seededAfter = promptArgs.chatHistory.find(
+  const seededAfter = getPromptArgs().chatHistory.find(
     (entry) => entry.role === 'tool' && entry.tool_call_id === 'prior-call'
   );
   t.truthy(seededAfter, 'seeded tool message should still be present');
@@ -1028,11 +931,11 @@ test.serial('toolCallback compacts oversized tool results in chat history', asyn
   const compactedLength = seededAfter.content.length;
   const args2 = {
     ...args,
-    chatHistory: promptArgs.chatHistory, // feed the post-compaction history back
+    chatHistory: getPromptArgs().chatHistory, // feed the post-compaction history back
   };
-  promptArgs = null;
+  setPromptArgs(null);
   await sysEntityAgent.toolCallback(args2, { tool_calls: [buildToolCall('ErrorJson', { userMessage: 'again' }, 'call-2')] }, resolver);
-  const seededSecondPass = promptArgs.chatHistory.find(
+  const seededSecondPass = getPromptArgs().chatHistory.find(
     (entry) => entry.role === 'tool' && entry.tool_call_id === 'prior-call'
   );
   t.is(seededSecondPass.content.length, compactedLength,
@@ -1117,17 +1020,15 @@ test('findSafeSplitPoint preserves tool call/result pairs', (t) => {
 });
 
 test.serial('toolCallback handles tool timeout error correctly', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
+  const originals = setupConfiguredAgent(t);
 
   // Create a tool that simulates a timeout
   const timeoutPathways = {
     ...config.get('pathways'),
     test_tool_slow: {
       rootResolver: async () => {
-        // Simulate a slow tool that would timeout
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        return { result: 'completed' };
+        // Simulate a tool that never resolves so the timeout path is deterministic.
+        await new Promise(() => {});
       },
     },
   };
@@ -1140,7 +1041,7 @@ test.serial('toolCallback handles tool timeout error correctly', async (t) => {
       definition: {
         ...buildToolDefinition('SlowTool', 'test_tool_slow').definition,
         // Set a very short timeout to trigger timeout
-        timeout: 10,
+        timeout: 1,
       },
     },
   };
@@ -1377,12 +1278,6 @@ test('MCP closeMcpClientsIfNeeded only closes when last callback completes', asy
 });
 
 test.serial('toolCallback preserves MCP clients when follow-up response still has tool calls', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-
   let closeCount = 0;
   const mcpClients = new Map([
     ['atlassian', {
@@ -1391,19 +1286,16 @@ test.serial('toolCallback preserves MCP clients when follow-up response still ha
     }],
   ]);
 
-  const resolver = buildResolver({
+  const { args, resolver } = setupToolCallbackHarness(t, {
+    chatHistory: [{ role: 'user', content: 'search tools, then call jira' }],
+    argsOverrides: {
+      mcpClients,
+      _mcpActiveCallbacks: 0,
+    },
     promptAndParse: async () => ({
       tool_calls: [buildToolCall('ErrorJson', { userMessage: 'next tool' }, 'call-next')],
     }),
   });
-
-  const args = {
-    chatHistory: [{ role: 'user', content: 'search tools, then call jira' }],
-    entityTools,
-    entityToolsOpenAiFormat,
-    mcpClients,
-    _mcpActiveCallbacks: 0,
-  };
 
   const result = await sysEntityAgent.toolCallback(
     args,
@@ -1418,27 +1310,15 @@ test.serial('toolCallback preserves MCP clients when follow-up response still ha
 });
 
 test.serial('toolCallback returns cached result for duplicate tool calls and injects system message', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-
   let promptCallCount = 0;
   let lastPromptArgs;
-  const resolver = buildResolver({
+  const { args, resolver } = setupToolCallbackHarness(t, {
     promptAndParse: async (args) => {
       promptCallCount++;
       lastPromptArgs = args;
       return 'tool-handled';
     },
   });
-
-  const args = {
-    chatHistory: [{ role: 'user', content: 'use tool' }],
-    entityTools,
-    entityToolsOpenAiFormat,
-  };
 
   // First call — should execute normally
   const message1 = { tool_calls: [buildToolCall('ErrorJson', { userMessage: 'run test' }, 'call-1')] };
@@ -1490,25 +1370,7 @@ test('tool callback invoked should not trigger stream warning or completion', (t
 });
 
 test.serial('toolCallback handles malformed tool arguments without crashing', async (t) => {
-  const originals = setupConfig();
-  t.teardown(() => restoreConfig(originals));
-
-  const entityConfig = config.get('entityConfig')[originals.entityId];
-  const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-
-  let promptArgs;
-  const resolver = buildResolver({
-    promptAndParse: async (args) => {
-      promptArgs = args;
-      return 'tool-handled';
-    },
-  });
-
-  const args = {
-    chatHistory: [{ role: 'user', content: 'use tool' }],
-    entityTools,
-    entityToolsOpenAiFormat,
-  };
+  const { args, resolver, getPromptArgs } = setupToolCallbackHarness(t);
 
   // Simulate a model sending truncated/malformed JSON arguments
   // This happens in production with streaming truncation or rate-limited responses
@@ -1532,5 +1394,5 @@ test.serial('toolCallback handles malformed tool arguments without crashing', as
   t.truthy(toolMessage, 'tool error message should be in chat history');
   t.true(toolMessage.content.includes('Error:'), 'tool message should contain the parse error');
   // Model should still be called with the error context
-  t.truthy(promptArgs, 'promptAndParse should still be called after the error');
+  t.truthy(getPromptArgs(), 'promptAndParse should still be called after the error');
 });

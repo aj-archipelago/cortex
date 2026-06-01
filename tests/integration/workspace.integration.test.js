@@ -10,7 +10,8 @@
  * - Redis + MongoDB configured (via root .env)
  * - Filehandler service (only for files push/pull and backup/restore tests)
  *
- * Run with: npm test -- cortex -- tests/integration/workspace.integration.test.js
+ * Run with:
+ * node -r dotenv/config ./node_modules/ava/entrypoints/cli.mjs tests/integration/workspace.integration.test.js --timeout=300s --concurrency=1
  */
 
 import test from 'ava';

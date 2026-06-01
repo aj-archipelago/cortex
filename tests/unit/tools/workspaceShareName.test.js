@@ -11,7 +11,7 @@
  * actually calling Azure or Docker APIs. We achieve this by subclassing the
  * backends and capturing the arguments passed to the underlying operations.
  *
- * Run with: npm test -- cortex tests/unit/tools/workspaceShareName.test.js
+ * Run with: npm run test:unit -- tests/unit/tools/workspaceShareName.test.js
  */
 
 import test from 'ava';
@@ -211,6 +211,8 @@ test('DockerBackend › createAndStart should use shareName for volume naming', 
     }
 
     const backend = new TestDockerBackend();
+    backend._isRemoteDocker = true;
+    backend._workspaceHost = 'workspace-host.test';
 
     await backend.createAndStart({
         containerName: 'workspace-entity-789',
@@ -246,11 +248,16 @@ test('DockerBackend › createAndStart should fall back to containerName when no
             if (method === 'DELETE') {
                 return {};
             }
+            if (method === 'GET' && path.includes('/json')) {
+                return { NetworkSettings: { Ports: { '3100/tcp': [{ HostPort: '12345' }] } } };
+            }
             return {};
         }
     }
 
     const backend = new TestDockerBackend();
+    backend._isRemoteDocker = true;
+    backend._workspaceHost = 'workspace-host.test';
 
     await backend.createAndStart({
         containerName: 'workspace-entity-000',

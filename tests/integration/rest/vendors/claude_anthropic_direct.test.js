@@ -2,7 +2,8 @@
  * E2E integration test for direct Anthropic API access (not via Vertex AI)
  * Tests the CLAUDE-ANTHROPIC plugin type with Claude models
  * 
- * Run with: npm test -- tests/integration/rest/vendors/claude_anthropic_direct.test.js
+ * Run with:
+ * node -r dotenv/config ./node_modules/ava/entrypoints/cli.mjs tests/integration/rest/vendors/claude_anthropic_direct.test.js --timeout=180s --concurrency=1
  */
 import test from 'ava';
 import serverFactory from '../../../../index.js';

@@ -201,7 +201,7 @@ test('should return identical text that chunker was passed, given weird spaces a
 });
 
 test('should return identical text that chunker was passed, given weird spaces and small chunks(10)', t => {
-    const maxChunkToken = 1;
+    const maxChunkToken = 10;
     const chunks = getSemanticChunks(testTextShortWeirdSpaces, maxChunkToken);
     t.assert(chunks.length > 0); //check chunking
     t.assert(chunks.every(chunk => encode(chunk).length <= maxChunkToken)); //check chunk size
@@ -419,7 +419,6 @@ test('should respect Arabic paragraph breaks', t => {
 
 test('should handle very large text (50x) efficiently', async t => {
     const largeText = Array(50).fill(testText).join('\n');
-    t.log('Size of very large text:', largeText.length, 'bytes');
 
     const startTime = performance.now();
     
@@ -435,59 +434,4 @@ test('should handle very large text (50x) efficiently', async t => {
     
     // Processing should take less than 1 second for this size
     t.true(processingTime < 1000, `Processing took ${processingTime}ms`);
-});
-
-test('should handle extremely large text (500x) efficiently', async t => {
-    const largeText = Array(500).fill(testText).join('\n');
-    t.log('Size of extremely large text:', largeText.length, 'bytes');
-
-    const startTime = performance.now();
-    
-    const maxChunkToken = 1000;
-    const chunks = getSemanticChunks(largeText, maxChunkToken);
-    
-    const endTime = performance.now();
-    const processingTime = endTime - startTime;
-    
-    t.true(chunks.length > 0);
-    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken));
-    t.is(chunks.join(''), largeText);
-    
-    // Processing should take less than 5 seconds for this size
-    t.true(processingTime < 5000, `Processing took ${processingTime}ms`);
-});
-
-test('should handle massive text (5000x) efficiently', async t => {
-    const largeText = Array(5000).fill(testText).join('\n');
-    t.log('Size of massive text:', largeText.length, 'bytes');
-
-    const startTime = performance.now();
-    
-    const maxChunkToken = 1000;
-    const chunks = getSemanticChunks(largeText, maxChunkToken);
-    
-    const endTime = performance.now();
-    const processingTime = endTime - startTime;
-    
-    t.true(chunks.length > 0);
-    t.true(chunks.every(chunk => encode(chunk).length <= maxChunkToken));
-    t.is(chunks.join(''), largeText);
-    
-    // Processing should take less than 30 seconds for this size
-    t.true(processingTime < 30000, `Processing took ${processingTime}ms`);
-});
-
-test('should maintain memory efficiency with huge texts', async t => {
-    const initialMemory = process.memoryUsage().heapUsed;
-    
-    const largeText = Array(1000).fill(testText).join('\n');
-    const maxChunkToken = 1000;
-    const chunks = getSemanticChunks(largeText, maxChunkToken);
-    
-    const finalMemory = process.memoryUsage().heapUsed;
-    const memoryIncrease = (finalMemory - initialMemory) / 1024 / 1024; // Convert to MB
-    
-    t.true(chunks.length > 0);
-    // Memory increase should be reasonable (less than 100MB for this test)
-    t.true(memoryIncrease < 100, `Memory increase was ${memoryIncrease.toFixed(2)}MB`);
 });

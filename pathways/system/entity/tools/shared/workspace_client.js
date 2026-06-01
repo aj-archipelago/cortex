@@ -1200,11 +1200,6 @@ async function uploadWorkspaceArchiveFromLegacyShare(entityId, workspace, archiv
         throw new Error(`Cannot copy non-standard legacy checkpoint path from Azure Files: ${archivePath}`);
     }
 
-    const { accountName, accountKey } = getWorkspaceFilesStorageAccount();
-    if (!accountName || !accountKey) {
-        throw new Error('Workspace Azure Files storage credentials are required for legacy checkpoint migration');
-    }
-
     if (_workspaceLegacyShareUploadOverride) {
         return await _workspaceLegacyShareUploadOverride({
             entityId,
@@ -1213,6 +1208,11 @@ async function uploadWorkspaceArchiveFromLegacyShare(entityId, workspace, archiv
             blobPath,
             shareName,
         });
+    }
+
+    const { accountName, accountKey } = getWorkspaceFilesStorageAccount();
+    if (!accountName || !accountKey) {
+        throw new Error('Workspace Azure Files storage credentials are required for legacy checkpoint migration');
     }
 
     const {

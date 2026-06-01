@@ -117,7 +117,7 @@ test("default example exposes GPT Image 2 metadata without service-specific cred
 
   t.truthy(model);
   t.is(model.type, "OPENAI-DALLE3");
-  t.is(model.endpoints[0].headers["api-key"], "{{AZURE_OPENAI_API_KEY}}");
+  t.is(model.endpoints[0].headers.Authorization, "Bearer {{OPENAI_API_KEY}}");
   t.false(model.endpoints[0].url.includes("archipelago"));
   t.is(model.metadata.displayName, "GPT Image 2");
   t.is(model.metadata.category, "image");

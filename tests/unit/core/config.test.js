@@ -30,7 +30,7 @@ test('config PORT', (t) => {
 });
 
 test('config enableCache', (t) => {
-    const expectedDefault = true;
+    const expectedDefault = false;
     t.is(config.get('enableCache'), expectedDefault);
 });
 

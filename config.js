@@ -454,6 +454,14 @@ const defaultEntityConstants = config.get('entityConstants');
 if (configFile && fs.existsSync(configFile)) {
     logger.info(`Loading config from ${configFile}`);
     config.loadFile(configFile);
+    const envOverrides = {};
+    const schemaProperties = config.getSchema()._cvtProperties || {};
+    for (const [key, schema] of Object.entries(schemaProperties)) {
+        if (schema.env && Object.prototype.hasOwnProperty.call(process.env, schema.env)) {
+            envOverrides[key] = process.env[schema.env];
+        }
+    }
+    config.load(envOverrides);
 } else {
     const openaiApiKey = config.get('openaiApiKey');
     if (!openaiApiKey) {

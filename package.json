@@ -35,7 +35,12 @@
     "dev": "node start.js",
     "start": "node start.js",
     "cleanup:personal-entities": "node scripts/cleanup-personal-entities.js",
-    "test": "ava"
+    "test": "npm run test:unit",
+    "test:unit": "CORTEX_LOG_LEVEL=silent CORTEX_CONFIG_FILE=./config/default.example.json OPENAI_API_KEY=test ava",
+    "test:unit:serial": "CORTEX_LOG_LEVEL=silent CORTEX_CONFIG_FILE=./config/default.example.json OPENAI_API_KEY=test ava --concurrency=1",
+    "test:integration": "CORTEX_ENABLE_REST=true node -r dotenv/config ./node_modules/ava/entrypoints/cli.mjs tests/integration/**/*.test.js --timeout=300s --concurrency=1",
+    "test:integration:rest": "CORTEX_ENABLE_REST=true node -r dotenv/config ./node_modules/ava/entrypoints/cli.mjs tests/integration/rest/*.test.js --timeout=180s --concurrency=1",
+    "test:all": "npm run test:unit && npm run test:integration"
   },
   "author": "",
   "license": "MIT",
@@ -97,14 +102,11 @@
   },
   "ava": {
     "files": [
-      "tests/**/*.test.js",
-      "!tests/integration/clientToolCallbacks.test.js"
-    ],
-    "require": [
-      "dotenv/config"
+      "tests/unit/**/*.test.js",
+      "tests/scripts/**/*.test.js"
     ],
     "timeout": "60s",
-    "concurrency": 1
+    "concurrency": 8
   },
   "overrides": {
     "whatwg-url": "^12.0.0",
