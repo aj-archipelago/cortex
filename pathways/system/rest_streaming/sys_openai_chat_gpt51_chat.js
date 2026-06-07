@@ -15,6 +15,8 @@ export default {
         messages: [{ role: '', content: [] }],
         tools: '',
         tool_choice: 'auto',
+        functions: '',
+        function_call: '',
     },
     model: 'oai-gpt51-chat',
     useInputChunking: false,

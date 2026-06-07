@@ -620,6 +620,7 @@ const buildPathways = async (config) => {
                     tools: '',
                     tool_choice: 'auto',
                     functions: '',
+                    function_call: '',
                     reasoningEffort: '',
                     thinkingType: { type: 'string' },
                     thinkingBudgetTokens: { type: 'integer' }

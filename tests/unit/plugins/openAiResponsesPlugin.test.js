@@ -578,6 +578,62 @@ test('processStreamEvent should convert function_call add events to chat-complet
     t.is(parsed.choices[0].delta.tool_calls[0].function.name, 'get_weather');
 });
 
+test('processStreamEvent should preserve legacy function_call streaming shape', t => {
+    const plugin = createMockPlugin();
+    plugin._legacyFunctionCallingRequest = true;
+
+    const added = plugin.processStreamEvent({
+        data: JSON.stringify({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: {
+                type: 'function_call',
+                call_id: 'call_123',
+                name: 'get_weather',
+                arguments: ''
+            }
+        })
+    }, {});
+
+    let parsed = JSON.parse(added.data);
+    t.deepEqual(parsed.choices[0].delta, {
+        function_call: {
+            name: 'get_weather',
+            arguments: ''
+        }
+    });
+    t.falsy(parsed.choices[0].delta.tool_calls);
+    t.is(parsed.choices[0].finish_reason, null);
+
+    const argsDelta = plugin.processStreamEvent({
+        data: JSON.stringify({
+            type: 'response.function_call_arguments.delta',
+            output_index: 0,
+            delta: '{"location":"Boston"}'
+        })
+    }, {});
+
+    parsed = JSON.parse(argsDelta.data);
+    t.deepEqual(parsed.choices[0].delta, {
+        function_call: {
+            arguments: '{"location":"Boston"}'
+        }
+    });
+
+    const completed = plugin.processStreamEvent({
+        data: JSON.stringify({
+            type: 'response.completed',
+            response: {
+                output: []
+            }
+        })
+    }, {});
+
+    parsed = JSON.parse(completed.data);
+    t.deepEqual(parsed.choices[0].delta, {});
+    t.is(parsed.choices[0].finish_reason, 'function_call');
+});
+
 test('processStreamEvent should mark response.completed as stop for clients', t => {
     const plugin = createMockPlugin();
     const eventData = {

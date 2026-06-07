@@ -245,7 +245,7 @@ const isLikelyRequestId = (value) => {
 const extractPathwayErrorMessage = (pathwayResponse) => {
     if (!pathwayResponse || typeof pathwayResponse !== 'object') return '';
 
-    const { errors, result } = pathwayResponse;
+    const { errors } = pathwayResponse;
     if (Array.isArray(errors) && errors.length > 0) {
         const firstError = errors[0];
         if (typeof firstError === 'string') return firstError;
@@ -253,9 +253,6 @@ const extractPathwayErrorMessage = (pathwayResponse) => {
     }
     if (typeof errors === 'string') {
         return errors;
-    }
-    if (typeof result === 'string' && result.startsWith('[ERROR]')) {
-        return result.replace(/^\[ERROR\]\s*/, '');
     }
 
     return '';

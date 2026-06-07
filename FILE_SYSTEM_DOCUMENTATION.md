@@ -24,7 +24,7 @@ The Cortex file system is a multi-layered architecture that handles file uploads
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │         System Tools & Plugins                       │   │
-│  │  (WriteFile, EditFile, Image, FileCollection, etc.)  │   │
+│  │  (WriteFile, WorkspaceSSH, Image, FileCollection)    │   │
 │  └──────────────────┬─────────────────────────────────┘   │
 │                      │                                       │
 │  ┌───────────────────▼─────────────────────────────────┐   │
@@ -56,7 +56,7 @@ The Cortex file system is a multi-layered architecture that handles file uploads
 1. **File Handler Service** (`cortex-file-handler`): External Azure Function that handles actual file storage
 2. **File Utilities** (`lib/fileUtils.js`): Cortex's abstraction layer over the file handler
 3. **File Collection System**: Redis-based metadata storage for user file collections
-4. **System Tools**: Pathways that use files (WriteFile, EditFile, Image, etc.)
+4. **System Tools**: Pathways that use files (WriteFile, WorkspaceSSH, Image, FileCollection, etc.)
 
 ---
 
@@ -374,33 +374,7 @@ const fileEntry = await addFileToCollection(
 );
 ```
 
-#### 2. EditFile (`sys_tool_editfile.js`)
-**Flow**:
-1. User provides file identifier and modification
-2. Resolves file via `resolveFileParameter()` → finds in collection
-3. Downloads file content via `axios.get(file.url)`
-4. Modifies content (line replacement or search/replace)
-5. Uploads modified file via `uploadFileToCloud()` (creates new hash)
-6. Updates collection entry atomically via `updateFileMetadata()` with new URL/hash
-
-**Key Code**:
-```javascript
-const foundFile = await resolveFileParameter(fileParam, contextId, contextKey);
-const oldHash = foundFile.hash;
-const uploadResult = await uploadFileToCloud(
-    fileBuffer, mimeType, filename, resolver, contextId
-);
-// Update file entry atomically (preserves CFH data, updates Cortex metadata)
-await updateFileMetadata(contextId, foundFile.hash, {
-    url: uploadResult.url,
-    gcs: uploadResult.gcs,
-    hash: uploadResult.hash
-});
-    await deleteFileByHash(oldHash, resolver, contextId);
-}
-```
-
-#### 3. FileCollection (`sys_tool_file_collection.js`)
+#### 2. FileCollection (`sys_tool_file_collection.js`)
 **Tools**:
 - `AddFileToCollection`: Adds file to collection (with optional upload)
 - `SearchFileCollection`: Searches files by filename, tags, notes
@@ -533,32 +507,6 @@ resolveFileParameter()
             │                      └─► Return {url, gcs, hash, filename, shortLivedUrl}
             │
             └─► Return file object with shortLivedUrl
-```
-
-### File Edit Flow
-
-```
-User/LLM Request (e.g., "edit file.txt, replace line 5")
-    │
-    ▼
-EditFile Tool
-    │
-    ├─► resolveFileParameter() ──► Find file in collection
-    │
-    ├─► Download file content ──► axios.get(file.url)
-    │
-    ├─► Modify content (line replacement or search/replace)
-    │
-    ├─► uploadFileToCloud() ──► Upload modified file
-    │   │
-    │   └─► Returns new {url, gcs, hash}
-    │
-    └─► updateFileMetadata() ──► Redis HSET (atomic update)
-        │
-        ├─► Preserve CFH fields (url, gcs, filename)
-        ├─► Update Cortex fields (url, gcs, hash)
-        └─► If update succeeds:
-                └─► deleteFileByHash() ──► File Handler DELETE /file-handler?hash=oldHash
 ```
 
 ### File Deletion Flow
@@ -964,7 +912,7 @@ Updates Cortex-managed metadata fields atomically.
   2. Merges metadata (preserves CFH fields, updates Cortex fields)
   3. Writes back via atomic HSET
   4. Invalidates cache
-- **Used by**: Search operations (updates lastAccessed), EditFile (updates URL/hash)
+- **Used by**: Search operations (updates lastAccessed), FileCollection metadata updates
 
 Adds file to collection via atomic operation.
 - **Parameters**:
@@ -1019,7 +967,7 @@ Resolves file parameter to file URL.
   1. Loads merged file collection from all contexts in `agentContext`
   2. Searches merged collection for matching file
   3. Returns file URL if found
-- **Used by**: ReadFile, EditFile, and other tools that need file URLs
+- **Used by**: ReadFile and other tools that need file URLs
 
 #### `findFileInCollection(fileParam, collection)`
 Finds file in collection array.
@@ -1088,7 +1036,7 @@ Checks if MIME type is text-based.
   - `mimeType`: MIME type string to check
 - **Returns**: Boolean (true if text-based)
 - **Supports**: All `text/*` types, plus application types like JSON, JavaScript, XML, YAML, Python, etc.
-- **Used by**: ReadFile, EditFile to validate file types
+- **Used by**: ReadFile to validate file types
 
 #### `getMimeTypeFromFilename(filenameOrPath, defaultMimeType)`
 Gets MIME type from filename or path.
