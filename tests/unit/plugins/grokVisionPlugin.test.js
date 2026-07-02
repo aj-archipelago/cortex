@@ -5,29 +5,42 @@ import test from 'ava';
 import GrokVisionPlugin from '../../../server/plugins/grokVisionPlugin.js';
 import { safeJsonParse } from '../../../server/plugins/grokVisionPlugin.js';
 
-test('should create GrokVisionPlugin instance', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
+const defaultMockPathway = {
+  name: 'test-pathway',
+  temperature: 0.7,
+  prompt: 'Test prompt'
+};
 
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
+const defaultMockModel = {
+  name: 'xai-grok-3',
+  type: 'GROK-VISION',
+  url: 'https://api.x.ai/v1/chat/completions',
+  headers: {
+    'Authorization': 'Bearer test-key',
+    'Content-Type': 'application/json'
+  },
+  params: {
+    model: 'grok-3-latest'
+  },
+  maxTokenLength: 131072,
+  maxReturnTokens: 4096
+};
+
+const createPlugin = (modelOverrides = {}, pathwayOverrides = {}) => new GrokVisionPlugin(
+  { ...defaultMockPathway, ...pathwayOverrides },
+  {
+    ...defaultMockModel,
+    ...modelOverrides,
+    headers: modelOverrides.headers ?? defaultMockModel.headers,
     params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
+      ...defaultMockModel.params,
+      ...modelOverrides.params
+    }
+  }
+);
 
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+test('should create GrokVisionPlugin instance', t => {
+  const plugin = createPlugin();
   
   t.true(plugin instanceof GrokVisionPlugin);
   t.is(plugin.modelName, 'xai-grok-3');
@@ -35,28 +48,7 @@ test('should create GrokVisionPlugin instance', t => {
 });
 
 test('should handle Grok-specific parameters', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-4',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-4-0709'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin({ name: 'xai-grok-4', params: { model: 'grok-4-0709' } });
 
   const parameters = {
     search_parameters: '{"mode": "auto"}'
@@ -70,20 +62,8 @@ test('should handle Grok-specific parameters', async t => {
 });
 
 test('should map reasoning effort for Grok requests', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
+  const plugin = createPlugin({
     name: 'xai-grok-4-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
     params: {
       model: 'grok-4.3'
     },
@@ -95,9 +75,7 @@ test('should map reasoning effort for Grok requests', async t => {
     },
     maxTokenLength: 1000000,
     maxReturnTokens: 128000
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  });
 
   for (const effort of ['none', 'low', 'medium', 'high']) {
     const requestParams = await plugin.getRequestParameters(
@@ -110,12 +88,6 @@ test('should map reasoning effort for Grok requests', async t => {
 });
 
 test('should not send reasoning effort for Grok models without an explicit map', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
   const grokModelsWithoutReasoningEffort = [
     ['xai-grok-4-20-reasoning', 'grok-4.20-0309-reasoning'],
     ['xai-grok-4-20-non-reasoning', 'grok-4.20-0309-non-reasoning'],
@@ -125,22 +97,14 @@ test('should not send reasoning effort for Grok models without an explicit map',
   ];
 
   for (const [name, providerModel] of grokModelsWithoutReasoningEffort) {
-    const mockModel = {
+    const plugin = createPlugin({
       name,
-      type: 'GROK-VISION',
-      url: 'https://api.x.ai/v1/chat/completions',
-      headers: {
-        'Authorization': 'Bearer test-key',
-        'Content-Type': 'application/json'
-      },
       params: {
         model: providerModel
       },
       maxTokenLength: 2000000,
       maxReturnTokens: 128000
-    };
-
-    const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+    });
     const requestParams = await plugin.getRequestParameters(
       'test text',
       { reasoningEffort: 'high' },
@@ -152,28 +116,7 @@ test('should not send reasoning effort for Grok models without an explicit map',
 });
 
 test('should handle all Live Search parameters correctly', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Test comprehensive Live Search parameters as JSON string
   const parameters = {
@@ -228,28 +171,7 @@ test('should handle all Live Search parameters correctly', async t => {
 });
 
 test('should handle individual source parameters correctly', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Test web source with allowed_websites
   const webParameters = {
@@ -282,28 +204,7 @@ test('should handle individual source parameters correctly', async t => {
 });
 
 test('should handle date range parameters correctly', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Test with only from_date
   const fromDateParameters = {
@@ -344,28 +245,7 @@ test('should handle date range parameters correctly', async t => {
 });
 
 test('should handle empty search_parameters correctly', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Test with empty search_parameters (should not be set)
   const emptyParameters = {};
@@ -385,28 +265,7 @@ test('should handle empty search_parameters correctly', async t => {
 // Note: grok_live_search pathway test removed as the pathway file does not exist yet
 
 test('should handle X.AI vision message structure correctly', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Test vision message with URL image
   const visionMessages = [
@@ -442,28 +301,7 @@ test('should handle X.AI vision message structure correctly', async t => {
 });
 
 test('should handle X.AI vision with base64 images', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Test vision message with base64 image
   const base64Image = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=';
@@ -501,28 +339,7 @@ test('should handle X.AI vision with base64 images', async t => {
 });
 
 test('should handle X.AI vision with multiple images', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Test vision message with multiple images
   const visionMessages = [
@@ -571,28 +388,7 @@ test('should handle X.AI vision with multiple images', async t => {
 });
 
 test('should parse Grok response with citations', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-4',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-4-0709'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin({ name: 'xai-grok-4', params: { model: 'grok-4-0709' } });
 
   const mockResponse = {
     choices: [{
@@ -616,28 +412,7 @@ test('should parse Grok response with citations', t => {
 });
 
 test('should handle tool calls in response', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-4',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-4-0709'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin({ name: 'xai-grok-4', params: { model: 'grok-4-0709' } });
 
   const mockResponse = {
     choices: [{
@@ -666,28 +441,7 @@ test('should handle tool calls in response', t => {
 });
 
 test('should handle string response from parent', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-4',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-4-0709'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin({ name: 'xai-grok-4', params: { model: 'grok-4-0709' } });
 
   const mockResponse = {
     choices: [{
@@ -705,28 +459,7 @@ test('should handle string response from parent', t => {
 });
 
 test('should handle basic Grok API response format', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // This matches the actual Grok API response format from your curl example
   const mockResponse = {
@@ -771,28 +504,7 @@ test('should handle basic Grok API response format', t => {
 });
 
 test('should parse messages with image content', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-4',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-4-0709'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin({ name: 'xai-grok-4', params: { model: 'grok-4-0709' } });
 
   const messages = [
     {
@@ -822,28 +534,7 @@ test('should parse messages with image content', async t => {
 });
 
 test('should handle Grok vision response with web search results', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-4',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-4-0709'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin({ name: 'xai-grok-4', params: { model: 'grok-4-0709' } });
 
   const mockResponse = {
     choices: [{
@@ -870,28 +561,7 @@ test('should handle Grok vision response with web search results', t => {
 });
 
 test('should handle streaming events with Grok-specific fields', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-4',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-4-0709'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin({ name: 'xai-grok-4', params: { model: 'grok-4-0709' } });
 
   const event = {
     data: JSON.stringify({
@@ -917,28 +587,7 @@ test('should handle streaming events with Grok-specific fields', t => {
 });
 
 test('should handle end of stream event', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-4',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-4-0709'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin({ name: 'xai-grok-4', params: { model: 'grok-4-0709' } });
 
   const event = { data: '[DONE]' };
   const requestProgress = { data: '', progress: 0 };
@@ -949,28 +598,7 @@ test('should handle end of stream event', t => {
 });
 
 test('should handle Live Search parameters correctly', async t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Test Live Search specific parameters
   const parameters = {
@@ -985,28 +613,7 @@ test('should handle Live Search parameters correctly', async t => {
 });
 
 test('should parse Live Search response with real-time data', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Mock response with Live Search data
   const mockResponse = {
@@ -1055,28 +662,7 @@ test('should parse Live Search response with real-time data', t => {
 });
 
 test('should parse Live Search response with usage data', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+  const plugin = createPlugin();
 
   // Mock response with Live Search usage data
   const mockResponse = {
@@ -1113,30 +699,9 @@ test('should parse Live Search response with usage data', t => {
 });
 
 test('should validate search parameters - valid parameters', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
+  const plugin = createPlugin();
 
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  const validParams = {
+  t.true(plugin.validateSearchParameters({
     mode: 'auto',
     return_citations: true,
     from_date: '2024-01-01',
@@ -1148,327 +713,98 @@ test('should validate search parameters - valid parameters', t => {
       { type: 'news' },
       { type: 'rss', links: ['https://example.com/feed.xml'] }
     ]
-  };
-
-  t.true(plugin.validateSearchParameters(validParams));
+  }));
 });
 
-test('should validate search parameters - invalid mode', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
+for (const { name, params, message } of [
+  {
+    name: 'invalid mode',
+    params: { mode: 'invalid_mode' },
+    message: 'Invalid \'mode\' parameter'
+  },
+  {
+    name: 'invalid date format',
+    params: { from_date: '2024/01/01' },
+    message: 'must be in YYYY-MM-DD format'
+  },
+  {
+    name: 'invalid max_search_results',
+    params: { max_search_results: 100 },
+    message: 'must be 50 or less'
+  },
+  {
+    name: 'invalid X handles count',
     params: {
-      model: 'grok-3-latest'
+      sources: [{
+        type: 'x',
+        included_x_handles: Array(11).fill('user')
+      }]
     },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  const invalidParams = {
-    mode: 'invalid_mode'
-  };
-
-  const error = t.throws(() => plugin.validateSearchParameters(invalidParams));
-  t.true(error.message.includes('Invalid \'mode\' parameter'));
-});
-
-test('should validate search parameters - invalid date format', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
+    message: 'can have a maximum of 10 items'
+  },
+  {
+    name: 'conflicting X handles',
     params: {
-      model: 'grok-3-latest'
+      sources: [{
+        type: 'x',
+        included_x_handles: ['user1'],
+        excluded_x_handles: ['user2']
+      }]
     },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  const invalidParams = {
-    from_date: '2024/01/01' // Invalid format
-  };
-
-  const error = t.throws(() => plugin.validateSearchParameters(invalidParams));
-  t.true(error.message.includes('must be in YYYY-MM-DD format'));
-});
-
-test('should validate search parameters - invalid max_search_results', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
+    message: 'cannot be specified simultaneously'
+  },
+  {
+    name: 'invalid RSS links count',
     params: {
-      model: 'grok-3-latest'
+      sources: [{
+        type: 'rss',
+        links: ['https://feed1.xml', 'https://feed2.xml']
+      }]
     },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
+    message: 'can only have one item'
+  }
+]) {
+  test(`should validate search parameters - ${name}`, t => {
+    const error = t.throws(() => createPlugin().validateSearchParameters(params));
+    t.true(error.message.includes(message));
+  });
+}
 
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
+for (const { name, input, expected, sameReference } of [
+  {
+    name: 'parse valid JSON',
+    input: '{"key": "value", "number": 42}',
+    expected: { key: 'value', number: 42 }
+  },
+  {
+    name: 'return original string for invalid JSON',
+    input: '{"key": "value", "invalid": }',
+    expected: '{"key": "value", "invalid": }'
+  },
+  {
+    name: 'return non-string input as-is',
+    input: { key: 'value' },
+    expected: { key: 'value' },
+    sameReference: true
+  },
+  {
+    name: 'return null as-is',
+    input: null,
+    expected: null
+  },
+  {
+    name: 'return undefined as-is',
+    input: undefined,
+    expected: undefined
+  }
+]) {
+  test(`safeJsonParse should ${name}`, t => {
+    const result = safeJsonParse(input);
 
-  const invalidParams = {
-    max_search_results: 100 // Too high
-  };
-
-  const error = t.throws(() => plugin.validateSearchParameters(invalidParams));
-  t.true(error.message.includes('must be 50 or less'));
-});
-
-test('should validate search parameters - invalid X handles count', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  const invalidParams = {
-    sources: [{
-      type: 'x',
-      included_x_handles: Array(11).fill('user') // Too many handles
-    }]
-  };
-
-  const error = t.throws(() => plugin.validateSearchParameters(invalidParams));
-  t.true(error.message.includes('can have a maximum of 10 items'));
-});
-
-test('should validate search parameters - conflicting X handles', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  const invalidParams = {
-    sources: [{
-      type: 'x',
-      included_x_handles: ['user1'],
-      excluded_x_handles: ['user2'] // Cannot specify both
-    }]
-  };
-
-  const error = t.throws(() => plugin.validateSearchParameters(invalidParams));
-  t.true(error.message.includes('cannot be specified simultaneously'));
-});
-
-test('should validate search parameters - invalid RSS links count', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  const invalidParams = {
-    sources: [{
-      type: 'rss',
-      links: ['https://feed1.xml', 'https://feed2.xml'] // Too many links
-    }]
-  };
-
-  const error = t.throws(() => plugin.validateSearchParameters(invalidParams));
-  t.true(error.message.includes('can only have one item'));
-});
-
-test('safeJsonParse should parse valid JSON', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  const validJson = '{"key": "value", "number": 42}';
-  const result = safeJsonParse(validJson);
-
-  t.deepEqual(result, { key: 'value', number: 42 });
-});
-
-test('safeJsonParse should return original string for invalid JSON', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  const invalidJson = '{"key": "value", "invalid": }';
-  const result = safeJsonParse(invalidJson);
-
-  t.is(result, invalidJson);
-});
-
-test('safeJsonParse should return non-string input as-is', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  const objectInput = { key: 'value' };
-  const result = safeJsonParse(objectInput);
-
-  t.is(result, objectInput);
-});
-
-test('safeJsonParse should return null/undefined as-is', t => {
-  const mockPathway = {
-    name: 'test-pathway',
-    temperature: 0.7,
-    prompt: 'Test prompt'
-  };
-
-  const mockModel = {
-    name: 'xai-grok-3',
-    type: 'GROK-VISION',
-    url: 'https://api.x.ai/v1/chat/completions',
-    headers: {
-      'Authorization': 'Bearer test-key',
-      'Content-Type': 'application/json'
-    },
-    params: {
-      model: 'grok-3-latest'
-    },
-    maxTokenLength: 131072,
-    maxReturnTokens: 4096
-  };
-
-  const plugin = new GrokVisionPlugin(mockPathway, mockModel);
-
-  t.is(safeJsonParse(null), null);
-  t.is(safeJsonParse(undefined), undefined);
-});
+    if (sameReference) {
+      t.is(result, input);
+    } else {
+      t.deepEqual(result, expected);
+    }
+  });
+}

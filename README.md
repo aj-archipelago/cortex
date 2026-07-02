@@ -983,10 +983,35 @@ Run Cortex:
 npm start
 ```
 
-Run tests:
+Run the fast hermetic unit and script suite:
 
 ```sh
 npm test
+```
+
+This is the default local and CI gate. It uses `config/default.example.json`
+and a dummy `OPENAI_API_KEY`, and does not load `.env`.
+
+Run live integration tests explicitly:
+
+```sh
+npm run test:integration
+```
+
+Integration tests load `.env`, enable REST routes for the test process, and
+may require provider keys, Redis, MongoDB, workspace services, or other local
+infrastructure. Some live REST compatibility groups are further gated by
+`CORTEX_RUN_REST_LIVE_TESTS=true` or vendor-specific live-test flags. For the
+REST integration subset only, use:
+
+```sh
+npm run test:integration:rest
+```
+
+To run both lanes:
+
+```sh
+npm run test:all
 ```
 
 Focused helper tests may use their own package scripts, for example:

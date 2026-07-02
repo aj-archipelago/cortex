@@ -24,24 +24,187 @@ const createMockPlugin = () => {
     return new OpenAIResponsesPlugin(mockPathway, mockModel);
 };
 
-test('execute should include request model when provided', async t => {
-    const plugin = createMockPlugin();
+const executeAndCaptureRequestData = async (plugin, {
+    requestParameters,
+    executeParameters = {},
+    prompt = null,
+    text = 'Say hello',
+    resolver = {},
+} = {}) => {
     let capturedRequestData;
 
-    plugin.getRequestParameters = async () => ({
-        model: 'request-model',
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
+    plugin.getRequestParameters = async () => requestParameters;
     plugin.executeRequest = async cortexRequest => {
         capturedRequestData = cortexRequest.data;
         return { output_text: 'Hello' };
     };
 
-    await plugin.execute('Say hello', { model: 'request-model' }, null, {});
+    await plugin.execute(text, executeParameters, prompt, resolver);
+    return capturedRequestData;
+};
 
-    t.truthy(capturedRequestData);
-    t.is(capturedRequestData.model, 'request-model');
-});
+for (const scenario of [
+    {
+        name: 'include request model when provided',
+        requestParameters: {
+            model: 'request-model',
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        executeParameters: { model: 'request-model' },
+        assert: (t, data) => t.is(data.model, 'request-model')
+    },
+    {
+        name: 'flatten chat-completions function tools for responses api',
+        requestParameters: {
+            model: 'request-model',
+            tools: [
+                {
+                    type: 'function',
+                    function: {
+                        name: 'search',
+                        description: 'Search the web',
+                        parameters: { type: 'object', properties: {} }
+                    }
+                }
+            ],
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        executeParameters: { model: 'request-model' },
+        assert: (t, data) => t.deepEqual(data.tools, [
+            {
+                type: 'function',
+                name: 'search',
+                description: 'Search the web',
+                parameters: { type: 'object', properties: {} }
+            }
+        ])
+    },
+    {
+        name: 'fallback to configured model when request model is missing',
+        requestParameters: {
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        assert: (t, data) => t.is(data.model, 'gpt-4o-responses')
+    },
+    {
+        name: 'prefer endpoint params model when request model is missing',
+        setup: plugin => {
+            plugin.model.params = { model: 'endpoint-params-model' };
+        },
+        requestParameters: {
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        assert: (t, data) => t.is(data.model, 'endpoint-params-model')
+    },
+    {
+        name: 'convert text content blocks to input_text for responses input',
+        requestParameters: {
+            messages: [
+                {
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: 'Say hello' }
+                    ]
+                }
+            ]
+        },
+        assert: (t, data) => {
+            t.truthy(data.input);
+            t.is(data.input[0].content[0].type, 'input_text');
+        }
+    },
+    {
+        name: 'convert response_format into text.format for responses api',
+        requestParameters: {
+            response_format: { type: 'json_object' },
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        assert: (t, data) => {
+            t.deepEqual(data.text, { format: { type: 'json_object' } });
+            t.false(Object.prototype.hasOwnProperty.call(data, 'response_format'));
+        }
+    },
+    {
+        name: 'flatten tool_choice function selection for responses api',
+        requestParameters: {
+            tool_choice: {
+                type: 'function',
+                function: { name: 'search' }
+            },
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        assert: (t, data) => t.deepEqual(data.tool_choice, {
+            type: 'function',
+            name: 'search'
+        })
+    },
+    {
+        name: 'omit temperature for responses requests',
+        requestParameters: {
+            temperature: 0.9,
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        assert: (t, data) => t.false(Object.prototype.hasOwnProperty.call(data, 'temperature'))
+    },
+    {
+        name: 'convert reasoningEffort into reasoning config',
+        requestParameters: {
+            reasoningEffort: 'HIGH',
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        executeParameters: { reasoning_effort: 'high' },
+        assert: (t, data) => {
+            t.deepEqual(data.reasoning, { effort: 'high' });
+            t.false(Object.prototype.hasOwnProperty.call(data, 'reasoningEffort'));
+            t.false(Object.prototype.hasOwnProperty.call(data, 'reasoning_effort'));
+        }
+    },
+    {
+        name: 'apply model reasoningEffortMap',
+        setup: plugin => {
+            plugin.model.reasoningEffortMap = {
+                none: 'medium',
+                low: 'medium',
+                high: 'medium',
+                xhigh: 'medium'
+            };
+        },
+        requestParameters: {
+            reasoningEffort: 'low',
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        executeParameters: { reasoning_effort: 'none' },
+        assert: (t, data) => t.deepEqual(data.reasoning, { effort: 'medium' })
+    },
+    {
+        name: 'preserve explicit reasoning config over reasoningEffort alias',
+        requestParameters: {
+            reasoning: { effort: 'medium', summary: 'auto' },
+            reasoningEffort: 'low',
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        executeParameters: { reasoning_effort: 'high' },
+        assert: (t, data) => t.deepEqual(data.reasoning, { effort: 'medium', summary: 'auto' })
+    },
+    {
+        name: 'drop blank explicit reasoning effort',
+        requestParameters: {
+            reasoning: { effort: '  ', summary: 'auto' },
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        assert: (t, data) => t.deepEqual(data.reasoning, { summary: 'auto' })
+    }
+]) {
+    test(`execute should ${scenario.name}`, async t => {
+        const plugin = createMockPlugin();
+        scenario.setup?.(plugin);
+
+        const capturedRequestData = await executeAndCaptureRequestData(plugin, scenario);
+
+        t.truthy(capturedRequestData);
+        scenario.assert(t, capturedRequestData);
+    });
+}
 
 test('getRequestParameters should not send chat stream_options to Responses API', async t => {
     const plugin = createMockPlugin();
@@ -54,45 +217,8 @@ test('getRequestParameters should not send chat stream_options to Responses API'
     t.false(Object.prototype.hasOwnProperty.call(params, 'stream_options'));
 });
 
-test('execute should flatten chat-completions function tools for responses api', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        model: 'request-model',
-        tools: [
-            {
-                type: 'function',
-                function: {
-                    name: 'search',
-                    description: 'Search the web',
-                    parameters: { type: 'object', properties: {} }
-                }
-            }
-        ],
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', { model: 'request-model' }, null, {});
-
-    t.truthy(capturedRequestData);
-    t.deepEqual(capturedRequestData.tools, [
-        {
-            type: 'function',
-            name: 'search',
-            description: 'Search the web',
-            parameters: { type: 'object', properties: {} }
-        }
-    ]);
-});
-
 test('execute should resolve configured runtime model aliases before dispatch', async t => {
     const plugin = createMockPlugin();
-    let capturedRequestData;
 
     plugin.config = {
         get: key => {
@@ -112,61 +238,20 @@ test('execute should resolve configured runtime model aliases before dispatch', 
             };
         }
     };
-    plugin.getRequestParameters = async () => ({
-        model: 'oai-gpt54',
-        messages: [{ role: 'user', content: 'Say hello' }]
+    const capturedRequestData = await executeAndCaptureRequestData(plugin, {
+        requestParameters: {
+            model: 'oai-gpt54',
+            messages: [{ role: 'user', content: 'Say hello' }]
+        },
+        executeParameters: { model: 'oai-gpt54' }
     });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', { model: 'oai-gpt54' }, null, {});
 
     t.truthy(capturedRequestData);
     t.is(capturedRequestData.model, 'gpt-5.4');
 });
 
-test('execute should fallback to configured model when request model is missing', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', {}, null, {});
-
-    t.truthy(capturedRequestData);
-    t.is(capturedRequestData.model, 'gpt-4o-responses');
-});
-
-test('execute should prefer endpoint params model when request model is missing', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-    plugin.model.params = { model: 'endpoint-params-model' };
-
-    plugin.getRequestParameters = async () => ({
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', {}, null, {});
-
-    t.truthy(capturedRequestData);
-    t.is(capturedRequestData.model, 'endpoint-params-model');
-});
-
 test('execute should fallback to config model endpoint params when runtime model metadata is missing', async t => {
     const plugin = createMockPlugin();
-    let capturedRequestData;
 
     plugin.model = {
         name: 'runtime-endpoint-only',
@@ -192,15 +277,11 @@ test('execute should fallback to config model endpoint params when runtime model
         }
     };
 
-    plugin.getRequestParameters = async () => ({
-        messages: [{ role: 'user', content: 'Say hello' }]
+    const capturedRequestData = await executeAndCaptureRequestData(plugin, {
+        requestParameters: {
+            messages: [{ role: 'user', content: 'Say hello' }]
+        }
     });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', {}, null, {});
 
     t.truthy(capturedRequestData);
     t.is(capturedRequestData.model, 'gpt-5.2-codex');
@@ -213,7 +294,6 @@ test('execute should not re-route modelGroup alias from parameters.model (must h
     // construction time, so the body's model field would disagree with the endpoint URL the
     // request was about to be sent to (404 DeploymentNotFound on Azure).
     const plugin = createMockPlugin();
-    let capturedRequestData;
 
     // this.model is what the resolver chose at construction (oai-gpt54 → gpt-5.4 endpoint).
     plugin.model = {
@@ -234,16 +314,13 @@ test('execute should not re-route modelGroup alias from parameters.model (must h
         },
     };
 
-    plugin.getRequestParameters = async () => ({
-        messages: [{ role: 'user', content: 'Say hello' }],
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
     // Caller passes the modelGroup alias (mirrors what sys_entity_agent passes through args).
-    await plugin.execute('Say hello', { model: 'cortex-agent-chat' }, null, {});
+    const capturedRequestData = await executeAndCaptureRequestData(plugin, {
+        requestParameters: {
+            messages: [{ role: 'user', content: 'Say hello' }],
+        },
+        executeParameters: { model: 'cortex-agent-chat' }
+    });
 
     t.truthy(capturedRequestData);
     t.is(capturedRequestData.model, 'gpt-5.4');
@@ -284,32 +361,6 @@ test('resolveResponsesRequestModel should follow model redirects without invokin
         plugin.resolveResponsesRequestModel('cortex-agent-chat', configuredModels, redirects),
         'cortex-agent-chat',
     );
-});
-
-test('execute should convert text content blocks to input_text for responses input', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        messages: [
-            {
-                role: 'user',
-                content: [
-                    { type: 'text', text: 'Say hello' }
-                ]
-            }
-        ]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', {}, null, {});
-
-    t.truthy(capturedRequestData);
-    t.truthy(capturedRequestData.input);
-    t.is(capturedRequestData.input[0].content[0].type, 'input_text');
 });
 
 test('normalizeResponsesApiInput should flatten image_url objects to plain URL strings', t => {
@@ -391,49 +442,6 @@ test('normalizeResponsesApiInput should convert assistant tool calls and tool ou
     ]);
 });
 
-test('execute should convert response_format into text.format for responses api', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        response_format: { type: 'json_object' },
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', {}, null, {});
-
-    t.deepEqual(capturedRequestData.text, { format: { type: 'json_object' } });
-    t.false(Object.prototype.hasOwnProperty.call(capturedRequestData, 'response_format'));
-});
-
-test('execute should flatten tool_choice function selection for responses api', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        tool_choice: {
-            type: 'function',
-            function: { name: 'search' }
-        },
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', {}, null, {});
-
-    t.deepEqual(capturedRequestData.tool_choice, {
-        type: 'function',
-        name: 'search'
-    });
-});
-
 test('execute should prefer raw responses_input_json passthrough over rebuilt messages', async t => {
     const plugin = createMockPlugin();
     let capturedRequestData;
@@ -470,110 +478,6 @@ test('execute should prefer raw responses_input_json passthrough over rebuilt me
     t.false(Object.prototype.hasOwnProperty.call(capturedRequestData, 'messages'));
     t.is(capturedRequestData.input[0].role, 'developer');
     t.is(capturedRequestData.input[0].content[0].type, 'input_text');
-});
-
-test('execute should omit temperature for responses requests', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        temperature: 0.9,
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', {}, null, {});
-
-    t.truthy(capturedRequestData);
-    t.false(Object.prototype.hasOwnProperty.call(capturedRequestData, 'temperature'));
-});
-
-test('execute should convert reasoningEffort into reasoning config', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        reasoningEffort: 'HIGH',
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', { reasoning_effort: 'high' }, null, {});
-
-    t.truthy(capturedRequestData);
-    t.deepEqual(capturedRequestData.reasoning, { effort: 'high' });
-    t.false(Object.prototype.hasOwnProperty.call(capturedRequestData, 'reasoningEffort'));
-    t.false(Object.prototype.hasOwnProperty.call(capturedRequestData, 'reasoning_effort'));
-});
-
-test('execute should apply model reasoningEffortMap', async t => {
-    const plugin = createMockPlugin();
-    plugin.model.reasoningEffortMap = {
-        none: 'medium',
-        low: 'medium',
-        high: 'medium',
-        xhigh: 'medium'
-    };
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        reasoningEffort: 'low',
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', { reasoning_effort: 'none' }, null, {});
-
-    t.truthy(capturedRequestData);
-    t.deepEqual(capturedRequestData.reasoning, { effort: 'medium' });
-});
-
-test('execute should preserve explicit reasoning config over reasoningEffort alias', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        reasoning: { effort: 'medium', summary: 'auto' },
-        reasoningEffort: 'low',
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', { reasoning_effort: 'high' }, null, {});
-
-    t.truthy(capturedRequestData);
-    t.deepEqual(capturedRequestData.reasoning, { effort: 'medium', summary: 'auto' });
-});
-
-test('execute should drop blank explicit reasoning effort', async t => {
-    const plugin = createMockPlugin();
-    let capturedRequestData;
-
-    plugin.getRequestParameters = async () => ({
-        reasoning: { effort: '  ', summary: 'auto' },
-        messages: [{ role: 'user', content: 'Say hello' }]
-    });
-    plugin.executeRequest = async cortexRequest => {
-        capturedRequestData = cortexRequest.data;
-        return { output_text: 'Hello' };
-    };
-
-    await plugin.execute('Say hello', {}, null, {});
-
-    t.truthy(capturedRequestData);
-    t.deepEqual(capturedRequestData.reasoning, { summary: 'auto' });
 });
 
 test('processStreamEvent should close response.incomplete streams with a visible error chunk', t => {
@@ -674,6 +578,62 @@ test('processStreamEvent should convert function_call add events to chat-complet
     t.is(parsed.choices[0].delta.tool_calls[0].function.name, 'get_weather');
 });
 
+test('processStreamEvent should preserve legacy function_call streaming shape', t => {
+    const plugin = createMockPlugin();
+    plugin._legacyFunctionCallingRequest = true;
+
+    const added = plugin.processStreamEvent({
+        data: JSON.stringify({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: {
+                type: 'function_call',
+                call_id: 'call_123',
+                name: 'get_weather',
+                arguments: ''
+            }
+        })
+    }, {});
+
+    let parsed = JSON.parse(added.data);
+    t.deepEqual(parsed.choices[0].delta, {
+        function_call: {
+            name: 'get_weather',
+            arguments: ''
+        }
+    });
+    t.falsy(parsed.choices[0].delta.tool_calls);
+    t.is(parsed.choices[0].finish_reason, null);
+
+    const argsDelta = plugin.processStreamEvent({
+        data: JSON.stringify({
+            type: 'response.function_call_arguments.delta',
+            output_index: 0,
+            delta: '{"location":"Boston"}'
+        })
+    }, {});
+
+    parsed = JSON.parse(argsDelta.data);
+    t.deepEqual(parsed.choices[0].delta, {
+        function_call: {
+            arguments: '{"location":"Boston"}'
+        }
+    });
+
+    const completed = plugin.processStreamEvent({
+        data: JSON.stringify({
+            type: 'response.completed',
+            response: {
+                output: []
+            }
+        })
+    }, {});
+
+    parsed = JSON.parse(completed.data);
+    t.deepEqual(parsed.choices[0].delta, {});
+    t.is(parsed.choices[0].finish_reason, 'function_call');
+});
+
 test('processStreamEvent should mark response.completed as stop for clients', t => {
     const plugin = createMockPlugin();
     const eventData = {
@@ -697,117 +657,105 @@ test('processStreamEvent should mark response.completed as stop for clients', t 
 // Tools Validation and Transformation Tests
 // ============================================================================
 
-test('validateAndTransformTools should flatten function tools in array format', t => {
-    const plugin = createMockPlugin();
-    const tools = [
-        { type: 'function', function: { name: 'get_weather', parameters: {} } },
-        { type: 'code_interpreter' }
-    ];
-
-    const result = plugin.validateAndTransformTools(tools);
-
-    t.deepEqual(result, [
-        { type: 'function', name: 'get_weather', parameters: {} },
-        { type: 'code_interpreter' }
-    ]);
-});
-
-test('validateAndTransformTools should handle function tool type', t => {
-    const plugin = createMockPlugin();
-    const tools = [
-        {
-            type: 'function',
-            function: {
-                name: 'search',
-                description: 'Search the web',
-                parameters: { type: 'object', properties: {} }
+for (const scenario of [
+    {
+        name: 'flatten function tools in array format',
+        tools: [
+            { type: 'function', function: { name: 'get_weather', parameters: {} } },
+            { type: 'code_interpreter' }
+        ],
+        assert: (t, result) => t.deepEqual(result, [
+            { type: 'function', name: 'get_weather', parameters: {} },
+            { type: 'code_interpreter' }
+        ])
+    },
+    {
+        name: 'handle function tool type',
+        tools: [
+            {
+                type: 'function',
+                function: {
+                    name: 'search',
+                    description: 'Search the web',
+                    parameters: { type: 'object', properties: {} }
+                }
             }
+        ],
+        assert: (t, result) => {
+            t.is(result.length, 1);
+            t.is(result[0].type, 'function');
+            t.is(result[0].name, 'search');
         }
-    ];
+    },
+    {
+        name: 'convert object format to array format',
+        tools: {
+            functions: [
+                { name: 'get_weather', description: 'Get weather', parameters: {} }
+            ]
+        },
+        assert: (t, result) => {
+            t.true(Array.isArray(result));
+            t.is(result.length, 1);
+            t.is(result[0].type, 'function');
+            t.is(result[0].name, 'get_weather');
+        }
+    },
+    {
+        name: 'handle code_interpreter tool',
+        tools: { code_interpreter: true },
+        assert: (t, result) => {
+            t.true(Array.isArray(result));
+            t.is(result.length, 1);
+            t.is(result[0].type, 'code_interpreter');
+        }
+    },
+    {
+        name: 'handle file_search tool',
+        tools: {
+            file_search: { vector_store_ids: ['vs_123'] }
+        },
+        assert: (t, result) => {
+            t.true(Array.isArray(result));
+            t.is(result.length, 1);
+            t.is(result[0].type, 'file_search');
+            t.deepEqual(result[0].vector_store_ids, ['vs_123']);
+        }
+    },
+    {
+        name: 'handle web_search_preview tool',
+        tools: { web_search_preview: true },
+        assert: (t, result) => {
+            t.true(Array.isArray(result));
+            t.is(result.length, 1);
+            t.is(result[0].type, 'web_search_preview');
+        }
+    },
+    {
+        name: 'handle multiple tools',
+        tools: {
+            code_interpreter: true,
+            file_search: true,
+            functions: [
+                { name: 'my_function', description: 'test', parameters: {} }
+            ]
+        },
+        assert: (t, result) => {
+            t.true(Array.isArray(result));
+            t.is(result.length, 3);
 
-    const result = plugin.validateAndTransformTools(tools);
-
-    t.is(result.length, 1);
-    t.is(result[0].type, 'function');
-    t.is(result[0].name, 'search');
-});
-
-test('validateAndTransformTools should convert object format to array format', t => {
-    const plugin = createMockPlugin();
-    const tools = {
-        functions: [
-            { name: 'get_weather', description: 'Get weather', parameters: {} }
-        ]
-    };
-
-    const result = plugin.validateAndTransformTools(tools);
-
-    t.true(Array.isArray(result));
-    t.is(result.length, 1);
-    t.is(result[0].type, 'function');
-    t.is(result[0].name, 'get_weather');
-});
-
-test('validateAndTransformTools should handle code_interpreter tool', t => {
-    const plugin = createMockPlugin();
-    const tools = {
-        code_interpreter: true
-    };
-
-    const result = plugin.validateAndTransformTools(tools);
-
-    t.true(Array.isArray(result));
-    t.is(result.length, 1);
-    t.is(result[0].type, 'code_interpreter');
-});
-
-test('validateAndTransformTools should handle file_search tool', t => {
-    const plugin = createMockPlugin();
-    const tools = {
-        file_search: { vector_store_ids: ['vs_123'] }
-    };
-
-    const result = plugin.validateAndTransformTools(tools);
-
-    t.true(Array.isArray(result));
-    t.is(result.length, 1);
-    t.is(result[0].type, 'file_search');
-    t.deepEqual(result[0].vector_store_ids, ['vs_123']);
-});
-
-test('validateAndTransformTools should handle web_search_preview tool', t => {
-    const plugin = createMockPlugin();
-    const tools = {
-        web_search_preview: true
-    };
-
-    const result = plugin.validateAndTransformTools(tools);
-
-    t.true(Array.isArray(result));
-    t.is(result.length, 1);
-    t.is(result[0].type, 'web_search_preview');
-});
-
-test('validateAndTransformTools should handle multiple tools', t => {
-    const plugin = createMockPlugin();
-    const tools = {
-        code_interpreter: true,
-        file_search: true,
-        functions: [
-            { name: 'my_function', description: 'test', parameters: {} }
-        ]
-    };
-
-    const result = plugin.validateAndTransformTools(tools);
-
-    t.true(Array.isArray(result));
-    t.is(result.length, 3);
-
-    const types = result.map(t => t.type);
-    t.true(types.includes('function'));
-    t.true(types.includes('code_interpreter'));
-    t.true(types.includes('file_search'));
-});
+            const types = result.map(tool => tool.type);
+            t.true(types.includes('function'));
+            t.true(types.includes('code_interpreter'));
+            t.true(types.includes('file_search'));
+        }
+    }
+]) {
+    test(`validateAndTransformTools should ${scenario.name}`, t => {
+        const result = createMockPlugin().validateAndTransformTools(scenario.tools);
+        scenario.assert(t, result);
+    });
+}
 
 // ============================================================================
 // Response Parsing Tests

@@ -7,21 +7,25 @@ import got from 'got';
 import serverFactory from '../../../index.js';
 
 const API_BASE = `http://localhost:${process.env.CORTEX_PORT}/v1`;
+const shouldRunRestLiveTests = process.env.CORTEX_RUN_REST_LIVE_TESTS === 'true';
+const liveRestTest = shouldRunRestLiveTests ? test : test.skip;
 
 let testServer;
 
-test.before(async () => {
-  process.env.CORTEX_ENABLE_REST = 'true';
-  const { server, startServer } = await serverFactory();
-  startServer && await startServer();
-  testServer = server;
-});
+if (shouldRunRestLiveTests) {
+  test.before(async () => {
+    process.env.CORTEX_ENABLE_REST = 'true';
+    const { server, startServer } = await serverFactory();
+    startServer && await startServer();
+    testServer = server;
+  });
 
-test.after.always('cleanup', async () => {
-  if (testServer) {
-    await testServer.stop();
-  }
-});
+  test.after.always('cleanup', async () => {
+    if (testServer) {
+      await testServer.stop();
+    }
+  });
+}
 
 // Helper to check if content is compliant (string, null, or array of objects with type field)
 function isContentCompliant(content) {
@@ -61,7 +65,7 @@ function assertNoErrors(t, response) {
   }
 }
 
-test('POST /chat/completions - user message with string content', async (t) => {
+liveRestTest('POST /chat/completions - user message with string content', async (t) => {
   // Spec: User message content can be a string
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -83,7 +87,7 @@ test('POST /chat/completions - user message with string content', async (t) => {
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - user message with array of text content parts', async (t) => {
+liveRestTest('POST /chat/completions - user message with array of text content parts', async (t) => {
   // Spec: User message content can be an array of content parts (objects with type field)
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -108,7 +112,7 @@ test('POST /chat/completions - user message with array of text content parts', a
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - user message with array containing strings (should be converted)', async (t) => {
+liveRestTest('POST /chat/completions - user message with array containing strings (should be converted)', async (t) => {
   // This tests that strings in arrays get converted to text content objects
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -130,7 +134,7 @@ test('POST /chat/completions - user message with array containing strings (shoul
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - system message with string content', async (t) => {
+liveRestTest('POST /chat/completions - system message with string content', async (t) => {
   // Spec: System message content can be a string
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -152,7 +156,7 @@ test('POST /chat/completions - system message with string content', async (t) =>
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - system message with array of text content parts', async (t) => {
+liveRestTest('POST /chat/completions - system message with array of text content parts', async (t) => {
   // Spec: System message content can be an array of text content parts
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -176,7 +180,7 @@ test('POST /chat/completions - system message with array of text content parts',
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - system message with array containing strings (should be converted)', async (t) => {
+liveRestTest('POST /chat/completions - system message with array containing strings (should be converted)', async (t) => {
   // This tests that strings in arrays get converted to text content objects
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -198,7 +202,7 @@ test('POST /chat/completions - system message with array containing strings (sho
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - assistant message with string content', async (t) => {
+liveRestTest('POST /chat/completions - assistant message with string content', async (t) => {
   // Spec: Assistant message content can be a string
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -224,7 +228,7 @@ test('POST /chat/completions - assistant message with string content', async (t)
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - assistant message with array of text content parts', async (t) => {
+liveRestTest('POST /chat/completions - assistant message with array of text content parts', async (t) => {
   // Spec: Assistant message content can be an array of content parts
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -253,7 +257,7 @@ test('POST /chat/completions - assistant message with array of text content part
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - assistant message with null content and tool_calls', async (t) => {
+liveRestTest('POST /chat/completions - assistant message with null content and tool_calls', async (t) => {
   // Spec: Assistant message content can be null if tool_calls is specified
   // This tests that null is preserved through transformations and sent to the API
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -294,7 +298,7 @@ test('POST /chat/completions - assistant message with null content and tool_call
   // The request should succeed, meaning null content was preserved and accepted by OpenAI API
 });
 
-test('POST /chat/completions - assistant message with empty string content and tool_calls', async (t) => {
+liveRestTest('POST /chat/completions - assistant message with empty string content and tool_calls', async (t) => {
   // Spec: Assistant message content can be empty string with tool_calls
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -333,7 +337,7 @@ test('POST /chat/completions - assistant message with empty string content and t
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - assistant message with array containing strings and tool_calls (should be converted)', async (t) => {
+liveRestTest('POST /chat/completions - assistant message with array containing strings and tool_calls (should be converted)', async (t) => {
   // This tests the bug fix: arrays with strings must be converted to text content objects
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -372,7 +376,7 @@ test('POST /chat/completions - assistant message with array containing strings a
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - tool message with string content', async (t) => {
+liveRestTest('POST /chat/completions - tool message with string content', async (t) => {
   // Spec: Tool message content can be a string
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -407,7 +411,7 @@ test('POST /chat/completions - tool message with string content', async (t) => {
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - tool message with array of text content parts', async (t) => {
+liveRestTest('POST /chat/completions - tool message with array of text content parts', async (t) => {
   // Spec: Tool message content can be an array of text content parts
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -445,7 +449,7 @@ test('POST /chat/completions - tool message with array of text content parts', a
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - tool message with array containing strings (should be converted)', async (t) => {
+liveRestTest('POST /chat/completions - tool message with array containing strings (should be converted)', async (t) => {
   // This tests that strings in tool message arrays get converted to text content objects
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -480,7 +484,7 @@ test('POST /chat/completions - tool message with array containing strings (shoul
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - tool message with empty string content', async (t) => {
+liveRestTest('POST /chat/completions - tool message with empty string content', async (t) => {
   // Spec: Tool message content can be empty string
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -515,7 +519,7 @@ test('POST /chat/completions - tool message with empty string content', async (t
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - tool message with null content (should be converted to empty string)', async (t) => {
+liveRestTest('POST /chat/completions - tool message with null content (should be converted to empty string)', async (t) => {
   // Spec: Tool message content should not be null, but we should handle it gracefully
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -550,7 +554,7 @@ test('POST /chat/completions - tool message with null content (should be convert
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - complex conversation with all content variations', async (t) => {
+liveRestTest('POST /chat/completions - complex conversation with all content variations', async (t) => {
   // Test a full conversation with all valid content variations
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -609,7 +613,7 @@ test('POST /chat/completions - complex conversation with all content variations'
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - user message with image content part', async (t) => {
+liveRestTest('POST /chat/completions - user message with image content part', async (t) => {
   // Spec: User messages can have image content parts
   // Note: This test may timeout if image URL validation fails, but it tests the content structure
   t.timeout(30000); // Increase timeout to 30s for image processing
@@ -644,7 +648,7 @@ test('POST /chat/completions - user message with image content part', async (t) 
   t.true([200, 400].includes(response.statusCode));
 });
 
-test('POST /chat/completions - mixed content array with strings and objects (should convert strings)', async (t) => {
+liveRestTest('POST /chat/completions - mixed content array with strings and objects (should convert strings)', async (t) => {
   // Test that mixed arrays (strings + objects) get properly converted
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -668,7 +672,7 @@ test('POST /chat/completions - mixed content array with strings and objects (sho
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - assistant message with empty array content and tool_calls', async (t) => {
+liveRestTest('POST /chat/completions - assistant message with empty array content and tool_calls', async (t) => {
   // Edge case: empty array with tool_calls
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -707,7 +711,7 @@ test('POST /chat/completions - assistant message with empty array content and to
   assertNoErrors(t, response);
 });
 
-test('POST /chat/completions - messages with name fields and various content types', async (t) => {
+liveRestTest('POST /chat/completions - messages with name fields and various content types', async (t) => {
   // Test name fields with different content types
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
@@ -739,4 +743,3 @@ test('POST /chat/completions - messages with name fields and various content typ
   t.truthy(response.body);
   assertNoErrors(t, response);
 });
-

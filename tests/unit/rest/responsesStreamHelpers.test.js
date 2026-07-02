@@ -137,7 +137,7 @@ test('extractPathwayErrorMessage handles string error payloads', (t) => {
   t.is(extractPathwayErrorMessage(pathwayResponse), 'Execution failed for sys_rest_streaming_oai_gpt52_codex: Resource not found');
 });
 
-test('extractPathwayErrorMessage extracts message from object errors and [ERROR] result prefix', (t) => {
+test('extractPathwayErrorMessage extracts message from object errors and ignores result text', (t) => {
   const objectErrorResponse = {
     errors: [{ message: 'Upstream timeout' }]
   };
@@ -146,6 +146,6 @@ test('extractPathwayErrorMessage extracts message from object errors and [ERROR]
   };
 
   t.is(extractPathwayErrorMessage(objectErrorResponse), 'Upstream timeout');
-  t.is(extractPathwayErrorMessage(prefixedErrorResponse), 'GraphQL execution failed');
+  t.is(extractPathwayErrorMessage(prefixedErrorResponse), '');
   t.is(extractPathwayErrorMessage({ result: 'normal result' }), '');
 });

@@ -57,6 +57,10 @@ const processRestRequest = async (server, req, pathway, name, parameterMap = {})
         variables.functions = JSON.stringify(req.body.functions);
     }
 
+    if (req.body.function_call) {
+        variables.function_call = typeof req.body.function_call === 'string' ? req.body.function_call : JSON.stringify(req.body.function_call);
+    }
+
     // Map reasoning_effort to reasoningEffort (OpenAI uses snake_case, we use camelCase)
     if (req.body.reasoning_effort) {
         variables.reasoningEffort = req.body.reasoning_effort;

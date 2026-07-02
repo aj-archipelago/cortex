@@ -6,23 +6,27 @@ import got from 'got';
 import serverFactory from '../../../index.js';
 
 const API_BASE = `http://localhost:${process.env.CORTEX_PORT}/v1`;
+const shouldRunRestLiveTests = process.env.CORTEX_RUN_REST_LIVE_TESTS === 'true';
+const liveRestTest = shouldRunRestLiveTests ? test : test.skip;
 
 let testServer;
 
-test.before(async () => {
-  process.env.CORTEX_ENABLE_REST = 'true';
-  const { server, startServer } = await serverFactory();
-  startServer && await startServer();
-  testServer = server;
-});
+if (shouldRunRestLiveTests) {
+  test.before(async () => {
+    process.env.CORTEX_ENABLE_REST = 'true';
+    const { server, startServer } = await serverFactory();
+    startServer && await startServer();
+    testServer = server;
+  });
 
-test.after.always('cleanup', async () => {
-  if (testServer) {
-    await testServer.stop();
-  }
-});
+  test.after.always('cleanup', async () => {
+    if (testServer) {
+      await testServer.stop();
+    }
+  });
+}
 
-test('POST /chat/completions - tool_calls objects are stringified in REST endpoint', async (t) => {
+liveRestTest('POST /chat/completions - tool_calls objects are stringified in REST endpoint', async (t) => {
   // Test that when tool_calls come in as objects, they get stringified
   // This simulates what happens in server/rest.js convertType function
   
@@ -58,7 +62,7 @@ test('POST /chat/completions - tool_calls objects are stringified in REST endpoi
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - tool_calls strings are preserved in REST endpoint', async (t) => {
+liveRestTest('POST /chat/completions - tool_calls strings are preserved in REST endpoint', async (t) => {
   // Test that when tool_calls come in as strings (from GraphQL), they are preserved
   
   const toolCallString = JSON.stringify({
@@ -89,7 +93,7 @@ test('POST /chat/completions - tool_calls strings are preserved in REST endpoint
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - tool message with content array is converted to text content parts array', async (t) => {
+liveRestTest('POST /chat/completions - tool message with content array is converted to text content parts array', async (t) => {
   // Test that tool messages with content arrays get converted to arrays of text content parts
   // This should happen in the plugin's tryParseMessages method
   
@@ -141,7 +145,7 @@ test('POST /chat/completions - tool message with content array is converted to t
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - handles tool_calls with mixed string and object format', async (t) => {
+liveRestTest('POST /chat/completions - handles tool_calls with mixed string and object format', async (t) => {
   // Test REST endpoint handling of mixed tool_calls formats
   
   const toolCall1String = JSON.stringify({
@@ -175,7 +179,7 @@ test('POST /chat/completions - handles tool_calls with mixed string and object f
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - JSON stringified non-whitelisted object in content array is preserved as text', async (t) => {
+liveRestTest('POST /chat/completions - JSON stringified non-whitelisted object in content array is preserved as text', async (t) => {
   // Test that when a JSON stringified object (not in WHITELISTED_CONTENT_TYPES) is sent
   // through REST in a content array, it gets converted to a text object with the JSON string preserved
   
@@ -213,4 +217,3 @@ test('POST /chat/completions - JSON stringified non-whitelisted object in conten
   // We can't directly inspect the plugin's internal state, but we verify the request succeeds
   // which means the conversion happened correctly (otherwise it would fail)
 });
-

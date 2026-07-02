@@ -2,7 +2,7 @@
  * Opt-in live integration tests for Anthropic Messages API compatibility.
  *
  * Run with:
- * CORTEX_RUN_ANTHROPIC_MESSAGES_LIVE_TESTS=true npm test -- tests/integration/rest/vendors/anthropic_messages_api.test.js
+ * CORTEX_RUN_ANTHROPIC_MESSAGES_LIVE_TESTS=true node -r dotenv/config ./node_modules/ava/entrypoints/cli.mjs tests/integration/rest/vendors/anthropic_messages_api.test.js --timeout=180s --concurrency=1
  */
 import test from 'ava';
 import got from 'got';

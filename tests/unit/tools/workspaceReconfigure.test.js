@@ -4,7 +4,7 @@
  * These tests run in isolation — no Docker or server needed.
  * Uses test.serial because tests share module-level secret state.
  *
- * Run with: npm test -- cortex -- tests/unit/tools/workspaceReconfigure.test.js
+ * Run with: npm run test:unit -- tests/unit/tools/workspaceReconfigure.test.js
  */
 
 import test from 'ava';

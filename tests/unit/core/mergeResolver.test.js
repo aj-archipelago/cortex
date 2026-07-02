@@ -812,8 +812,6 @@ test('tool property getter returns correct legacy fields', (t) => {
   t.is(toolData.toolCallbackName, 'test_callback');
   t.is(toolData.title, 'Test Title');
   t.deepEqual(toolData.search, { query: 'test' });
-  t.is(toolData.coding, false);
-  t.is(toolData.codeRequestId, 'code_123');
   t.is(toolData.toolCallbackId, 'callback_456');
   t.deepEqual(toolData.toolUsed, ['tool1', 'tool2']);
   t.deepEqual(toolData.citations, ['cite1', 'cite2']);
@@ -821,6 +819,8 @@ test('tool property getter returns correct legacy fields', (t) => {
   // Verify excluded fields are not present
   t.is(toolData.usage, undefined);
   t.is(toolData.finishReason, undefined);
+  t.is(toolData.coding, undefined);
+  t.is(toolData.codeRequestId, undefined);
   t.is(toolData.customField, undefined);
 });
 

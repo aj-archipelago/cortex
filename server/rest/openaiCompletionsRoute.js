@@ -13,6 +13,7 @@ import {
     resolveModelName,
     handleModelNotFound,
     extractResponseData,
+    extractPathwayErrorMessage,
     parseToolCalls,
     generateResponseId,
     logTokenUsage,
@@ -31,6 +32,15 @@ const isChatPassthroughModel = (pathwayModelName) => {
 
 const getChatPassthroughModelName = (model, endpoint) => {
     return endpoint?.params?.model || model.params?.model || model.emulateOpenAIChatModel || model.name;
+};
+
+const sendOpenAIError = (res, message, status = 502, type = 'server_error') => {
+    res.status(status).json({
+        error: {
+            message,
+            type,
+        }
+    });
 };
 
 /**
@@ -177,7 +187,7 @@ const processIncomingStream = (requestId, req, res, jsonResponse, pathway, model
             requestId
         });
         // If we haven't sent the stop message yet, do it now
-        if (jsonResponse.choices?.[0]?.finish_reason !== "stop") {
+        if (jsonResponse.choices?.[0]?.finish_reason == null) {
             let jsonEndStream = JSON.parse(JSON.stringify(jsonResponse));
 
             if (jsonEndStream.object === 'text_completion') {
@@ -221,7 +231,7 @@ const processIncomingStream = (requestId, req, res, jsonResponse, pathway, model
     }
 
     const fillJsonResponseWithToolCalls = (jsonResponse, toolCalls, finishReason) => {
-        jsonResponse.choices[0].finish_reason = finishReason;
+        jsonResponse.choices[0].finish_reason = finishReason ?? null;
         if (jsonResponse.object !== 'text_completion') {
             if (!jsonResponse.choices[0].delta) {
                 jsonResponse.choices[0].delta = {};
@@ -282,9 +292,18 @@ const processIncomingStream = (requestId, req, res, jsonResponse, pathway, model
 
         logger.debug(`REQUEST_PROGRESS received progress: ${data.requestProgress.progress}, data: ${data.requestProgress.data}`);
 
-        const { progress, data: progressData } = data.requestProgress;
+        const { progress, data: progressData, error: progressError } = data.requestProgress;
 
         try {
+            if (progressError) {
+                logger.error(`Stream error REST: ${progressError}`);
+                fillJsonResponse(jsonResponse, `[ERROR] ${progressError}`);
+                sendStreamData(jsonResponse);
+                safeUnsubscribe(subscription);
+                finishStream(res, jsonResponse);
+                return;
+            }
+
             const messageJson = JSON.parse(progressData);
 
             if (typeof messageJson === 'string') {
@@ -293,7 +312,10 @@ const processIncomingStream = (requestId, req, res, jsonResponse, pathway, model
             }
 
             if (messageJson.error) {
-                logger.error(`Stream error REST: ${messageJson?.error?.message || 'unknown error'}`);
+                const errorMessage = messageJson?.error?.message || messageJson?.error || 'unknown error';
+                logger.error(`Stream error REST: ${errorMessage}`);
+                fillJsonResponse(jsonResponse, `[ERROR] ${errorMessage}`);
+                sendStreamData(jsonResponse);
                 safeUnsubscribe(subscription);
                 finishStream(res, jsonResponse);
                 return;
@@ -310,7 +332,7 @@ const processIncomingStream = (requestId, req, res, jsonResponse, pathway, model
 
                 // Handle tool calls in streaming events
                 if (delta.tool_calls) {
-                    fillJsonResponseWithToolCalls(jsonResponse, delta.tool_calls, finishReason || "tool_calls");
+                    fillJsonResponseWithToolCalls(jsonResponse, delta.tool_calls, finishReason);
                     sendStreamData(jsonResponse);
 
                     if (finishReason === "tool_calls" || progress === 1) {
@@ -321,7 +343,13 @@ const processIncomingStream = (requestId, req, res, jsonResponse, pathway, model
                 }
 
                 // Handle the case where we get an empty delta with finish_reason: "tool_calls"
-                if (finishReason === "tool_calls" && Object.keys(delta).length === 0) {
+                if (
+                    (finishReason === "tool_calls" || finishReason === "function_call") &&
+                    Object.keys(delta).length === 0
+                ) {
+                    jsonResponse.choices[0].finish_reason = finishReason;
+                    jsonResponse.choices[0].delta = {};
+                    sendStreamData(jsonResponse);
                     safeUnsubscribe(subscription);
                     finishStream(res, jsonResponse);
                     return;
@@ -333,7 +361,7 @@ const processIncomingStream = (requestId, req, res, jsonResponse, pathway, model
                         jsonResponse.choices[0].delta = {};
                     }
                     jsonResponse.choices[0].delta.function_call = delta.function_call;
-                    jsonResponse.choices[0].finish_reason = finishReason || "function_call";
+                    jsonResponse.choices[0].finish_reason = finishReason ?? null;
                     sendStreamData(jsonResponse);
 
                     if (finishReason === "function_call") {
@@ -423,6 +451,11 @@ function registerOpenAICompletionsRoute(app, pathways, openAIChatModels, openAIC
         const pathway = pathways[pathwayName];
         const parameterMap = { text: 'prompt' };
         const pathwayResponse = await processRestRequest(server, req, pathway, pathwayName, parameterMap);
+        const pathwayError = extractPathwayErrorMessage(pathwayResponse);
+        if (pathwayError) {
+            sendOpenAIError(res, pathwayError);
+            return;
+        }
         const { resultText, resultData } = extractResponseData(pathwayResponse);
         const { usage } = parseToolCalls(resultData, resultText);
 
@@ -485,6 +518,11 @@ function registerOpenAICompletionsRoute(app, pathways, openAIChatModels, openAIC
         }
 
         const pathwayResponse = await processRestRequest(server, req, pathway, pathwayName);
+        const pathwayError = extractPathwayErrorMessage(pathwayResponse);
+        if (pathwayError) {
+            sendOpenAIError(res, pathwayError);
+            return;
+        }
         const { resultText, resultData } = extractResponseData(pathwayResponse);
         const { messageContent, toolCalls, functionCall, finishReason, usage } = parseToolCalls(resultData, resultText);
 

@@ -146,6 +146,99 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
     return { ...rest, ...fn };
   }
 
+  parseJsonLikeParameter(value, fallback = value) {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return fallback;
+    }
+  }
+
+  normalizeFunctionsToResponsesTools(functions) {
+    const parsedFunctions = this.parseJsonLikeParameter(functions, functions);
+    if (!parsedFunctions) return [];
+    const functionList = Array.isArray(parsedFunctions)
+      ? parsedFunctions
+      : [parsedFunctions];
+
+    return functionList
+      .filter((fn) => fn && typeof fn === "object")
+      .map((fn) => ({
+        type: "function",
+        ...fn,
+      }));
+  }
+
+  normalizeToolChoiceForResponses(toolChoice) {
+    if (!toolChoice) return toolChoice;
+
+    const parsedToolChoice = this.parseJsonLikeParameter(toolChoice, toolChoice);
+
+    if (typeof parsedToolChoice === "string") {
+      if (parsedToolChoice === "any") return "required";
+      return parsedToolChoice;
+    }
+
+    if (!parsedToolChoice || typeof parsedToolChoice !== "object") {
+      return parsedToolChoice;
+    }
+
+    if (
+      parsedToolChoice.type === "auto" ||
+      parsedToolChoice.type === "none" ||
+      parsedToolChoice.type === "required"
+    ) {
+      return parsedToolChoice.type;
+    }
+
+    if (parsedToolChoice.type === "any") {
+      return "required";
+    }
+
+    if (parsedToolChoice.function) {
+      return {
+        type: "function",
+        name: parsedToolChoice.function.name || parsedToolChoice.function,
+      };
+    }
+
+    if (parsedToolChoice.type === "tool") {
+      return {
+        type: "function",
+        name:
+          parsedToolChoice.name ||
+          parsedToolChoice.function?.name ||
+          parsedToolChoice.function,
+      };
+    }
+
+    return parsedToolChoice;
+  }
+
+  normalizeFunctionCallForResponses(functionCall) {
+    if (!functionCall) return functionCall;
+
+    const parsedFunctionCall = this.parseJsonLikeParameter(functionCall, functionCall);
+    if (typeof parsedFunctionCall === "string") {
+      if (parsedFunctionCall === "none") return "none";
+      if (parsedFunctionCall === "auto") return "auto";
+      return { type: "function", name: parsedFunctionCall };
+    }
+
+    if (parsedFunctionCall && typeof parsedFunctionCall === "object") {
+      const name = parsedFunctionCall.name || parsedFunctionCall.function?.name;
+      if (name) {
+        return { type: "function", name };
+      }
+    }
+
+    return parsedFunctionCall;
+  }
+
   // Override: OpenAI tools are function/code_interpreter, not web_search/x_search.
   // Responses API expects function tools flattened:
   //   { type: "function", name, description, parameters }
@@ -205,6 +298,8 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
       prompt,
     );
 
+    this._legacyFunctionCallingRequest = Boolean(parameters.functions);
+
     // Handle instructions field (OpenAI Responses API system instructions)
     if (parameters.instructions) {
       requestParameters.instructions = parameters.instructions;
@@ -250,6 +345,22 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
       } catch (error) {
         logger.warn(`Invalid tools parameter, ignoring: ${error.message}`);
       }
+    }
+
+    const legacyFunctionTools = this.normalizeFunctionsToResponsesTools(
+      parameters.functions,
+    );
+    if (legacyFunctionTools.length > 0) {
+      const existingTools = Array.isArray(requestParameters.tools)
+        ? requestParameters.tools
+        : [];
+      requestParameters.tools = [...existingTools, ...legacyFunctionTools];
+    }
+
+    if (!requestParameters.tool_choice && parameters.function_call) {
+      requestParameters.tool_choice = this.normalizeFunctionCallForResponses(
+        parameters.function_call,
+      );
     }
 
     // Preserve raw Responses API input payload for passthrough fidelity when provided by REST adapter.
@@ -406,7 +517,11 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
         }));
 
       if (functionCalls.length > 0) {
-        cortexResponse.toolCalls = functionCalls;
+        if (this._legacyFunctionCallingRequest) {
+          cortexResponse.functionCall = functionCalls[0].function;
+        } else {
+          cortexResponse.toolCalls = functionCalls;
+        }
       }
     }
 
@@ -510,6 +625,10 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
     });
   }
 
+  getToolCallFinishReason() {
+    return this._legacyFunctionCallingRequest ? "function_call" : "tool_calls";
+  }
+
   // OpenAI Responses streaming emits response.* lifecycle events.
   // Convert them back to chat-completions chunks for non-REST consumers.
   // Direct /v1/responses passthrough bypasses this plugin and keeps raw SSE.
@@ -557,19 +676,28 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
       };
       this._responsesToolIndexMap = this._responsesToolIndexMap || new Map();
       this._responsesToolIndexMap.set(parsedMessage.output_index, index);
-      requestProgress.data = this.toChatCompletionsChunk({
-        tool_calls: [
-          {
-            index,
-            id: item.call_id || item.id || "",
-            type: "function",
-            function: {
-              name: item.name || "",
-              arguments: "",
-            },
+      if (this._legacyFunctionCallingRequest) {
+        requestProgress.data = this.toChatCompletionsChunk({
+          function_call: {
+            name: item.name || "",
+            arguments: item.arguments || "",
           },
-        ],
-      });
+        });
+      } else {
+        requestProgress.data = this.toChatCompletionsChunk({
+          tool_calls: [
+            {
+              index,
+              id: item.call_id || item.id || "",
+              type: "function",
+              function: {
+                name: item.name || "",
+                arguments: "",
+              },
+            },
+          ],
+        });
+      }
       return requestProgress;
     }
 
@@ -578,16 +706,24 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
       if (this.toolCallsBuffer[index]) {
         this.toolCallsBuffer[index].function.arguments += parsedMessage.delta || "";
       }
-      requestProgress.data = this.toChatCompletionsChunk({
-        tool_calls: [
-          {
-            index,
-            function: {
-              arguments: parsedMessage.delta || "",
-            },
+      if (this._legacyFunctionCallingRequest) {
+        requestProgress.data = this.toChatCompletionsChunk({
+          function_call: {
+            arguments: parsedMessage.delta || "",
           },
-        ],
-      });
+        });
+      } else {
+        requestProgress.data = this.toChatCompletionsChunk({
+          tool_calls: [
+            {
+              index,
+              function: {
+                arguments: parsedMessage.delta || "",
+              },
+            },
+          ],
+        });
+      }
       return requestProgress;
     }
 
@@ -596,7 +732,7 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
       if (this.toolCallsBuffer[index] && parsedMessage.arguments) {
         this.toolCallsBuffer[index].function.arguments = parsedMessage.arguments;
       }
-      requestProgress.data = event.data;
+      requestProgress.data = null;
       return requestProgress;
     }
 
@@ -604,7 +740,7 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
       type === "response.output_item.done" &&
       parsedMessage.item?.type === "function_call"
     ) {
-      requestProgress.data = event.data;
+      requestProgress.data = null;
       return requestProgress;
     }
 
@@ -637,7 +773,7 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
                 pathwayResolver,
               );
               requestProgress.toolCallbackInvoked = true;
-              requestProgress.data = this.toChatCompletionsChunk({}, "tool_calls");
+              requestProgress.data = this.toChatCompletionsChunk({}, this.getToolCallFinishReason());
             }
           }
         }
@@ -676,7 +812,7 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
                 pathwayResolver,
               );
               requestProgress.toolCallbackInvoked = true;
-              requestProgress.data = this.toChatCompletionsChunk({}, "tool_calls");
+              requestProgress.data = this.toChatCompletionsChunk({}, this.getToolCallFinishReason());
             }
           }
         }
@@ -698,7 +834,11 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
             }, "stop");
             requestProgress.error = errorMessage;
           } else {
-            requestProgress.data = this.toChatCompletionsChunk({}, "stop");
+            const finishReason =
+              isSuccessfulTerminal && this.toolCallsBuffer.length > 0
+                ? this.getToolCallFinishReason()
+                : "stop";
+            requestProgress.data = this.toChatCompletionsChunk({}, finishReason);
           }
           requestProgress.progress = 1;
         }
@@ -892,13 +1032,10 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
       delete requestParameters.response_format;
     }
 
-    if (
-      requestParameters.tool_choice &&
-      typeof requestParameters.tool_choice === "object" &&
-      requestParameters.tool_choice.function
-    ) {
-      const { function: fn, ...rest } = requestParameters.tool_choice;
-      requestParameters.tool_choice = { ...rest, ...fn };
+    if (requestParameters.tool_choice) {
+      requestParameters.tool_choice = this.normalizeToolChoiceForResponses(
+        requestParameters.tool_choice,
+      );
     }
 
     // Ensure we don't send chat completion params to Responses API

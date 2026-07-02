@@ -10,13 +10,14 @@
  * - Redis + MongoDB configured (via root .env)
  * - Filehandler service (only for files push/pull and backup/restore tests)
  *
- * Run with: npm test -- cortex -- tests/integration/workspace.integration.test.js
+ * Run with:
+ * node -r dotenv/config ./node_modules/ava/entrypoints/cli.mjs tests/integration/workspace.integration.test.js --timeout=300s --concurrency=1
  */
 
 import test from 'ava';
 import { v4 as uuidv4 } from 'uuid';
 import serverFactory from '../../index.js';
-import { stopWorkspace, destroyWorkspace, __testables as workspaceTestables } from '../../pathways/system/entity/tools/shared/workspace_client.js';
+import { stopWorkspace, destroyWorkspace } from '../../pathways/system/entity/tools/shared/workspace_client.js';
 import { loadEntityConfig } from '../../pathways/system/entity/tools/shared/sys_entity_tools.js';
 import { getEntityStore } from '../../lib/MongoEntityStore.js';
 
@@ -232,7 +233,7 @@ test.serial('reset › should clear workspace contents', async (t) => {
 // Stop / Wake-on-Demand (idle management)
 // ============================================================================
 
-test.serial('idle › should stop and auto-wake workspace, preserving data', async (t) => {
+test.serial('idle › should stop and auto-wake workspace', async (t) => {
     t.timeout(180_000); // docker: ~20s; ACI: stop (~5s) + start (~30-60s) + health check
     // Create a marker file to verify data persistence across stop/start
     const createResult = await workspaceExec('echo "survive stop" > /workspace/persist_test.txt');
@@ -250,10 +251,14 @@ test.serial('idle › should stop and auto-wake workspace, preserving data', asy
     t.is(stoppedConfig.workspace.status, 'stopped');
     t.truthy(stoppedConfig.workspace.stoppedAt);
 
-    // Execute a command — this should trigger wake-on-demand automatically
-    const wakeResult = await workspaceExec('cat /workspace/persist_test.txt');
+    // Execute a command — this should trigger wake-on-demand automatically.
+    // ACI stop/start preserves the container, but not necessarily uncheckpointed
+    // local workspace files. Reprovision/checkpoint coverage below verifies
+    // persisted data restoration for ACI.
+    const isAci = (process.env.WORKSPACE_BACKEND || 'docker') === 'aci';
+    const wakeResult = await workspaceExec(isAci ? 'echo "awake"' : 'cat /workspace/persist_test.txt');
     t.true(wakeResult.success);
-    t.is(wakeResult.stdout.trim(), 'survive stop');
+    t.is(wakeResult.stdout.trim(), isAci ? 'awake' : 'survive stop');
 
     // Verify entity status is back to 'running'
     const runningConfig = await loadEntityConfig(TEST_ENTITY_ID);
@@ -425,10 +430,10 @@ test.serial('blob mount › private entity should get per-user blob mount', asyn
 });
 
 // ============================================================================
-// Idle reaper — destroys ACI containers and rewakes via share remount
+// Destroy/reprovision — destroys ACI containers and rewakes via preserved storage
 // ============================================================================
 
-test.serial('reaper › idle ACI workspace is destroyed and rewakes from preserved share', async (t) => {
+test.serial('destroy › ACI workspace is destroyed and rewakes from preserved checkpoint', async (t) => {
     if ((process.env.WORKSPACE_BACKEND || 'docker') !== 'aci') {
         t.log('Skipping: only relevant for ACI backend (Docker keeps stop semantics)');
         t.pass();
@@ -438,11 +443,6 @@ test.serial('reaper › idle ACI workspace is destroyed and rewakes from preserv
 
     const reaperEntityId = `test-reaper-${uuidv4().slice(0, 8)}`;
     const entityStore = getEntityStore();
-
-    // Snapshot lastActivity so we don't accidentally reap any other entity.
-    // The reaper iterates everything in this Map, so we clear it, set only our
-    // test entity to a stale timestamp, then restore other entries afterwards.
-    const lastActivitySnapshot = new Map(workspaceTestables.lastActivity);
 
     await entityStore.upsertEntity({
         id: reaperEntityId,
@@ -461,7 +461,7 @@ test.serial('reaper › idle ACI workspace is destroyed and rewakes from preserv
             if (attempt === 3) throw new Error(`Workspace not ready: ${result.error}`);
         }
 
-        // 2. Write a marker into the Azure Files share at /workspace
+        // 2. Write a marker into the workspace so destroy/provision must preserve it.
         const markerWrite = await workspaceExec(
             'echo "survive-reap-destroy" > /workspace/reaper_marker.txt',
             { entityId: reaperEntityId },
@@ -472,52 +472,47 @@ test.serial('reaper › idle ACI workspace is destroyed and rewakes from preserv
         t.truthy(beforeReap?.workspace?.containerId, 'should have containerId before reap');
         t.is(beforeReap.workspace.status, 'running');
         provisionedShareName = beforeReap.workspace.shareName || beforeReap.workspace.containerId;
-        t.truthy(provisionedShareName, 'should have a shareName before reap');
+        t.truthy(provisionedShareName, 'should have a persistence handle before reap');
 
-        // 3. Force the reaper to fire for ONLY this entity.
-        // Clear the shared lastActivity Map (snapshot restored in finally),
-        // then mark just this entity as ancient so the timeout check trips.
-        // Also clear the entity's Redis activity key — the reaper takes
-        // max(local, redis) and our own provisioning just wrote a fresh value.
-        workspaceTestables.lastActivity.clear();
-        workspaceTestables.lastActivity.set(reaperEntityId, 1);
-        await workspaceTestables.clearRedisActivityForTest(reaperEntityId);
+        t.log('Destroying workspace while preserving storage...');
+        const destroyResult = await destroyWorkspace(reaperEntityId, beforeReap, { destroyVolume: false });
+        t.true(destroyResult.success, destroyResult.error || 'destroy should preserve workspace storage');
 
-        t.log('Running reaper...');
-        await workspaceTestables.reapIdleWorkspaces();
-
-        // 4. Assert the entity workspace was reduced to just shareName
+        // 4. Assert the entity workspace was reduced to a persistence handle.
+        // Current ACI images preserve Blob checkpoints; legacy images may preserve Azure Files shares.
         const afterReap = await loadEntityConfig(reaperEntityId);
         t.truthy(afterReap?.workspace, 'workspace stub should remain');
-        t.is(afterReap.workspace.shareName, provisionedShareName, 'shareName preserved');
+        const afterReapHandle = afterReap.workspace.checkpointBlobPath || afterReap.workspace.shareName;
+        t.truthy(afterReapHandle, 'workspace persistence handle preserved');
+        if (afterReap.workspace.shareName) {
+            t.is(afterReap.workspace.shareName, provisionedShareName, 'shareName preserved');
+        }
         t.falsy(afterReap.workspace.containerId, 'containerId should be cleared');
         t.falsy(afterReap.workspace.url, 'url should be cleared');
 
-        // 5. Trigger workspace use → must auto-reprovision and remount share
+        // 5. Trigger workspace use → must auto-reprovision and restore preserved storage.
         t.log('Triggering reprovision via workspace use...');
         const rewakeRead = await workspaceExec(
             'cat /workspace/reaper_marker.txt',
             { entityId: reaperEntityId },
         );
         t.true(rewakeRead.success, 'reprovisioned workspace should respond');
-        t.is(rewakeRead.stdout.trim(), 'survive-reap-destroy', 'marker survives via share remount');
+        t.is(rewakeRead.stdout.trim(), 'survive-reap-destroy', 'marker survives reprovision');
 
         // 6. Sanity: new container has a (possibly different) containerId
         const afterRewake = await loadEntityConfig(reaperEntityId);
         t.truthy(afterRewake?.workspace?.containerId, 'should have containerId after rewake');
         t.is(afterRewake.workspace.status, 'running');
-        t.is(
-            afterRewake.workspace.shareName || afterRewake.workspace.containerId,
-            provisionedShareName,
-            'rewake remounts the same share',
-        );
-    } finally {
-        // Restore the lastActivity Map so we don't affect other tests' state
-        workspaceTestables.lastActivity.clear();
-        for (const [k, v] of lastActivitySnapshot) {
-            workspaceTestables.lastActivity.set(k, v);
+        if (afterReap.workspace.shareName) {
+            t.is(
+                afterRewake.workspace.shareName || afterRewake.workspace.containerId,
+                provisionedShareName,
+                'rewake remounts the same share',
+            );
+        } else {
+            t.is(afterRewake.workspace.checkpointBlobPath, afterReap.workspace.checkpointBlobPath, 'rewake preserves the same checkpoint');
         }
-
+    } finally {
         // Clean up: destroy workspace AND volume, delete entity
         try {
             const finalConfig = await loadEntityConfig(reaperEntityId);

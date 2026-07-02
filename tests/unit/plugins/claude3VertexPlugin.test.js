@@ -36,8 +36,7 @@ function loadTestData(filename) {
   try {
     const filePath = path.join(process.cwd(), 'tests', 'data', filename);
     return fs.readFileSync(filePath, 'utf8');
-  } catch (error) {
-    console.error(`Error loading test data file ${filename}:`, error);
+  } catch {
     // Return a smaller fallback test string if file loading fails
     return 'a '.repeat(1000); 
   }
@@ -155,9 +154,7 @@ test('getRequestParameters with long message in chatHistory', async (t) => {
     
     t.truthy(finalInputMessage, 'Final user input should be included');
     
-    // Log token counts for debugging/verification
-    console.log(`Original content length: ${longContent.length} chars`);
-    console.log(`Truncated content length: ${longMessage.content[0].text.length} chars`);
+    t.true(longMessage.content[0].text.length > 100);
 });
 
 test('parseResponse', (t) => {

@@ -1,4 +1,5 @@
 import { QueueServiceClient } from '@azure/storage-queue';
+import logger from '../lib/logger.js';
 
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 let queueClient;
@@ -8,21 +9,21 @@ if (connectionString) {
   const queueClientService = QueueServiceClient.fromConnectionString(connectionString);
   queueClient = queueClientService.getQueueClient(queueName);
 } else {
-  console.warn("Azure Storage connection string is not provided. Queue operations will be unavailable.");
+  logger.warn("Azure Storage connection string is not provided. Queue operations will be unavailable.");
 }
 
 async function sendMessageToQueue(data) {
     try {
         if(!queueClient){
-            console.warn("Azure Storage connection string is not provided. Queue operations will be unavailable.");
+            logger.warn("Azure Storage connection string is not provided. Queue operations will be unavailable.");
             return;
         }
         const encodedMessage = Buffer.from(JSON.stringify(data)).toString('base64');
         const result = await queueClient.sendMessage(encodedMessage);
-        console.log(`Message added to queue: ${JSON.stringify(result)}`);
+        logger.info(`Message added to queue: ${JSON.stringify(result)}`);
         return result.messageId;
     } catch (error) {
-        console.error("Error sending message:", error);
+        logger.error(`Error sending message: ${error instanceof Error ? error.stack || error.message : JSON.stringify(error)}`);
     }
 }
 
@@ -43,4 +44,3 @@ export default {
         return JSON.stringify({response});
     },
 };
-

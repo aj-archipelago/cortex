@@ -245,36 +245,7 @@ function stubLogger() {
 }
 
 function stubEntityStore(entity) {
-    const entityStore = getEntityStore();
-    const original = {
-        isConfigured: entityStore.isConfigured,
-        getEntity: entityStore.getEntity,
-        getEntityByWorkspaceContainerId: entityStore.getEntityByWorkspaceContainerId,
-        getDefaultEntity: entityStore.getDefaultEntity,
-        getAllEntities: entityStore.getAllEntities,
-        upsertEntity: entityStore.upsertEntity,
-    };
-    let currentEntity = entity;
-
-    entityStore.isConfigured = () => true;
-    entityStore.getEntity = async () => currentEntity;
-    entityStore.getEntityByWorkspaceContainerId = async (containerId) =>
-        currentEntity?.workspace?.containerId === containerId ? currentEntity : null;
-    entityStore.getDefaultEntity = async () => null;
-    entityStore.getAllEntities = async () => currentEntity ? [currentEntity] : [];
-    entityStore.upsertEntity = async (nextEntity) => {
-        currentEntity = nextEntity;
-        return nextEntity;
-    };
-
-    return () => {
-        entityStore.isConfigured = original.isConfigured;
-        entityStore.getEntity = original.getEntity;
-        entityStore.getEntityByWorkspaceContainerId = original.getEntityByWorkspaceContainerId;
-        entityStore.getDefaultEntity = original.getDefaultEntity;
-        entityStore.getAllEntities = original.getAllEntities;
-        entityStore.upsertEntity = original.upsertEntity;
-    };
+    return stubMutableEntityStore(entity).restore;
 }
 
 function stubMutableEntityStore(entity) {
@@ -2517,7 +2488,8 @@ test.serial('destroyWorkspace applies caller timeout to pre-destroy checkpoint',
     global.fetch = async (_url, options = {}) => new Promise((resolve, reject) => {
         options.signal?.addEventListener('abort', () => {
             reject(new Error('aborted by test signal'));
-        });
+        }, { once: true });
+        setTimeout(() => reject(new Error('fetch did not abort')), 100);
     });
 
     try {
