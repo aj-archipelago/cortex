@@ -225,6 +225,59 @@ export class LocalStorageProvider extends StorageProvider {
     return /%[0-9A-Fa-f]{2}/.test(str);
   }
 
+  _resolveBlobPath(blobName) {
+    const normalizedBlobName = String(blobName || "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "");
+    const resolvedPath = path.resolve(this.publicFolder, normalizedBlobName);
+    const relativePath = path.relative(this.publicFolder, resolvedPath);
+
+    if (!normalizedBlobName || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+      throw new Error("Invalid blob path");
+    }
+
+    return { normalizedBlobName, resolvedPath };
+  }
+
+  _urlForBlobName(blobName) {
+    const encodedBlobName = blobName
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+    return `http://${ipAddress}:${port}/files/${encodedBlobName}`;
+  }
+
+  extractBlobNameFromUrl(url) {
+    const filePath = this.urlToFilePath(url);
+    if (!filePath) return null;
+
+    const relativePath = path.relative(this.publicFolder, filePath);
+    if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+      return null;
+    }
+
+    return relativePath.replace(/\\/g, "/");
+  }
+
+  async renameBlob(oldBlobName, newBlobName) {
+    const source = this._resolveBlobPath(oldBlobName);
+    const target = this._resolveBlobPath(newBlobName);
+
+    if (!fs.existsSync(source.resolvedPath)) {
+      throw new Error("File not found");
+    }
+
+    await fs.promises.mkdir(path.dirname(target.resolvedPath), { recursive: true });
+    await fs.promises.rename(source.resolvedPath, target.resolvedPath);
+
+    const url = this._urlForBlobName(target.normalizedBlobName);
+    return {
+      url,
+      shortLivedUrl: url,
+      blobName: target.normalizedBlobName,
+    };
+  }
+
   urlToFilePath(url) {
     try {
       // If it's a full URL, extract the pathname

@@ -416,7 +416,11 @@ export class StorageService {
         ? await StorageFactory.getInstance().getAzureProvider(containerName)
         : this.primaryProvider;
 
-      const oldBlobName = sourceBlobPath || provider.extractBlobNameFromUrl(hashResult.url);
+      const oldBlobName = sourceBlobPath
+        || provider.extractBlobNameFromUrl?.(hashResult.url)
+        || hashResult.blobPath
+        || hashResult.blobName
+        || this._extractBlobNameFromUrl(hashResult.url);
       if (oldBlobName) {
         const newBlobName = sanitizedTargetBlobPath
           || this._computeNewBlobName(oldBlobName, sanitized);
