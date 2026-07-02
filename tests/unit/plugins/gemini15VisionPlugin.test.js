@@ -5,14 +5,14 @@ import { requestState } from '../../../server/requestState.js';
 const createPlugin = () => {
   const pathway = {
     name: 'test-pathway',
-    model: 'gemini-flash-3-vision',
+    model: 'gemini-flash-35-vision',
     prompt: 'test prompt',
     toolCallback: () => {}
   };
 
   const model = {
-    name: 'gemini-flash-3-vision',
-    type: 'GEMINI-3-VISION'
+    name: 'gemini-flash-35-vision',
+    type: 'GEMINI-3-REASONING-VISION'
   };
 
   return new Gemini15VisionPlugin(pathway, model);
@@ -315,6 +315,37 @@ test('parseResponse gracefully handles non-streaming UNEXPECTED_TOOL_CALL', t =>
   t.true(result.output_text.includes('try rephrasing'));
 });
 
+test('parseResponse maps non-streaming prompt feedback block to content_filter', t => {
+  const plugin = createPlugin();
+
+  const result = plugin.parseResponse({
+    promptFeedback: { blockReason: 'SAFETY' },
+  });
+
+  t.is(result.finishReason, 'content_filter');
+  t.true(result.output_text.includes('SAFETY'));
+});
+
+test('getRequestParameters sends Gemini safety settings with REST field casing', t => {
+  const plugin = createPlugin();
+  const safetySettings = [
+    {
+      category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+      threshold: 'BLOCK_NONE',
+    },
+  ];
+
+  const params = plugin.getRequestParameters(
+    'hello',
+    {},
+    { prompt: '{{text}}' },
+    { pathway: { geminiSafetySettings: safetySettings } },
+  );
+
+  t.deepEqual(params.safetySettings, safetySettings);
+  t.falsy(params.safety_settings);
+});
+
 test('convertMessagesToGemini drops assistant with empty content and no tool_calls', t => {
   const plugin = createPlugin();
 
@@ -333,7 +364,7 @@ test('convertMessagesToGemini drops assistant with empty content and no tool_cal
 });
 
 test('processStreamEvent accumulates tool calls across events and dispatches once on STOP', t => {
-  // Simulates Gemini 3 Flash pattern: 3 separate SSE events, each with a functionCall
+  // Simulates Gemini 3.5 Flash pattern: 3 separate SSE events, each with a functionCall
   // + usageMetadata, only the last has finishReason: "STOP".
   // Verify: exactly ONE callback with ALL 3 tool calls.
   const toolCallbackArgs = [];
@@ -434,7 +465,7 @@ test('processStreamEvent does NOT dispatch tool calls without finishReason STOP'
         }
       }],
       usageMetadata: { trafficType: 'ON_DEMAND' },
-      modelVersion: 'gemini-3-flash-preview',
+      modelVersion: 'gemini-3.5-flash',
       responseId: 'test-response-id'
     })
   };

@@ -12,7 +12,7 @@ import { loadEntityConfig } from './sys_entity_tools.js';
 import { getEntityStore } from '../../../../../lib/MongoEntityStore.js';
 import { getBackend } from './backends/index.js';
 import { getUserContainerName, ensureContainer, generateContainerSASToken } from '../../../../../lib/blobContainerUtils.js';
-import { initWarmPool, claimContainer, getWarmPoolActiveContainerNames, removeWarmPoolEntry } from './warmPool.js';
+import { initWarmPool, claimContainer, getWarmPoolActiveContainerNames, releaseClaimedContainer, removeWarmPoolEntry } from './warmPool.js';
 
 /**
  * Resolve the full workspace image reference (name:tag).
@@ -70,6 +70,97 @@ function getLongFetchDispatcher(timeoutMs) {
         }));
     }
     return longFetchDispatchers.get(boundedTimeoutMs);
+}
+
+async function refreshWorkspaceUrlFromBackend(entityId, entityConfig, backend = null) {
+    const workspace = entityConfig?.workspace;
+    if (!entityId || !workspace?.containerId || !workspace?.url) return entityConfig;
+
+    const activeBackend = backend || await getBackend();
+    if (activeBackend.backendName !== 'aci' || typeof activeBackend.getContainerUrl !== 'function') {
+        return entityConfig;
+    }
+
+    let currentUrl = null;
+    try {
+        currentUrl = await activeBackend.getContainerUrl(workspace.containerId, workspace.containerId);
+    } catch (e) {
+        logger.warn(`Failed to refresh workspace URL for ${entityId} from ACI: ${e.message}`);
+        return entityConfig;
+    }
+
+    if (!currentUrl || currentUrl === workspace.url) return entityConfig;
+
+    const freshEntityConfig = (await loadEntityConfig(entityId, { fresh: true })) || entityConfig;
+    const freshWorkspace = freshEntityConfig?.workspace;
+    if (freshWorkspace?.containerId !== workspace.containerId) {
+        return freshEntityConfig;
+    }
+
+    const updatedEntityConfig = {
+        ...freshEntityConfig,
+        workspace: {
+            ...freshWorkspace,
+            url: currentUrl,
+        },
+    };
+    await getEntityStore().upsertEntity(updatedEntityConfig);
+    logger.warn(`Workspace URL for ${entityId} changed from ${workspace.url} to ${currentUrl}; refreshed from ACI`);
+    return updatedEntityConfig;
+}
+
+function workspaceAfterMissingRuntimeContainer(workspace = {}) {
+    const retainedWorkspace = {
+        ...getWorkspaceCheckpointMetadata(workspace),
+    };
+    const legacyShareName = getLegacyShareName(workspace);
+    if (legacyShareName) {
+        retainedWorkspace.legacyShareName = legacyShareName;
+    }
+
+    return Object.keys(retainedWorkspace).length > 0 ? retainedWorkspace : null;
+}
+
+async function clearMissingWorkspaceContainerFromBackend(entityId, entityConfig, backend = null) {
+    const workspace = entityConfig?.workspace;
+    if (!entityId || !workspace?.containerId) {
+        return { cleared: false, entityConfig };
+    }
+
+    const activeBackend = backend || await getBackend();
+    if (activeBackend.backendName !== 'aci' || typeof activeBackend.getContainerInfo !== 'function') {
+        return { cleared: false, entityConfig };
+    }
+
+    let containerInfo;
+    try {
+        containerInfo = await activeBackend.getContainerInfo(workspace.containerId, workspace.containerId);
+    } catch (e) {
+        logger.warn(`Failed to reconcile workspace container ${workspace.containerId} for ${entityId} from ACI: ${e.message}`);
+        return { cleared: false, entityConfig };
+    }
+
+    if (containerInfo?.exists !== false) {
+        return { cleared: false, entityConfig, containerInfo };
+    }
+
+    const freshEntityConfig = (await loadEntityConfig(entityId, { fresh: true })) || entityConfig;
+    const freshWorkspace = freshEntityConfig?.workspace;
+    if (freshWorkspace?.containerId !== workspace.containerId) {
+        return { cleared: false, entityConfig: freshEntityConfig };
+    }
+
+    const retainedWorkspace = workspaceAfterMissingRuntimeContainer(freshWorkspace || workspace);
+    const updatedEntityConfig = {
+        ...freshEntityConfig,
+        workspace: retainedWorkspace,
+    };
+    await getEntityStore().upsertEntity(updatedEntityConfig);
+    logger.warn(
+        `Workspace container ${workspace.containerId} for ${entityId} is missing from ACI; cleared stale runtime workspace state`
+        + (retainedWorkspace ? ' and retained checkpoint/legacy share metadata' : ''),
+    );
+    return { cleared: true, entityConfig: updatedEntityConfig };
 }
 
 function workspaceActivityKey(entityId) {
@@ -618,38 +709,69 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
     }
     let { entityConfig } = workspaceResult;
 
-    const { url, secret } = entityConfig.workspace;
+    let workspace = entityConfig.workspace;
     markActivity();
 
     try {
-        const fetchOptions = {
-            method,
-            headers: {
-                'x-workspace-secret': secret,
-                'Content-Type': 'application/json',
-            },
-            signal: AbortSignal.timeout(timeoutMs),
+        const buildFetchOptions = (secret) => {
+            const fetchOptions = {
+                method,
+                headers: {
+                    'x-workspace-secret': secret,
+                    'Content-Type': 'application/json',
+                },
+                signal: AbortSignal.timeout(timeoutMs),
+            };
+
+            if (body && method !== 'GET') {
+                fetchOptions.body = JSON.stringify(body);
+            }
+
+            return fetchOptions;
         };
 
-        if (body && method !== 'GET') {
-            fetchOptions.body = JSON.stringify(body);
-        }
-
-        const response = await fetch(`${url}${endpoint}`, fetchOptions);
+        let response = await fetch(`${workspace.url}${endpoint}`, buildFetchOptions(workspace.secret));
 
         markActivity();
+
+        if (response.status === 401) {
+            const backend = await getBackend();
+            const refreshedEntityConfig = await refreshWorkspaceUrlFromBackend(entityId, entityConfig, backend);
+            if (refreshedEntityConfig?.workspace?.url && refreshedEntityConfig.workspace.url !== workspace.url) {
+                entityConfig = refreshedEntityConfig;
+                workspace = entityConfig.workspace;
+                response = await fetch(`${workspace.url}${endpoint}`, buildFetchOptions(workspace.secret));
+                markActivity();
+            }
+        }
 
         if (response.status === 401) {
             // Secret mismatch — likely ACI restarted the container, reverting
             // its in-memory secret to the bootstrap secret from the env var.
             // Try reconfiguring with the bootstrap secret first (fast path),
             // then fall back to full reprovision if that fails.
-            const workspace = entityConfig.workspace;
+            workspace = entityConfig.workspace;
+            let reconciledMissingContainer = false;
+            let backend = null;
 
-            if (workspace.bootstrapSecret) {
+            try {
+                backend = await getBackend();
+                const missingContainerResult = await clearMissingWorkspaceContainerFromBackend(entityId, entityConfig, backend);
+                if (missingContainerResult.cleared) {
+                    reconciledMissingContainer = true;
+                    entityConfig = missingContainerResult.entityConfig;
+                    workspace = entityConfig.workspace;
+                }
+            } catch (reconcileErr) {
+                logger.warn(`Workspace container reconciliation failed for ${entityId}: ${reconcileErr.message}`);
+            }
+
+            if (!reconciledMissingContainer && workspace.bootstrapSecret) {
                 logger.warn(`Workspace auth failed for ${entityId} — attempting reconfigure with bootstrap secret`);
                 try {
-                    const backend = await getBackend();
+                    backend = backend || await getBackend();
+                    entityConfig = await refreshWorkspaceUrlFromBackend(entityId, entityConfig, backend);
+                    workspace = entityConfig.workspace;
                     await reconfigureForEntity(entityId, entityConfig, {
                         containerName: workspace.containerId,
                         shareName: workspace.shareName || null,
@@ -662,18 +784,10 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
 
                     // Retry the request with the fresh secret
                     entityConfig = await loadEntityConfig(entityId);
-                    const retryOptions = {
-                        method,
-                        headers: {
-                            'x-workspace-secret': entityConfig.workspace.secret,
-                            'Content-Type': 'application/json',
-                        },
-                        signal: AbortSignal.timeout(timeoutMs),
-                    };
-                    if (body && method !== 'GET') {
-                        retryOptions.body = JSON.stringify(body);
-                    }
-                    const retryResponse = await fetch(`${entityConfig.workspace.url}${endpoint}`, retryOptions);
+                    const retryResponse = await fetch(
+                        `${entityConfig.workspace.url}${endpoint}`,
+                        buildFetchOptions(entityConfig.workspace.secret),
+                    );
                     markActivity();
                     if (retryResponse.status === 401) {
                         // Reconfigure succeeded but auth still fails — something else is wrong
@@ -692,12 +806,14 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
 
             // Full reprovision fallback
             logger.warn(`Workspace auth failed for ${entityId} — re-provisioning`);
-            try {
-                await getEntityStore().upsertEntity({
-                    ...entityConfig,
-                    workspace: { ...entityConfig.workspace, status: 'error' },
-                });
-            } catch { /* best effort */ }
+            if (!reconciledMissingContainer) {
+                try {
+                    await getEntityStore().upsertEntity({
+                        ...entityConfig,
+                        workspace: { ...entityConfig.workspace, status: 'error' },
+                    });
+                } catch { /* best effort */ }
+            }
 
             const provisionResult = await provisionWorkspace(entityId, entityConfig, options);
             if (!provisionResult.success) {
@@ -710,18 +826,10 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
                 return { success: false, error: 'Re-provision completed but config not available' };
             }
             try {
-                const retryOptions = {
-                    method,
-                    headers: {
-                        'x-workspace-secret': entityConfig.workspace.secret,
-                        'Content-Type': 'application/json',
-                    },
-                    signal: AbortSignal.timeout(timeoutMs),
-                };
-                if (body && method !== 'GET') {
-                    retryOptions.body = JSON.stringify(body);
-                }
-                const retryResponse = await fetch(`${entityConfig.workspace.url}${endpoint}`, retryOptions);
+                const retryResponse = await fetch(
+                    `${entityConfig.workspace.url}${endpoint}`,
+                    buildFetchOptions(entityConfig.workspace.secret),
+                );
                 markActivity();
                 if (retryResponse.status === 401) {
                     return { success: false, error: 'Authentication failed after re-provision' };
@@ -752,6 +860,57 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
             (e.name === 'TypeError' && e.message === 'fetch failed');
 
         if (isConnectionError) {
+            try {
+                const refreshedEntityConfig = await refreshWorkspaceUrlFromBackend(entityId, entityConfig);
+                if (refreshedEntityConfig?.workspace?.url && refreshedEntityConfig.workspace.url !== entityConfig.workspace.url) {
+                    entityConfig = refreshedEntityConfig;
+                    const retryOptions = {
+                        method,
+                        headers: {
+                            'x-workspace-secret': entityConfig.workspace.secret,
+                            'Content-Type': 'application/json',
+                        },
+                        signal: AbortSignal.timeout(timeoutMs),
+                    };
+                    if (body && method !== 'GET') {
+                        retryOptions.body = JSON.stringify(body);
+                    }
+                    const retryResponse = await fetch(`${entityConfig.workspace.url}${endpoint}`, retryOptions);
+                    markActivity();
+                    if (retryResponse.status === 401 && entityConfig.workspace.bootstrapSecret) {
+                        const recoveredConfig = await recoverWorkspaceAuthWithBootstrapSecret(entityId, entityConfig);
+                        if (recoveredConfig?.workspace?.url && recoveredConfig?.workspace?.secret) {
+                            entityConfig = recoveredConfig;
+                            const recoveredOptions = {
+                                ...retryOptions,
+                                headers: {
+                                    ...retryOptions.headers,
+                                    'x-workspace-secret': entityConfig.workspace.secret,
+                                },
+                            };
+                            const recoveredResponse = await fetch(`${entityConfig.workspace.url}${endpoint}`, recoveredOptions);
+                            markActivity();
+                            if (recoveredResponse.status !== 401) {
+                                const recoveredData = await recoveredResponse.json();
+                                if (recoveredData.error) {
+                                    return { success: false, error: recoveredData.error };
+                                }
+                                return { success: true, ...recoveredData };
+                            }
+                        }
+                    }
+                    if (retryResponse.status !== 401) {
+                        const retryData = await retryResponse.json();
+                        if (retryData.error) {
+                            return { success: false, error: retryData.error };
+                        }
+                        return { success: true, ...retryData };
+                    }
+                }
+            } catch (refreshErr) {
+                logger.warn(`Workspace URL refresh failed for ${entityId} after connection error: ${refreshErr.message}`);
+            }
+
             // Container is dead — re-provision and retry the request in the same call
             logger.warn(`Workspace for ${entityId} unreachable — re-provisioning`);
             try {
@@ -852,7 +1011,7 @@ async function provisionWorkspace(entityId, entityConfig, options = {}) {
         entityConfig = (await loadEntityConfig(entityId, { fresh: true })) || entityConfig;
     }
 
-    const provisionPromise = _doProvision(entityId, entityConfig);
+    const provisionPromise = _doProvision(entityId, entityConfig, options);
     provisioningLocks.set(entityId, provisionPromise);
 
     try {
@@ -1101,7 +1260,7 @@ async function recoverExistingWorkspaceCheckpoint(entityId, entityConfig) {
 
     let checkpointFields = null;
     try {
-        checkpointFields = await readExistingWorkspaceCheckpointBlobFields(entityId, entityConfig?.workspace);
+        checkpointFields = await readExistingWorkspaceCheckpointBlobFields(entityId, entityConfig?.workspace || {});
     } catch (e) {
         logger.warn(`Could not validate existing workspace checkpoint for ${entityId}: ${e.message}`);
         return entityConfig;
@@ -1595,11 +1754,14 @@ async function checkpointAndPersistWorkspace(entityId, entityConfig, options = {
 }
 
 async function recoverWorkspaceAuthWithBootstrapSecret(entityId, entityConfig) {
+    entityConfig = await refreshWorkspaceUrlFromBackend(entityId, entityConfig);
     let workspace = entityConfig?.workspace;
     if (!workspace?.bootstrapSecret || !workspace?.url) return null;
 
     logger.warn(`Workspace auth failed for ${entityId} — attempting reconfigure with bootstrap secret`);
     const backend = await getBackend();
+    entityConfig = await refreshWorkspaceUrlFromBackend(entityId, entityConfig, backend);
+    workspace = entityConfig?.workspace;
     await reconfigureForEntity(entityId, entityConfig, {
         containerName: workspace.containerId,
         shareName: workspace.shareName || null,
@@ -1648,6 +1810,21 @@ async function fetchWorkspaceJsonWithAuthRecovery(entityId, entityConfig, endpoi
             workspace,
             authRecovered: false,
         };
+    }
+
+    const refreshedConfig = await refreshWorkspaceUrlFromBackend(entityId, currentConfig);
+    if (refreshedConfig?.workspace?.url && refreshedConfig.workspace.url !== workspace.url) {
+        currentConfig = refreshedConfig;
+        workspace = currentConfig.workspace;
+        result = await fetchWorkspaceJson(workspace.url, workspace.secret, endpoint, options);
+        if (result.response.status !== 401) {
+            return {
+                ...result,
+                entityConfig: currentConfig,
+                workspace,
+                authRecovered: false,
+            };
+        }
     }
 
     const recoveredConfig = await recoverWorkspaceAuthWithBootstrapSecret(entityId, currentConfig);
@@ -1936,7 +2113,25 @@ async function ensureWorkspaceReady(entityId, options = {}) {
     if (expectedVersion && entityConfig.workspace.imageVersion &&
         entityConfig.workspace.imageVersion !== expectedVersion) {
         logger.info(`Workspace for ${entityId} has stale image (${entityConfig.workspace.imageVersion} vs ${expectedVersion}) — reprovisioning`);
-        const reprovisionResult = await reprovisionStaleWorkspace(entityId, entityConfig, options, onWorkspaceLifecycle);
+        const backend = await getBackend();
+        const missingContainerResult = await clearMissingWorkspaceContainerFromBackend(entityId, entityConfig, backend);
+        let reprovisionResult;
+        if (missingContainerResult.cleared) {
+            await emitWorkspaceLifecycle(onWorkspaceLifecycle, { type: 'start', phase: 'reprovision', message: 'Updating workspace' });
+            const provisionResult = await provisionWorkspace(entityId, missingContainerResult.entityConfig, options);
+            await emitWorkspaceLifecycle(onWorkspaceLifecycle, {
+                type: 'finish',
+                phase: 'reprovision',
+                success: provisionResult.success,
+                error: provisionResult.error,
+            });
+            reprovisionResult = {
+                ...provisionResult,
+                entityConfig: provisionResult.success ? await loadEntityConfig(entityId) : missingContainerResult.entityConfig,
+            };
+        } else {
+            reprovisionResult = await reprovisionStaleWorkspace(entityId, entityConfig, options, onWorkspaceLifecycle);
+        }
         if (!reprovisionResult.success) {
             return { success: false, error: reprovisionResult.error };
         }
@@ -2243,7 +2438,7 @@ async function setupWorkspaceContainerForEntity(entityId, entityConfig, containe
  *   3. createGenericContainer() — create on demand, only mounting Azure Files for one-time legacy migration
  *   4. reconfigureForEntity() — inject secrets, mount blob storage, rotate secret
  */
-async function _doProvision(entityId, entityConfig) {
+async function _doProvision(entityId, entityConfig, options = {}) {
     if (!isValidWorkspaceEntityId(entityId)) {
         throw new Error('Workspace entityId is required');
     }
@@ -2306,8 +2501,14 @@ async function _doProvision(entityId, entityConfig) {
         // written, so restored .env files cannot win over current secrets. If
         // a pool-claimed container is dead, fall back to creating a fresh one.
         try {
-            setupResult = await setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend);
+            setupResult = await setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend, options);
+            if (container.claimedFromPool) {
+                await releaseClaimedContainer(container.containerName);
+            }
         } catch (provisionErr) {
+            if (container?.claimedFromPool) {
+                await releaseClaimedContainer(container.containerName);
+            }
             if (checkpointBlobPath && legacyShareName && backend.backendName === 'aci') {
                 logger.warn(`Blob checkpoint restore failed for ${entityId}; falling back to legacy share migration: ${provisionErr.message}`);
                 const legacyEntityConfig = {
@@ -2321,12 +2522,12 @@ async function _doProvision(entityId, entityConfig) {
                     shareName: legacyShareName,
                     mountAzureFiles: true,
                 });
-                setupResult = await setupWorkspaceContainerForEntity(entityId, legacyEntityConfig, container, backend);
+                setupResult = await setupWorkspaceContainerForEntity(entityId, legacyEntityConfig, container, backend, options);
                 migratedLegacyShare = true;
             } else if (container.claimedFromPool) {
                 logger.warn(`[WarmPool] Claimed container ${container.containerName} failed setup — falling back to fresh container: ${provisionErr.message}`);
                 container = await createGenericContainer(entityId, backend);
-                setupResult = await setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend);
+                setupResult = await setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend, options);
             } else {
                 throw provisionErr;
             }
@@ -2609,6 +2810,9 @@ export async function destroyWorkspace(entityId, entityConfig, options = {}) {
     const onWorkspaceLifecycle = typeof options.onWorkspaceLifecycle === 'function'
         ? options.onWorkspaceLifecycle
         : null;
+    if (!entityConfig) {
+        entityConfig = await loadEntityConfig(entityId, { fresh: true });
+    }
     let workspace = entityConfig?.workspace;
     // Use stored containerId — pool-claimed containers have names like
     // workspace-pool-{shortId}, not workspace-{entityId}.

@@ -300,6 +300,44 @@ export default class ACIBackend extends ContainerBackend {
         return { url };
     }
 
+    async getContainerUrl(containerId, containerName) {
+        const client = await this._getClient();
+        const resourceGroup = config.get('azureResourceGroup');
+        const groupName = containerName || containerId;
+
+        try {
+            const containerGroup = await client.containerGroups.get(resourceGroup, groupName);
+            return this._getContainerGroupUrl(containerGroup);
+        } catch (e) {
+            if (e.statusCode === 404) return null;
+            throw e;
+        }
+    }
+
+    async getContainerInfo(containerId, containerName) {
+        const client = await this._getClient();
+        const resourceGroup = config.get('azureResourceGroup');
+        const groupName = containerName || containerId;
+
+        try {
+            const containerGroup = await client.containerGroups.get(resourceGroup, groupName);
+            return {
+                exists: true,
+                name: containerGroup.name || groupName,
+                url: this._getContainerGroupUrl(containerGroup),
+                provisioningState: containerGroup.provisioningState || null,
+                instanceViewState: containerGroup.instanceView?.state || null,
+                tags: containerGroup.tags || {},
+                image: containerGroup.containers?.[0]?.image || null,
+            };
+        } catch (e) {
+            if (e.statusCode === 404) {
+                return { exists: false, name: groupName, url: null };
+            }
+            throw e;
+        }
+    }
+
     /**
      * Set an `entityId` Azure tag on a container group. Used to mark pool
      * containers as claimed so the orphan reconciler can distinguish

@@ -22,7 +22,7 @@ import { buildModelEndpoints } from '../lib/requestExecutor.js';
 import { startModelSampler } from '../lib/modelSampler.js';
 import { startTestServer } from '../tests/helpers/server.js';
 import { requestState } from './requestState.js';
-import { cancelRequestResolver, submitClientToolResultResolver, injectAgentMessageResolver } from './resolver.js';
+import { cancelRequestResolver, submitClientToolResultResolver, clientToolHeartbeatResolver, injectAgentMessageResolver } from './resolver.js';
 import subscriptions from './subscriptions.js';
 import { getMessageTypeDefs } from './typeDef.js';
 import { buildRestEndpoints } from './rest.js';
@@ -92,6 +92,7 @@ const getTypedefs = (pathways, pathwayManager) => {
     type Mutation {
         cancelRequest(requestId: String!): Boolean
         submitClientToolResult(requestId: String!, toolCallbackId: String!, result: String!, success: Boolean!): Boolean
+        clientToolHeartbeat(requestId: String!, toolCallbackId: String!): Boolean
         injectAgentMessage(requestId: String!, message: String!): Boolean
     }
 
@@ -155,6 +156,7 @@ const getResolvers = (config, pathways, pathwayManager) => {
         Mutation: {
             'cancelRequest': cancelRequestResolver,
             'submitClientToolResult': submitClientToolResultResolver,
+            'clientToolHeartbeat': clientToolHeartbeatResolver,
             'injectAgentMessage': injectAgentMessageResolver,
             ...mutationResolvers,
             ...pathwayManagerResolvers.Mutation

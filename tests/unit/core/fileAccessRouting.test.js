@@ -104,3 +104,148 @@ test.serial('user-files file access target lists the full user file share read-o
         axios.get = originalGet;
     }
 });
+
+test.serial('app-private file access target reads applet-user and legacy workspace scopes', async t => {
+    const { axios } = await loadRequestExecutor();
+    const { getWriteFileAccessTarget, listFilesForFileAccessPlan } = await loadFileUtils();
+    const originalGet = axios.get;
+    const capturedUrls = [];
+
+    axios.get = async (url) => {
+        capturedUrls.push(url);
+        const parsed = new URL(url);
+        const fileScope = parsed.searchParams.get('fileScope');
+        return {
+            data: {
+                files: [
+                    {
+                        name: `${fileScope}/report.txt`,
+                        hash: `${fileScope}-hash`,
+                        url: `https://files.test/${fileScope}/report.txt`,
+                    },
+                ],
+            },
+        };
+    };
+
+    const fileAccessPlan = [
+        {
+            kind: 'app-private',
+            userContextId: 'user-456',
+            appletId: 'applet-123',
+            workspaceId: 'workspace-789',
+            write: true,
+        },
+    ];
+
+    try {
+        const writeTarget = getWriteFileAccessTarget(fileAccessPlan);
+        t.is(writeTarget.contextId, 'applet-user:applet-123:user-456');
+        t.is(writeTarget.writeFileScope, 'applet-user');
+
+        const files = await listFilesForFileAccessPlan(fileAccessPlan);
+
+        t.is(files.length, 2);
+        t.deepEqual(files.map(file => file._readFileScope).sort(), [
+            'applet-user',
+            'workspace-user-legacy',
+        ]);
+        t.deepEqual(capturedUrls.map(url => new URL(url).searchParams.get('fileScope')), [
+            'applet-user',
+            'workspace-user-legacy',
+        ]);
+        t.is(new URL(capturedUrls[0]).searchParams.get('contextId'), 'applet-user:applet-123:user-456');
+        t.is(new URL(capturedUrls[1]).searchParams.get('contextId'), 'user-456');
+        t.is(new URL(capturedUrls[1]).searchParams.get('workspaceId'), 'workspace-789');
+    } finally {
+        axios.get = originalGet;
+    }
+});
+
+test.serial('scoped name listing makes documented global prefixes relative to user-global scope', async t => {
+    const { axios } = await loadRequestExecutor();
+    const { listFileNamesForFileAccessPlan } = await loadFileUtils();
+    const originalGet = axios.get;
+    const capturedUrls = [];
+
+    axios.get = async (url) => {
+        capturedUrls.push(url);
+        return {
+            data: {
+                items: [
+                    ['global/reports/q1.csv', 123, '2026-01-01T00:00:00.000Z'],
+                ],
+                truncated: false,
+            },
+        };
+    };
+
+    try {
+        await listFileNamesForFileAccessPlan(
+            [{ kind: 'user-global', userContextId: 'user-456', write: true }],
+            { subPath: '/workspace/files/global', maxResultsPerTarget: 10 },
+        );
+        await listFileNamesForFileAccessPlan(
+            [{ kind: 'user-global', userContextId: 'user-456', write: true }],
+            { subPath: '/workspace/files/global/reports', maxResultsPerTarget: 10 },
+        );
+
+        t.is(capturedUrls.length, 2);
+
+        const rootUrl = new URL(capturedUrls[0]);
+        t.is(rootUrl.searchParams.get('operation'), 'listNames');
+        t.is(rootUrl.searchParams.get('fileScope'), 'global');
+        t.false(rootUrl.searchParams.has('subPath'));
+
+        const nestedUrl = new URL(capturedUrls[1]);
+        t.is(nestedUrl.searchParams.get('fileScope'), 'global');
+        t.is(nestedUrl.searchParams.get('subPath'), 'reports');
+    } finally {
+        axios.get = originalGet;
+    }
+});
+
+test.serial('scoped name listing makes documented chat prefixes relative to chat scope', async t => {
+    const { axios } = await loadRequestExecutor();
+    const { listFileNamesForFileAccessPlan } = await loadFileUtils();
+    const originalGet = axios.get;
+    const capturedUrls = [];
+
+    axios.get = async (url) => {
+        capturedUrls.push(url);
+        return {
+            data: {
+                items: [
+                    ['chats/chat-123/session-notes.txt', 456, '2026-01-01T00:00:00.000Z'],
+                ],
+                truncated: false,
+            },
+        };
+    };
+
+    try {
+        await listFileNamesForFileAccessPlan(
+            [{ kind: 'chat', userContextId: 'user-456', chatId: 'chat-123', write: true }],
+            { subPath: '/workspace/files/chats/chat-123', maxResultsPerTarget: 10 },
+        );
+        await listFileNamesForFileAccessPlan(
+            [{ kind: 'chat', userContextId: 'user-456', chatId: 'chat-123', write: true }],
+            { subPath: '/workspace/files/chats/chat-123/uploads', maxResultsPerTarget: 10 },
+        );
+
+        t.is(capturedUrls.length, 2);
+
+        const rootUrl = new URL(capturedUrls[0]);
+        t.is(rootUrl.searchParams.get('operation'), 'listNames');
+        t.is(rootUrl.searchParams.get('fileScope'), 'chat');
+        t.is(rootUrl.searchParams.get('chatId'), 'chat-123');
+        t.false(rootUrl.searchParams.has('subPath'));
+
+        const nestedUrl = new URL(capturedUrls[1]);
+        t.is(nestedUrl.searchParams.get('fileScope'), 'chat');
+        t.is(nestedUrl.searchParams.get('chatId'), 'chat-123');
+        t.is(nestedUrl.searchParams.get('subPath'), 'uploads');
+    } finally {
+        axios.get = originalGet;
+    }
+});

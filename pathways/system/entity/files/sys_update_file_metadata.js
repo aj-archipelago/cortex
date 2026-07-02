@@ -24,23 +24,23 @@ export default {
     resolver: async (_parent, args, _contextValue, _info) => {
         const { fileAccessPlan } = args;
         const { hash, displayFilename, mimeType } = args;
-        
+
         const writeTarget = getWriteFileAccessTarget(fileAccessPlan);
         if (!writeTarget) {
-            return JSON.stringify({ 
-                success: false, 
+            return JSON.stringify({
+                success: false,
                 error: 'fileAccessPlan with a writable target is required'
             });
         }
-        
+
         // Validate required parameters
         if (!hash) {
-            return JSON.stringify({ 
-                success: false, 
-                error: 'hash is required' 
+            return JSON.stringify({
+                success: false,
+                error: 'hash is required'
             });
         }
-        
+
         try {
             // Build metadata object with only provided fields
             const metadata = {};
@@ -56,22 +56,22 @@ export default {
                 hash,
                 metadata,
             );
-            
+
             if (success) {
-                return JSON.stringify({ 
+                return JSON.stringify({
                     success: true,
                     message: 'File metadata updated successfully'
                 });
             } else {
-                return JSON.stringify({ 
-                    success: false, 
-                    error: 'Failed to update file metadata' 
+                return JSON.stringify({
+                    success: false,
+                    error: 'Failed to update file metadata'
                 });
             }
         } catch (e) {
-            return JSON.stringify({ 
-                success: false, 
-                error: e.message || 'Unknown error occurred' 
+            return JSON.stringify({
+                success: false,
+                error: e.message || 'Unknown error occurred'
             });
         }
     }

@@ -253,7 +253,7 @@ Redis Hash Maps
               url: "https://storage.../file.pdf",
               gcs: "gs://bucket/file.pdf",
               filename: "uuid-based-filename.pdf",  // CFH-managed
-              
+
               // Cortex-managed fields (user metadata)
               id: "timestamp-random",
               displayFilename: "user-friendly-name.pdf",  // User-provided name
@@ -600,7 +600,7 @@ RemoveFileFromCollection Tool
     url: "https://storage.../file.pdf",
     gcs: "gs://bucket/file.pdf",
     filename: "uuid-based-name.pdf",
-    
+
     // Cortex-managed fields
     id: "1736966400000-abc123",
     displayFilename: "user-friendly-name.pdf",

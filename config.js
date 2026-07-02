@@ -1,28 +1,27 @@
-import path from 'path';
-import convict from 'convict';
-import HandleBars from './lib/handleBars.js';
-import fs from 'fs';
-import { fileURLToPath, pathToFileURL } from 'url';
-import GcpAuthTokenHelper from './lib/gcpAuthTokenHelper.js';
-import AzureAuthTokenHelper from './lib/azureAuthTokenHelper.js';
-import logger from './lib/logger.js';
-import PathwayManager from './lib/pathwayManager.js';
-import { readdir } from 'fs/promises';
-import { entityConstants } from './lib/entityConstants.js';
-import { Prompt } from './server/prompt.js';
+import path from "path";
+import convict from "convict";
+import HandleBars from "./lib/handleBars.js";
+import fs from "fs";
+import { fileURLToPath, pathToFileURL } from "url";
+import GcpAuthTokenHelper from "./lib/gcpAuthTokenHelper.js";
+import AzureAuthTokenHelper from "./lib/azureAuthTokenHelper.js";
+import logger from "./lib/logger.js";
+import PathwayManager from "./lib/pathwayManager.js";
+import { readdir } from "fs/promises";
+import { entityConstants } from "./lib/entityConstants.js";
+import { Prompt } from "./server/prompt.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const defaultConfigExample = JSON.parse(fs.readFileSync(path.join(__dirname, 'config', 'default.example.json'), 'utf8'));
 
 convict.addFormat({
-    name: 'string-array',
+    name: "string-array",
     validate: function (val) {
         if (!Array.isArray(val)) {
-            throw new Error('must be of type Array');
+            throw new Error("must be of type Array");
         }
     },
     coerce: function (val) {
-        return val.split(',');
+        return val.split(",");
     },
 });
 
@@ -30,44 +29,51 @@ convict.addFormat({
 var config = convict({
     env: {
         format: String,
-        default: 'development',
-        env: 'NODE_ENV'
+        default: "development",
+        env: "NODE_ENV",
     },
     cortexId: {
         format: String,
-        default: 'local',
-        env: 'CORTEX_ID'
+        default: "local",
+        env: "CORTEX_ID",
     },
     basePathwayPath: {
         format: String,
-        default: path.join(__dirname, 'pathways', 'basePathway.js'),
-        env: 'CORTEX_BASE_PATHWAY_PATH'
+        default: path.join(__dirname, "pathways", "basePathway.js"),
+        env: "CORTEX_BASE_PATHWAY_PATH",
     },
     corePathwaysPath: {
         format: String,
-        default: path.join(__dirname, 'pathways'),
-        env: 'CORTEX_CORE_PATHWAYS_PATH'
+        default: path.join(__dirname, "pathways"),
+        env: "CORTEX_CORE_PATHWAYS_PATH",
     },
     cortexApiKeys: {
-        format: 'string-array',
+        format: "string-array",
         default: null,
-        env: 'CORTEX_API_KEY',
-        sensitive: true
+        env: "CORTEX_API_KEY",
+        sensitive: true,
     },
     cortexConfigFile: {
         format: String,
         default: null,
-        env: 'CORTEX_CONFIG_FILE'
+        env: "CORTEX_CONFIG_FILE",
     },
     defaultModelName: {
         format: String,
-        default: defaultConfigExample.defaultModelName,
-        env: 'DEFAULT_MODEL_NAME'
+        default: "oai-gpt4o",
+        env: "DEFAULT_MODEL_NAME",
     },
     modelRedirects: {
         format: Object,
-        default: defaultConfigExample.modelRedirects,
-        env: 'MODEL_REDIRECTS'
+        default: {
+            "xai-grok-3": "xai-grok-4-20-reasoning",
+            "xai-grok-4": "xai-grok-4-3",
+            "xai-grok-4-fast-reasoning": "xai-grok-4-20-reasoning",
+            "xai-grok-4-fast-non-reasoning": "xai-grok-4-20-non-reasoning",
+            "xai-grok-4-1-fast-responses": "xai-grok-4-20-responses",
+            "xai-grok-4-responses": "xai-grok-4-20-responses",
+        },
+        env: "MODEL_REDIRECTS",
     },
     modelGroups: {
         // Map of alias -> { members: [...], metadata?: {...} }. The alias
@@ -76,48 +82,50 @@ var config = convict({
         // lib/requestExecutor.js (pickGroupMember), lib/modelSampler.js, and
         // pathways/system/sys_model_metadata.js.
         format: Object,
-        default: {}
+        default: {},
     },
     defaultEntityName: {
         format: String,
         default: "Jarvis",
-        env: 'DEFAULT_ENTITY_NAME'
+        env: "DEFAULT_ENTITY_NAME",
     },
     enableCache: {
         format: Boolean,
         default: true,
-        env: 'CORTEX_ENABLE_CACHE'
+        env: "CORTEX_ENABLE_CACHE",
     },
     enableGraphqlCache: {
         format: Boolean,
         default: false,
-        env: 'CORTEX_ENABLE_GRAPHQL_CACHE'
+        env: "CORTEX_ENABLE_GRAPHQL_CACHE",
     },
     enableRestEndpoints: {
         format: Boolean,
         default: false,
-        env: 'CORTEX_ENABLE_REST'
+        env: "CORTEX_ENABLE_REST",
     },
     ollamaUrl: {
         format: String,
-        default: '',
-        env: 'OLLAMA_URL'
+        default: "",
+        env: "OLLAMA_URL",
     },
     claudeVertexUrl: {
         format: String,
-        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/anthropic/models/claude-opus-4-7',
-        env: 'CLAUDE_VERTEX_URL'
+        default:
+            "https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/anthropic/models/claude-4-sonnet@20250722",
+        env: "CLAUDE_VERTEX_URL",
     },
     geminiFlashUrl: {
         format: String,
-        default: 'https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/google/models/gemini-3.5-flash',
-        env: 'GEMINI_FLASH_URL'
+        default:
+            "https://region.googleapis.com/v1/projects/projectid/locations/location/publishers/google/models/gemini-2.5-flash",
+        env: "GEMINI_FLASH_URL",
     },
     geminiApiKey: {
         format: String,
         default: null,
-        env: 'GEMINI_API_KEY',
-        sensitive: true
+        env: "GEMINI_API_KEY",
+        sensitive: true,
     },
     entityConfig: {
         format: Object,
@@ -143,307 +151,1157 @@ var config = convict({
     gcpServiceAccountKey: {
         format: String,
         default: null,
-        env: 'GCP_SERVICE_ACCOUNT_KEY',
-        sensitive: true
+        env: "GCP_SERVICE_ACCOUNT_KEY",
+        sensitive: true,
+    },
+    gcpAuthTokenHelper: {
+        format: "*",
+        default: null,
+        sensitive: true,
     },
     azureServicePrincipalCredentials: {
         format: String,
         default: null,
-        env: 'AZURE_SERVICE_PRINCIPAL_CREDENTIALS',
-        sensitive: true
+        env: "AZURE_SERVICE_PRINCIPAL_CREDENTIALS",
+        sensitive: true,
+    },
+    azureAuthTokenHelper: {
+        format: "*",
+        default: null,
+        sensitive: true,
     },
     models: {
         format: Object,
-        default: defaultConfigExample.models,
-        env: 'CORTEX_MODELS'
+        default: {
+            "oai-gpturbo": {
+                type: "OPENAI-CHAT",
+                emulateOpenAICompletionModel: "*",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "gpt-3.5-turbo",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 8192,
+                supportsStreaming: true,
+            },
+            "oai-whisper": {
+                type: "OPENAI-WHISPER",
+                url: "https://api.openai.com/v1/audio/transcriptions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                },
+                params: {
+                    model: "whisper-1",
+                },
+            },
+            neuralspace: {
+                type: "NEURALSPACE",
+                url: "https://voice.neuralspace.ai/api/v2/jobs",
+                headers: {
+                    Authorization: "{{NEURALSPACE_API_KEY}}",
+                },
+            },
+            "azure-cognitive": {
+                type: "AZURE-COGNITIVE",
+                url: "{{{AZURE_COGNITIVE_API_URL_QA}}}",
+                headers: {
+                    "api-key": "{{{AZURE_COGNITIVE_API_KEY_QA}}}",
+                    "Content-Type": "application/json",
+                },
+                requestsPerSecond: 10,
+            },
+            "oai-embeddings": {
+                type: "OPENAI-EMBEDDINGS",
+                url: "https://api.openai.com/v1/embeddings",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "text-embedding-ada-002",
+                },
+                maxTokenLength: 8192,
+            },
+            "oai-gpt5-chat": {
+                type: "OPENAI-VISION",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "gpt-5-chat-latest",
+                },
+                requestsPerSecond: 50,
+                maxTokenLength: 128000,
+                maxReturnTokens: 16384,
+                supportsStreaming: true,
+            },
+            "oai-gpt5": {
+                type: "OPENAI-REASONING-VISION",
+                emulateOpenAIChatModel: "gpt-5",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "gpt-5",
+                },
+                requestsPerSecond: 50,
+                maxTokenLength: 400000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+            },
+            "oai-gpt5-mini": {
+                type: "OPENAI-REASONING-VISION",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "gpt-5-mini",
+                },
+                requestsPerSecond: 50,
+                maxTokenLength: 400000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+            },
+            "oai-gpt4o": {
+                type: "OPENAI-VISION",
+                emulateOpenAIChatModel: "gpt-4o",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "gpt-4o",
+                },
+                requestsPerSecond: 50,
+                maxTokenLength: 131072,
+                maxReturnTokens: 4096,
+                supportsStreaming: true,
+            },
+            "oai-gpt4o-mini": {
+                type: "OPENAI-VISION",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "gpt-4o-mini",
+                },
+                requestsPerSecond: 50,
+                maxTokenLength: 131072,
+                maxReturnTokens: 4096,
+                supportsStreaming: true,
+            },
+            "oai-gpt41": {
+                type: "OPENAI-VISION",
+                emulateOpenAIChatModel: "gpt-4.1",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "gpt-4.1",
+                },
+                requestsPerSecond: 50,
+                maxTokenLength: 1000000,
+                maxReturnTokens: 32768,
+                supportsStreaming: true,
+            },
+            "oai-gpt41-mini": {
+                type: "OPENAI-VISION",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "gpt-4.1-mini",
+                },
+                requestsPerSecond: 50,
+                maxTokenLength: 1000000,
+                maxReturnTokens: 32768,
+                supportsStreaming: true,
+            },
+            "oai-o1": {
+                type: "OPENAI-REASONING",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "o1",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 200000,
+                maxReturnTokens: 100000,
+                supportsStreaming: false,
+            },
+            "oai-o3": {
+                type: "OPENAI-REASONING",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "o3",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 200000,
+                maxReturnTokens: 100000,
+                supportsStreaming: true,
+            },
+            "oai-o3-mini": {
+                type: "OPENAI-REASONING",
+                emulateOpenAIChatModel: "o3-mini",
+                url: "https://api.openai.com/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{OPENAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "o3-mini",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 200000,
+                maxReturnTokens: 100000,
+                supportsStreaming: true,
+            },
+            "google-cse": {
+                type: "GOOGLE-CSE",
+                url: "https://www.googleapis.com/customsearch/v1",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 200000,
+            },
+            "brave-search": {
+                type: "BRAVE-SEARCH",
+                url: "https://api.search.brave.com/res/v1/web/search",
+                headers: {
+                    Accept: "application/json",
+                    "Accept-Encoding": "gzip",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 200000,
+            },
+            "runware-flux-schnell": {
+                type: "RUNWARE-AI",
+                url: "https://api.runware.ai/v1",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-seedance-1-pro": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/seedance-1-pro/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-seedance-1.5-pro": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/seedance-1.5-pro/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-seedance-2.0": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/seedance-2.0/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-seedance-2.0-fast": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/seedance-2.0-fast/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-seedance-2.0-mini": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/seedance-2.0-mini/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-kling-v2.5-turbo-pro": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/kwaivgi/kling-v2.5-turbo-pro/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-grok-imagine-video": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/xai/grok-imagine-video/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-dreamactor-m2.0": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/dreamactor-m2.0/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-p-video-avatar": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/prunaai/p-video-avatar/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-video-upscaler": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/video-upscaler/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-topaz-image-upscale": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/topazlabs/image-upscale/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-topaz-video-upscale": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/topazlabs/video-upscale/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-flux-11-pro": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/black-forest-labs/flux-1.1-pro/predictions",
+                headers: {
+                    Prefer: "wait=60",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-flux-1-schnell": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
+                headers: {
+                    Prefer: "wait=10",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-flux-1-dev": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/black-forest-labs/flux-dev/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-recraft-v3": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/recraft-ai/recraft-v3/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-flux-kontext-pro": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/black-forest-labs/flux-kontext-pro/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-flux-kontext-max": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/black-forest-labs/flux-kontext-max/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-multi-image-kontext-max": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/flux-kontext-apps/multi-image-kontext-max/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-qwen-image": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/qwen/qwen-image/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-qwen-image-edit-plus": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/qwen/qwen-image-edit-plus/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-qwen-image-edit-2511": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/qwen/qwen-image-edit-2511/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-seedream-4": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/seedream-4/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-seedream-4.5": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/seedream-4.5/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-seedream-5-lite": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/bytedance/seedream-5-lite/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "replicate-flux-2-pro": {
+                type: "REPLICATE-API",
+                url: "https://api.replicate.com/v1/models/black-forest-labs/flux-2-pro/predictions",
+                headers: {
+                    Prefer: "wait",
+                    Authorization: "Token {{REPLICATE_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+            },
+            "azure-video-translate": {
+                type: "AZURE-VIDEO-TRANSLATE",
+                url: "https://eastus.api.cognitive.microsoft.com/videotranslation",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+            },
+            "ollama-chat": {
+                type: "OLLAMA-CHAT",
+                emulateOpenAIChatModel: "ollama-chat",
+                restStreaming: {
+                    timeout: 300,
+                },
+                url: "{{ollamaUrl}}/api/chat",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 131072,
+                supportsStreaming: true,
+            },
+            "ollama-completion": {
+                type: "OLLAMA-COMPLETION",
+                emulateOpenAICompletionModel: "ollama-completion",
+                restStreaming: {
+                    timeout: 300,
+                },
+                url: "{{ollamaUrl}}/api/generate",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 131072,
+                supportsStreaming: true,
+            },
+            "google-translate": {
+                type: "GOOGLE-TRANSLATE",
+                url: "https://translation.googleapis.com/language/translate/v2",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                requestsPerSecond: 10,
+            },
+            "groq-chat": {
+                type: "GROQ-CHAT",
+                url: "https://api.groq.com/openai/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{GROQ_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 65536,
+                maxReturnTokens: 4096,
+                supportsStreaming: true,
+            },
+            "claude-37-sonnet-vertex": {
+                type: "CLAUDE-3-VERTEX",
+                emulateOpenAIChatModel: "claude-3.7-sonnet",
+                url: "{{claudeVertexUrl}}",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 200000,
+                maxReturnTokens: 4096,
+                maxImageSize: 5242880,
+                supportsStreaming: true,
+            },
+            "claude-4-sonnet-vertex": {
+                type: "CLAUDE-4-VERTEX",
+                emulateOpenAIChatModel: "claude-4-sonnet",
+                url: "{{claudeVertexUrl}}",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 200000,
+                maxReturnTokens: 4096,
+                maxImageSize: 5242880,
+                supportsStreaming: true,
+            },
+            "claude-sonnet-4": {
+                type: "CLAUDE-ANTHROPIC",
+                emulateOpenAIChatModel: "claude-sonnet-4",
+                endpoints: [
+                    {
+                        name: "Anthropic Claude Sonnet 4",
+                        url: "https://api.anthropic.com/v1/messages",
+                        headers: {
+                            "x-api-key": "{{CLAUDE_API_KEY}}",
+                            "Content-Type": "application/json",
+                        },
+                        params: {
+                            model: "claude-sonnet-4-20250514",
+                        },
+                        requestsPerSecond: 10,
+                    },
+                ],
+                maxTokenLength: 200000,
+                maxReturnTokens: 64000,
+                maxImageSize: 31457280,
+                supportsStreaming: true,
+            },
+            "claude-45-sonnet": {
+                type: "CLAUDE-ANTHROPIC",
+                emulateOpenAIChatModel: "claude-4.5-sonnet",
+                endpoints: [
+                    {
+                        name: "Anthropic Claude 4.5 Sonnet",
+                        url: "https://api.anthropic.com/v1/messages",
+                        headers: {
+                            "x-api-key": "{{CLAUDE_API_KEY}}",
+                            "Content-Type": "application/json",
+                        },
+                        params: {
+                            model: "claude-sonnet-4-5-20250514",
+                        },
+                        requestsPerSecond: 10,
+                    },
+                ],
+                maxTokenLength: 200000,
+                maxReturnTokens: 64000,
+                maxImageSize: 31457280,
+                supportsStreaming: true,
+            },
+            "claude-45-opus": {
+                type: "CLAUDE-ANTHROPIC",
+                emulateOpenAIChatModel: "claude-4.5-opus",
+                endpoints: [
+                    {
+                        name: "Anthropic Claude 4.5 Opus",
+                        url: "https://api.anthropic.com/v1/messages",
+                        headers: {
+                            "x-api-key": "{{CLAUDE_API_KEY}}",
+                            "Content-Type": "application/json",
+                        },
+                        params: {
+                            model: "claude-opus-4-5-20250514",
+                        },
+                        requestsPerSecond: 10,
+                    },
+                ],
+                maxTokenLength: 200000,
+                maxReturnTokens: 32000,
+                maxImageSize: 31457280,
+                supportsStreaming: true,
+            },
+            "gemini-flash-25-vision": {
+                type: "GEMINI-1.5-VISION",
+                emulateOpenAIChatModel: "gemini-flash-25",
+                restStreaming: {
+                    geminiSafetySettings: [
+                        {
+                            category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+                            threshold: "BLOCK_ONLY_HIGH",
+                        },
+                        {
+                            category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                            threshold: "BLOCK_ONLY_HIGH",
+                        },
+                        {
+                            category: "HARM_CATEGORY_HARASSMENT",
+                            threshold: "BLOCK_ONLY_HIGH",
+                        },
+                        {
+                            category: "HARM_CATEGORY_HATE_SPEECH",
+                            threshold: "BLOCK_ONLY_HIGH",
+                        },
+                    ],
+                },
+                url: "{{geminiFlashUrl}}",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 1048576,
+                maxReturnTokens: 65535,
+                supportsStreaming: true,
+            },
+            "xai-grok-4-3": {
+                type: "GROK-VISION",
+                emulateOpenAIChatModel: "grok-4.3",
+                restStreaming: {
+                    inputParameters: {
+                        stream: false,
+                        search_parameters: "",
+                    },
+                },
+                url: "https://api.x.ai/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "grok-4.3",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 1000000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+                reasoningEffortMap: {
+                    none: "none",
+                    low: "low",
+                    medium: "medium",
+                    high: "high",
+                },
+            },
+            "xai-grok-4-20-reasoning": {
+                type: "GROK-VISION",
+                emulateOpenAIChatModel: "grok-4.20-0309-reasoning",
+                restStreaming: {
+                    inputParameters: {
+                        stream: false,
+                        search_parameters: "",
+                    },
+                },
+                url: "https://api.x.ai/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "grok-4.20-0309-reasoning",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 2000000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+            },
+            "xai-grok-4-20-non-reasoning": {
+                type: "GROK-VISION",
+                emulateOpenAIChatModel: "grok-4.20-0309-non-reasoning",
+                restStreaming: {
+                    inputParameters: {
+                        stream: false,
+                        search_parameters: "",
+                    },
+                },
+                url: "https://api.x.ai/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "grok-4.20-0309-non-reasoning",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 2000000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+            },
+            "xai-grok-4-20-multi-agent": {
+                type: "GROK-RESPONSES",
+                emulateOpenAIChatModel: "grok-4.20-multi-agent-0309",
+                restStreaming: {
+                    inputParameters: {
+                        stream: true,
+                        tools: "",
+                        inline_citations: true,
+                    },
+                },
+                url: "https://api.x.ai/v1/responses",
+                headers: {
+                    Authorization: "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "grok-4.20-multi-agent-0309",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 2000000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+            },
+            "xai-grok-4-20-responses": {
+                type: "GROK-RESPONSES",
+                emulateOpenAIChatModel: "grok-4.20-0309-search",
+                restStreaming: {
+                    inputParameters: {
+                        stream: true,
+                        tools: "",
+                        inline_citations: true,
+                    },
+                },
+                url: "https://api.x.ai/v1/responses",
+                headers: {
+                    Authorization: "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "grok-4.20-0309-non-reasoning",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 2000000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+            },
+            "xai-grok-4-1-fast-reasoning": {
+                type: "GROK-VISION",
+                url: "https://api.x.ai/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "grok-4-1-fast-reasoning",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 2000000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+            },
+            "xai-grok-4-1-fast-non-reasoning": {
+                type: "GROK-VISION",
+                emulateOpenAIChatModel: "grok-4-1-fast-non-reasoning",
+                url: "https://api.x.ai/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "grok-4-1-fast-non-reasoning",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 2000000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+            },
+            "xai-grok-code-fast-1": {
+                type: "GROK-VISION",
+                url: "https://api.x.ai/v1/chat/completions",
+                headers: {
+                    Authorization: "Bearer {{XAI_API_KEY}}",
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    model: "grok-code-fast-1",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 2000000,
+                maxReturnTokens: 128000,
+                supportsStreaming: true,
+            },
+            "apptek-translate": {
+                type: "APPTEK-TRANSLATE",
+                url: "{{APPTEK_API_ENDPOINT}}",
+                headers: {
+                    "x-token": "{{APPTEK_API_KEY}}",
+                    Accept: "application/json",
+                    "Content-Type": "text/plain",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 128000,
+            },
+            "azure-bing-agent": {
+                type: "AZURE-FOUNDRY-AGENTS",
+                url: "{{azureFoundryAgentUrl}}",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                params: {
+                    "api-version": "2025-05-01",
+                    assistant_id: "{{azureFoundryAgentId}}",
+                },
+                requestsPerSecond: 10,
+                maxTokenLength: 32768,
+                maxReturnTokens: 4096,
+                supportsStreaming: false,
+            },
+        },
+        env: "CORTEX_MODELS",
     },
     azureVideoTranslationApiKey: {
         format: String,
         default: null,
-        env: 'AZURE_VIDEO_TRANSLATION_API_KEY',
-        sensitive: true
+        env: "AZURE_VIDEO_TRANSLATION_API_KEY",
+        sensitive: true,
     },
     openaiApiKey: {
         format: String,
         default: null,
-        env: 'OPENAI_API_KEY',
-        sensitive: true
+        env: "OPENAI_API_KEY",
+        sensitive: true,
     },
     claudeApiKey: {
         format: String,
         default: null,
-        env: 'CLAUDE_API_KEY',
-        sensitive: true
+        env: "CLAUDE_API_KEY",
+        sensitive: true,
     },
     openaiApiUrl: {
         format: String,
-        default: 'https://api.openai.com/v1/completions',
-        env: 'OPENAI_API_URL'
+        default: "https://api.openai.com/v1/completions",
+        env: "OPENAI_API_URL",
     },
     openaiDefaultModel: {
         format: String,
-        default: 'gpt-5.4-mini',
-        env: 'OPENAI_DEFAULT_MODEL'
+        default: "gpt-3.5-turbo",
+        env: "OPENAI_DEFAULT_MODEL",
     },
     pathways: {
         format: Object,
-        default: {}
+        default: {},
     },
     pathwaysPath: {
         format: String,
-        default: path.join(process.cwd(), '/pathways'),
-        env: 'CORTEX_PATHWAYS_PATH'
+        default: path.join(process.cwd(), "/pathways"),
+        env: "CORTEX_PATHWAYS_PATH",
     },
     PORT: {
-        format: 'port',
+        format: "port",
         default: 4000,
-        env: 'CORTEX_PORT'
+        env: "CORTEX_PORT",
     },
     storageConnectionString: {
-        doc: 'Connection string used for access to Storage',
-        format: '*',
-        default: '',
+        doc: "Connection string used for access to Storage",
+        format: "*",
+        default: "",
         sensitive: true,
-        env: 'STORAGE_CONNECTION_STRING'
+        env: "STORAGE_CONNECTION_STRING",
     },
     redisEncryptionKey: {
         format: String,
         default: null,
-        env: 'REDIS_ENCRYPTION_KEY',
-        sensitive: true
+        env: "REDIS_ENCRYPTION_KEY",
+        sensitive: true,
     },
     replicateApiKey: {
         format: String,
         default: null,
-        env: 'REPLICATE_API_KEY',
-        sensitive: true
+        env: "REPLICATE_API_KEY",
+        sensitive: true,
     },
     runwareAiApiKey: {
         format: String,
         default: null,
-        env: 'RUNWARE_API_KEY',
-        sensitive: true
+        env: "RUNWARE_API_KEY",
+        sensitive: true,
     },
     dalleImageApiUrl: {
         format: String,
-        default: 'null',
-        env: 'DALLE_IMAGE_API_URL'
+        default: "null",
+        env: "DALLE_IMAGE_API_URL",
     },
     whisperMediaApiUrl: {
         format: String,
-        default: 'null',
-        env: 'WHISPER_MEDIA_API_URL'
+        default: "null",
+        env: "WHISPER_MEDIA_API_URL",
     },
     whisperTSApiUrl: {
         format: String,
         default: null,
-        env: 'WHISPER_TS_API_URL'
+        env: "WHISPER_TS_API_URL",
     },
     subscriptionKeepAlive: {
         format: Number,
         default: 0,
-        env: 'SUBSCRIPTION_KEEP_ALIVE'
+        env: "SUBSCRIPTION_KEEP_ALIVE",
     },
     neuralSpaceApiKey: {
         format: String,
         default: null,
-        env: 'NEURALSPACE_API_KEY'
+        env: "NEURALSPACE_API_KEY",
     },
     browserServiceUrl: {
         format: String,
         default: null,
-        env: 'CORTEX_BROWSER_URL'
+        env: "CORTEX_BROWSER_URL",
     },
     jinaApiKey: {
         format: String,
         default: null,
-        env: 'JINA_API_KEY'
+        env: "JINA_API_KEY",
     },
     apptekApiKey: {
         format: String,
         default: null,
-        env: 'APPTEK_API_KEY',
-        sensitive: true
+        env: "APPTEK_API_KEY",
+        sensitive: true,
     },
     apptekApiEndpoint: {
         format: String,
         default: null,
-        env: 'APPTEK_API_ENDPOINT'
+        env: "APPTEK_API_ENDPOINT",
     },
     azureFoundryAgentUrl: {
         format: String,
         default: null,
-        env: 'AZURE_FOUNDRY_AGENT_URL'
+        env: "AZURE_FOUNDRY_AGENT_URL",
     },
     azureFoundryAgentId: {
         format: String,
         default: null,
-        env: 'AZURE_FOUNDRY_AGENT_ID'
+        env: "AZURE_FOUNDRY_AGENT_ID",
     },
     azureFoundryBingSearchConnectionId: {
         format: String,
         default: null,
-        env: 'AZURE_FOUNDRY_BING_SEARCH_CONNECTION_ID'
+        env: "AZURE_FOUNDRY_BING_SEARCH_CONNECTION_ID",
     },
     workspaceImage: {
         format: String,
-        default: 'cortex-workspace',
-        env: 'WORKSPACE_IMAGE'
+        default: "cortex-workspace",
+        env: "WORKSPACE_IMAGE",
     },
     workspaceImageVersion: {
         format: String,
-        default: '',
-        env: 'WORKSPACE_IMAGE_VERSION'
+        default: "",
+        env: "WORKSPACE_IMAGE_VERSION",
     },
     workspaceNetwork: {
         format: String,
-        default: 'cortex_workspace',
-        env: 'WORKSPACE_NETWORK'
+        default: "cortex_workspace",
+        env: "WORKSPACE_NETWORK",
     },
     workspaceCpus: {
         format: String,
-        default: '1.0',
-        env: 'WORKSPACE_CPUS'
+        default: "1.0",
+        env: "WORKSPACE_CPUS",
     },
     workspaceMemory: {
         format: String,
-        default: '512m',
-        env: 'WORKSPACE_MEMORY'
+        default: "512m",
+        env: "WORKSPACE_MEMORY",
     },
     workspaceDiskSize: {
         format: String,
-        default: '10g',
-        env: 'WORKSPACE_DISK_SIZE'
+        default: "10g",
+        env: "WORKSPACE_DISK_SIZE",
     },
     dockerHost: {
         format: String,
-        default: '',
-        env: 'DOCKER_HOST',
-        doc: 'Docker Engine endpoint. Unix socket (unix:///var/run/docker.sock) or TCP (tcp://host:port). Empty = auto-detect local socket.'
+        default: "",
+        env: "DOCKER_HOST",
+        doc: "Docker Engine endpoint. Unix socket (unix:///var/run/docker.sock) or TCP (tcp://host:port). Empty = auto-detect local socket.",
     },
     workspaceHost: {
         format: String,
-        default: '',
-        env: 'WORKSPACE_HOST',
-        doc: 'Hostname/IP for reaching workspace containers. Set when Docker runs on a remote host. Empty = auto (localhost or Docker DNS).'
+        default: "",
+        env: "WORKSPACE_HOST",
+        doc: "Hostname/IP for reaching workspace containers. Set when Docker runs on a remote host. Empty = auto (localhost or Docker DNS).",
     },
     workspaceIdleTimeoutMs: {
         format: Number,
         default: 1800000,
-        env: 'WORKSPACE_IDLE_TIMEOUT_MS',
-        doc: 'Milliseconds of inactivity before a workspace container is automatically stopped. Default 30 minutes. Set 0 to disable.'
+        env: "WORKSPACE_IDLE_TIMEOUT_MS",
+        doc: "Milliseconds of inactivity before a workspace container is automatically stopped. Default 30 minutes. Set 0 to disable.",
     },
     workspaceIdleCheckpointMs: {
         format: Number,
         default: 900000,
-        env: 'WORKSPACE_IDLE_CHECKPOINT_MS',
-        doc: 'Milliseconds of workspace inactivity before an ACI workspace checkpoint is refreshed. Default 15 minutes. Set 0 to checkpoint only at reap time.'
+        env: "WORKSPACE_IDLE_CHECKPOINT_MS",
+        doc: "Milliseconds of workspace inactivity before an ACI workspace checkpoint is refreshed. Default 15 minutes. Set 0 to checkpoint only at reap time.",
     },
     workspaceBackend: {
         format: String,
-        default: 'docker',
-        env: 'WORKSPACE_BACKEND',
-        doc: "Container backend: 'docker' (local/remote Docker Engine) or 'aci' (Azure Container Instances)."
+        default: "docker",
+        env: "WORKSPACE_BACKEND",
+        doc: "Container backend: 'docker' (local/remote Docker Engine) or 'aci' (Azure Container Instances).",
     },
     workspaceContainerPrefix: {
         format: String,
-        default: 'workspace-local',
-        env: 'WORKSPACE_CONTAINER_PREFIX',
-        doc: 'Prefix for workspace ACI container groups. Production should explicitly set "workspace"; non-prod should use env-specific prefixes such as "workspace-dev", "workspace-blue", or "workspace-local".'
+        default: "workspace-local",
+        env: "WORKSPACE_CONTAINER_PREFIX",
+        doc: 'Prefix for workspace ACI container groups. Production should explicitly set "workspace"; non-prod should use env-specific prefixes such as "workspace-dev", "workspace-blue", or "workspace-local".',
     },
     warmPoolSize: {
         format: Number,
         default: 2,
-        env: 'WARM_POOL_SIZE',
-        doc: 'Number of pre-provisioned ACI containers in the warm pool. 0 = disabled.'
+        env: "WARM_POOL_SIZE",
+        doc: "Number of pre-provisioned ACI containers in the warm pool. 0 = disabled.",
     },
     warmPoolBootstrapSecret: {
         format: String,
-        default: '',
-        env: 'WARM_POOL_BOOTSTRAP_SECRET',
+        default: "",
+        env: "WARM_POOL_BOOTSTRAP_SECRET",
         sensitive: true,
-        doc: 'Legacy shared warm-pool bootstrap secret. Deprecated and no longer used for new containers.'
+        doc: "Legacy shared warm-pool bootstrap secret. Deprecated and no longer used for new containers.",
     },
     warmPoolEnabled: {
         format: Boolean,
         default: false,
-        env: 'WARM_POOL_ENABLED',
-        doc: 'Enable the warm pool for pre-provisioned ACI workspace containers.'
+        env: "WARM_POOL_ENABLED",
+        doc: "Enable the warm pool for pre-provisioned ACI workspace containers.",
     },
     azureSubscriptionId: {
         format: String,
-        default: '',
-        env: 'AZURE_SUBSCRIPTION_ID'
+        default: "",
+        env: "AZURE_SUBSCRIPTION_ID",
     },
     azureResourceGroup: {
         format: String,
-        default: '',
-        env: 'AZURE_RESOURCE_GROUP'
+        default: "",
+        env: "AZURE_RESOURCE_GROUP",
     },
     azureLocation: {
         format: String,
-        default: 'eastus',
-        env: 'AZURE_LOCATION'
+        default: "eastus",
+        env: "AZURE_LOCATION",
     },
     aciSubnetId: {
         format: String,
-        default: '',
-        env: 'ACI_SUBNET_ID',
-        doc: 'Full resource ID of the subnet delegated to ACI (enables private VNet deployment)'
+        default: "",
+        env: "ACI_SUBNET_ID",
+        doc: "Full resource ID of the subnet delegated to ACI (enables private VNet deployment)",
     },
     azureAcrServer: {
         format: String,
-        default: '',
-        env: 'AZURE_ACR_SERVER',
-        doc: 'Azure Container Registry server (e.g. myacr.azurecr.io)'
+        default: "",
+        env: "AZURE_ACR_SERVER",
+        doc: "Azure Container Registry server (e.g. myacr.azurecr.io)",
     },
     azureAcrUsername: {
         format: String,
-        default: '',
-        env: 'AZURE_ACR_USERNAME',
-        sensitive: true
+        default: "",
+        env: "AZURE_ACR_USERNAME",
+        sensitive: true,
     },
     azureAcrPassword: {
         format: String,
-        default: '',
-        env: 'AZURE_ACR_PASSWORD',
-        sensitive: true
+        default: "",
+        env: "AZURE_ACR_PASSWORD",
+        sensitive: true,
     },
     azureStorageAccountName: {
         format: String,
-        default: '',
-        env: 'AZURE_STORAGE_ACCOUNT_NAME'
+        default: "",
+        env: "AZURE_STORAGE_ACCOUNT_NAME",
     },
     azureStorageAccountKey: {
         format: String,
-        default: '',
-        env: 'AZURE_STORAGE_ACCOUNT_KEY',
-        sensitive: true
+        default: "",
+        env: "AZURE_STORAGE_ACCOUNT_KEY",
+        sensitive: true,
     },
     workspaceAzureFilesStorageAccountName: {
         format: String,
-        default: '',
-        env: 'WORKSPACE_AZURE_FILES_STORAGE_ACCOUNT_NAME'
+        default: "",
+        env: "WORKSPACE_AZURE_FILES_STORAGE_ACCOUNT_NAME",
     },
     workspaceAzureFilesStorageAccountKey: {
         format: String,
-        default: '',
-        env: 'WORKSPACE_AZURE_FILES_STORAGE_ACCOUNT_KEY',
-        sensitive: true
+        default: "",
+        env: "WORKSPACE_AZURE_FILES_STORAGE_ACCOUNT_KEY",
+        sensitive: true,
     },
     azureBlobContainerName: {
         format: String,
-        default: '',
-        env: 'AZURE_BLOB_CONTAINER_NAME',
-        doc: 'Azure Blob container for user files (blob mount in ACI workspaces)'
+        default: "",
+        env: "AZURE_BLOB_CONTAINER_NAME",
+        doc: "Azure Blob container for user files (blob mount in ACI workspaces)",
     },
 });
 
 // Read in environment variables and set up service configuration
-const configFile = config.get('cortexConfigFile');
+const configFile = config.get("cortexConfigFile");
 
 //Save default entity constants
-const defaultEntityConstants = config.get('entityConstants');
+const defaultEntityConstants = config.get("entityConstants");
 
 // Load config file
 if (configFile && fs.existsSync(configFile)) {
@@ -458,29 +1316,37 @@ if (configFile && fs.existsSync(configFile)) {
     }
     config.load(envOverrides);
 } else {
-    const openaiApiKey = config.get('openaiApiKey');
+    const openaiApiKey = config.get("openaiApiKey");
     if (!openaiApiKey) {
-        const errorString = 'No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.';
+        const errorString =
+            "No config file or api key specified. Please set the OPENAI_API_KEY to use OAI or use CORTEX_CONFIG_FILE environment variable to point at the Cortex configuration for your project.";
         logger.error(errorString);
         throw new Error(errorString);
     } else {
-        logger.info(`Using default model with OPENAI_API_KEY environment variable`)
+        logger.info(
+            `Using default model with OPENAI_API_KEY environment variable`,
+        );
     }
 }
 
 // Merge default entity constants with config entity constants
-if (config.get('entityConstants') && defaultEntityConstants) {
-    config.set('entityConstants', { ...defaultEntityConstants, ...config.get('entityConstants') });
+if (config.get("entityConstants") && defaultEntityConstants) {
+    config.set("entityConstants", {
+        ...defaultEntityConstants,
+        ...config.get("entityConstants"),
+    });
 }
 
-if (config.get('gcpServiceAccountKey')) {
+if (config.get("gcpServiceAccountKey")) {
     const gcpAuthTokenHelper = new GcpAuthTokenHelper(config.getProperties());
-    config.set('gcpAuthTokenHelper', gcpAuthTokenHelper);
+    config.set("gcpAuthTokenHelper", gcpAuthTokenHelper);
 }
 
-if (config.get('azureServicePrincipalCredentials')) {
-    const azureAuthTokenHelper = new AzureAuthTokenHelper(config.getProperties());
-    config.set('azureAuthTokenHelper', azureAuthTokenHelper);
+if (config.get("azureServicePrincipalCredentials")) {
+    const azureAuthTokenHelper = new AzureAuthTokenHelper(
+        config.getProperties(),
+    );
+    config.set("azureAuthTokenHelper", azureAuthTokenHelper);
 }
 
 // Load dynamic pathways from JSON file or cloud storage
@@ -492,14 +1358,17 @@ const createDynamicPathwayManager = async (config, basePathway) => {
     }
 
     const storageConfig = {
-        storageType: dynamicPathwayConfig.storageType || 'local',
+        storageType: dynamicPathwayConfig.storageType || "local",
         filePath: dynamicPathwayConfig.filePath || "./dynamic/pathways.json",
-        azureStorageConnectionString: dynamicPathwayConfig.azureStorageConnectionString,
-        azureContainerName: dynamicPathwayConfig.azureContainerName || 'cortexdynamicpathways',
+        azureStorageConnectionString:
+            dynamicPathwayConfig.azureStorageConnectionString,
+        azureContainerName:
+            dynamicPathwayConfig.azureContainerName || "cortexdynamicpathways",
         awsAccessKeyId: dynamicPathwayConfig.awsAccessKeyId,
         awsSecretAccessKey: dynamicPathwayConfig.awsSecretAccessKey,
         awsRegion: dynamicPathwayConfig.awsRegion,
-        awsBucketName: dynamicPathwayConfig.awsBucketName || 'cortexdynamicpathways',
+        awsBucketName:
+            dynamicPathwayConfig.awsBucketName || "cortexdynamicpathways",
         publishKey: dynamicPathwayConfig.publishKey,
     };
 
@@ -508,7 +1377,9 @@ const createDynamicPathwayManager = async (config, basePathway) => {
     try {
         const dynamicPathways = await pathwayManager.initialize();
         logger.info(`Dynamic pathways loaded successfully`);
-        logger.info(`Loaded dynamic pathways for users: [${Object.keys(dynamicPathways).join(", ")}]`);
+        logger.info(
+            `Loaded dynamic pathways for users: [${Object.keys(dynamicPathways).join(", ")}]`,
+        );
 
         return pathwayManager;
     } catch (error) {
@@ -519,12 +1390,15 @@ const createDynamicPathwayManager = async (config, basePathway) => {
 
 // Build and load pathways to config
 const buildPathways = async (config) => {
-    const { pathwaysPath, corePathwaysPath, basePathwayPath } = config.getProperties();
+    const { pathwaysPath, corePathwaysPath, basePathwayPath } =
+        config.getProperties();
 
     const basePathwayURL = pathToFileURL(basePathwayPath).toString();
 
     // Load cortex base pathway
-    const basePathway = await import(basePathwayURL).then(module => module.default);
+    const basePathway = await import(basePathwayURL).then(
+        (module) => module.default,
+    );
 
     // Helper function to recursively load pathway files
     const loadPathwaysFromDir = async (dirPath) => {
@@ -536,26 +1410,32 @@ const buildPathways = async (config) => {
                 const fullPath = path.join(dirPath, file.name);
                 if (file.isDirectory()) {
                     // Skip the shared directory
-                    if (file.name === 'shared') continue;
+                    if (file.name === "shared") continue;
 
                     // Recursively load pathways from other subdirectories
                     const subPathways = await loadPathwaysFromDir(fullPath);
                     Object.assign(pathways, subPathways);
-                } else if (file.name.endsWith('.js')) {
+                } else if (file.name.endsWith(".js")) {
                     // Load individual pathway file
                     try {
                         const pathwayURL = pathToFileURL(fullPath).toString();
-                        const pathway = await import(pathwayURL).then(module => module.default || module);
-                        const pathwayName = path.basename(file.name, '.js');
+                        const pathway = await import(pathwayURL).then(
+                            (module) => module.default || module,
+                        );
+                        const pathwayName = path.basename(file.name, ".js");
                         pathways[pathwayName] = pathway;
                     } catch (pathwayError) {
-                        logger.error(`Error loading pathway file ${fullPath}: ${pathwayError.message}`);
+                        logger.error(
+                            `Error loading pathway file ${fullPath}: ${pathwayError.message}`,
+                        );
                         throw pathwayError; // Re-throw to be caught by outer catch block
                     }
                 }
             }
         } catch (error) {
-            logger.error(`Error loading pathways from ${dirPath}: ${error.message}`);
+            logger.error(
+                `Error loading pathways from ${dirPath}: ${error.message}`,
+            );
         }
         return pathways;
     };
@@ -571,7 +1451,8 @@ const buildPathways = async (config) => {
         loadedPathways = { ...loadedPathways, ...customPathways };
     }
 
-    const { DYNAMIC_PATHWAYS_CONFIG_FILE, DYNAMIC_PATHWAYS_CONFIG_JSON } = process.env;
+    const { DYNAMIC_PATHWAYS_CONFIG_FILE, DYNAMIC_PATHWAYS_CONFIG_JSON } =
+        process.env;
 
     let dynamicPathwayConfig;
 
@@ -579,14 +1460,21 @@ const buildPathways = async (config) => {
     let pathwayManager;
     try {
         if (DYNAMIC_PATHWAYS_CONFIG_FILE) {
-            logger.info(`Reading dynamic pathway config from ${DYNAMIC_PATHWAYS_CONFIG_FILE}`);
-            dynamicPathwayConfig = JSON.parse(fs.readFileSync(DYNAMIC_PATHWAYS_CONFIG_FILE, 'utf8'));
+            logger.info(
+                `Reading dynamic pathway config from ${DYNAMIC_PATHWAYS_CONFIG_FILE}`,
+            );
+            dynamicPathwayConfig = JSON.parse(
+                fs.readFileSync(DYNAMIC_PATHWAYS_CONFIG_FILE, "utf8"),
+            );
         } else if (DYNAMIC_PATHWAYS_CONFIG_JSON) {
-            logger.info(`Reading dynamic pathway config from DYNAMIC_PATHWAYS_CONFIG_JSON variable`);
+            logger.info(
+                `Reading dynamic pathway config from DYNAMIC_PATHWAYS_CONFIG_JSON variable`,
+            );
             dynamicPathwayConfig = JSON.parse(DYNAMIC_PATHWAYS_CONFIG_JSON);
-        }
-        else {
-            logger.warn('Dynamic pathways are not enabled. Please set the DYNAMIC_PATHWAYS_CONFIG_FILE or DYNAMIC_PATHWAYS_CONFIG_JSON environment variable to enable dynamic pathways.');
+        } else {
+            logger.warn(
+                "Dynamic pathways are not enabled. Please set the DYNAMIC_PATHWAYS_CONFIG_FILE or DYNAMIC_PATHWAYS_CONFIG_JSON environment variable to enable dynamic pathways.",
+            );
         }
 
         config.load({ dynamicPathwayConfig });
@@ -599,15 +1487,15 @@ const buildPathways = async (config) => {
     // Generate REST streaming pathways from model configs
     const generateRestStreamingPathways = (models) => {
         const restPathways = {};
-        
+
         for (const [modelName, modelConfig] of Object.entries(models || {})) {
             if (!modelConfig) continue;
-            
+
             // Check for chat model emulation
             if (modelConfig.emulateOpenAIChatModel) {
-                const pathwayName = `sys_rest_streaming_${modelName.replace(/-/g, '_')}`;
+                const pathwayName = `sys_rest_streaming_${modelName.replace(/-/g, "_")}`;
                 const restConfig = modelConfig.restStreaming || {};
-                
+
                 // Default input parameters for OpenAI-compatible chat models.
                 const defaultInputParams = {
                     messages: [{role: '', content: []}],
@@ -620,21 +1508,19 @@ const buildPathways = async (config) => {
                     thinkingType: { type: 'string' },
                     thinkingBudgetTokens: { type: 'integer' }
                 };
-                
+
                 // Merge with any custom input parameters
-                const inputParameters = restConfig.inputParameters 
+                const inputParameters = restConfig.inputParameters
                     ? { ...defaultInputParams, ...restConfig.inputParameters }
                     : defaultInputParams;
-                
+
                 // OpenAI chat-style models support functions in REST emulation.
-                if (modelName.startsWith('oai-')) {
-                    inputParameters.functions = '';
+                if (modelName.startsWith("oai-")) {
+                    inputParameters.functions = "";
                 }
-                
+
                 restPathways[pathwayName] = {
-                    prompt: [
-                        new Prompt({ messages: ["{{messages}}"] })
-                    ],
+                    prompt: [new Prompt({ messages: ["{{messages}}"] })],
                     inputParameters,
                     model: modelName,
                     useInputChunking: false,
@@ -643,55 +1529,71 @@ const buildPathways = async (config) => {
                     ...(restConfig.timeout && { timeout: restConfig.timeout })
                 };
             }
-            
+
             // Check for completion model emulation
             if (modelConfig.emulateOpenAICompletionModel) {
-                const pathwayName = `sys_rest_streaming_${modelName.replace(/-/g, '_')}_completion`;
+                const pathwayName = `sys_rest_streaming_${modelName.replace(/-/g, "_")}_completion`;
                 const restConfig = modelConfig.restStreaming || {};
-                
+
                 restPathways[pathwayName] = {
                     prompt: `{{text}}`,
                     inputParameters: restConfig.inputParameters || {
-                        text: '',
-                        ...(modelName.includes('ollama') && { ollamaModel: '' })
+                        text: "",
+                        ...(modelName.includes("ollama") && {
+                            ollamaModel: "",
+                        }),
                     },
                     model: modelName,
                     useInputChunking: false,
-                    emulateOpenAICompletionModel: modelConfig.emulateOpenAICompletionModel,
-                    ...(restConfig.timeout && { timeout: restConfig.timeout })
+                    emulateOpenAICompletionModel:
+                        modelConfig.emulateOpenAICompletionModel,
+                    ...(restConfig.timeout && { timeout: restConfig.timeout }),
                 };
             }
         }
-        
+
         return restPathways;
     };
-    
+
     // Generate REST streaming pathways from models
-    const models = config.get('models');
-    const generatedRestPathways = models ? generateRestStreamingPathways(models) : {};
-    
+    const models = config.get("models");
+    const generatedRestPathways = models
+        ? generateRestStreamingPathways(models)
+        : {};
+
     if (Object.keys(generatedRestPathways).length > 0) {
-        logger.info(`Generated ${Object.keys(generatedRestPathways).length} REST streaming pathways from model configs`);
+        logger.info(
+            `Generated ${Object.keys(generatedRestPathways).length} REST streaming pathways from model configs`,
+        );
     }
-    
+
     // Merge generated pathways into loaded pathways (they can be overridden by file-based pathways)
     Object.assign(loadedPathways, generatedRestPathways);
-    
+
     // This is where we integrate pathway overrides from the config
     // file. This can run into a partial definition issue if the
     // config file contains pathways that no longer exist.
-    const pathways = config.get('pathways');
+    const pathways = config.get("pathways");
     const entityTools = {};
 
     for (const [key, def] of Object.entries(loadedPathways)) {
-        const pathway = { ...basePathway, name: key, objName: key.charAt(0).toUpperCase() + key.slice(1), ...def, ...pathways[key] };
+        const pathway = {
+            ...basePathway,
+            name: key,
+            objName: key.charAt(0).toUpperCase() + key.slice(1),
+            ...def,
+            ...pathways[key],
+        };
         pathways[def.name || key] = pathways[key] = pathway;
 
         // Register tool if the pathway has a toolDefinition and it's not empty
-        if (pathway.toolDefinition && (
-            (Array.isArray(pathway.toolDefinition) && pathway.toolDefinition.length > 0) ||
-            (!Array.isArray(pathway.toolDefinition) && Object.keys(pathway.toolDefinition).length > 0)
-        )) {
+        if (
+            pathway.toolDefinition &&
+            ((Array.isArray(pathway.toolDefinition) &&
+                pathway.toolDefinition.length > 0) ||
+                (!Array.isArray(pathway.toolDefinition) &&
+                    Object.keys(pathway.toolDefinition).length > 0))
+        ) {
             try {
                 // Convert single tool definition to array for consistent processing
                 const toolDefinitions = Array.isArray(pathway.toolDefinition)
@@ -701,7 +1603,9 @@ const buildPathways = async (config) => {
                 for (const toolDef of toolDefinitions) {
                     // Validate tool definition format
                     if (!toolDef.type || !toolDef.function) {
-                        logger.warn(`Invalid tool definition in pathway ${key} - missing required fields`);
+                        logger.warn(
+                            `Invalid tool definition in pathway ${key} - missing required fields`,
+                        );
                         continue;
                     }
 
@@ -715,13 +1619,17 @@ const buildPathways = async (config) => {
                     const name = toolDef.function.name.toLowerCase();
 
                     if (!name || !description || !parameters) {
-                        logger.warn(`Invalid tool definition in pathway ${key} - missing required function fields`);
+                        logger.warn(
+                            `Invalid tool definition in pathway ${key} - missing required function fields`,
+                        );
                         continue;
                     }
 
                     // Check for duplicate function names
                     if (entityTools[name]) {
-                        logger.warn(`Duplicate tool name ${name} found in pathway ${key} - skipping. Original tool defined in pathway ${entityTools[name].pathwayName}`);
+                        logger.warn(
+                            `Duplicate tool name ${name} found in pathway ${key} - skipping. Original tool defined in pathway ${entityTools[name].pathwayName}`,
+                        );
                         continue;
                     }
 
@@ -729,13 +1637,17 @@ const buildPathways = async (config) => {
                     entityTools[name] = {
                         definition: toolDef,
                         pathwayName: key,
-                        ...(pathway.timeout && { timeout: pathway.timeout * 1000 }), // pathway timeout (seconds → ms)
+                        ...(pathway.timeout && {
+                            timeout: pathway.timeout * 1000,
+                        }), // pathway timeout (seconds → ms)
                     };
 
                     logger.info(`Registered tool ${name} from pathway ${key}`);
                 }
             } catch (error) {
-                logger.error(`Error registering tool from pathway ${key}: ${error.message}`);
+                logger.error(
+                    `Error registering tool from pathway ${key}: ${error.message}`,
+                );
             }
         }
     }
@@ -744,7 +1656,7 @@ const buildPathways = async (config) => {
     config.load({ pathways, entityTools });
 
     return { pathwayManager, pathways };
-}
+};
 
 // Build and load models to config
 const buildModels = (config) => {
@@ -766,16 +1678,32 @@ const buildModels = (config) => {
                         url: model.url,
                         headers: model.headers,
                         params: model.params,
-                        requestsPerSecond: model.requestsPerSecond
-                    }
-                ]
+                        requestsPerSecond: model.requestsPerSecond,
+                    },
+                ],
             };
         }
 
         // compile handlebars templates for each endpoint
-        model.endpoints = model.endpoints.map(endpoint =>
-            JSON.parse(HandleBars.compile(JSON.stringify(endpoint))({ ...model, ...config.getEnv(), ...config.getProperties() }))
+        model.endpoints = model.endpoints.map((endpoint) =>
+            JSON.parse(
+                HandleBars.compile(JSON.stringify(endpoint))({
+                    ...model,
+                    ...config.getEnv(),
+                    ...config.getProperties(),
+                }),
+            ),
         );
+
+        if (model.dataSources) {
+            model.dataSources = JSON.parse(
+                HandleBars.compile(JSON.stringify(model.dataSources))({
+                    ...model,
+                    ...config.getEnv(),
+                    ...config.getProperties(),
+                }),
+            );
+        }
 
         models[key] = model;
     }
@@ -784,20 +1712,23 @@ const buildModels = (config) => {
     config.load({ models });
 
     // Check that models are specified, Cortex cannot run without a model
-    if (Object.keys(config.get('models')).length <= 0) {
-        const errorString = 'No models specified! Please set the models in your config file or via CORTEX_MODELS environment variable to point at the models for your project.';
+    if (Object.keys(config.get("models")).length <= 0) {
+        const errorString =
+            "No models specified! Please set the models in your config file or via CORTEX_MODELS environment variable to point at the models for your project.";
         logger.error(errorString);
         throw new Error(errorString);
     }
 
     // Set default model name to the first model in the config in case no default is specified
-    if (!config.get('defaultModelName')) {
-        logger.warn('No default model specified, using first model as default.');
-        config.load({ defaultModelName: Object.keys(config.get('models'))[0] });
+    if (!config.get("defaultModelName")) {
+        logger.warn(
+            "No default model specified, using first model as default.",
+        );
+        config.load({ defaultModelName: Object.keys(config.get("models"))[0] });
     }
 
     return models;
-}
+};
 
 // TODO: Perform validation
 // config.validate({ allowed: 'strict' });

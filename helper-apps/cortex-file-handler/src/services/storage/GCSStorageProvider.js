@@ -82,6 +82,66 @@ export class GCSStorageProvider extends StorageProvider {
     };
   }
 
+  buildUrlForBlobName(blobName) {
+    const normalizedBlobName = this.normalizeBlobName(blobName);
+    if (!normalizedBlobName) {
+      return null;
+    }
+    return `gs://${this.bucketName}/${normalizedBlobName}`;
+  }
+
+  normalizeBlobName(blobName) {
+    if (!blobName || typeof blobName !== "string") {
+      return "";
+    }
+    let decoded = blobName;
+    try {
+      decoded = decodeURIComponent(blobName);
+    } catch {
+      decoded = blobName;
+    }
+    return decoded
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .split("/")
+      .filter((part) => part && part !== "." && part !== "..")
+      .join("/");
+  }
+
+  async uploadStreamToBlobName(context, blobName, stream, providedContentType = null) {
+    const bucket = this.storage.bucket(this.bucketName);
+    const normalizedBlobName = this.normalizeBlobName(blobName);
+    if (!normalizedBlobName) {
+      throw new Error("Missing GCS blob name");
+    }
+
+    let contentType = providedContentType || this.getContentType(normalizedBlobName) || "application/octet-stream";
+
+    if (this.isTextMimeType(contentType) && !contentType.includes("charset=")) {
+      contentType = `${contentType}; charset=utf-8`;
+    }
+
+    const file = bucket.file(normalizedBlobName);
+    const writeStream = file.createWriteStream({
+      metadata: {
+        contentType,
+      },
+      resumable: false,
+    });
+
+    await new Promise((resolve, reject) => {
+      stream.on("error", reject);
+      stream.pipe(writeStream)
+        .on("finish", resolve)
+        .on("error", reject);
+    });
+
+    return {
+      url: this.buildUrlForBlobName(normalizedBlobName),
+      blobName: normalizedBlobName,
+    };
+  }
+
   async uploadStream(context, encodedFilename, stream, providedContentType = null, folderPath = null) {
     const bucket = this.storage.bucket(this.bucketName);
     let blobName = sanitizeFilename(encodedFilename);
@@ -209,6 +269,97 @@ export class GCSStorageProvider extends StorageProvider {
     }
 
     return results;
+  }
+
+  /**
+   * List blob names/properties under a folder prefix without generating signed
+   * URLs or fetching per-file metadata. Returns [blobPath, size, lastModified].
+   */
+  async listNames(folderPath, options = {}) {
+    const bucket = this.storage.bucket(this.bucketName);
+    const prefix = folderPath === '' ? undefined : (folderPath.endsWith('/') ? folderPath : `${folderPath}/`);
+    const maxResults = Math.min(Math.max(parseInt(options.maxResults, 10) || 10000, 1), 50000);
+    const scanLimit = maxResults + 1;
+    const results = [];
+    let truncated = false;
+
+    if (process.env.STORAGE_EMULATOR_HOST) {
+      let pageToken = null;
+      do {
+        const remaining = scanLimit - results.length;
+        if (remaining <= 0) {
+          truncated = true;
+          break;
+        }
+
+        try {
+          const listResp = await axios.get(
+            `${process.env.STORAGE_EMULATOR_HOST}/storage/v1/b/${this.bucketName}/o`,
+            {
+              params: {
+                prefix,
+                maxResults: Math.min(remaining, 1000),
+                ...(pageToken ? { pageToken } : {}),
+              },
+              validateStatus: (s) => s === 200 || s === 404,
+            },
+          );
+
+          if (listResp.status === 404) {
+            return { items: [], truncated: false };
+          }
+
+          for (const item of listResp.data?.items || []) {
+            results.push([
+              item.name,
+              parseInt(item.size, 10) || null,
+              item.updated || null,
+            ]);
+            if (results.length >= scanLimit) {
+              truncated = true;
+              results.length = maxResults;
+              break;
+            }
+          }
+          pageToken = truncated ? null : listResp.data?.nextPageToken || null;
+        } catch (error) {
+          console.error("Error listing names from emulator:", error);
+          break;
+        }
+      } while (pageToken);
+
+      return { items: results, truncated };
+    }
+
+    try {
+      let query = {
+        prefix,
+        autoPaginate: false,
+        maxResults: Math.min(scanLimit, 1000),
+      };
+
+      while (query && results.length < scanLimit) {
+        const [files, nextQuery] = await bucket.getFiles(query);
+        for (const file of files) {
+          const metadata = file.metadata || {};
+          results.push([
+            file.name,
+            parseInt(metadata.size, 10) || null,
+            metadata.updated || null,
+          ]);
+          if (results.length >= scanLimit) {
+            truncated = true;
+            results.length = maxResults;
+            break;
+          }
+        }
+        query = truncated ? null : nextQuery;
+      }
+    } catch (error) {
+      console.error("Error listing names from GCS:", error);
+    }
+
+    return { items: results, truncated };
   }
 
   /**

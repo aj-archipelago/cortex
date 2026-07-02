@@ -22,7 +22,7 @@ const { version } = JSON.parse(fs.readFileSync(new URL('./package.json', import.
 const app = express();
 const PORT = parseInt(process.env.PORT || '3100', 10);
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '/workspace';
-const BLOB_FILES_DIR = process.env.WORKSPACE_BLOB_FILES_DIR || '/blob-files';
+const BLOB_FILES_DIR = process.env.WORKSPACE_BLOB_FILES_DIR || '/cloud-files';
 const WORKSPACE_FILES_DIR = path.join(WORKSPACE_DIR, 'files');
 
 // Wrap async route handlers so Express 4 catches rejections
@@ -45,8 +45,22 @@ function unmountPath(mountPath) {
     }
 }
 
+function isSymlink(targetPath) {
+    try {
+        return fs.lstatSync(targetPath).isSymbolicLink();
+    } catch {
+        return false;
+    }
+}
+
+function unmountWorkspaceFilesExposure() {
+    if (!isSymlink(WORKSPACE_FILES_DIR)) {
+        unmountPath(WORKSPACE_FILES_DIR);
+    }
+}
+
 function exposeBlobFiles() {
-    unmountPath(WORKSPACE_FILES_DIR);
+    unmountWorkspaceFilesExposure();
 
     try {
         fs.rmSync(WORKSPACE_FILES_DIR, { recursive: true, force: true });
@@ -54,20 +68,12 @@ function exposeBlobFiles() {
         if (e.code !== 'EBUSY') throw e;
         return { mode: 'existing', warning: `${WORKSPACE_FILES_DIR} is busy; leaving existing exposure in place` };
     }
-    fs.mkdirSync(WORKSPACE_FILES_DIR, { recursive: true });
 
     try {
-        shellExecSync(`mount --bind "${BLOB_FILES_DIR}" "${WORKSPACE_FILES_DIR}"`, { stdio: 'ignore', timeout: 5000 });
-        return { mode: 'bind' };
-    } catch (e) {
-        try {
-            fs.rmSync(WORKSPACE_FILES_DIR, { recursive: true, force: true });
-        } catch (rmErr) {
-            if (rmErr.code !== 'EBUSY') throw rmErr;
-            return { mode: 'existing', warning: `${WORKSPACE_FILES_DIR} is busy after bind mount failure: ${e.message}` };
-        }
         fs.symlinkSync(BLOB_FILES_DIR, WORKSPACE_FILES_DIR, 'dir');
-        return { mode: 'symlink', warning: e.message };
+        return { mode: 'symlink' };
+    } catch (e) {
+        return { mode: 'existing', warning: `failed to symlink ${WORKSPACE_FILES_DIR} to ${BLOB_FILES_DIR}: ${e.message}` };
     }
 }
 
@@ -261,17 +267,28 @@ app.post('/reconfigure', wrap(async (req, res) => {
         const configYaml = [
             'logging:',
             '  type: syslog',
-            '  level: log_err',
+            '  level: log_warning',
+            'components:',
+            '  - libfuse',
+            '  - file_cache',
+            '  - attr_cache',
+            '  - azstorage',
+            'libfuse:',
+            '  attribute-expiration-sec: 120',
+            '  entry-expiration-sec: 120',
+            '  negative-entry-expiration-sec: 240',
+            'file_cache:',
+            '  path: /tmp/blobfuse2-cache',
+            '  timeout-sec: 120',
+            '  max-size-mb: 512',
+            'attr_cache:',
+            '  timeout-sec: 7200',
             'azstorage:',
             '  type: block',
             `  account-name: ${accountName}`,
             `  sas: ${sasToken}`,
             `  container: ${containerName}`,
             '  endpoint: https://' + accountName + '.blob.core.windows.net',
-            'file_cache:',
-            '  path: /tmp/blobfuse2-cache',
-            '  timeout-sec: 120',
-            '  max-size-mb: 512',
         ].join('\n') + '\n';
 
         fs.writeFileSync('/tmp/blobfuse2-reconfig.yaml', configYaml);
@@ -280,10 +297,9 @@ app.post('/reconfigure', wrap(async (req, res) => {
 
         try {
             // The image starts without blob credentials for warm-pool/fresh
-            // containers, so entrypoint may have bind-mounted the plain
-            // /blob-files directory at /workspace/files. Detach that
-            // compatibility mount before mounting blobfuse on /blob-files.
-            unmountPath(WORKSPACE_FILES_DIR);
+            // containers, so detach any old compatibility mount before
+            // mounting blobfuse on the cloud files directory.
+            unmountWorkspaceFilesExposure();
             unmountPath(BLOB_FILES_DIR);
             shellExecSync(
                 `blobfuse2 mount "${BLOB_FILES_DIR}" --config-file=/tmp/blobfuse2-reconfig.yaml --allow-other --set-content-type=true -o nonempty`,
@@ -291,7 +307,7 @@ app.post('/reconfigure', wrap(async (req, res) => {
             );
             const exposeResult = exposeBlobFiles();
             if (exposeResult.warning) {
-                console.warn(`WARNING: bind mount failed; ${WORKSPACE_FILES_DIR} is a symlink to ${BLOB_FILES_DIR}: ${exposeResult.warning}`);
+                console.warn(`WARNING: ${WORKSPACE_FILES_DIR} exposure warning: ${exposeResult.warning}`);
             }
         } catch (e) {
             return res.status(500).json({ error: `blobfuse2 mount failed: ${e.stderr?.toString() || e.message}` });

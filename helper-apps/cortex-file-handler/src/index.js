@@ -16,11 +16,13 @@ import { downloadFile, splitMediaFile } from "./fileChunker.js";
 import { ensureEncoded, ensureFileExtension, urlExists } from "./helper.js";
 import {
   cleanupRedisFileStoreMap,
+  getCachedValue,
   getFileStoreMap,
   getAllFilesForContext,
   publishRequestProgress,
   removeFromFileStoreMap,
   setFileStoreMap,
+  setCachedValue,
   cleanupRedisFileStoreMapAge,
 } from "./redis.js";
 import { FileConversionService } from "./services/FileConversionService.js";
@@ -38,15 +40,14 @@ import { generateShortId, sanitizeFilename } from "./utils/filenameUtils.js";
 import { sanitizeTargetBlobPath } from "./utils/targetBlobPathUtils.js";
 import { redactContextId, redactSasToken, sanitizeForLogging } from "./utils/logSecurity.js";
 import {
-  resolveHashRecordWithLegacyWorkspacePrivateFallback,
-  migrateHashRecordToScopedStorage,
   resolveBlobPathWithLegacyFallback,
-} from "./utils/legacyWorkspacePrivateResolver.js";
+} from "./utils/legacyBlobResolver.js";
 
 // Lazy cleanup remains in getFileStoreMap for entries whose backing files are
 // actually gone. Age/container cleanup is opt-in because Redis hash records are
 // needed to resolve legacy files whose blobs still exist.
 let requestCount = 0;
+const inFlightListNames = new Map();
 
 function isEnabled(value) {
   return /^(1|true|yes)$/i.test(String(value || ""));
@@ -154,6 +155,121 @@ function mergeListedFiles(primaryFiles = [], fallbackFiles = []) {
   return merged;
 }
 
+function parseBoundedPositiveInt(value, defaultValue, maxValue) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return defaultValue;
+  }
+  return Math.min(parsed, maxValue);
+}
+
+function trimLeadingTrailingSlashes(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === '/') start++;
+  while (end > start && value[end - 1] === '/') end--;
+  return value.slice(start, end);
+}
+
+function sanitizeListNamesSubPath(subPath) {
+  if (!subPath || typeof subPath !== 'string') return null;
+
+  const trimmedPath = trimLeadingTrailingSlashes(subPath.split('\\').join('/'));
+  const pathSegments = trimmedPath
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (pathSegments.length === 0) return null;
+  if (pathSegments.some((segment) => (
+    segment === '.'
+    || segment === '..'
+    || /[\x00-\x1F\x7F]/.test(segment)
+  ))) {
+    return null;
+  }
+
+  return pathSegments.join('/');
+}
+
+function getListedNameKey(item = []) {
+  if (Array.isArray(item)) {
+    return item[0] || null;
+  }
+  return item.blobPath || item.name || null;
+}
+
+function mergeListedNameItems(primaryItems = [], fallbackItems = [], maxResults = 10000) {
+  const merged = [];
+  const seen = new Set();
+
+  for (const item of [...primaryItems, ...fallbackItems]) {
+    const key = getListedNameKey(item);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(Array.isArray(item)
+      ? item
+      : [item.blobPath || item.name, item.size ?? null, item.lastModified || item.updatedAt || null]);
+    if (merged.length >= maxResults) {
+      break;
+    }
+  }
+
+  return merged;
+}
+
+function listNamesCacheKey({
+  providerType = 'unknown',
+  containerName = null,
+  folderPath = '',
+  maxResults = 10000,
+} = {}) {
+  const normalizedProvider = providerType || 'unknown';
+  const normalizedContainer = containerName || 'default';
+  const normalizedFolder = folderPath || '';
+  return `CFH:listNames:v2:${normalizedProvider}:${normalizedContainer}:${normalizedFolder}:${maxResults}`;
+}
+
+async function listNamesWithCache(provider, folderPath, options = {}) {
+  const maxResults = parseBoundedPositiveInt(options.maxResults, 10000, 50000);
+  const ttlSeconds = parseBoundedPositiveInt(
+    process.env.CFH_LIST_NAMES_CACHE_TTL_SECONDS,
+    30,
+    300,
+  );
+  const cacheKey = listNamesCacheKey({
+    providerType: provider?.constructor?.name || 'unknown',
+    containerName: provider?.containerName || provider?.bucketName || null,
+    folderPath,
+    maxResults,
+  });
+  const cached = await getCachedValue(cacheKey);
+  if (cached?.items && Array.isArray(cached.items)) {
+    return { ...cached, cacheHit: true };
+  }
+
+  if (inFlightListNames.has(cacheKey)) {
+    const result = await inFlightListNames.get(cacheKey);
+    return { ...result, cacheHit: true, inFlightHit: true };
+  }
+
+  const loadPromise = (async () => {
+    const result = await provider.listNames(folderPath, { ...options, maxResults });
+    await setCachedValue(cacheKey, result, ttlSeconds);
+    return result;
+  })();
+
+  inFlightListNames.set(cacheKey, loadPromise);
+  try {
+    const result = await loadPromise;
+    return { ...result, cacheHit: false };
+  } finally {
+    inFlightListNames.delete(cacheKey);
+  }
+}
+
 async function listAzureFolderIfContainerExists(provider, folderPath) {
   if (!provider?.ensureInitialized) {
     return [];
@@ -202,6 +318,21 @@ async function listAzureFolderIfContainerExists(provider, folderPath) {
   }
 }
 
+async function listAzureFolderNamesIfContainerExists(provider, folderPath, options = {}) {
+  if (typeof provider?.listNames !== "function") {
+    return { items: [], truncated: false };
+  }
+
+  try {
+    return await listNamesWithCache(provider, folderPath, options);
+  } catch (error) {
+    if (isNotFoundError(error)) {
+      return { items: [], truncated: false };
+    }
+    throw error;
+  }
+}
+
 export async function listLegacyScopedFolderFiles(containerOwnerId, folderPath) {
   const files = [];
   for (const containerName of getLegacyScopedContainerNames(containerOwnerId)) {
@@ -222,6 +353,35 @@ export async function listLegacyScopedFolderFiles(containerOwnerId, folderPath) 
     }
   }
   return files;
+}
+
+export async function listLegacyScopedFolderNames(containerOwnerId, folderPath, options = {}) {
+  const items = [];
+  let truncated = false;
+  let cacheHit = false;
+  let inFlightHit = false;
+  for (const containerName of getLegacyScopedContainerNames(containerOwnerId)) {
+    try {
+      const provider = await StorageFactory.getInstance().getAzureProvider(
+        containerName,
+      );
+      const legacyResult = await listAzureFolderNamesIfContainerExists(
+        provider,
+        folderPath,
+        options,
+      );
+      items.push(...(legacyResult.items || []));
+      truncated = truncated || legacyResult.truncated === true;
+      cacheHit = cacheHit || legacyResult.cacheHit === true;
+      inFlightHit = inFlightHit || legacyResult.inFlightHit === true;
+    } catch (error) {
+      if (/Missing Azure Storage connection string or container name/i.test(error?.message || "")) {
+        return { items, truncated, cacheHit, inFlightHit };
+      }
+      throw error;
+    }
+  }
+  return { items, truncated, cacheHit, inFlightHit };
 }
 
 export async function resolveLegacyScopedBlobClient(containerOwnerId, blobPath) {
@@ -377,6 +537,8 @@ async function CortexFileHandler(context, req) {
     blobPath,
     // Folder-based storage parameters
     listFolder,
+    listNames,
+    maxResults,
     userId,
     chatId,
     workspaceId,
@@ -412,6 +574,8 @@ async function CortexFileHandler(context, req) {
                         (req.query?.operation === "rename") || (parsedBody?.operation === "rename");
   const shouldListFolder = listFolder === true || listFolder === "true" ||
                             (req.query?.operation === "listFolder") || (parsedBody?.operation === "listFolder");
+  const shouldListNames = listNames === true || listNames === "true" ||
+                            (req.query?.operation === "listNames") || (parsedBody?.operation === "listNames");
 
   // Determine operation using explicit if-else chain
   let operation;
@@ -423,6 +587,8 @@ async function CortexFileHandler(context, req) {
     operation = "clearHash";
   } else if (shouldRename) {
     operation = "rename";
+  } else if (shouldListNames) {
+    operation = "listNames";
   } else if (shouldListFolder) {
     operation = "listFolder";
   } else if (shouldFetchRemote) {
@@ -792,6 +958,102 @@ async function CortexFileHandler(context, req) {
     }
   }
 
+  // Fast compact blob-name listing (folder-based storage). This intentionally
+  // skips URL signing, Redis enrichment, and GCS backup checks.
+  if (operation === "listNames") {
+    let folderPath = constructFolderPath({
+      userId,
+      chatId,
+      workspaceId,
+      appletId,
+      contextId: logicalContextId,
+      fileScope,
+    });
+
+    if (subPath && folderPath !== null) {
+      const sanitizedSub = sanitizeListNamesSubPath(subPath);
+      if (!sanitizedSub) {
+        context.res = {
+          status: 400,
+          body: "Invalid subPath for listNames",
+        };
+        return;
+      }
+      folderPath = folderPath ? `${folderPath}/${sanitizedSub}` : sanitizedSub;
+    }
+
+    if (folderPath === null) {
+      context.res = {
+        status: 400,
+        body: "Missing required parameters. Provide contextId or userId with optional chatId/workspaceId/appletId/fileScope, or workspaceId with fileScope='workspace-shared-legacy'",
+      };
+      return;
+    }
+
+    try {
+      const { provider, containerOwnerId } = await getScopedProvider({
+        storageService,
+        resolvedContextId: logicalContextId,
+        userId,
+        workspaceId,
+        appletId,
+        fileScope,
+      });
+
+      if (!provider || typeof provider.listNames !== 'function') {
+        context.res = {
+          status: 500,
+          body: "Storage provider does not support fast name listing",
+        };
+        return;
+      }
+
+      const requestedMaxResults = parseBoundedPositiveInt(maxResults, 10000, 50000);
+      const primaryResult = await listNamesWithCache(provider, folderPath, {
+        maxResults: requestedMaxResults,
+      });
+      let items = primaryResult.items || [];
+      let truncated = primaryResult.truncated === true;
+      let cacheHit = primaryResult.cacheHit === true;
+      let inFlightHit = primaryResult.inFlightHit === true;
+
+      if (containerOwnerId && items.length < requestedMaxResults) {
+        const legacyResult = await listLegacyScopedFolderNames(containerOwnerId, folderPath, {
+          maxResults: requestedMaxResults - items.length,
+        });
+        items = mergeListedNameItems(
+          items,
+          legacyResult.items || [],
+          requestedMaxResults,
+        );
+        truncated = truncated || legacyResult.truncated === true;
+        cacheHit = cacheHit || legacyResult.cacheHit === true;
+        inFlightHit = inFlightHit || legacyResult.inFlightHit === true;
+      }
+
+      context.res = {
+        status: 200,
+        body: {
+          folderPath,
+          items,
+          count: items.length,
+          truncated,
+          maxResults: requestedMaxResults,
+          cacheHit,
+          inFlightHit,
+        },
+      };
+      return;
+    } catch (error) {
+      context.log(`Error listing blob names: ${error.message}`);
+      context.res = {
+        status: 500,
+        body: `Error listing blob names: ${error.message}`,
+      };
+      return;
+    }
+  }
+
   // List files in a folder (folder-based storage)
   if (operation === "listFolder") {
     // Construct folder path from provided parameters
@@ -1074,60 +1336,6 @@ async function CortexFileHandler(context, req) {
   if (hash && checkHash) {
     let mapContextId = logicalContextId || null;
     let hashResult = await getFileStoreMap(hash, true, mapContextId); // Skip lazy cleanup to handle it ourselves
-
-    // Self-healing fallback for old applet-private layout:
-    // if current context misses, probe legacy compound context and migrate.
-    if (!hashResult && logicalContextId) {
-      try {
-        const legacyRecord =
-          await resolveHashRecordWithLegacyWorkspacePrivateFallback({
-            hash,
-            resolvedContextId: logicalContextId,
-            userId,
-            workspaceId,
-            fileScope,
-            getFileStoreMap,
-          });
-
-        if (legacyRecord?.hashResult) {
-          hashResult = legacyRecord.hashResult;
-          mapContextId = legacyRecord.sourceContextId || mapContextId;
-          context.log(
-            `Recovered hash from legacy context for self-heal: ${hash}${mapContextId ? ` (contextId: ${redactContextId(mapContextId)})` : ""}`,
-          );
-
-          try {
-            hashResult = await migrateHashRecordToScopedStorage({
-              context,
-              hash,
-              hashResult,
-              sourceContextId: mapContextId,
-              resolvedContextId: logicalContextId,
-              userId,
-              chatId,
-              workspaceId,
-              appletId,
-              fileScope,
-              storageService,
-              setFileStoreMap,
-              removeFromFileStoreMap,
-            });
-            mapContextId = logicalContextId;
-            context.log(
-              `Legacy hash self-healed into current context: ${hash} (contextId: ${redactContextId(logicalContextId)})`,
-            );
-          } catch (migrationError) {
-            context.log(
-              `Legacy hash migration failed (continuing with legacy location): ${migrationError.message}`,
-            );
-          }
-        }
-      } catch (legacyLookupError) {
-        context.log(
-          `Legacy hash lookup failed for ${hash}: ${legacyLookupError.message}`,
-        );
-      }
-    }
 
     if (hashResult) {
       context.log(`File exists in map: ${hash}${mapContextId ? ` (contextId: ${redactContextId(mapContextId)})` : ""}`);
@@ -1669,7 +1877,7 @@ async function CortexFileHandler(context, req) {
   // from the blob path, without needing a hash in Redis.
   if (blobPath) {
     try {
-      const { provider } = await getScopedProvider({
+      const { provider, containerOwnerId } = await getScopedProvider({
         storageService,
         resolvedContextId: logicalContextId,
         userId,
@@ -1693,6 +1901,10 @@ async function CortexFileHandler(context, req) {
             const ensuredFile = await storageService.ensureGCSUpload(context, {
               url: shortLivedUrl,
               blobName: blobPath,
+              blobPath,
+              containerOwnerId,
+            }, {
+              waitForInFlightMs: 5000,
             });
             gcsUrl = ensuredFile?.gcs || null;
           } catch (ensureGcsError) {

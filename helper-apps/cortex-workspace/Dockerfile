@@ -30,7 +30,7 @@ COPY .npmrc package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 
-RUN mkdir -p /workspace /persist /blob-files /tmp/blobfuse2
+RUN mkdir -p /workspace /persist /cloud-files /blob-files /tmp/blobfuse2
 
 EXPOSE 3100
 

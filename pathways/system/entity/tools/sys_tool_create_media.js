@@ -14,6 +14,9 @@ import {
 import { config } from '../../../../config.js';
 import axios from 'axios';
 
+export const DEFAULT_AGENT_IMAGE_MODEL = 'gemini-flash-lite-31-image';
+export const DEFAULT_AGENT_IMAGE_PATHWAY = 'image_gemini_31_lite';
+
 /**
  * Download a file from GCS using authenticated request
  * @param {string} gcsUri - GCS URI in format gs://bucket-name/object-path
@@ -222,7 +225,6 @@ async function generateImage(args, pathwayResolver, chatId) {
  * Generate image with Gemini (no reference images, or reference images with GCS preference)
  */
 async function generateImageWithGemini(args, prompt, resolvedImages, pathwayResolver, chatId) {
-    const model = "gemini-flash-31-image";
     const fileAccessPlan = Array.isArray(args.fileAccessPlan) ? args.fileAccessPlan : [];
     const writeTarget = getWriteFileAccessTarget(fileAccessPlan);
 
@@ -236,10 +238,10 @@ async function generateImageWithGemini(args, prompt, resolvedImages, pathwayReso
     }
     const images = resolvedGcsImages.length > 0 ? resolvedGcsImages : resolvedImages;
 
-    const result = await callPathway('image_gemini_31', {
+    const result = await callPathway(DEFAULT_AGENT_IMAGE_PATHWAY, {
         ...args,
         text: prompt,
-        model,
+        model: DEFAULT_AGENT_IMAGE_MODEL,
         stream: false,
         input_image: images.length > 0 ? images[0] : undefined,
         input_image_2: images.length > 1 ? images[1] : undefined,

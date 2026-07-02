@@ -983,7 +983,7 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
     // alias (e.g. `cortex-agent-chat`), and re-routing it here can pick a
     // different group member than the one this.model represents, which
     // desyncs body model from endpoint URL.
-    if (!requestParameters.model) {
+    if (!requestParameters.model && this.model.requiresRequestModel !== false) {
       const pathwayModelKey =
         typeof this.promptParameters?.model === "string"
           ? this.promptParameters.model

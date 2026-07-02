@@ -304,12 +304,12 @@ test('execute should not re-route modelGroup alias from parameters.model (must h
     plugin.config = {
         get: key => {
             if (key !== 'models') return undefined;
-            // Sibling member of the same group (claude-47-opus-vertex → claude-opus-4-7).
+            // Sibling member of the same group (claude-48-opus-vertex → claude-opus-4-8).
             // If the plugin re-routes parameters.model through the picker, it could land here
-            // and stamp 'claude-opus-4-7' into the body — the bug we are guarding against.
+            // and stamp 'claude-opus-4-8' into the body — the bug we are guarding against.
             return {
                 'oai-gpt54': { endpoints: [{ params: { model: 'gpt-5.4' } }], emulateOpenAIChatModel: 'gpt-5.4' },
-                'claude-47-opus-vertex': { emulateOpenAIChatModel: 'claude-opus-4-7' },
+                'claude-48-opus-vertex': { emulateOpenAIChatModel: 'claude-opus-4-8' },
             };
         },
     };
@@ -324,7 +324,7 @@ test('execute should not re-route modelGroup alias from parameters.model (must h
 
     t.truthy(capturedRequestData);
     t.is(capturedRequestData.model, 'gpt-5.4');
-    t.not(capturedRequestData.model, 'claude-opus-4-7');
+    t.not(capturedRequestData.model, 'claude-opus-4-8');
 });
 
 test('resolveResponsesRequestModel should not invoke modelGroup picker', t => {

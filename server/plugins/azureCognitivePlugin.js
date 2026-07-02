@@ -20,6 +20,39 @@ class AzureCognitivePlugin extends ModelPlugin {
         super(pathway, model);
     }
 
+    normalizeUrl(url) {
+        if (!url || typeof url !== 'string') return '';
+        return url.trim().replace(/\/+$/, '');
+    }
+
+    getApiVersion() {
+        return (process.env.AZURE_COGNITIVE_API_VERSION || '2023-11-01').trim();
+    }
+
+    normalizeFilter(filter, indexName) {
+        if (!filter || typeof filter !== 'string') return filter;
+        if (typeof indexName !== 'string') return filter;
+        if (!indexName.startsWith('idx-ucms-')) return filter;
+        // New UCMS indexes use date_published instead of date.
+        return filter.replace(/\bdate\b/g, 'date_published');
+    }
+
+    getOrderByField(filter) {
+        if (!filter || typeof filter !== 'string') return null;
+        if (filter.includes('date_published')) return 'date_published';
+        if (filter.includes('date_modified')) return 'date_modified';
+        if (/\bdate\b/.test(filter)) return 'date';
+        return null;
+    }
+
+    buildSearchUrl(baseUrl, indexName, mode) {
+        const normalized = this.normalizeUrl(baseUrl);
+        if (!normalized || !indexName) return baseUrl;
+        if (normalized.includes('/indexes/')) return normalized;
+        const apiVersion = this.getApiVersion();
+        return `${normalized}/indexes/${encodeURIComponent(indexName)}/docs/${mode}?api-version=${encodeURIComponent(apiVersion)}`;
+    }
+
     async getInputVector (text) {
         try{
             if(!text || !text.trim()){
@@ -37,9 +70,10 @@ class AzureCognitivePlugin extends ModelPlugin {
         const { modelPromptText } = this.getCompiledPrompt(text, combinedParameters, prompt);
         const { inputVector, calculateInputVector, privateData, filter, docId, title, chunkNo, chatId, semanticConfiguration } = combinedParameters;
         const data = {};
+        const normalizedFilter = this.normalizeFilter(filter, indexName);
 
         if (mode == 'delete') {
-            let searchUrl = this.ensureMode(this.requestUrl(text), 'search');
+            let searchUrl = this.ensureMode(this.requestUrl(text), 'search', indexName);
             searchUrl = this.ensureIndex(searchUrl, indexName);
             let searchQuery = `owner:${savedContextId}`;
             
@@ -117,7 +151,6 @@ class AzureCognitivePlugin extends ModelPlugin {
             data.semanticConfiguration = semanticConfiguration; // Use provided value directly
             data.captions = "extractive";
             data.answers = "extractive|count-3";
-            data.queryLanguage = "en-us";
             // Omit top-level queryRewrites as it caused issues before
 
             if (inputVector) {
@@ -148,7 +181,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             if (parameters.titleOnly) {
                 switch(indexName){
                     case 'indexcortex':
-                    case 'indexwires':
+                    case 'idx-wires':
                         data.select = 'title,id';
                         break;
                     default:
@@ -159,7 +192,7 @@ class AzureCognitivePlugin extends ModelPlugin {
         }
 
         // Apply filters (common to both semantic and non-semantic)
-        filter && (data.filter = filter);
+        normalizedFilter && (data.filter = normalizedFilter);
         if (indexName == 'indexcortex') { //if private, filter by owner via contextId //privateData && 
             data.filter && (data.filter = data.filter + ' and ');
             data.filter = `owner eq '${savedContextId}'`;
@@ -169,22 +202,24 @@ class AzureCognitivePlugin extends ModelPlugin {
             }
         }
 
-        // Add date-based ordering if there's a date filter
-        if (data.filter && data.filter.includes('date')) {
-            data.orderby = 'date desc';
+        // Add date-based ordering if there's a date-related filter
+        const orderByField = this.getOrderByField(data.filter);
+        if (orderByField) {
+            data.orderby = `${orderByField} desc`;
         }
 
         return { data };
     }
 
-    ensureMode(url, mode) {
+    ensureMode(url, mode, indexName) {
+        const seededUrl = this.buildSearchUrl(url, indexName, mode);
         const pattern = new RegExp(`indexes\/.*\/docs\/${mode}`);
-        if (pattern.test(url)) {
+        if (pattern.test(seededUrl)) {
             // if the URL is already in the correct form, return it as is
-            return url;
+            return seededUrl;
         } else {
             // otherwise, perform the replacement
-            return url.replace(/(indexes\/.*\/docs\/)([^?]+)/, `$1${mode}`);
+            return seededUrl.replace(/(indexes\/.*\/docs\/)([^?]+)/, `$1${mode}`);
         }
     }
 
@@ -210,8 +245,8 @@ class AzureCognitivePlugin extends ModelPlugin {
     async execute(text, parameters, prompt, cortexRequest) {
         const { requestId, savedContextId, savedContext } = cortexRequest.pathwayResolver;
         const mode = this.promptParameters.mode || 'search';
-        let url = this.ensureMode(this.requestUrl(text), mode == 'delete' ? 'index' : mode);
         const indexName = parameters.indexName || 'indexcortex';
+        let url = this.ensureMode(this.requestUrl(text), mode == 'delete' ? 'index' : mode, indexName);
         url = this.ensureIndex(url, indexName);
         const headers = cortexRequest.headers;
 

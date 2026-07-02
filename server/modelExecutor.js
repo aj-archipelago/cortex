@@ -43,8 +43,11 @@ import GrokResponsesPlugin from './plugins/grokResponsesPlugin.js';
 import KimiChatPlugin from './plugins/kimiChatPlugin.js';
 import OpenAIResponsesPlugin from './plugins/openAiResponsesPlugin.js';
 import AzureFoundryAgentsPlugin from './plugins/azureFoundryAgentsPlugin.js';
+import AzureFoundryResponsesPlugin from './plugins/azureFoundryResponsesPlugin.js';
 import GoogleCsePlugin from './plugins/googleCsePlugin.js';
+import BraveSearchPlugin from './plugins/braveSearchPlugin.js';
 import GeminiMusicPlugin from './plugins/geminiMusicPlugin.js';
+import GeminiInteractionsPlugin from './plugins/geminiInteractionsPlugin.js';
 import GeminiTtsPlugin from './plugins/geminiTtsPlugin.js';
 
 class ModelExecutor {
@@ -125,6 +128,9 @@ class ModelExecutor {
             case 'GEMINI-MUSIC':
                 plugin = new GeminiMusicPlugin(pathway, model);
                 break;
+            case 'GEMINI-INTERACTIONS':
+                plugin = new GeminiInteractionsPlugin(pathway, model);
+                break;
             case 'GEMINI-TTS':
                 plugin = new GeminiTtsPlugin(pathway, model);
                 break;
@@ -179,8 +185,14 @@ class ModelExecutor {
             case 'AZURE-FOUNDRY-AGENTS':
                 plugin = new AzureFoundryAgentsPlugin(pathway, model);
                 break;
+            case 'AZURE-FOUNDRY-RESPONSES':
+                plugin = new AzureFoundryResponsesPlugin(pathway, model);
+                break;
             case 'GOOGLE-CSE':
                 plugin = new GoogleCsePlugin(pathway, model);
+                break;
+            case 'BRAVE-SEARCH':
+                plugin = new BraveSearchPlugin(pathway, model);
                 break;
             default:
                 throw new Error(`Unsupported model type: ${model.type}`);

@@ -19,7 +19,7 @@ import {
     logTokenUsage,
     setupPassthroughStreaming,
 } from './restUtils.js';
-import { modelEndpoints, selectEndpoint, axios } from '../../lib/requestExecutor.js';
+import { modelEndpoints, selectEndpoint, axios, buildLimiterScheduleOptions } from '../../lib/requestExecutor.js';
 
 // Model types whose upstream natively speaks the OpenAI chat completions protocol
 // and can be passed through without conversion.
@@ -78,7 +78,7 @@ const handleChatCompletionsPassthrough = async (req, res, pathwayModelName) => {
     const abortController = new AbortController();
 
     try {
-        const response = await endpoint.limiter.schedule({ id: requestId }, async () => {
+        const response = await endpoint.limiter.schedule(buildLimiterScheduleOptions(requestId), async () => {
             return axios({
                 method: 'POST',
                 url,

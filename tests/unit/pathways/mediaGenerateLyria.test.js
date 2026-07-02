@@ -125,7 +125,7 @@ test("media_generate forwards MiniMax cover audio URL", (t) => {
 test("media_generate normalizes every music pathway through audio artifacts", (t) => {
   t.regex(
     String(mediaGenerate.executePathway),
-    /pathwayName\.startsWith\('music_'\)/,
+    /pathwayName\.startsWith\(["']music_["']\)/,
   );
 });
 
@@ -270,7 +270,7 @@ test("tts_replicate lets media_generate override the default Replicate TTS model
 test("media_generate normalizes TTS pathways through audio artifacts", (t) => {
   t.regex(
     String(mediaGenerate.executePathway),
-    /pathwayName\.startsWith\('tts_'\)/,
+    /pathwayName\.startsWith\(["']tts_["']\)/,
   );
 });
 

@@ -2,10 +2,16 @@ import { StorageFactory } from "./StorageFactory.js";
 import path from "path";
 import os from "os";
 import fs from "fs";
-import { v4 as uuidv4 } from "uuid";
+import axios from "axios";
 import { generateShortId, sanitizeFilename } from "../../utils/filenameUtils.js";
 import { sanitizeTargetBlobPath } from "../../utils/targetBlobPathUtils.js";
 import { AZURITE_ACCOUNT_NAME, getDefaultContainerName, getUserContainerName } from "../../constants.js";
+
+const GCS_ENSURE_LOCK_TTL_SECONDS = Number.parseInt(
+  process.env.GCS_ENSURE_LOCK_TTL_SECONDS || "1800",
+  10,
+);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class StorageService {
   constructor(factory) {
@@ -60,7 +66,7 @@ export class StorageService {
           tempFile,
           filename,
           null, // hash
-          null, // filename (will use provided filename)
+          null // filename (will use provided filename)
         );
         // Ensure shortLivedUrl is included
         const response = {
@@ -410,7 +416,11 @@ export class StorageService {
         ? await StorageFactory.getInstance().getAzureProvider(containerName)
         : this.primaryProvider;
 
-      const oldBlobName = sourceBlobPath || provider.extractBlobNameFromUrl(hashResult.url);
+      const oldBlobName = sourceBlobPath
+        || provider.extractBlobNameFromUrl?.(hashResult.url)
+        || hashResult.blobPath
+        || hashResult.blobName
+        || this._extractBlobNameFromUrl(hashResult.url);
       if (oldBlobName) {
         const newBlobName = sanitizedTargetBlobPath
           || this._computeNewBlobName(oldBlobName, sanitized);
@@ -486,6 +496,84 @@ export class StorageService {
     } catch { return null; }
   }
 
+  _extractBlobNameFromUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      let pathParts = decodeURIComponent(urlObj.pathname).split('/').filter(p => p.length > 0);
+      if (pathParts[0] === AZURITE_ACCOUNT_NAME) {
+        pathParts = pathParts.slice(1);
+      }
+      return pathParts.length > 1 ? pathParts.slice(1).join('/') : null;
+    } catch { return null; }
+  }
+
+  _extractContainerOwnerIdFromUrl(url) {
+    const containerName = this._extractContainerFromUrl(url);
+    const defaultContainer = getDefaultContainerName();
+    const prefix = `${defaultContainer}-`;
+    if (!containerName || !containerName.startsWith(prefix)) {
+      return null;
+    }
+    return containerName.slice(prefix.length) || null;
+  }
+
+  _normalizeGCSBlobName(blobName) {
+    if (!blobName || typeof blobName !== "string") {
+      return "";
+    }
+    if (this.backupProvider?.normalizeBlobName) {
+      return this.backupProvider.normalizeBlobName(blobName);
+    }
+    return blobName
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "")
+      .split("/")
+      .filter((part) => part && part !== "." && part !== "..")
+      .join("/");
+  }
+
+  _getExpectedGCSBlobName(existingFile = {}) {
+    const sourceBlobName = this._normalizeGCSBlobName(
+      existingFile.gcsBlobName
+      || existingFile.blobName
+      || existingFile.blobPath
+      || existingFile.name
+      || this.primaryProvider?.extractBlobNameFromUrl?.(existingFile.url)
+      || this._extractBlobNameFromUrl(existingFile.url)
+    );
+
+    if (!sourceBlobName) {
+      return null;
+    }
+
+    const containerOwnerId = this._normalizeGCSBlobName(
+      existingFile.containerOwnerId
+      || existingFile.gcsPrefix
+      || this._extractContainerOwnerIdFromUrl(existingFile.url)
+    );
+
+    if (containerOwnerId && !sourceBlobName.startsWith(`${containerOwnerId}/`)) {
+      return `${containerOwnerId}/${sourceBlobName}`;
+    }
+
+    return sourceBlobName;
+  }
+
+  async getExpectedGCSUrl(existingFile = {}) {
+    await this._initialize();
+    if (!this.backupProvider?.bucketName) {
+      return null;
+    }
+    const blobName = this._getExpectedGCSBlobName(existingFile);
+    if (!blobName) {
+      return null;
+    }
+    if (this.backupProvider.buildUrlForBlobName) {
+      return this.backupProvider.buildUrlForBlobName(blobName);
+    }
+    return `gs://${this.backupProvider.bucketName}/${blobName}`;
+  }
+
   /**
    * Compute a new blob name by replacing the filename portion while preserving
    * the folder path and hash prefix.
@@ -526,7 +614,7 @@ export class StorageService {
       filePath,
       requestId,
       hash,
-      finalFilename,
+      finalFilename
     );
 
     let gcsResult = null;
@@ -659,7 +747,7 @@ export class StorageService {
     return results;
   }
 
-  async ensureGCSUpload(context, existingFile) {
+  async ensureGCSUpload(context, existingFile, options = {}) {
     await this._initialize();
     
     if (
@@ -670,6 +758,15 @@ export class StorageService {
       return existingFile;
     }
 
+    const expectedGCSBlobName = this._getExpectedGCSBlobName(existingFile);
+    const expectedGCSUrl = expectedGCSBlobName
+      ? (
+        this.backupProvider.buildUrlForBlobName
+          ? this.backupProvider.buildUrlForBlobName(expectedGCSBlobName)
+          : `gs://${this.backupProvider.bucketName}/${expectedGCSBlobName}`
+      )
+      : null;
+
     // If we already have a GCS URL, check if it exists
     if (existingFile.gcs) {
       const exists = await this.backupProvider.fileExists(existingFile.gcs);
@@ -678,31 +775,83 @@ export class StorageService {
       }
     }
 
-    // Download from primary storage
-    // Extract filename from URL (remove query parameters first)
-    const urlWithoutQuery = existingFile.url.split('?')[0];
-    const filename = path.basename(urlWithoutQuery) || `restore-${uuidv4()}`;
-    const tempFile = path.join(os.tmpdir(), filename);
-    try {
-      await this.primaryProvider.downloadFile(existingFile.url, tempFile);
+    if (expectedGCSUrl) {
+      const expectedExists = await this.backupProvider.fileExists(expectedGCSUrl);
+      if (expectedExists) {
+        return {
+          ...existingFile,
+          gcs: expectedGCSUrl,
+        };
+      }
+    }
 
-      // Upload to GCS - extract requestId from blobName if available, otherwise use empty string
-      const requestId = existingFile.blobName ? path.dirname(existingFile.blobName) : "";
-      const gcsResult = await this.backupProvider.uploadFile(
-        context,
-        tempFile,
-        requestId,
-      );
+    if (!expectedGCSBlobName) {
+      return existingFile;
+    }
+
+    const lockKey = `gcs-ensure:${expectedGCSUrl || expectedGCSBlobName}`;
+    const { acquireLock, releaseLock } = await import("../../redis.js");
+    const lockAcquired = await acquireLock(lockKey, GCS_ENSURE_LOCK_TTL_SECONDS);
+    if (!lockAcquired) {
+      context.log?.(`GCS backup already being ensured: ${expectedGCSUrl || expectedGCSBlobName}`);
+      const waitForInFlightMs = Number(options.waitForInFlightMs || 0);
+      if (expectedGCSUrl && waitForInFlightMs > 0) {
+        const deadline = Date.now() + waitForInFlightMs;
+        const pollEveryMs = Math.max(50, Number(options.pollEveryMs || 250));
+        while (Date.now() < deadline) {
+          if (await this.backupProvider.fileExists(expectedGCSUrl)) {
+            return {
+              ...existingFile,
+              gcs: expectedGCSUrl,
+            };
+          }
+          await sleep(Math.min(pollEveryMs, Math.max(0, deadline - Date.now())));
+        }
+      }
+      return {
+        ...existingFile,
+      };
+    }
+
+    try {
+      if (expectedGCSUrl) {
+        const existsAfterLock = await this.backupProvider.fileExists(expectedGCSUrl);
+        if (existsAfterLock) {
+          return {
+            ...existingFile,
+            gcs: expectedGCSUrl,
+          };
+        }
+      }
+
+      const response = await axios({
+        method: "get",
+        url: existingFile.url,
+        responseType: "stream",
+      });
+      const contentType = existingFile.mimeType || response.headers?.["content-type"] || null;
+
+      const gcsResult = this.backupProvider.uploadStreamToBlobName
+        ? await this.backupProvider.uploadStreamToBlobName(
+          context,
+          expectedGCSBlobName,
+          response.data,
+          contentType,
+        )
+        : await this.backupProvider.uploadStream(
+          context,
+          path.basename(expectedGCSBlobName),
+          response.data,
+          contentType,
+          path.dirname(expectedGCSBlobName) === "." ? null : path.dirname(expectedGCSBlobName),
+        );
 
       return {
         ...existingFile,
-        gcs: gcsResult.url,
+        gcs: gcsResult.url || gcsResult,
       };
     } finally {
-      // Cleanup temp file
-      if (fs.existsSync(tempFile)) {
-        fs.unlinkSync(tempFile);
-      }
+      await releaseLock(lockKey);
     }
   }
 

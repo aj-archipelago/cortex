@@ -49,7 +49,7 @@ Provide a clear summary preserving all URLs, citations, and numerical data.`
         researchContent: '',
         language: "English",
     },
-    model: 'gemini-flash-3-vision',
+    model: 'gemini-flash-35-vision',
     useInputChunking: false,
     timeout: 120,
     

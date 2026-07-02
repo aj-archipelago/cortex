@@ -1,16 +1,6 @@
 // OpenAIChatPlugin.js
 import OpenAIChatPlugin from './openAiChatPlugin.js';
 
-const normalizeValue = (value) => {
-    if (!value || typeof value !== 'string') return '';
-    return value.trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
-};
-
-const normalizeEndpoint = (value) => {
-    const normalized = normalizeValue(value);
-    return normalized ? normalized.replace(/\/+$/, '') : '';
-};
-
 class OpenAIChatExtensionPlugin extends OpenAIChatPlugin {
     constructor(pathway, model) {
         super(pathway, model);
@@ -53,14 +43,6 @@ class OpenAIChatExtensionPlugin extends OpenAIChatPlugin {
             indexName && (dataSource.parameters.indexName = indexName);
             semanticConfiguration && (dataSource.parameters.semanticConfiguration = semanticConfiguration);
             dataSource.parameters.queryType = semanticConfiguration ? 'semantic' : 'simple';
-
-            if (dataSource.type === 'AzureCognitiveSearch') {
-                const resolvedIndex = dataSource.parameters.indexName || indexName || '';
-                if (typeof resolvedIndex === 'string' && resolvedIndex.startsWith('idx-')) {
-                    dataSource.parameters.endpoint = normalizeEndpoint(process.env.AZURE_COGNITIVE_API_URL_QA);
-                    dataSource.parameters.key = normalizeValue(process.env.AZURE_COGNITIVE_API_KEY_QA);
-                }
-            }
         }
         return reqParams;
     }

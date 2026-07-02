@@ -1,7 +1,8 @@
 import test from "ava";
+import nock from "nock";
 import { StorageService } from "../../src/services/storage/StorageService.js";
 import { StorageFactory } from "../../src/services/storage/StorageFactory.js";
-import { getFileStoreMap, setFileStoreMap, removeFromFileStoreMap } from "../../src/redis.js";
+import { acquireLock, getFileStoreMap, setFileStoreMap, removeFromFileStoreMap, releaseLock } from "../../src/redis.js";
 import path from "path";
 import os from "os";
 import fs from "fs";
@@ -10,6 +11,152 @@ test("should create storage service with factory", (t) => {
   const factory = new StorageFactory();
   const service = new StorageService(factory);
   t.truthy(service);
+});
+
+test("_extractContainerFromUrl ignores local file handler URLs", (t) => {
+  const service = new StorageService({
+    getPrimaryProvider: async () => ({}),
+    getGCSProvider: () => null,
+  });
+
+  t.is(service._extractContainerFromUrl("http://localhost:3100/files/request/file.png"), null);
+  t.is(service._extractContainerFromUrl("http://127.0.0.1:7071/files/request/file.png"), null);
+});
+
+test("_extractContainerFromUrl extracts Azure and Azurite containers", (t) => {
+  const service = new StorageService({
+    getPrimaryProvider: async () => ({}),
+    getGCSProvider: () => null,
+  });
+
+  t.is(
+    service._extractContainerFromUrl("https://acct.blob.core.windows.net/user-container/path/file.png?sas=1"),
+    "user-container",
+  );
+  t.is(
+    service._extractContainerFromUrl("http://127.0.0.1:10000/devstoreaccount1/azurite-container/path/file.png"),
+    "azurite-container",
+  );
+});
+
+test("getExpectedGCSUrl derives deterministic per-owner GCS path", async (t) => {
+  const service = new StorageService({
+    getPrimaryProvider: async () => ({}),
+    getGCSProvider: () => ({
+      bucketName: "backup-bucket",
+      normalizeBlobName: (blobName) => blobName.replace(/^\/+/, ""),
+      buildUrlForBlobName: (blobName) => `gs://backup-bucket/${blobName.replace(/^\/+/, "")}`,
+    }),
+  });
+
+  const result = await service.getExpectedGCSUrl({
+    blobName: "chats/chat-1/image.png",
+    containerOwnerId: "user-1",
+  });
+
+  t.is(result, "gs://backup-bucket/user-1/chats/chat-1/image.png");
+});
+
+test("ensureGCSUpload reuses inferred GCS object when it exists", async (t) => {
+  const expectedUrl = "gs://backup-bucket/user-1/chats/chat-1/image.png";
+  const fileExistsCalls = [];
+  const service = new StorageService({
+    getPrimaryProvider: async () => ({}),
+    getGCSProvider: () => ({
+      bucketName: "backup-bucket",
+      isConfigured: () => true,
+      normalizeBlobName: (blobName) => blobName.replace(/^\/+/, ""),
+      buildUrlForBlobName: (blobName) => `gs://backup-bucket/${blobName.replace(/^\/+/, "")}`,
+      fileExists: async (url) => {
+        fileExistsCalls.push(url);
+        return url === expectedUrl;
+      },
+      uploadStreamToBlobName: async () => {
+        t.fail("should not upload when inferred GCS object exists");
+      },
+    }),
+  });
+
+  const result = await service.ensureGCSUpload({}, {
+    url: "https://azure.test/container/chats/chat-1/image.png?sas=1",
+    blobName: "chats/chat-1/image.png",
+    containerOwnerId: "user-1",
+  });
+
+  t.deepEqual(fileExistsCalls, [expectedUrl]);
+  t.is(result.gcs, expectedUrl);
+});
+
+test("ensureGCSUpload copies Azure stream to deterministic GCS object", async (t) => {
+  const expectedUrl = "gs://backup-bucket/user-1/chats/chat-1/image.png";
+  const service = new StorageService({
+    getPrimaryProvider: async () => ({}),
+    getGCSProvider: () => ({
+      bucketName: "backup-bucket",
+      isConfigured: () => true,
+      normalizeBlobName: (blobName) => blobName.replace(/^\/+/, ""),
+      buildUrlForBlobName: (blobName) => `gs://backup-bucket/${blobName.replace(/^\/+/, "")}`,
+      fileExists: async () => false,
+      uploadStreamToBlobName: async (context, blobName, stream, contentType) => {
+        t.is(blobName, "user-1/chats/chat-1/image.png");
+        t.is(contentType, "image/png");
+        let body = "";
+        for await (const chunk of stream) {
+          body += chunk.toString();
+        }
+        t.is(body, "image-bytes");
+        return { url: expectedUrl, blobName };
+      },
+    }),
+  });
+
+  nock("https://azure.test")
+    .get("/container/chats/chat-1/image.png")
+    .query(true)
+    .reply(200, "image-bytes", { "content-type": "image/png" });
+
+  const result = await service.ensureGCSUpload({}, {
+    url: "https://azure.test/container/chats/chat-1/image.png?sas=1",
+    blobName: "chats/chat-1/image.png",
+    containerOwnerId: "user-1",
+  });
+
+  t.is(result.gcs, expectedUrl);
+  t.true(nock.isDone());
+});
+
+test("ensureGCSUpload does not claim missing GCS object while Redis lock is held", async (t) => {
+  const expectedUrl = "gs://backup-bucket/user-1/chats/chat-1/large-video.mp4";
+  const lockKey = `gcs-ensure:${expectedUrl}`;
+  await releaseLock(lockKey);
+  const acquired = await acquireLock(lockKey, 30);
+  t.true(acquired);
+
+  const service = new StorageService({
+    getPrimaryProvider: async () => ({}),
+    getGCSProvider: () => ({
+      bucketName: "backup-bucket",
+      isConfigured: () => true,
+      normalizeBlobName: (blobName) => blobName.replace(/^\/+/, ""),
+      buildUrlForBlobName: (blobName) => `gs://backup-bucket/${blobName.replace(/^\/+/, "")}`,
+      fileExists: async () => false,
+      uploadStreamToBlobName: async () => {
+        t.fail("should not upload while another worker holds the GCS ensure lock");
+      },
+    }),
+  });
+
+  try {
+    const result = await service.ensureGCSUpload({ log: () => {} }, {
+      url: "https://azure.test/container/chats/chat-1/large-video.mp4?sas=1",
+      blobName: "chats/chat-1/large-video.mp4",
+      containerOwnerId: "user-1",
+    });
+
+    t.is(result.gcs, undefined);
+  } finally {
+    await releaseLock(lockKey);
+  }
 });
 
 test("should get primary provider", (t) => {

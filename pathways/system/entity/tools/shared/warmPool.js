@@ -18,6 +18,7 @@ import { parseMemoryToMB, resolveWorkspaceImage } from './workspace_client.js';
 const REPLENISH_INTERVAL_MS = 60_000;
 const REPLENISH_LOCK_TTL_MS = 6 * 60 * 1000;  // must exceed STUCK_PROVISION_TIMEOUT_MS
 const STUCK_PROVISION_TIMEOUT_MS = 5 * 60 * 1000;
+const CLAIMED_CONTAINER_TIMEOUT_MS = 30 * 60 * 1000;
 
 let _replenishTimer = null;
 let _hostId = null;
@@ -39,6 +40,16 @@ function isStuckProvisioning(entry, now = Date.now()) {
     if (entry?.status !== 'PROVISIONING') return false;
     const createdAt = new Date(entry.createdAt).getTime();
     return Number.isFinite(createdAt) && now - createdAt > STUCK_PROVISION_TIMEOUT_MS;
+}
+
+function isFreshClaimed(entry, now = Date.now()) {
+    if (entry?.status !== 'CLAIMED') return false;
+    const claimedAt = new Date(entry.claimedAt).getTime();
+    return Number.isFinite(claimedAt) && now - claimedAt <= CLAIMED_CONTAINER_TIMEOUT_MS;
+}
+
+function isPoolEntryProtected(entry) {
+    return isPoolEntryActive(entry) || isFreshClaimed(entry);
 }
 
 // ---------------------------------------------------------------------------
@@ -131,8 +142,8 @@ export async function initWarmPool() {
  *
  * @returns {Promise<{ success: boolean, containerName?: string, url?: string, bootstrapSecret?: string, containerId?: string }>}
  */
-export async function claimContainer(entityId) {
-    const redis = await getRedisClient();
+export async function claimContainer(entityId, redisClient = null) {
+    const redis = redisClient || await getRedisClient();
     if (!redis) return { success: false };
 
     try {
@@ -164,8 +175,11 @@ export async function claimContainer(entityId) {
             }
         }
 
-        // Remove from registry
-        await redis.hdel(containersKey(), containerName);
+        entry.status = 'CLAIMED';
+        entry.claimedAt = new Date().toISOString();
+        entry.claimedByEntityId = entityId || null;
+        await redis.hset(containersKey(), containerName, JSON.stringify(entry));
+        await redis.srem(readyKey(), containerName);
 
         logger.info(`[WarmPool] Claimed container ${containerName}`);
 
@@ -238,7 +252,7 @@ export async function getWarmPoolActiveContainerNames(redisClient = null) {
         const active = new Set();
         for (const [name, raw] of Object.entries(all)) {
             const entry = JSON.parse(raw);
-            if (entry.status === 'READY' || entry.status === 'PROVISIONING') {
+            if (isPoolEntryProtected(entry)) {
                 active.add(name);
             }
         }
@@ -246,6 +260,25 @@ export async function getWarmPoolActiveContainerNames(redisClient = null) {
     } catch (e) {
         logger.warn(`[WarmPool] Failed to read active pool containers: ${e.message}`);
         return new Set();
+    }
+}
+
+export async function releaseClaimedContainer(containerName, redisClient = null) {
+    if (!containerName) return;
+    const redis = redisClient || await getRedisClient();
+    if (!redis) return;
+
+    try {
+        const raw = await redis.hget(containersKey(), containerName);
+        if (!raw) return;
+
+        const entry = JSON.parse(raw);
+        if (entry.status !== 'CLAIMED') return;
+
+        await redis.hdel(containersKey(), containerName);
+        await redis.srem(readyKey(), containerName);
+    } catch (e) {
+        logger.warn(`[WarmPool] Failed to release claimed container ${containerName}: ${e.message}`);
     }
 }
 
@@ -513,6 +546,14 @@ async function pruneStalePoolEntries(redis) {
             continue;
         }
 
+        if (entry.status === 'CLAIMED' && !isFreshClaimed(entry)) {
+            logger.warn(`[WarmPool] Removing stale CLAIMED container ${containerName} (age=${Math.round((Date.now() - new Date(entry.claimedAt).getTime()) / 1000)}s)`);
+            await redis.hdel(containersKey(), containerName);
+            await redis.srem(readyKey(), containerName);
+            pruned += 1;
+            continue;
+        }
+
         if (entry.status !== 'READY') continue;
         if (!inventory.available) continue;
 
@@ -621,6 +662,7 @@ export const __testables = {
     getWarmPoolActiveContainerNames,
     pruneStalePoolEntries,
     provisionPoolContainer,
+    releaseClaimedContainer,
     replenish,
     validatePoolContainerInventoryEntry,
 };

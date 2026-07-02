@@ -3,44 +3,53 @@
 // the correct sub-pathway based on model metadata. Normalizes responses
 // so callers always get URLs (direct or data: URIs), never raw API JSON.
 
-import { callPathway } from '../lib/pathwayTools.js';
-import { config } from '../config.js';
-import logger from '../lib/logger.js';
+import { callPathway } from "../lib/pathwayTools.js";
+import { config } from "../config.js";
+import logger from "../lib/logger.js";
 
-const omitUndefined = (obj) => Object.fromEntries(
-    Object.entries(obj).filter(([, value]) => value !== undefined && value !== null),
-);
+const omitUndefined = (obj) =>
+    Object.fromEntries(
+        Object.entries(obj).filter(
+            ([, value]) => value !== undefined && value !== null,
+        ),
+    );
+
+const SEEDANCE_2_MODELS = new Set([
+    "replicate-seedance-2.0",
+    "replicate-seedance-2.0-fast",
+    "replicate-seedance-2.0-mini",
+]);
 
 const REFERENCE_ROLE_ALIASES = {
-    reference: 'reference',
-    general: 'reference',
-    general_reference: 'reference',
-    asset: 'reference',
-    start: 'start_frame',
-    start_frame: 'start_frame',
-    startFrame: 'start_frame',
-    first_frame: 'start_frame',
-    firstFrame: 'start_frame',
-    start_image: 'start_frame',
-    startImage: 'start_frame',
-    end: 'end_frame',
-    end_frame: 'end_frame',
-    endFrame: 'end_frame',
-    last_frame: 'end_frame',
-    lastFrame: 'end_frame',
-    end_image: 'end_frame',
-    endImage: 'end_frame',
+    reference: "reference",
+    general: "reference",
+    general_reference: "reference",
+    asset: "reference",
+    start: "start_frame",
+    start_frame: "start_frame",
+    startFrame: "start_frame",
+    first_frame: "start_frame",
+    firstFrame: "start_frame",
+    start_image: "start_frame",
+    startImage: "start_frame",
+    end: "end_frame",
+    end_frame: "end_frame",
+    endFrame: "end_frame",
+    last_frame: "end_frame",
+    lastFrame: "end_frame",
+    end_image: "end_frame",
+    endImage: "end_frame",
 };
 
 const REFERENCE_ROLE_LABELS = {
-    reference: 'Reference',
-    start_frame: 'Start Frame',
-    end_frame: 'End Frame',
+    reference: "Reference",
+    start_frame: "Start Frame",
+    end_frame: "End Frame",
 };
 
 function normalizeReferenceRole(role) {
-    if (typeof role !== 'string' || !role.trim()) return '';
-    return REFERENCE_ROLE_ALIASES[role.trim()] || '';
+    if (typeof role !== "string" || !role.trim()) return "";
+    return REFERENCE_ROLE_ALIASES[role.trim()] || "";
 }
 
 function getRoleLabel(role) {
@@ -48,7 +57,9 @@ function getRoleLabel(role) {
 }
 
 function buildImageReferences(args, images) {
-    const roles = Array.isArray(args.inputImageRoles) ? args.inputImageRoles : [];
+    const roles = Array.isArray(args.inputImageRoles)
+        ? args.inputImageRoles
+        : [];
     return images.map((url, index) => ({
         url,
         role: normalizeReferenceRole(roles[index]),
@@ -70,38 +81,54 @@ function splitImageReferences(args, images) {
 
     return {
         hasExplicitRoles: true,
-        startFrames: refs.filter((ref) => ref.role === 'start_frame').map((ref) => ref.url),
-        endFrames: refs.filter((ref) => ref.role === 'end_frame').map((ref) => ref.url),
-        references: refs.filter((ref) => ref.role === 'reference' || !ref.role).map((ref) => ref.url),
+        startFrames: refs
+            .filter((ref) => ref.role === "start_frame")
+            .map((ref) => ref.url),
+        endFrames: refs
+            .filter((ref) => ref.role === "end_frame")
+            .map((ref) => ref.url),
+        references: refs
+            .filter((ref) => ref.role === "reference" || !ref.role)
+            .map((ref) => ref.url),
     };
 }
 
 function validateReferenceRoles(args, modelId, metadata = {}) {
-    const roles = Array.isArray(args.inputImageRoles) ? args.inputImageRoles : [];
+    const roles = Array.isArray(args.inputImageRoles)
+        ? args.inputImageRoles
+        : [];
     const normalizedRoles = roles
-        .filter((role) => typeof role === 'string' && role.trim())
-        .map((role) => ({ raw: role, normalized: normalizeReferenceRole(role) }));
+        .filter((role) => typeof role === "string" && role.trim())
+        .map((role) => ({
+            raw: role,
+            normalized: normalizeReferenceRole(role),
+        }));
 
     if (normalizedRoles.length === 0) return;
 
     const invalidRole = normalizedRoles.find((role) => !role.normalized);
     if (invalidRole) {
-        throw new Error(`Unsupported reference image role '${invalidRole.raw}'`);
+        throw new Error(
+            `Unsupported reference image role '${invalidRole.raw}'`,
+        );
     }
 
     const supportedRoles = metadata.referenceImageRoles || [];
-    const unsupportedRole = normalizedRoles.find((role) => !supportedRoles.includes(role.normalized));
+    const unsupportedRole = normalizedRoles.find(
+        (role) => !supportedRoles.includes(role.normalized),
+    );
     if (unsupportedRole) {
-        const supportedText = supportedRoles.length > 0
-            ? supportedRoles.map(getRoleLabel).join(', ')
-            : 'none';
+        const supportedText =
+            supportedRoles.length > 0
+                ? supportedRoles.map(getRoleLabel).join(", ")
+                : "none";
         throw new Error(
             `Model '${modelId}' does not support ${getRoleLabel(unsupportedRole.normalized)} image references. Supported roles: ${supportedText}.`,
         );
     }
 
     const roleLimits = metadata.referenceImageRoleLimits;
-    if (!roleLimits || typeof roleLimits !== 'object') return;
+    if (!roleLimits || typeof roleLimits !== "object") return;
 
     const counts = new Map();
     for (const role of normalizedRoles) {
@@ -112,10 +139,12 @@ function validateReferenceRoles(args, modelId, metadata = {}) {
     for (const [role, count] of counts.entries()) {
         const range = roleLimits[role] || roleLimits.default;
         if (range === undefined) continue;
-        const max = Array.isArray(range) ? Number(range[1] ?? range[0]) : Number(range);
+        const max = Array.isArray(range)
+            ? Number(range[1] ?? range[0])
+            : Number(range);
         if (Number.isFinite(max) && count > max) {
             throw new Error(
-                `Model '${modelId}' supports at most ${max} ${getRoleLabel(role)} image reference${max === 1 ? '' : 's'}.`,
+                `Model '${modelId}' supports at most ${max} ${getRoleLabel(role)} image reference${max === 1 ? "" : "s"}.`,
             );
         }
     }
@@ -124,29 +153,31 @@ function validateReferenceRoles(args, modelId, metadata = {}) {
 // Convert an HTTPS storage.googleapis.com URL (or gs:// URI) into
 // the JSON {gcsUri, mimeType} format that the Veo pathway expects.
 const VEO_IMAGE_MIME_TYPES = {
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    png: 'image/png',
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
 };
 
 const VEO_VIDEO_MIME_TYPES = {
-    mp4: 'video/mp4',
+    mp4: "video/mp4",
 };
 
 function getMediaExtension(mediaUrl, mediaType) {
-    if (typeof mediaUrl !== 'string') return '';
+    if (typeof mediaUrl !== "string") return "";
 
-    const dataUriMatch = mediaUrl.match(new RegExp(`^data:${mediaType}/([^;,]+)`, 'i'));
+    const dataUriMatch = mediaUrl.match(
+        new RegExp(`^data:${mediaType}/([^;,]+)`, "i"),
+    );
     if (dataUriMatch) return dataUriMatch[1].toLowerCase();
 
     const extensionFromPath = (value) => {
-        const path = value.split('?')[0].split('#')[0];
-        const filename = path.split('/').pop() || '';
-        if (!filename.includes('.')) return '';
-        return filename.split('.').pop().toLowerCase();
+        const path = value.split("?")[0].split("#")[0];
+        const filename = path.split("/").pop() || "";
+        if (!filename.includes(".")) return "";
+        return filename.split(".").pop().toLowerCase();
     };
 
-    if (mediaUrl.startsWith('gs://')) {
+    if (mediaUrl.startsWith("gs://")) {
         return extensionFromPath(mediaUrl);
     }
 
@@ -159,41 +190,45 @@ function getMediaExtension(mediaUrl, mediaType) {
 }
 
 function getVeoImageMimeType(imageUrl) {
-    const ext = getMediaExtension(imageUrl, 'image');
-    if (!ext) return 'image/jpeg';
+    const ext = getMediaExtension(imageUrl, "image");
+    if (!ext) return "image/jpeg";
 
     const mimeType = VEO_IMAGE_MIME_TYPES[ext];
     if (!mimeType) {
-        throw new Error(`Veo image references must be JPEG or PNG. Unsupported file extension: ${ext}.`);
+        throw new Error(
+            `Veo image references must be JPEG or PNG. Unsupported file extension: ${ext}.`,
+        );
     }
 
     return mimeType;
 }
 
 function getVeoVideoMimeType(videoUrl) {
-    const ext = getMediaExtension(videoUrl, 'video');
-    if (!ext) return 'video/mp4';
+    const ext = getMediaExtension(videoUrl, "video");
+    if (!ext) return "video/mp4";
 
     const mimeType = VEO_VIDEO_MIME_TYPES[ext];
     if (!mimeType) {
-        throw new Error(`Veo video extension requires MP4 input. Unsupported file extension: ${ext}.`);
+        throw new Error(
+            `Veo video extension requires MP4 input. Unsupported file extension: ${ext}.`,
+        );
     }
 
     return mimeType;
 }
 
 function formatImageForVeo(imageUrl) {
-    if (!imageUrl) return '';
+    if (!imageUrl) return "";
 
     const mimeType = getVeoImageMimeType(imageUrl);
 
-    if (imageUrl.startsWith('gs://')) {
+    if (imageUrl.startsWith("gs://")) {
         return JSON.stringify({ gcsUri: imageUrl, mimeType });
     }
 
     try {
         const url = new URL(imageUrl);
-        if (url.hostname === 'storage.googleapis.com') {
+        if (url.hostname === "storage.googleapis.com") {
             const gcsUri = `gs://${url.pathname.substring(1)}`;
             return JSON.stringify({ gcsUri, mimeType });
         }
@@ -205,8 +240,8 @@ function formatImageForVeo(imageUrl) {
 }
 
 export function formatVideoForVeo(videoUrl) {
-    if (!videoUrl) return '';
-    if (typeof videoUrl !== 'string') return JSON.stringify(videoUrl);
+    if (!videoUrl) return "";
+    if (typeof videoUrl !== "string") return JSON.stringify(videoUrl);
 
     const dataUriMatch = videoUrl.match(/^data:(video\/[^;,]+);base64,(.+)$/i);
     if (dataUriMatch) {
@@ -220,13 +255,13 @@ export function formatVideoForVeo(videoUrl) {
 
     const mimeType = getVeoVideoMimeType(videoUrl);
 
-    if (videoUrl.startsWith('gs://')) {
+    if (videoUrl.startsWith("gs://")) {
         return JSON.stringify({ gcsUri: videoUrl, mimeType });
     }
 
     try {
         const url = new URL(videoUrl);
-        if (url.hostname === 'storage.googleapis.com') {
+        if (url.hostname === "storage.googleapis.com") {
             const gcsUri = `gs://${url.pathname.substring(1)}`;
             return JSON.stringify({ gcsUri, mimeType });
         }
@@ -242,13 +277,16 @@ function formatReferenceImageForVeo(imageUrl) {
     const formatted = formatImageForVeo(imageUrl);
     let image;
     try {
-        image = typeof formatted === 'string' ? JSON.parse(formatted) : formatted;
+        image =
+            typeof formatted === "string" ? JSON.parse(formatted) : formatted;
     } catch {
-        throw new Error('Veo reference images must use gs:// or storage.googleapis.com URLs');
+        throw new Error(
+            "Veo reference images must use gs:// or storage.googleapis.com URLs",
+        );
     }
     return {
         image,
-        referenceType: 'asset',
+        referenceType: "asset",
     };
 }
 
@@ -259,11 +297,11 @@ function formatReferenceImageForVeo(imageUrl) {
 // prompting cookbook, so 2K stays at or below that envelope; 4K pushes
 // toward the hard limits (≤ 3824 edge, ≤ ~8.2M pixels).
 const GPT_IMAGE_2_SIZES = {
-    '1:1':  { '1K': '1024x1024', '2K': '1920x1920', '4K': '2864x2864' },
-    '16:9': { '1K': '1792x1008', '2K': '2560x1440', '4K': '3824x2144' },
-    '9:16': { '1K': '1008x1792', '2K': '1440x2560', '4K': '2144x3824' },
-    '4:3':  { '1K': '1408x1056', '2K': '2048x1536', '4K': '3264x2448' },
-    '3:4':  { '1K': '1056x1408', '2K': '1536x2048', '4K': '2448x3264' },
+    "1:1": { "1K": "1024x1024", "2K": "1920x1920", "4K": "2864x2864" },
+    "16:9": { "1K": "1792x1008", "2K": "2560x1440", "4K": "3824x2144" },
+    "9:16": { "1K": "1008x1792", "2K": "1440x2560", "4K": "2144x3824" },
+    "4:3": { "1K": "1408x1056", "2K": "2048x1536", "4K": "3264x2448" },
+    "3:4": { "1K": "1056x1408", "2K": "1536x2048", "4K": "2448x3264" },
 };
 
 // Map standardized inputImages / inputVideos arrays → pathway-specific parameters
@@ -275,7 +313,8 @@ export const PARAM_MAPPERS = {
             optimizePrompt: args.optimizePrompt,
         };
         for (let i = 0; i < Math.min(images.length, 3); i++) {
-            mapped[i === 0 ? 'input_image' : `input_image_${i + 1}`] = images[i];
+            mapped[i === 0 ? "input_image" : `input_image_${i + 1}`] =
+                images[i];
         }
         return mapped;
     },
@@ -289,9 +328,14 @@ export const PARAM_MAPPERS = {
             image_size: args.imageSize,
         };
         for (let i = 0; i < Math.min(images.length, 14); i++) {
-            mapped[i === 0 ? 'input_image' : `input_image_${i + 1}`] = images[i];
+            mapped[i === 0 ? "input_image" : `input_image_${i + 1}`] =
+                images[i];
         }
         return mapped;
+    },
+
+    image_gemini_31_lite(args, images) {
+        return PARAM_MAPPERS.image_gemini_31(args, images);
     },
 
     image_gemini_3(args, images) {
@@ -299,36 +343,52 @@ export const PARAM_MAPPERS = {
         return PARAM_MAPPERS.image_gemini_31(args, images);
     },
 
+    video_gemini_omni(args, images, videos, audios = []) {
+        return {
+            text: args.text,
+            model: args.model,
+            input_images: images.slice(0, 5),
+            input_videos: videos.slice(0, 1),
+            input_audios: audios.slice(0, 1),
+            contextId: args.contextId,
+        };
+    },
+
     image_flux(args, images) {
         const mapped = {
             text: args.text,
             model: args.model,
-            aspectRatio: args.aspectRatio || '1:1',
+            aspectRatio: args.aspectRatio || "1:1",
             resolution: args.resolution,
             output_format: args.outputFormat,
             output_quality: args.outputQuality,
             seed: args.seed,
         };
         // flux-2-pro uses input_images array; others use individual fields
-        if (args.model === 'replicate-flux-2-pro') {
+        if (args.model === "replicate-flux-2-pro") {
             if (images.length > 0) mapped.input_images = images.slice(0, 8);
         } else {
             for (let i = 0; i < Math.min(images.length, 3); i++) {
-                mapped[i === 0 ? 'input_image' : `input_image_${i + 1}`] = images[i];
+                mapped[i === 0 ? "input_image" : `input_image_${i + 1}`] =
+                    images[i];
             }
         }
         return mapped;
     },
 
     image_gpt_image_2(args, images) {
-        const size = GPT_IMAGE_2_SIZES[args.aspectRatio || '1:1']?.[args.imageSize || '1K']
-            || GPT_IMAGE_2_SIZES['1:1']['1K'];
+        const size =
+            GPT_IMAGE_2_SIZES[args.aspectRatio || "1:1"]?.[
+                args.imageSize || "1K"
+            ] || GPT_IMAGE_2_SIZES["1:1"]["1K"];
         // Up to 10 input images route to the /images/edits endpoint.
         const inputImages = Object.fromEntries(
-            images.slice(0, 10).map((src, i) => [
-                i === 0 ? 'input_image' : `input_image_${i + 1}`,
-                src,
-            ]),
+            images
+                .slice(0, 10)
+                .map((src, i) => [
+                    i === 0 ? "input_image" : `input_image_${i + 1}`,
+                    src,
+                ]),
         );
         return {
             text: args.text,
@@ -351,9 +411,10 @@ export const PARAM_MAPPERS = {
             numberResults: args.numberResults,
         };
         // Base model (replicate-qwen-image) is text-only; edit models accept images
-        if (args.model !== 'replicate-qwen-image') {
+        if (args.model !== "replicate-qwen-image") {
             for (let i = 0; i < Math.min(images.length, 3); i++) {
-                mapped[i === 0 ? 'input_image' : `input_image_${i + 1}`] = images[i];
+                mapped[i === 0 ? "input_image" : `input_image_${i + 1}`] =
+                    images[i];
             }
         }
         return mapped;
@@ -369,10 +430,10 @@ export const PARAM_MAPPERS = {
             aspectRatio: args.aspectRatio,
             maxImages: args.numberResults || 1,
             numberResults: args.numberResults || 1,
-            input_image: images[0] || '',
-            input_image_1: images[0] || '',
-            input_image_2: images[1] || '',
-            input_image_3: images[2] || '',
+            input_image: images[0] || "",
+            input_image_1: images[0] || "",
+            input_image_2: images[1] || "",
+            input_image_3: images[2] || "",
             seed: args.seed,
         };
     },
@@ -385,10 +446,10 @@ export const PARAM_MAPPERS = {
             aspectRatio: args.aspectRatio,
             maxImages: args.numberResults || 1,
             numberResults: args.numberResults || 1,
-            input_image: images[0] || '',
-            input_image_1: images[0] || '',
-            input_image_2: images[1] || '',
-            input_image_3: images[2] || '',
+            input_image: images[0] || "",
+            input_image_1: images[0] || "",
+            input_image_2: images[1] || "",
+            input_image_3: images[2] || "",
             disableSafetyChecker: args.disableSafetyChecker ?? false,
         };
     },
@@ -401,20 +462,25 @@ export const PARAM_MAPPERS = {
             aspectRatio: args.aspectRatio,
             maxImages: args.numberResults || 1,
             numberResults: args.numberResults || 1,
-            input_image: images[0] || '',
-            input_image_1: images[0] || '',
-            input_image_2: images[1] || '',
-            input_image_3: images[2] || '',
+            input_image: images[0] || "",
+            input_image_1: images[0] || "",
+            input_image_2: images[1] || "",
+            input_image_3: images[2] || "",
             outputFormat: args.outputFormat,
         };
     },
 
     video_veo(args, images, videos = []) {
         const roles = splitImageReferences(args, images);
-        const startImage = roles.hasExplicitRoles ? roles.startFrames[0] : images[0];
-        const endImage = roles.hasExplicitRoles ? roles.endFrames[0] : '';
+        const startImage = roles.hasExplicitRoles
+            ? roles.startFrames[0]
+            : images[0];
+        const endImage = roles.hasExplicitRoles ? roles.endFrames[0] : "";
         const referenceImages = roles.hasExplicitRoles
-            ? roles.references.slice(0, 3).map(formatReferenceImageForVeo).filter(Boolean)
+            ? roles.references
+                  .slice(0, 3)
+                  .map(formatReferenceImageForVeo)
+                  .filter(Boolean)
             : [];
 
         return {
@@ -422,46 +488,55 @@ export const PARAM_MAPPERS = {
             model: args.model,
             image: formatImageForVeo(startImage),
             video: formatVideoForVeo(videos[0]),
-            lastFrame: endImage ? formatImageForVeo(endImage) : '',
+            lastFrame: endImage ? formatImageForVeo(endImage) : "",
             referenceImages,
-            aspectRatio: args.aspectRatio || '16:9',
+            aspectRatio: args.aspectRatio || "16:9",
             durationSeconds: args.duration || 8,
             enhancePrompt: args.enhancePrompt !== false,
             generateAudio: args.generateAudio ?? true,
-            resolution: args.resolution || (videos[0] ? '720p' : undefined),
-            negativePrompt: args.negativePrompt || '',
-            personGeneration: 'allow_all',
+            resolution: args.resolution || (videos[0] ? "720p" : undefined),
+            negativePrompt: args.negativePrompt || "",
+            personGeneration: "allow_all",
             sampleCount: 1,
-            storageUri: '',
-            location: 'us-central1',
+            storageUri: "",
+            location: "us-central1",
             seed: args.seed ?? -1,
         };
     },
 
-    video_seedance(args, images, videos) {
+    video_seedance(args, images, videos, audios = []) {
         const roles = splitImageReferences(args, images);
-        if (args.model === 'replicate-seedance-2.0') {
+        if (SEEDANCE_2_MODELS.has(args.model)) {
             const mapped = {
                 text: args.text,
                 model: args.model,
-                aspectRatio: args.aspectRatio || '16:9',
-                duration: args.duration || 5,
+                aspectRatio: args.aspectRatio || "16:9",
+                duration: args.duration ?? 5,
                 generate_audio: args.generateAudio ?? true,
                 resolution: args.resolution,
-                seed: args.seed ?? -1,
+                ...(Number.isInteger(args.seed) ? { seed: args.seed } : {}),
             };
 
             if (roles.hasExplicitRoles) {
                 if (roles.startFrames[0]) mapped.image = roles.startFrames[0];
-                if (roles.endFrames[0]) mapped.last_frame_image = roles.endFrames[0];
-                if (roles.references.length > 0) mapped.reference_images = roles.references.slice(0, 9);
-                if (videos.length > 0) mapped.reference_videos = videos.slice(0, 3);
+                if (roles.endFrames[0])
+                    mapped.last_frame_image = roles.endFrames[0];
+                if (roles.references.length > 0)
+                    mapped.reference_images = roles.references.slice(0, 9);
+                if (videos.length > 0)
+                    mapped.reference_videos = videos.slice(0, 3);
             } else if (videos.length > 0 || images.length > 2) {
-                if (images.length > 0) mapped.reference_images = images.slice(0, 9);
-                if (videos.length > 0) mapped.reference_videos = videos.slice(0, 3);
+                if (images.length > 0)
+                    mapped.reference_images = images.slice(0, 9);
+                if (videos.length > 0)
+                    mapped.reference_videos = videos.slice(0, 3);
             } else {
-                mapped.image = images[0] || '';
-                mapped.last_frame_image = images[1] || '';
+                mapped.image = images[0] || "";
+                mapped.last_frame_image = images[1] || "";
+            }
+
+            if (audios.length > 0) {
+                mapped.reference_audios = audios.slice(0, 3);
             }
 
             return mapped;
@@ -470,43 +545,133 @@ export const PARAM_MAPPERS = {
         return {
             text: args.text,
             model: args.model,
-            aspectRatio: args.aspectRatio || '16:9',
+            aspectRatio: args.aspectRatio || "16:9",
             duration: args.duration || 5,
             camera_fixed: args.cameraFixed ?? false,
             generate_audio: args.generateAudio ?? false,
             resolution: args.resolution,
-            image: images[0] || '',
+            image: images[0] || "",
             seed: args.seed ?? -1,
         };
     },
 
     video_kling(args, images) {
         const roles = splitImageReferences(args, images);
-        const startImage = roles.hasExplicitRoles ? roles.startFrames[0] : images[0];
-        const endImage = roles.hasExplicitRoles ? roles.endFrames[0] : images[1];
+        const startImage = roles.hasExplicitRoles
+            ? roles.startFrames[0]
+            : images[0];
+        const endImage = roles.hasExplicitRoles
+            ? roles.endFrames[0]
+            : images[1];
 
         return {
             text: args.text,
             model: args.model,
-            aspectRatio: args.aspectRatio || '16:9',
+            aspectRatio: args.aspectRatio || "16:9",
             duration: args.duration || 5,
-            start_image: startImage || '',
-            end_image: endImage || '',
-            image: startImage || '',
-            negativePrompt: args.negativePrompt || '',
+            start_image: startImage || "",
+            end_image: endImage || "",
+            image: startImage || "",
+            negativePrompt: args.negativePrompt || "",
         };
     },
 
     video_grok_imagine(args, images, videos) {
-        const video = videos[0] || '';
+        const video = videos[0] || "";
         return {
             text: args.text,
             model: args.model,
-            aspectRatio: args.aspectRatio || 'auto',
+            aspectRatio: args.aspectRatio || "auto",
             duration: args.duration || 5,
-            resolution: args.resolution || '720p',
-            image: images[0] || '',
+            resolution: args.resolution || "720p",
+            image: images[0] || "",
             video,
+        };
+    },
+
+    video_dreamactor(args, images, videos) {
+        return {
+            model: args.model,
+            image: images[0] || "",
+            video: videos[0] || "",
+            cut_first_second: args.cutFirstSecond ?? true,
+        };
+    },
+
+    video_avatar(args, images, videos, audios = []) {
+        const audio =
+            audios[0] || args.inputAudioUrl || args.audioUrl || args.audio;
+        return {
+            model: args.model,
+            image: images[0] || "",
+            audio: audio || "",
+            ...(audio
+                ? {}
+                : {
+                      voice: args.voice || "Zephyr (Female)",
+                      voice_script:
+                          args.voiceScript ||
+                          args.voice_script ||
+                          args.text ||
+                          "",
+                      voice_language:
+                          args.voiceLanguage ||
+                          args.voice_language ||
+                          "English (US)",
+                      voice_prompt:
+                          args.voicePrompt ||
+                          args.voice_prompt ||
+                          "Say the following.",
+                  }),
+            resolution: args.resolution || "720p",
+            video_prompt:
+                args.videoPrompt ||
+                args.video_prompt ||
+                "The person is talking.",
+            negative_prompt: args.negativePrompt || args.negative_prompt || "",
+            strength_negative_prompt:
+                args.strengthNegativePrompt ??
+                args.strength_negative_prompt ??
+                0.5,
+            disable_safety_filter:
+                args.disableSafetyFilter ?? args.disable_safety_filter ?? true,
+            disable_prompt_upsampling:
+                args.disablePromptUpsampling ??
+                args.disable_prompt_upsampling ??
+                false,
+            no_op: args.noOp ?? args.no_op ?? false,
+            ...(Number.isInteger(args.seed) ? { seed: args.seed } : {}),
+        };
+    },
+
+    video_upscaler(args, images, videos) {
+        const isTopazVideo = args.model === "replicate-topaz-video-upscale";
+        return {
+            model: args.model,
+            video: videos[0] || "",
+            ...(isTopazVideo
+                ? {}
+                : {
+                      processing_type: args.processingType || "standard",
+                      scene: args.scene || "aigc",
+                  }),
+            target_resolution:
+                args.targetResolution || (isTopazVideo ? "1080p" : "4k"),
+            target_fps: args.targetFps || (isTopazVideo ? 30 : 60),
+        };
+    },
+
+    image_upscaler(args, images) {
+        return {
+            model: args.model,
+            image: images[0] || "",
+            enhance_model: args.enhanceModel || "Standard V2",
+            upscale_factor: args.upscaleFactor || "None",
+            output_format: args.outputFormat || "jpg",
+            subject_detection: args.subjectDetection || "None",
+            face_enhancement: args.faceEnhancement ?? false,
+            face_enhancement_creativity: args.faceEnhancementCreativity ?? 0,
+            face_enhancement_strength: args.faceEnhancementStrength ?? 0.8,
         };
     },
 
@@ -514,7 +679,7 @@ export const PARAM_MAPPERS = {
         return {
             text: args.text,
             input_images: images.slice(0, 10),
-            input_image: images[0] || '',
+            input_image: images[0] || "",
             contextId: args.contextId,
         };
     },
@@ -524,8 +689,9 @@ export const PARAM_MAPPERS = {
     },
 
     music_replicate(args) {
-        const isElevenLabsMusic = !args.model || args.model === 'replicate-elevenlabs-music';
-        const isMiniMaxCover = args.model === 'replicate-minimax-music-cover';
+        const isElevenLabsMusic =
+            !args.model || args.model === "replicate-elevenlabs-music";
+        const isMiniMaxCover = args.model === "replicate-minimax-music-cover";
         const mapped = {
             text: args.text,
             model: args.model,
@@ -535,7 +701,7 @@ export const PARAM_MAPPERS = {
 
         if (isElevenLabsMusic) {
             mapped.duration = args.duration || 10;
-            mapped.outputFormat = args.outputFormat || 'wav_cd_quality';
+            mapped.outputFormat = args.outputFormat || "wav_cd_quality";
             mapped.forceInstrumental = args.forceInstrumental ?? true;
         }
 
@@ -600,7 +766,7 @@ export const PARAM_MAPPERS = {
 
 // Convert gs:// URI to HTTPS URL
 function convertGcsToHttp(gcsUri) {
-    return gcsUri.replace('gs://', 'https://storage.googleapis.com/');
+    return gcsUri.replace("gs://", "https://storage.googleapis.com/");
 }
 
 // Extract video URL from Veo response structures
@@ -618,7 +784,8 @@ function extractVideoUrl(video) {
 function normalizeVeoResponse(rawResult) {
     let parsed;
     try {
-        parsed = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult;
+        parsed =
+            typeof rawResult === "string" ? JSON.parse(rawResult) : rawResult;
     } catch {
         return rawResult; // Not JSON — return as-is
     }
@@ -646,9 +813,21 @@ function normalizeVeoResponse(rawResult) {
 function normalizeGeminiResponse(rawResult, resolver) {
     const artifacts = resolver?.pathwayResultData?.artifacts;
     if (artifacts && Array.isArray(artifacts)) {
-        const imageArtifact = artifacts.find(a => a.type === 'image');
+        const imageArtifact = artifacts.find((a) => a.type === "image");
         if (imageArtifact?.data) {
-            return `data:${imageArtifact.mimeType || 'image/png'};base64,${imageArtifact.data}`;
+            return `data:${imageArtifact.mimeType || "image/png"};base64,${imageArtifact.data}`;
+        }
+    }
+    return rawResult;
+}
+
+function normalizeMediaArtifactResponse(rawResult, resolver, type, fallbackMimeType) {
+    const artifacts = resolver?.pathwayResultData?.artifacts;
+    if (Array.isArray(artifacts)) {
+        const artifact = artifacts.find((a) => a.type === type);
+        if (artifact?.url) return artifact.url;
+        if (artifact?.data) {
+            return `data:${artifact.mimeType || fallbackMimeType};base64,${artifact.data}`;
         }
     }
     return rawResult;
@@ -660,7 +839,8 @@ function normalizeGeminiResponse(rawResult, resolver) {
 function normalizeOpenAIImageResponse(rawResult) {
     let parsed;
     try {
-        parsed = typeof rawResult === 'string' ? JSON.parse(rawResult) : rawResult;
+        parsed =
+            typeof rawResult === "string" ? JSON.parse(rawResult) : rawResult;
     } catch {
         return rawResult; // Not JSON — pass through
     }
@@ -670,7 +850,7 @@ function normalizeOpenAIImageResponse(rawResult) {
 
     if (first.url) return first.url;
     if (first.b64_json) {
-        const mime = `image/${parsed.output_format || 'png'}`;
+        const mime = `image/${parsed.output_format || "png"}`;
         return `data:${mime};base64,${first.b64_json}`;
     }
     return rawResult;
@@ -679,9 +859,9 @@ function normalizeOpenAIImageResponse(rawResult) {
 function normalizeAudioResponse(rawResult, resolver) {
     const artifacts = resolver?.pathwayResultData?.artifacts;
     if (Array.isArray(artifacts)) {
-        const audioArtifact = artifacts.find(a => a.type === 'audio');
+        const audioArtifact = artifacts.find((a) => a.type === "audio");
         if (audioArtifact?.data) {
-            return `data:${audioArtifact.mimeType || 'audio/mpeg'};base64,${audioArtifact.data}`;
+            return `data:${audioArtifact.mimeType || "audio/mpeg"};base64,${audioArtifact.data}`;
         }
         if (audioArtifact?.url) {
             return audioArtifact.url;
@@ -694,85 +874,108 @@ function normalizeAudioResponse(rawResult, resolver) {
 export default {
     prompt: [],
     inputParameters: {
-        model: '',
-        text: '',
-        inputImages: { type: 'array', items: { type: 'string' } },
-        inputImageRoles: { type: 'array', items: { type: 'string' } },
-        inputVideos: { type: 'array', items: { type: 'string' } },
-        aspectRatio: '',
+        model: "",
+        text: "",
+        inputImages: { type: "array", items: { type: "string" } },
+        inputImageRoles: { type: "array", items: { type: "string" } },
+        inputVideos: { type: "array", items: { type: "string" } },
+        inputAudio: { type: "array", items: { type: "string" } },
+        processingType: "",
+        scene: "",
+        targetResolution: "",
+        targetFps: 0,
+        enhanceModel: "",
+        upscaleFactor: "",
+        subjectDetection: "",
+        faceEnhancement: false,
+        faceEnhancementCreativity: 0,
+        faceEnhancementStrength: 0.8,
+        aspectRatio: "",
         duration: 0,
-        outputFormat: '',
+        outputFormat: "",
         outputQuality: 0,
         forceInstrumental: true,
-        inputAudioUrl: '',
-        audioUrl: '',
-        audioFormat: '',
+        inputAudioUrl: "",
+        audioUrl: "",
+        audio: "",
+        audioFormat: "",
         sampleRate: 0,
         bitrate: 0,
-        lyrics: '',
+        lyrics: "",
         isInstrumental: false,
         lyricsOptimizer: false,
-        voiceName: '',
-        speaker1Name: '',
-        speaker1VoiceName: '',
-        speaker2Name: '',
-        speaker2VoiceName: '',
-        mode: '',
-        language: '',
-        speaker: '',
-        referenceAudio: '',
-        referenceAudioUrl: '',
-        referenceText: '',
-        styleInstruction: '',
-        voiceDescription: '',
-        voice: { type: 'string' },
-        stability: { type: 'number' },
-        similarityBoost: { type: 'number' },
-        style: { type: 'number' },
-        speed: { type: 'number' },
-        previousText: { type: 'string' },
-        nextText: { type: 'string' },
-        languageCode: { type: 'string' },
-        voiceId: { type: 'string' },
-        customVoiceId: { type: 'string' },
-        volume: { type: 'number' },
-        pitch: { type: 'integer' },
-        emotion: { type: 'string' },
-        channel: { type: 'string' },
-        languageBoost: { type: 'string' },
-        subtitleEnable: { type: 'boolean' },
-        englishNormalization: { type: 'boolean' },
-        quality: '',
-        negativePrompt: '',
+        voiceName: "",
+        speaker1Name: "",
+        speaker1VoiceName: "",
+        speaker2Name: "",
+        speaker2VoiceName: "",
+        mode: "",
+        language: "",
+        speaker: "",
+        referenceAudio: "",
+        referenceAudioUrl: "",
+        referenceText: "",
+        styleInstruction: "",
+        voiceDescription: "",
+        voice: { type: "string" },
+        voiceScript: { type: "string" },
+        voiceLanguage: { type: "string" },
+        voicePrompt: { type: "string" },
+        videoPrompt: { type: "string" },
+        stability: { type: "number" },
+        similarityBoost: { type: "number" },
+        style: { type: "number" },
+        speed: { type: "number" },
+        previousText: { type: "string" },
+        nextText: { type: "string" },
+        languageCode: { type: "string" },
+        voiceId: { type: "string" },
+        customVoiceId: { type: "string" },
+        volume: { type: "number" },
+        pitch: { type: "integer" },
+        emotion: { type: "string" },
+        channel: { type: "string" },
+        languageBoost: { type: "string" },
+        subtitleEnable: { type: "boolean" },
+        englishNormalization: { type: "boolean" },
+        quality: "",
+        negativePrompt: "",
         numberResults: 1,
         seed: -1,
         disableSafetyChecker: false,
         optimizePrompt: false,
         generateAudio: false,
-        resolution: '',
+        cutFirstSecond: true,
+        noOp: false,
+        strengthNegativePrompt: 0.5,
+        disableSafetyFilter: true,
+        disablePromptUpsampling: false,
+        resolution: "",
         cameraFixed: false,
         enhancePrompt: true,
-        imageSize: '',
+        imageSize: "",
         width: 0,
         height: 0,
-        size: '',
-        contextId: '',
+        size: "",
+        contextId: "",
         async: false,
     },
-    model: 'oai-gpt4o', // placeholder — executePathway delegates to sub-pathways
+    model: "oai-gpt4o", // placeholder — executePathway delegates to sub-pathways
     timeout: 60 * 30,
 
     executePathway: async ({ args, resolver }) => {
         const modelId = args.model;
         if (!modelId) {
-            throw new Error('media_generate requires a model parameter');
+            throw new Error("media_generate requires a model parameter");
         }
 
         // Look up model config to find the target pathway
-        const allModels = config.get('models');
+        const allModels = config.get("models");
         const modelConfig = allModels[modelId];
         if (!modelConfig?.metadata?.pathwayName) {
-            throw new Error(`Model '${modelId}' not found or has no pathwayName in metadata`);
+            throw new Error(
+                `Model '${modelId}' not found or has no pathwayName in metadata`,
+            );
         }
 
         const pathwayName = modelConfig.metadata.pathwayName;
@@ -785,7 +988,10 @@ export default {
         // Build pathway-specific parameters from standardized inputs
         const inputImages = (args.inputImages || []).filter(Boolean);
         const inputVideos = (args.inputVideos || []).filter(Boolean);
-        const mappedArgs = mapper(args, inputImages, inputVideos);
+        const inputAudio = (args.inputAudio || args.inputAudios || []).filter(
+            Boolean,
+        );
+        const mappedArgs = mapper(args, inputImages, inputVideos, inputAudio);
 
         // Note: do NOT propagate async to sub-pathways. The parent
         // media_generate is already async (callers subscribe to its requestId).
@@ -793,7 +999,7 @@ export default {
         // normalized (e.g. Veo JSON → data: URI) before being published.
 
         // Call the sub-pathway
-        const maxRetries = pathwayName.startsWith('image_gemini') ? 3 : 0;
+        const maxRetries = pathwayName.startsWith("image_gemini") ? 3 : 0;
         let result = null;
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -801,32 +1007,49 @@ export default {
                 result = await callPathway(pathwayName, mappedArgs, resolver);
 
                 // For Gemini pathways: check if we got artifacts
-                if (pathwayName.startsWith('image_gemini')) {
-                    const normalized = normalizeGeminiResponse(result, resolver);
+                if (pathwayName.startsWith("image_gemini")) {
+                    const normalized = normalizeGeminiResponse(
+                        result,
+                        resolver,
+                    );
                     if (normalized !== result) {
                         return normalized; // Got a valid data: URI
                     }
                     // No artifacts — retry if we have attempts left
                     if (attempt < maxRetries) {
                         const delay = Math.pow(2, attempt) * 1000;
-                        logger.warn(`Gemini returned no artifacts, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
-                        await new Promise(r => setTimeout(r, delay));
+                        logger.warn(
+                            `Gemini returned no artifacts, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`,
+                        );
+                        await new Promise((r) => setTimeout(r, delay));
                         continue;
                     }
                     return result; // No artifacts after all retries
                 }
 
                 // Normalize Veo responses
-                if (pathwayName === 'video_veo') {
+                if (pathwayName === "video_veo") {
                     return normalizeVeoResponse(result);
                 }
 
+                if (pathwayName === "video_gemini_omni") {
+                    return normalizeMediaArtifactResponse(
+                        result,
+                        resolver,
+                        "video",
+                        "video/mp4",
+                    );
+                }
+
                 // Normalize Azure OpenAI image responses (gpt-image-2, DALL-E 3, …)
-                if (pathwayName === 'image_gpt_image_2') {
+                if (pathwayName === "image_gpt_image_2") {
                     return normalizeOpenAIImageResponse(result);
                 }
 
-                if (pathwayName.startsWith('music_') || pathwayName.startsWith('tts_')) {
+                if (
+                    pathwayName.startsWith("music_") ||
+                    pathwayName.startsWith("tts_")
+                ) {
                     return normalizeAudioResponse(result, resolver);
                 }
 
@@ -835,8 +1058,10 @@ export default {
             } catch (error) {
                 if (attempt < maxRetries) {
                     const delay = Math.pow(2, attempt) * 1000;
-                    logger.warn(`media_generate attempt ${attempt + 1} failed, retrying: ${error.message}`);
-                    await new Promise(r => setTimeout(r, delay));
+                    logger.warn(
+                        `media_generate attempt ${attempt + 1} failed, retrying: ${error.message}`,
+                    );
+                    await new Promise((r) => setTimeout(r, delay));
                     continue;
                 }
                 throw error;

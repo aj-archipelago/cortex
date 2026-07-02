@@ -6,9 +6,7 @@ The Cortex File Handler is a service that processes files through various operat
 
 ## Storage Architecture
 
-The file handler uses a unified storage approach with Azure Blob Storage:
-- **Single Container**: All files are stored in a single Azure Blob Storage container
-- **Scoped Paths**: Folder paths and Redis metadata provide per-context lookup and isolation
+The file handler uses Azure Blob Storage as primary storage, with optional Google Cloud Storage backup support.
 
 ## Request Methods
 
@@ -179,7 +177,6 @@ The file handler uses a unified storage approach with Azure Blob Storage:
   - Organized by requestId folders
   - Azure: Uses SAS tokens for access
     - All files are stored in a single container (configured via `AZURE_STORAGE_CONTAINER_NAME` environment variable)
-    - Lifecycle management automatically deletes temporary files after 30 days
     - No container specification is supported - all files use the single configured container
   - Local: Served via HTTP on configured port
 - **GCS** (if configured):

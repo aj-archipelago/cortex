@@ -14,16 +14,17 @@ import {
 } from "./shared/transcribe_xai/shared.js";
 
 const transcribeXai = {
-  // Inherit input parameters and resolver from transcribe_gemini for shape
-  // parity with the other transcribe pathways.
+  // Inherit input parameters / resolver from transcribe_gemini for shape parity
+  // with the other transcribe pathways.
   ...transcribeGemini,
   inputParameters: {
     ...transcribeGemini.inputParameters,
     aiName: "Jarvis",
   },
   // Cortex PathwayResolver requires a configured model even when executePathway
-  // performs the external xAI call itself. xAI-only requests never call this model.
-  model: "gemini-flash-3-vision",
+  // performs the external xAI call itself. This value preserves the inherited
+  // transcribe_gemini pathway shape; xAI-only requests never call this model.
+  model: "gemini-flash-35-vision",
   timeout: 3600,
 
   executePathway: async function ({ args, resolver }) {

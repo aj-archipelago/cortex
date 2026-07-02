@@ -1,10 +1,29 @@
 import logger from "../lib/logger.js";
 import { publishRequestProgress } from "../lib/redisSubscription.js";
+import { normalizeTranscriptionError } from "../lib/transcriptionErrors.js";
 import { alignSubtitles } from "../lib/util.js";
 import { getMediaChunks, isYoutubeUrl } from "../lib/fileUtils.js";
 import { Prompt } from "../server/prompt.js";
+import { callPathway } from "../lib/pathwayTools.js";
 
 const OFFSET_CHUNK = 500; //seconds of each chunk offset, only used if helper does not provide
+export const isGeminiSafetyBlockedResult = (result) => {
+    const finishReason = result?.finishReason || result?.finish_reason;
+    return Boolean(
+        finishReason === 'SAFETY' ||
+        finishReason === 'content_filter' ||
+        result?.promptFeedback?.blockReason
+    );
+};
+export const getTranscriptionFallbackFile = (chunk) => {
+    return chunk?.uri || chunk?.url || chunk?.downloadUrl || chunk?.signedUrl || chunk?.gcs;
+};
+export const geminiTranscriptionSafetySettings = [
+    {category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE'},
+    {category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE'},
+    {category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE'},
+    {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE'},
+];
 
 export default {
     prompt:
@@ -26,10 +45,7 @@ export default {
         contextId: ``,
     },
     timeout: 3600, // in seconds
-    geminiSafetySettings: [{category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH'},
-        {category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH'},
-        {category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH'},
-        {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH'}],
+    geminiSafetySettings: geminiTranscriptionSafetySettings,
 
     executePathway: async ({args, runAllPrompts, resolver}) => {
         let intervalId;
@@ -67,7 +83,9 @@ export default {
         sendProgress(true);
         intervalId = setInterval(() => sendProgress(true), 3000);
 
-        const { file, wordTimestamped, maxLineWidth } = args;
+        const { file, language, wordTimestamped, maxLineWidth } = args;
+        const allowTranscriptionFallback =
+            args.allowTranscriptionFallback !== false;
 
         const responseFormat = args.responseFormat || 'text';
 
@@ -103,6 +121,24 @@ export default {
             respectLimitsPrompt += `  These subtitles will be shown in a ${possiblePlacement} formatted video player.  Each subtitle line should not exceed ${maxLineWidth} characters to fit the player.`;
         }
 
+        function getLanguageInstruction(language) {
+            const normalizedLanguage = String(language || '').toLowerCase();
+            if (normalizedLanguage === 'hi' || normalizedLanguage === 'hindi') {
+                return 'The spoken language is Hindi. Output the transcript in Hindi Devanagari script. Do not use Latin, Urdu/Perso-Arabic, or Gurmukhi script.';
+            }
+            if (normalizedLanguage === 'ur' || normalizedLanguage === 'urdu') {
+                return 'The spoken language is Urdu. Output the transcript in Urdu/Perso-Arabic script. Do not use Devanagari/Hindi script.';
+            }
+            if (
+                normalizedLanguage === 'pa' ||
+                normalizedLanguage === 'punjabi' ||
+                normalizedLanguage === 'panjabi'
+            ) {
+                return 'The spoken language is Punjabi. Output the transcript in Gurmukhi script. Do not use Devanagari/Hindi script.';
+            }
+            return '';
+        }
+
         function getMessages(file) {
             
             // Base system content that's always included
@@ -112,6 +148,11 @@ You are a transcription assistant. Your job is to transcribe the audio/video con
 IMPORTANT: Only provide the transcription in your response - no explanations, comments, or additional text.
 
 Format your response in ${responseFormat} format.`;
+
+            const languageInstruction = getLanguageInstruction(language);
+            if (languageInstruction) {
+                systemContent += `\n\n${languageInstruction}`;
+            }
 
             // Only include timestamp instructions if we're not using plain text format
             if (responseFormat !== 'text') {
@@ -203,14 +244,31 @@ REMEMBER:
 
         const processChunksParallel = async (chunks, args) => {
             try {
-                const chunkPromises = chunks.map(async (chunk, index) => ({
-                    index,
-                    result: await runAllPrompts({ 
+                const chunkPromises = chunks.map(async (chunk, index) => {
+                    const result = await runAllPrompts({
                         ...args, 
                         messages: getMessages(chunk.gcs || chunk.uri, responseFormat),
                         requestId: `${requestId}-${index}`
-                    })
-                }));
+                    });
+                    if (isGeminiSafetyBlockedResult(result)) {
+                        if (!allowTranscriptionFallback) {
+                            const error = new Error('Gemini transcription blocked by safety ratings');
+                            error.code = 'GEMINI_SAFETY_BLOCKED';
+                            throw error;
+                        }
+                        logger.warn(`Gemini transcription blocked by safety ratings; falling back to transcribe for chunk ${index + 1}`);
+                        return {
+                            index,
+                            result: await callPathway('transcribe', {
+                                ...args,
+                                file: getTranscriptionFallbackFile(chunk),
+                                async: false,
+                                stream: false,
+                            }, resolver),
+                        };
+                    }
+                    return { index, result };
+                });
         
                 const results = await Promise.all(
                 chunkPromises.map(promise => 
@@ -246,7 +304,9 @@ REMEMBER:
         return transcriptArray.join(` `);
     }catch(error){
         logger.error(`Error in transcribing: ${error}`);
-        throw error;
+        throw normalizeTranscriptionError(error, {
+            isYoutube: isYoutubeUrl(args?.file),
+        });
     }finally{
         intervalId && clearInterval(intervalId);
     }

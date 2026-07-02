@@ -524,6 +524,57 @@
                 "requiredEnv": "GCP_SERVICE_ACCOUNT_KEY"
             }
         },
+        "gemini-flash-lite-31-image": {
+            "type": "GEMINI-3-IMAGE",
+            "endpoints": [
+                {
+                    "name": "GLOBAL GEMINI-FLASH-LITE-3.1-IMAGE",
+                    "url": "https://aiplatform.googleapis.com/v1/projects/project-id/locations/global/publishers/google/models/gemini-3.1-flash-lite-image-preview",
+                    "headers": {
+                        "Content-Type": "application/json"
+                    },
+                    "requestsPerSecond": 10
+                }
+            ],
+            "requestsPerSecond": 10,
+            "maxTokenLength": 128000,
+            "maxReturnTokens": 32768,
+            "supportsStreaming": true,
+            "metadata": {
+                "displayName": "Gemini 3.1 Flash Lite Image",
+                "category": "image",
+                "pathwayName": "image_gemini_31_lite",
+                "resultKey": "image_gemini_31_lite",
+                "preferredUrlFormat": "gcs",
+                "mediaDefaults": {
+                    "inputImages": [
+                        0,
+                        3
+                    ],
+                    "quality": "high",
+                    "aspectRatio": "1:1",
+                    "optimizePrompt": true
+                },
+                "mediaToggles": [
+                    "optimizePrompt"
+                ],
+                "availableAspectRatios": [
+                    "1:1",
+                    "16:9",
+                    "9:16",
+                    "4:3",
+                    "3:4"
+                ],
+                "availableImageSizes": [
+                    "512",
+                    "1K",
+                    "2K",
+                    "4K"
+                ],
+                "provider": "google",
+                "requiredEnv": "GCP_SERVICE_ACCOUNT_KEY"
+            }
+        },
         "google-gemini-3.1-flash-tts": {
             "type": "GEMINI-TTS",
             "endpoints": [

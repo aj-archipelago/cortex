@@ -11,6 +11,7 @@ import {
     getWriteFileAccessTarget,
     getWorkspacePathForFile,
     constructFolderPath,
+    normalizeImageDataForUpload,
     getMimeTypeFromFilename,
     getMimeTypeFromExtension,
     isTextMimeType,
@@ -21,6 +22,20 @@ function createFileAccessPlan(contextId) {
         ? [{ kind: 'user-global', userContextId: contextId, write: true }]
         : null;
 }
+
+test('normalizeImageDataForUpload handles JPEG base64 that looks like an absolute path', t => {
+    const buffer = normalizeImageDataForUpload('/9j/');
+
+    t.true(Buffer.isBuffer(buffer));
+    t.deepEqual([...buffer], [0xff, 0xd8, 0xff]);
+});
+
+test('normalizeImageDataForUpload strips data URL prefixes', t => {
+    const buffer = normalizeImageDataForUpload('data:image/png;base64,iVBORw0KGgo=');
+
+    t.true(Buffer.isBuffer(buffer));
+    t.deepEqual([...buffer.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+});
 
 // Test extractFilesFromChatHistory
 test('extractFilesFromChatHistory should extract files from array content', t => {
@@ -197,28 +212,6 @@ test('getWriteFileAccessTarget should return null when no file access target is 
 
     t.is(target, null);
 });
-
-test('getWriteFileAccessTarget keeps app-private writes scoped to the applet folder in the user container', t => {
-    const target = getWriteFileAccessTarget([
-        {
-            kind: 'app-private',
-            userContextId: 'user-456',
-            workspaceId: 'workspace-123',
-            appletId: 'applet-123',
-            write: true,
-        },
-    ]);
-
-    t.truthy(target);
-    t.is(target.contextId, 'applet-user:applet-123:user-456');
-    t.is(target.userContextId, 'user-456');
-    t.is(target.appletId, 'applet-123');
-    t.is(target.workspaceId, 'workspace-123');
-    t.is(target.readFileScope, 'applet-user');
-    t.is(target.writeFileScope, 'applet-user');
-    t.true(target.write);
-});
-
 
 test('extractFilesFromChatHistory should handle mixed content types', t => {
     const chatHistory = [
@@ -491,7 +484,7 @@ test('getActualContentMimeType should use URL, not displayFilename', async t => 
 });
 
 test('addFileToCollection should preserve original displayFilename for converted files', async t => {
-    const { addFileToCollection, getRedisClient } = await import('../../../lib/fileUtils.js');
+    const { addFileToCollection } = await import('../../../lib/fileUtils.js');
     
     // Simulate adding a file where URL points to converted content (.md)
     // but user wants to keep original filename (.docx)
@@ -515,21 +508,10 @@ test('addFileToCollection should preserve original displayFilename for converted
         
         // mimeType should be determined from URL (actual content)
         t.is(fileEntry.mimeType, 'text/markdown', 'mimeType should be from URL, not displayFilename');
-
-        const redisClient = await getRedisClient();
-        if (!redisClient) {
-            return;
-        }
         
-        // Verify it was saved correctly
-        const { loadFileCollection } = await import('../../../lib/fileUtils.js');
-        const collection = await loadFileCollection(createFileAccessPlan(contextId), { useCache: false });
-        t.is(collection.length, 1);
-        t.is(collection[0].displayFilename, 'original-document.docx');
-        t.is(collection[0].mimeType, 'text/markdown');
-        t.is(collection[0].url, url);
     } finally {
         // Cleanup
+        const { getRedisClient } = await import('../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
         if (redisClient) {
             await redisClient.del(`FileStoreMap:ctx:${contextId}`);

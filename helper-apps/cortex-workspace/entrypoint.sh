@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-# Mount Azure Blob Storage at /blob-files if credentials are provided, then
-# expose it at /workspace/files for compatibility.
+# Mount Azure Blob Storage at /cloud-files if credentials are provided, then
+# expose it at /workspace/files as a compatibility symlink.
 # The blob container name (e.g. cortexfiles-local, cortexfiles-local-abc123)
 # comes from the AZURE_BLOB_CONTAINER env var, set per environment.
 #
@@ -12,7 +12,7 @@ set -e
 
 WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 PERSIST_DIR="${WORKSPACE_PERSIST_DIR:-/persist}"
-BLOB_FILES_DIR="${WORKSPACE_BLOB_FILES_DIR:-/blob-files}"
+BLOB_FILES_DIR="${WORKSPACE_BLOB_FILES_DIR:-/cloud-files}"
 CHECKPOINT_PATH="${WORKSPACE_CHECKPOINT_PATH:-$PERSIST_DIR/workspace.tar.gz}"
 
 mkdir -p "$WORKSPACE_DIR" "$PERSIST_DIR" "$BLOB_FILES_DIR"
@@ -23,20 +23,14 @@ expose_blob_files() {
     umount "$target" >/dev/null 2>&1 || true
     umount -l "$target" >/dev/null 2>&1 || true
     if ! rm -rf "$target" >/dev/null 2>&1; then
-        echo "WARNING: ${target} is busy; leaving existing blob-files exposure in place"
+        echo "WARNING: ${target} is busy; leaving existing cloud-files exposure in place"
         return 0
     fi
-    mkdir -p "$target"
 
-    if mount --bind "$BLOB_FILES_DIR" "$target" >/dev/null 2>&1; then
-        echo "Exposed ${BLOB_FILES_DIR} at ${target} with bind mount"
+    if ln -s "$BLOB_FILES_DIR" "$target"; then
+        echo "Exposed ${BLOB_FILES_DIR} at ${target} with symlink"
     else
-        if rmdir "$target" >/dev/null 2>&1 || rm -rf "$target" >/dev/null 2>&1; then
-            ln -s "$BLOB_FILES_DIR" "$target"
-            echo "WARNING: bind mount failed; ${target} is a symlink to ${BLOB_FILES_DIR}"
-        else
-            echo "WARNING: bind mount failed and ${target} is busy; leaving existing exposure in place"
-        fi
+        echo "WARNING: failed to symlink ${target} to ${BLOB_FILES_DIR}; leaving existing exposure in place"
     fi
 }
 

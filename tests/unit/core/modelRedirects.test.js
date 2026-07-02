@@ -134,7 +134,7 @@ test.serial('buildModelEndpoints handles multiple redirects', (t) => {
             endpoints: [{ name: 'ep2', url: 'https://example.com', headers: {}, requestsPerSecond: 10 }],
             maxTokenLength: 200000,
         },
-        'claude-47-opus-vertex': {
+        'claude-48-opus-vertex': {
             type: 'CLAUDE-4-VERTEX',
             endpoints: [{ name: 'ep3', url: 'https://example.com', headers: {}, requestsPerSecond: 10 }],
             maxTokenLength: 1000000,
@@ -147,7 +147,8 @@ test.serial('buildModelEndpoints handles multiple redirects', (t) => {
             if (key === 'modelRedirects') return {
                 'claude-3-haiku-vertex': 'claude-45-haiku-vertex',
                 'claude-37-sonnet-vertex': 'claude-46-sonnet-vertex',
-                'claude-46-opus-vertex': 'claude-47-opus-vertex',
+                'claude-46-opus-vertex': 'claude-48-opus-vertex',
+                'claude-47-opus-vertex': 'claude-48-opus-vertex',
             };
             return config.get(key);
         },
@@ -157,7 +158,8 @@ test.serial('buildModelEndpoints handles multiple redirects', (t) => {
 
     t.is(modelEndpoints['claude-3-haiku-vertex'], modelEndpoints['claude-45-haiku-vertex']);
     t.is(modelEndpoints['claude-37-sonnet-vertex'], modelEndpoints['claude-46-sonnet-vertex']);
-    t.is(modelEndpoints['claude-46-opus-vertex'], modelEndpoints['claude-47-opus-vertex']);
+    t.is(modelEndpoints['claude-46-opus-vertex'], modelEndpoints['claude-48-opus-vertex']);
+    t.is(modelEndpoints['claude-47-opus-vertex'], modelEndpoints['claude-48-opus-vertex']);
 });
 
 // ---------------------------------------------------------------------------
