@@ -14,7 +14,6 @@ export default {
     },
     inputChunkSize: 1000,
     model: 'oai-gpt4o',
-    enableDuplicateRequests: false,
     useParallelChunkProcessing: true,
 
 }

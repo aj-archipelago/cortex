@@ -11,7 +11,7 @@ import { Prompt } from '../server/prompt.js';
 // which overrides this. Kept so the pathway is usable/testable with no caller prompt.
 // {{count}} is Handlebars-rendered from the request args.
 const DEFAULT_SYSTEM_PROMPT =
-`You are an editorial assistant for Al Jazeera. Summarise the article the user provides into exactly {{count}} bullet points, written in the same language as the article. Respond ONLY with a JSON object of the form {"bullets":["…","…","…"]}. Each bullet must be a single self-contained fact of at most 140 characters, must not introduce facts that are not in the article, and must preserve names accurately.`;
+`You are an editorial assistant. Summarise the article the user provides into exactly {{count}} bullet points, written in the same language as the article. Respond ONLY with a JSON object of the form {"bullets":["…","…","…"]}. Each bullet must be a single self-contained fact of at most 140 characters, must not introduce facts that are not in the article, and must preserve names accurately.`;
 
 export default {
     // Deterministic output for a structured summary.

@@ -1,7 +1,6 @@
 export default {
   prompt: ["{{text}}"],
 
-  enableDuplicateRequests: false,
   inputParameters: {
     model: "replicate-kling-v2.5-turbo-pro",
     aspectRatio: "16:9",

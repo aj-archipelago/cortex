@@ -51,7 +51,6 @@ Provide a clear summary preserving all URLs, citations, and numerical data.`
     },
     model: 'gemini-flash-35-vision',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 120,
     
     executePathway: async ({args, runAllPrompts}) => {

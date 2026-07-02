@@ -56,6 +56,5 @@ The user has selected an input image for Lyria. Make the prompt explicitly use t
   max_tokens: 2048,
   model: "oai-gpt-chat-latest",
   useInputChunking: false,
-  enableDuplicateRequests: false,
   timeout: 30,
 };

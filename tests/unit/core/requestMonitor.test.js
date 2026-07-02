@@ -23,11 +23,11 @@ test('RequestMonitor: getAverageCallDuration', async t => {
   const rm = new RequestMonitor();
 
   const callId1 = rm.startCall();
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  rm.callStartTimes.set(callId1, new Date(Date.now() - 1000));
   rm.endCall(callId1);
 
   const callId2 = rm.startCall();
-  await new Promise(resolve => setTimeout(resolve, 2000));
+  rm.callStartTimes.set(callId2, new Date(Date.now() - 2000));
   rm.endCall(callId2);
 
   const average = rm.getAverageCallDuration();
@@ -57,31 +57,27 @@ test('RequestMonitor: incrementError429Count', t => {
   t.is(rm.error429Count.size(), 1);
 });
 
-test('RequestMonitor: getCallRate', async t => {
+test('RequestMonitor: getCallRate', t => {
   const rm = new RequestMonitor();
 
   rm.startCall();
   rm.endCall();
-
-  await new Promise(resolve => setTimeout(resolve, 1000));
 
   const callRate = rm.getCallRate();
-  t.truthy(callRate > 0.9 && callRate < 1.1);
+  t.is(callRate, 1);
 });
 
-test('RequestMonitor: getPeakCallRate', async t => {
+test('RequestMonitor: getPeakCallRate', t => {
   const rm = new RequestMonitor();
 
   rm.startCall();
   rm.endCall();
-
-  await new Promise(resolve => setTimeout(resolve, 1000));
 
   rm.startCall();
   rm.endCall();
 
   const peakCallRate = rm.getPeakCallRate();
-  t.truthy(peakCallRate > 1.9 && peakCallRate < 2.1);
+  t.is(peakCallRate, 2);
 });
 
 test('RequestMonitor: getError429Rate', t => {

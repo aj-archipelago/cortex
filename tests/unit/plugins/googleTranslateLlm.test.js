@@ -5,6 +5,7 @@ import { ModelExecutor } from "../../../server/modelExecutor.js";
 process.env.GCP_SERVICE_ACCOUNT_KEY ||= JSON.stringify({
   project_id: "service-account-project",
 });
+process.env.GOOGLE_CLOUD_PROJECT_ID ||= "service-account-project";
 
 const pathway = {
   name: "translate_google_llm",

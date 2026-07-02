@@ -17,7 +17,6 @@ export default {
     max_tokens: 4096,
     model: 'oai-gpt4o',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     
     executePathway: async ({args, runAllPrompts, resolver}) => {

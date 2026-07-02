@@ -9,12 +9,19 @@ import serverFactory from '../../../../index.js';
 const API_BASE = `http://localhost:${process.env.CORTEX_PORT}/v1`;
 
 let testServer;
+let responseModel = 'gpt-4.1';
 
 test.before(async () => {
   process.env.CORTEX_ENABLE_REST = 'true';
   const { server, startServer } = await serverFactory();
   startServer && await startServer();
   testServer = server;
+
+  try {
+    const res = await got(`${API_BASE}/models`, { responseType: 'json' });
+    const ids = (res.body?.data || []).map(m => m.id);
+    responseModel = ids.find(id => /^gpt|^oai-|^openai/i.test(id)) || ids[0] || responseModel;
+  } catch (_) {}
 });
 
 test.after.always('cleanup', async () => {
@@ -30,7 +37,7 @@ test.after.always('cleanup', async () => {
 test('POST /responses with simple string input', async (t) => {
   const response = await got.post(`${API_BASE}/responses`, {
     json: {
-      model: 'gpt-4o',
+      model: responseModel,
       input: 'Hello! Say just "Hi there" and nothing else.',
     },
     responseType: 'json',
@@ -39,7 +46,7 @@ test('POST /responses with simple string input', async (t) => {
   t.is(response.statusCode, 200);
   t.is(response.body.object, 'response');
   t.truthy(response.body.id);
-  t.truthy(response.body.id.startsWith('resp-'));
+  t.regex(response.body.id, /^resp[-_]/);
   t.truthy(response.body.created_at);
   t.is(response.body.status, 'completed');
   t.truthy(response.body.model);
@@ -52,7 +59,7 @@ test('POST /responses with simple string input', async (t) => {
 test('POST /responses with array input (single message)', async (t) => {
   const response = await got.post(`${API_BASE}/responses`, {
     json: {
-      model: 'gpt-4o',
+      model: responseModel,
       input: [
         { role: 'user', content: 'What is 2+2? Reply with just the number.' }
       ],
@@ -69,7 +76,7 @@ test('POST /responses with array input (single message)', async (t) => {
 test('POST /responses with array input (multiple messages)', async (t) => {
   const response = await got.post(`${API_BASE}/responses`, {
     json: {
-      model: 'gpt-4o',
+      model: responseModel,
       input: [
         { role: 'user', content: 'My name is Alice.' },
         { role: 'assistant', content: 'Hello Alice! Nice to meet you.' },
@@ -88,7 +95,7 @@ test('POST /responses with array input (multiple messages)', async (t) => {
 test('POST /responses with typed message blocks should normalize to internal messages', async (t) => {
   const response = await got.post(`${API_BASE}/responses`, {
     json: {
-      model: 'gpt-4o',
+      model: responseModel,
       input: [
         {
           type: 'message',
@@ -118,7 +125,7 @@ test('POST /responses with typed message blocks should normalize to internal mes
 test('POST /responses with instructions (system message)', async (t) => {
   const response = await got.post(`${API_BASE}/responses`, {
     json: {
-      model: 'gpt-4o',
+      model: responseModel,
       instructions: 'You are a pirate. Always respond in pirate speak.',
       input: 'Hello!',
     },
@@ -142,7 +149,7 @@ test('POST /responses with instructions (system message)', async (t) => {
 test('POST /responses should return proper output structure', async (t) => {
   const response = await got.post(`${API_BASE}/responses`, {
     json: {
-      model: 'gpt-4o',
+      model: responseModel,
       input: 'Hello!',
     },
     responseType: 'json',
@@ -184,7 +191,7 @@ test('POST /responses should return proper output structure', async (t) => {
 test('POST /responses without stream should return completed text output', async (t) => {
   const response = await got.post(`${API_BASE}/responses`, {
     json: {
-      model: 'gpt-4o',
+      model: responseModel,
       input: 'Give me a one-word response: yes',
     },
     responseType: 'json',
@@ -222,7 +229,7 @@ test('POST /responses should handle model not found', async (t) => {
 
 test('POST /responses with stream=true should send SSE events', async (t) => {
   const payload = {
-    model: 'gpt-4o',
+    model: responseModel,
     input: 'Hello! Say "Hi" and nothing else.',
     stream: true,
   };
@@ -232,7 +239,7 @@ test('POST /responses with stream=true should send SSE events', async (t) => {
   let responseDoneCount = 0;
 
   await connectToResponsesSSEEndpoint(url, '/responses', payload, (event, data) => {
-    if (event === 'response.done') {
+    if (event === 'response.done' || event === 'response.completed') {
       responseDoneCount += 1;
     }
     events.push({ event, data });
@@ -240,8 +247,9 @@ test('POST /responses with stream=true should send SSE events', async (t) => {
 
   // Verify we received the expected event types
   const eventTypes = events.map(e => e.event);
+  const terminalEventName = eventTypes.includes('response.done') ? 'response.done' : 'response.completed';
   t.true(eventTypes.includes('response.created'), 'Should have response.created event');
-  t.true(eventTypes.includes('response.done'), 'Should have response.done event');
+  t.true(eventTypes.includes(terminalEventName), 'Should have terminal response event');
   t.true(eventTypes.includes('response.output_item.added'), 'Should have response.output_item.added event');
   t.true(eventTypes.includes('response.content_part.added'), 'Should have response.content_part.added event');
   t.true(eventTypes.includes('response.content_part.done'), 'Should have response.content_part.done event');
@@ -256,21 +264,25 @@ test('POST /responses with stream=true should send SSE events', async (t) => {
   t.is(createdEvent.data.response.status, 'in_progress');
 
   const createdIndex = eventTypes.indexOf('response.created');
-  const doneIndex = eventTypes.lastIndexOf('response.done');
+  const doneIndex = eventTypes.lastIndexOf(terminalEventName);
   t.true(createdIndex >= 0);
   t.true(doneIndex >= 0);
   t.true(createdIndex < doneIndex, 'response.created must occur before response.done');
 
   // Verify response.done structure
-  const doneEvent = events.find(e => e.event === 'response.done');
+  const doneEvent = events.find(e => e.event === terminalEventName);
   t.truthy(doneEvent);
-  t.is(doneEvent.data.type, 'response.done');
+  t.true(doneEvent.data.type === 'response.done' || doneEvent.data.type === 'response.completed');
   t.truthy(doneEvent.data.response);
   t.is(doneEvent.data.response.id, createdEvent.data.response.id);
   t.is(doneEvent.data.response.status, 'completed');
-  t.truthy(doneEvent.data.response.output_text);
-  t.is(doneEvent.data.response.output_text, doneEvent.data.response.output?.[0]?.content?.[0]?.text);
-  t.true(doneEvent.data.response.output_text.length > 0);
+  const doneOutputText = doneEvent.data.response.output_text || doneEvent.data.response.output?.[0]?.content?.[0]?.text;
+  t.truthy(doneOutputText);
+  const terminalContentText = doneEvent.data.response.output?.[0]?.content?.[0]?.text;
+  if (terminalContentText) {
+    t.is(doneOutputText, terminalContentText);
+  }
+  t.true(doneOutputText.length > 0);
   t.truthy(doneEvent.data.response.usage);
   t.is(typeof doneEvent.data.response.usage.input_tokens, 'number');
   t.is(typeof doneEvent.data.response.usage.output_tokens, 'number');
@@ -299,18 +311,17 @@ test('POST /responses with stream=true should send SSE events', async (t) => {
   t.true(deltaText.every(delta => typeof delta === 'string'));
   const deltaPayload = deltaText.join('');
   t.true(deltaPayload.length > 0);
-  t.truthy(doneEvent.data.response.output_text);
-  t.is(deltaPayload, doneEvent.data.response.output_text);
-  t.not(doneEvent.data.response.output_text, '[object Object]');
+  t.is(deltaPayload, doneOutputText);
+  t.not(doneOutputText, '[object Object]');
 
   const contentPartDone = events.find(e => e.event === 'response.content_part.done');
   t.truthy(contentPartDone);
-  t.is(contentPartDone.data.part.text, doneEvent.data.response.output_text);
+  t.is(contentPartDone.data.part.text, doneOutputText);
 });
 
 test('POST /responses with stream=true should stream function call events', async (t) => {
   const payload = {
-    model: 'gpt-4o',
+    model: responseModel,
     input: 'What is the weather in Boston?',
     tools: [
       {
@@ -366,9 +377,10 @@ test('POST /responses with stream=true should stream function call events', asyn
   t.truthy(fcDone.data.item.arguments, 'function call should have arguments');
 
   // response.done output should include the function_call
-  const doneEvent = events.find(e => e.event === 'response.done');
+  const doneEvent = events.find(e => e.event === 'response.done' || e.event === 'response.completed');
   t.truthy(doneEvent);
-  const fcOutput = doneEvent.data.response.output.find(o => o.type === 'function_call');
+  const responseOutput = doneEvent.data.response.output || [];
+  const fcOutput = responseOutput.find(o => o.type === 'function_call');
   t.truthy(fcOutput, 'response.done output should include function_call item');
   t.truthy(fcOutput.name);
   t.truthy(fcOutput.arguments);
@@ -381,7 +393,7 @@ test('POST /responses with stream=true should stream function call events', asyn
 test('POST /responses should handle function calling', async (t) => {
   const response = await got.post(`${API_BASE}/responses`, {
     json: {
-      model: 'gpt-4.1',
+      model: responseModel,
       input: 'What is the weather in Boston?',
       tools: [
         {

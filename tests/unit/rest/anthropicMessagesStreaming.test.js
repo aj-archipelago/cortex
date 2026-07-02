@@ -75,7 +75,8 @@ const simulateEvent = async (requestId, progress, data) => {
     });
 };
 
-const tick = () => new Promise(r => setTimeout(r, 20));
+// Yield once to let local pubsub handlers run.
+const tick = () => new Promise(resolve => setImmediate(resolve));
 
 // ============================================================================
 // 1) Text streaming baseline

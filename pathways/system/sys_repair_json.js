@@ -15,5 +15,4 @@ export default {
     },
     temperature: 0.0,
     enableCache: true,
-    enableDuplicateRequests: false,
 }

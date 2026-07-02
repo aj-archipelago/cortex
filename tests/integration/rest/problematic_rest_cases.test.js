@@ -7,23 +7,27 @@ import got from 'got';
 import serverFactory from '../../../index.js';
 
 const API_BASE = `http://localhost:${process.env.CORTEX_PORT}/v1`;
+const shouldRunRestLiveTests = process.env.CORTEX_RUN_REST_LIVE_TESTS === 'true';
+const liveRestTest = shouldRunRestLiveTests ? test : test.skip;
 
 let testServer;
 
-test.before(async () => {
-  process.env.CORTEX_ENABLE_REST = 'true';
-  const { server, startServer } = await serverFactory();
-  startServer && await startServer();
-  testServer = server;
-});
+if (shouldRunRestLiveTests) {
+  test.before(async () => {
+    process.env.CORTEX_ENABLE_REST = 'true';
+    const { server, startServer } = await serverFactory();
+    startServer && await startServer();
+    testServer = server;
+  });
 
-test.after.always('cleanup', async () => {
-  if (testServer) {
-    await testServer.stop();
-  }
-});
+  test.after.always('cleanup', async () => {
+    if (testServer) {
+      await testServer.stop();
+    }
+  });
+}
 
-test('POST /chat/completions - tool message with string content (debug-req-body.json case)', async (t) => {
+liveRestTest('POST /chat/completions - tool message with string content (debug-req-body.json case)', async (t) => {
   // Case from debug-req-body.json: Tool message with string content (not array)
   // This tests that tool messages with string content are handled correctly
   
@@ -90,7 +94,7 @@ test('POST /chat/completions - tool message with string content (debug-req-body.
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - system message with array content (debug-req-body2.json case)', async (t) => {
+liveRestTest('POST /chat/completions - system message with array content (debug-req-body2.json case)', async (t) => {
   // Case from debug-req-body2.json: System message with array content (text type)
   
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -123,7 +127,7 @@ test('POST /chat/completions - system message with array content (debug-req-body
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - assistant message with empty string content and tool_calls', async (t) => {
+liveRestTest('POST /chat/completions - assistant message with empty string content and tool_calls', async (t) => {
   // Case from debug-req-body2.json: Assistant message with empty string content and tool_calls
   
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -161,7 +165,7 @@ test('POST /chat/completions - assistant message with empty string content and t
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - assistant message with content array containing strings (should be converted to objects)', async (t) => {
+liveRestTest('POST /chat/completions - assistant message with content array containing strings (should be converted to objects)', async (t) => {
   // This tests the fix: content arrays cannot have standalone strings - they must be text content objects
   // This is the actual bug from debug-req-body2.json and debug-req-body3.json
   
@@ -200,7 +204,7 @@ test('POST /chat/completions - assistant message with content array containing s
   // The request should succeed because the plugin converts [""] to [{"type": "text", "text": ""}]
 });
 
-test('POST /chat/completions - tool message with string error content', async (t) => {
+liveRestTest('POST /chat/completions - tool message with string error content', async (t) => {
   // Case from debug-req-body2.json: Tool message with string content containing error JSON
   
   const errorContent = "{'success': False, 'error': '(pymysql.err.ProgrammingError) (1064, \"You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near \\'utc_date, \\'wire\\' AS source\\\\nFROM ucms_aje.wp_posts\\\\nWHERE post_status = \\'publish\\'\\\\n\\' at line 1\")\\n[SQL: SELECT id, post_title AS headline, post_date_gmt AS utc_date, \\'wire\\' AS source\\nFROM ucms_aje.wp_posts\\nWHERE post_status = \\'publish\\'\\n  AND post_type IN (\\'ajwire\\', \\'aje_wire\\')\\n  AND post_date_gmt >= UTC_TIMESTAMP() - INTERVAL 1 DAY\\nORDER BY post_date_gmt DESC\\nLIMIT 30;]\\n(Background on this error at: https://sqlalche.me/e/20/f405)', 'requested_database': 'ucms_aje'}";
@@ -237,7 +241,7 @@ test('POST /chat/completions - tool message with string error content', async (t
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - multiple tool calls in sequence', async (t) => {
+liveRestTest('POST /chat/completions - multiple tool calls in sequence', async (t) => {
   // Case from debug-req-body2.json: Multiple tool calls in sequence
   
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -287,7 +291,7 @@ test('POST /chat/completions - multiple tool calls in sequence', async (t) => {
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - messages with name fields (user and assistant)', async (t) => {
+liveRestTest('POST /chat/completions - messages with name fields (user and assistant)', async (t) => {
   // Case from debug-req-body.json and selectortestsimple.py: Messages with name fields
   
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -325,7 +329,7 @@ test('POST /chat/completions - messages with name fields (user and assistant)', 
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - complex multi-turn conversation with tool calls and name fields', async (t) => {
+liveRestTest('POST /chat/completions - complex multi-turn conversation with tool calls and name fields', async (t) => {
   // Case from debug-req-body3.json: Complex multi-turn conversation
   
   const response = await got.post(`${API_BASE}/chat/completions`, {
@@ -433,7 +437,7 @@ test('POST /chat/completions - complex multi-turn conversation with tool calls a
   t.truthy(response.body);
 });
 
-test('POST /chat/completions - assistant message with content array containing string (retry after error)', async (t) => {
+liveRestTest('POST /chat/completions - assistant message with content array containing string (retry after error)', async (t) => {
   // Case from debug-req-body2.json and debug-req-body3.json: Assistant retries after tool error
   // with content as array containing a string (not an object) - this is the actual bug case
   // In debug-req-body2.json line 124-125: "content": ["All three headline fetch queries failed..."]
@@ -485,4 +489,3 @@ test('POST /chat/completions - assistant message with content array containing s
   t.truthy(response.body);
   // The request should succeed because the plugin converts ["string"] to [{"type": "text", "text": "string"}]
 });
-

@@ -1011,7 +1011,7 @@ async function provisionWorkspace(entityId, entityConfig, options = {}) {
         entityConfig = (await loadEntityConfig(entityId, { fresh: true })) || entityConfig;
     }
 
-    const provisionPromise = _doProvision(entityId, entityConfig);
+    const provisionPromise = _doProvision(entityId, entityConfig, options);
     provisioningLocks.set(entityId, provisionPromise);
 
     try {
@@ -1359,11 +1359,6 @@ async function uploadWorkspaceArchiveFromLegacyShare(entityId, workspace, archiv
         throw new Error(`Cannot copy non-standard legacy checkpoint path from Azure Files: ${archivePath}`);
     }
 
-    const { accountName, accountKey } = getWorkspaceFilesStorageAccount();
-    if (!accountName || !accountKey) {
-        throw new Error('Workspace Azure Files storage credentials are required for legacy checkpoint migration');
-    }
-
     if (_workspaceLegacyShareUploadOverride) {
         return await _workspaceLegacyShareUploadOverride({
             entityId,
@@ -1372,6 +1367,11 @@ async function uploadWorkspaceArchiveFromLegacyShare(entityId, workspace, archiv
             blobPath,
             shareName,
         });
+    }
+
+    const { accountName, accountKey } = getWorkspaceFilesStorageAccount();
+    if (!accountName || !accountKey) {
+        throw new Error('Workspace Azure Files storage credentials are required for legacy checkpoint migration');
     }
 
     const {
@@ -2438,7 +2438,7 @@ async function setupWorkspaceContainerForEntity(entityId, entityConfig, containe
  *   3. createGenericContainer() — create on demand, only mounting Azure Files for one-time legacy migration
  *   4. reconfigureForEntity() — inject secrets, mount blob storage, rotate secret
  */
-async function _doProvision(entityId, entityConfig) {
+async function _doProvision(entityId, entityConfig, options = {}) {
     if (!isValidWorkspaceEntityId(entityId)) {
         throw new Error('Workspace entityId is required');
     }
@@ -2501,7 +2501,7 @@ async function _doProvision(entityId, entityConfig) {
         // written, so restored .env files cannot win over current secrets. If
         // a pool-claimed container is dead, fall back to creating a fresh one.
         try {
-            setupResult = await setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend);
+            setupResult = await setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend, options);
             if (container.claimedFromPool) {
                 await releaseClaimedContainer(container.containerName);
             }
@@ -2522,12 +2522,12 @@ async function _doProvision(entityId, entityConfig) {
                     shareName: legacyShareName,
                     mountAzureFiles: true,
                 });
-                setupResult = await setupWorkspaceContainerForEntity(entityId, legacyEntityConfig, container, backend);
+                setupResult = await setupWorkspaceContainerForEntity(entityId, legacyEntityConfig, container, backend, options);
                 migratedLegacyShare = true;
             } else if (container.claimedFromPool) {
                 logger.warn(`[WarmPool] Claimed container ${container.containerName} failed setup — falling back to fresh container: ${provisionErr.message}`);
                 container = await createGenericContainer(entityId, backend);
-                setupResult = await setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend);
+                setupResult = await setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend, options);
             } else {
                 throw provisionErr;
             }

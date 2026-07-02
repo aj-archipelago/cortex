@@ -198,7 +198,6 @@ const TOOLS = [
 
 export default {
     useInputChunking: false,
-    enableDuplicateRequests: false,
     useSingleTokenStream: false,
     inputParameters: { 
         chatHistory: [{role: '', content: []}],

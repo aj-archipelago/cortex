@@ -94,11 +94,6 @@ var config = convict({
         default: true,
         env: "CORTEX_ENABLE_CACHE",
     },
-    enableDuplicateRequests: {
-        format: Boolean,
-        default: true,
-        env: "CORTEX_ENABLE_DUPLICATE_REQUESTS",
-    },
     enableGraphqlCache: {
         format: Boolean,
         default: false,
@@ -159,10 +154,20 @@ var config = convict({
         env: "GCP_SERVICE_ACCOUNT_KEY",
         sensitive: true,
     },
+    gcpAuthTokenHelper: {
+        format: "*",
+        default: null,
+        sensitive: true,
+    },
     azureServicePrincipalCredentials: {
         format: String,
         default: null,
         env: "AZURE_SERVICE_PRINCIPAL_CREDENTIALS",
+        sensitive: true,
+    },
+    azureAuthTokenHelper: {
+        format: "*",
+        default: null,
         sensitive: true,
     },
     models: {
@@ -362,9 +367,6 @@ var config = convict({
             "oai-o3-mini": {
                 type: "OPENAI-REASONING",
                 emulateOpenAIChatModel: "o3-mini",
-                restStreaming: {
-                    enableDuplicateRequests: false,
-                },
                 url: "https://api.openai.com/v1/chat/completions",
                 headers: {
                     Authorization: "Bearer {{OPENAI_API_KEY}}",
@@ -1305,6 +1307,14 @@ const defaultEntityConstants = config.get("entityConstants");
 if (configFile && fs.existsSync(configFile)) {
     logger.info(`Loading config from ${configFile}`);
     config.loadFile(configFile);
+    const envOverrides = {};
+    const schemaProperties = config.getSchema()._cvtProperties || {};
+    for (const [key, schema] of Object.entries(schemaProperties)) {
+        if (schema.env && Object.prototype.hasOwnProperty.call(process.env, schema.env)) {
+            envOverrides[key] = process.env[schema.env];
+        }
+    }
+    config.load(envOverrides);
 } else {
     const openaiApiKey = config.get("openaiApiKey");
     if (!openaiApiKey) {
@@ -1486,41 +1496,26 @@ const buildPathways = async (config) => {
                 const pathwayName = `sys_rest_streaming_${modelName.replace(/-/g, "_")}`;
                 const restConfig = modelConfig.restStreaming || {};
 
-                // Default input parameters for chat models
-                // Special case: oai-gpt4o (default) uses empty array, others use object array
-                const defaultInputParams =
-                    modelName === "oai-gpt4o"
-                        ? {
-                              messages: [],
-                              responses_input_json: "",
-                              tools: "",
-                              tool_choice: "auto",
-                              functions: "",
-                              reasoningEffort: "",
-                              thinkingType: { type: "string" },
-                              thinkingBudgetTokens: { type: "integer" },
-                          }
-                        : {
-                              messages: [{ role: "", content: [] }],
-                              responses_input_json: "",
-                              tools: "",
-                              tool_choice: "auto",
-                              reasoningEffort: "",
-                              thinkingType: { type: "string" },
-                              thinkingBudgetTokens: { type: "integer" },
-                          };
+                // Default input parameters for OpenAI-compatible chat models.
+                const defaultInputParams = {
+                    messages: [{role: '', content: []}],
+                    responses_input_json: '',
+                    tools: '',
+                    tool_choice: 'auto',
+                    functions: '',
+                    function_call: '',
+                    reasoningEffort: '',
+                    thinkingType: { type: 'string' },
+                    thinkingBudgetTokens: { type: 'integer' }
+                };
 
                 // Merge with any custom input parameters
                 const inputParameters = restConfig.inputParameters
                     ? { ...defaultInputParams, ...restConfig.inputParameters }
                     : defaultInputParams;
 
-                // Special handling for certain models
-                if (
-                    modelName.startsWith("oai-") &&
-                    !modelName.includes("gpturbo") &&
-                    modelName !== "oai-gpt4o"
-                ) {
+                // OpenAI chat-style models support functions in REST emulation.
+                if (modelName.startsWith("oai-")) {
                     inputParameters.functions = "";
                 }
 
@@ -1530,14 +1525,8 @@ const buildPathways = async (config) => {
                     model: modelName,
                     useInputChunking: false,
                     emulateOpenAIChatModel: modelConfig.emulateOpenAIChatModel,
-                    ...(restConfig.geminiSafetySettings && {
-                        geminiSafetySettings: restConfig.geminiSafetySettings,
-                    }),
-                    ...(restConfig.enableDuplicateRequests !== undefined && {
-                        enableDuplicateRequests:
-                            restConfig.enableDuplicateRequests,
-                    }),
-                    ...(restConfig.timeout && { timeout: restConfig.timeout }),
+                    ...(restConfig.geminiSafetySettings && { geminiSafetySettings: restConfig.geminiSafetySettings }),
+                    ...(restConfig.timeout && { timeout: restConfig.timeout })
                 };
             }
 

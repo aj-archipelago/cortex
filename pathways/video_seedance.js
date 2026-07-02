@@ -1,7 +1,6 @@
 export default {
     prompt: ["{{text}}"],
 
-    enableDuplicateRequests: false,
     inputParameters: {
         model: "replicate-seedance-1-pro",
         resolution: "720p",

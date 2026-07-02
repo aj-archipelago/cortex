@@ -27,7 +27,6 @@ export default {
     list: true,
     model: 'oai-gpt4o',
     useInputChunking: false,
-    enableDuplicateRequests: false,
 
     // Custom resolver to generate headlines by reprompting if they are too long
     resolver: async (_parent, args, contextValue, _info) => {

@@ -13,7 +13,6 @@ export default {
     model: 'oai-gpt4o',
     temperature: 0.0,
     enableCache: true,
-    enableDuplicateRequests: false,
     json: true
 }
 

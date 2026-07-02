@@ -17,7 +17,6 @@ export default {
         aiStyle: "OpenAI",
     },
     useInputChunking: false,
-    enableDuplicateRequests: false,
     executePathway: async ({args, runAllPrompts}) => {
 
         args = {

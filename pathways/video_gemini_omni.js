@@ -1,7 +1,6 @@
 export default {
     prompt: ["{{{text}}}"],
 
-    enableDuplicateRequests: false,
     inputParameters: {
         text: "",
         model: "gemini-omni-flash-preview",

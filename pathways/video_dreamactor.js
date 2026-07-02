@@ -1,7 +1,6 @@
 export default {
     prompt: ["{{{text}}}"],
 
-    enableDuplicateRequests: false,
     inputParameters: {
         model: "replicate-dreamactor-m2.0",
         image: "",

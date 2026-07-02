@@ -15,7 +15,7 @@ import {
 
 const transcribeXai = {
   // Inherit input parameters / resolver from transcribe_gemini for shape parity
-  // with the other transcribe pathways (so labeeb can call it the same way).
+  // with the other transcribe pathways.
   ...transcribeGemini,
   inputParameters: {
     ...transcribeGemini.inputParameters,

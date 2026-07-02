@@ -19,7 +19,6 @@ export default {
         }),
     ],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     model: 'oai-gpt41',
     inputParameters: {
         privateData: false,

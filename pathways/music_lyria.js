@@ -12,6 +12,5 @@ export default {
   max_tokens: 8192,
   model: "google-lyria-3-music",
   useInputChunking: false,
-  enableDuplicateRequests: false,
   timeout: 60 * 10,
 };

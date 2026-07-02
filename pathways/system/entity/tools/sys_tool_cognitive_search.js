@@ -42,7 +42,6 @@ const SEARCH_PARAMS = {
 export default {
     prompt: [],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     inputParameters: {
         text: '',
         filter: '',
@@ -58,7 +57,7 @@ export default {
             icon: "📰",
             function: {
                 name: "SearchIndex",
-                description: `Search Al Jazeera indexes: ${VALID_INDEXES_MESSAGE}. Use wires for news wires. ALWAYS use a date filter (last 3-7 days) for latest/recent queries. If results appear stale (years old on a daily source), re-query with a broader range before reporting.`,
+                description: `Search configured news indexes: ${VALID_INDEXES_MESSAGE}. Use wires for news wires. ALWAYS use a date filter (last 3-7 days) for latest/recent queries. If results appear stale (years old on a daily source), re-query with a broader range before reporting.`,
                 parameters: {
                     type: "object",
                     properties: {

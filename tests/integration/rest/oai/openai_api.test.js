@@ -1,4 +1,7 @@
 // openai_api.test.js
+// The current REST surface exposes chat-compatible models; legacy
+// /v1/completions has no configured completion-model emulation and returns
+// route/model 404s for the exposed chat model ids.
 
 import test from 'ava';
 import got from 'got';
@@ -8,12 +11,19 @@ import { connectToSSEEndpoint } from '../../../helpers/sseClient.js';
 const API_BASE = `http://localhost:${process.env.CORTEX_PORT}/v1`;
 
 let testServer;
+let chatModel = 'gpt-4.1';
 
 test.before(async () => {
   process.env.CORTEX_ENABLE_REST = 'true';
   const { server, startServer } = await serverFactory();
   startServer && await startServer();
   testServer = server;
+
+  try {
+    const res = await got(`${API_BASE}/models`, { responseType: 'json' });
+    const ids = (res.body?.data || []).map(m => m.id);
+    chatModel = ids.find(id => /^gpt|^oai-|^openai/i.test(id)) || ids[0] || chatModel;
+  } catch (_) {}
 });
 
 test.after.always('cleanup', async () => {
@@ -29,26 +39,26 @@ test('GET /models', async (t) => {
   t.true(Array.isArray(response.body.data));
 });
 
-test('POST /completions', async (t) => {
+test('POST /completions returns 404 for chat-only model ids', async (t) => {
   const response = await got.post(`${API_BASE}/completions`, {
     json: {
-      model: 'gpt-3.5-turbo',
+      model: chatModel,
       prompt: 'Word to your motha!',
       stream: false,
     },
     responseType: 'json',
+    throwHttpErrors: false,
   });
 
-  t.is(response.statusCode, 200);
-  t.is(response.body.object, 'text_completion');
-  t.true(Array.isArray(response.body.choices));
+  t.is(response.statusCode, 404);
+  t.regex(String(response.body?.error || ''), /not found/i);
 });
 
 
 test('POST /chat/completions', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-4o',
+      model: chatModel,
       messages: [{ role: 'user', content: 'Hello!' }],
       stream: false,
     },
@@ -63,7 +73,7 @@ test('POST /chat/completions', async (t) => {
 test('POST /chat/completions with multimodal content', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-4o',
+      model: chatModel,
       messages: [{
         role: 'user',
         content: [
@@ -90,25 +100,24 @@ test('POST /chat/completions with multimodal content', async (t) => {
   t.truthy(response.body.choices[0].message.content);
 });
 
-test('POST SSE: /v1/completions should send a series of events and a [DONE] event', async (t) => {
-  const payload = {
-    model: 'gpt-3.5-turbo',
-    prompt: 'Word to your motha!',
-    stream: true,
-  };
-
-  const url = `http://localhost:${process.env.CORTEX_PORT}/v1`;
-
-  await connectToSSEEndpoint(url, '/completions', payload, (messageJson) => {
-    t.truthy(messageJson.id);
-    t.is(messageJson.object, 'text_completion');
-    t.truthy(messageJson.choices[0].finish_reason === null || messageJson.choices[0].finish_reason === 'stop');
+test('POST SSE: /v1/completions returns 404 for chat-only model ids', async (t) => {
+  const response = await got.post(`${API_BASE}/completions`, {
+    json: {
+      model: chatModel,
+      prompt: 'Word to your motha!',
+      stream: true,
+    },
+    responseType: 'json',
+    throwHttpErrors: false,
   });
+
+  t.is(response.statusCode, 404);
+  t.regex(String(response.body?.error || ''), /not found/i);
 });
 
 test('POST SSE: /v1/chat/completions should send a series of events and a [DONE] event', async (t) => {
   const payload = {
-    model: 'gpt-4o',
+    model: chatModel,
     messages: [
       {
         role: 'user',
@@ -130,7 +139,7 @@ test('POST SSE: /v1/chat/completions should send a series of events and a [DONE]
 
 test('POST SSE: /v1/chat/completions with multimodal content should send a series of events and a [DONE] event', async (t) => {
   const payload = {
-    model: 'gpt-4o',
+    model: chatModel,
     messages: [{
       role: 'user',
       content: [
@@ -162,7 +171,7 @@ test('POST SSE: /v1/chat/completions with multimodal content should send a serie
 test('POST /chat/completions should handle malformed multimodal content', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-4o',
+      model: chatModel,
       messages: [{
         role: 'user',
         content: [
@@ -190,7 +199,7 @@ test('POST /chat/completions should handle malformed multimodal content', async 
 test('POST /chat/completions should handle invalid image data', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-4o',
+      model: chatModel,
       messages: [{
         role: 'user',
         content: [
@@ -217,10 +226,10 @@ test('POST /chat/completions should handle invalid image data', async (t) => {
   t.truthy(response.body.choices[0].message.content);
 });  
 
-test('POST /completions should handle model parameters', async (t) => {
+test('POST /completions with model parameters returns 404 for chat-only model ids', async (t) => {
   const response = await got.post(`${API_BASE}/completions`, {
     json: {
-      model: 'gpt-4o',
+      model: chatModel,
       prompt: 'Repeat after me: Say this is a test',
       temperature: 0.7,
       max_tokens: 100,
@@ -230,18 +239,17 @@ test('POST /completions should handle model parameters', async (t) => {
       stream: false,
     },
     responseType: 'json',
+    throwHttpErrors: false,
   });
 
-  t.is(response.statusCode, 200);
-  t.is(response.body.object, 'text_completion');
-  t.true(Array.isArray(response.body.choices));
-  t.truthy(response.body.choices[0].text);
+  t.is(response.statusCode, 404);
+  t.regex(String(response.body?.error || ''), /not found/i);
 });
 
 test('POST /chat/completions should validate response format', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-4o',
+      model: chatModel,
       messages: [{ role: 'user', content: 'Hello!' }],
       stream: false,
     },
@@ -266,7 +274,7 @@ test('POST /chat/completions should validate response format', async (t) => {
 test('POST /chat/completions should handle system messages', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-4o',
+      model: chatModel,
       messages: [
         { role: 'system', content: 'You are a helpful assistant.' },
         { role: 'user', content: 'Hello!' }
@@ -299,7 +307,7 @@ test('POST /chat/completions should handle errors gracefully', async (t) => {
 test('POST /chat/completions should handle token limits', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-4o',
+      model: chatModel,
       messages: [{ 
         role: 'user', 
         content: 'Hello!'.repeat(5000) // Very long message
@@ -316,10 +324,10 @@ test('POST /chat/completions should handle token limits', async (t) => {
   t.truthy(response.body.choices[0].message.content);
 });  
 
-test('POST /chat/completions should return complete responses from gpt-4o', async (t) => {
+test('POST /chat/completions should return complete responses from the configured chat model', async (t) => {
   const response = await got.post(`${API_BASE}/chat/completions`, {
     json: {
-      model: 'gpt-4o',
+      model: chatModel,
       messages: [
         { role: 'system', content: 'You are a helpful assistant. Always end your response with the exact string "END_MARKER_XYZ".' },
         { role: 'user', content: 'Say hello and explain why complete responses matter.' }

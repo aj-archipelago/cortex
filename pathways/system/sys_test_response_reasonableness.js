@@ -15,6 +15,5 @@ export default {
         modelResponse: '',
     },
     model: 'oai-gpt4o-mini',
-    enableDuplicateRequests: false,
     json: true
 } 

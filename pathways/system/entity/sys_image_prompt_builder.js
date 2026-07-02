@@ -32,6 +32,5 @@ Example response with 2 prompts creating 3 images total: [{"prompt": "A beautifu
         ]}),
     ],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     json: true
 }

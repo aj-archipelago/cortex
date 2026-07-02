@@ -10,7 +10,6 @@ export default {
         model: 'oai-gpt41-mini',
     },
     useInputChunking: false,
-    enableDuplicateRequests: false,
     executePathway: async ({args, runAllPrompts, resolver}) => {
 
         let pathwayResolver = resolver;

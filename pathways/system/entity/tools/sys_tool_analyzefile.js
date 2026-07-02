@@ -23,7 +23,6 @@ export default {
     max_tokens: 8192,
     model: 'gemini-flash-35-vision',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     geminiSafetySettings: [{category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH'},
         {category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH'},

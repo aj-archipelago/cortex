@@ -12,7 +12,6 @@ export default {
     },
 
     model: 'oai-gpt4o',
-    enableDuplicateRequests: false,
     useInputChunking: false,
     enableCache: true,
     json: true,

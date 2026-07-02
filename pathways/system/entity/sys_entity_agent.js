@@ -1210,7 +1210,6 @@ export {
 export default {
     emulateOpenAIChatModel: 'cortex-agent',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     useSingleTokenStream: false,
     manageTokenLength: false, // Agentic models handle context management themselves
     inputParameters: {

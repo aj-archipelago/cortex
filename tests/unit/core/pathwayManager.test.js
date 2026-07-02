@@ -14,6 +14,14 @@ test.beforeEach(t => {
     t.context.pathwayManager = new PathwayManager(mockConfig);
 });
 
+function setStoredPathway(t, userId, pathwayName, pathway) {
+    t.context.pathwayManager.pathways = {
+        [userId.toLowerCase()]: {
+            [pathwayName]: pathway
+        }
+    };
+}
+
 test('transformPrompts handles array of strings (legacy format)', async t => {
     const pathway = {
         prompt: [
@@ -544,84 +552,83 @@ test('getPathways returns all pathways when promptNames is null', async t => {
     t.is(result.length, 2);
 });
 
-test('isLegacyPromptFormat identifies legacy format (array of strings)', t => {
-    const userId = 'testUser';
-    const pathwayName = 'testPathway';
-    
-    // Set up pathway with legacy prompts
-    t.context.pathwayManager.pathways = {
-        [userId.toLowerCase()]: {
-            [pathwayName]: {
-                prompt: [
-                    'First prompt text',
-                    'Second prompt text',
-                    'Third prompt text'
-                ]
-            }
-        }
-    };
-    
-    const result = t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
-    t.true(result);
-});
+for (const { name, prompt, expectedLegacy } of [
+    {
+        name: 'identifies legacy format (array of strings)',
+        prompt: [
+            'First prompt text',
+            'Second prompt text',
+            'Third prompt text'
+        ],
+        expectedLegacy: true
+    },
+    {
+        name: 'identifies new format (array of objects)',
+        prompt: [
+            { name: 'First Prompt', prompt: 'First prompt text' },
+            { name: 'Second Prompt', prompt: 'Second prompt text' },
+            { prompt: 'Third prompt text' }
+        ],
+        expectedLegacy: false
+    },
+    {
+        name: 'handles empty array (defaults to new format)',
+        prompt: [],
+        expectedLegacy: false
+    },
+    {
+        name: 'handles mixed format (treats as legacy)',
+        prompt: [
+            'Legacy string prompt',
+            { name: 'New format prompt', prompt: 'New format text' }
+        ],
+        expectedLegacy: true
+    },
+    {
+        name: 'handles objects with missing prompt property (treats as legacy)',
+        prompt: [
+            { name: 'Missing prompt property' },
+            { name: 'Another invalid object', notPrompt: 'invalid' }
+        ],
+        expectedLegacy: true
+    },
+    {
+        name: 'handles objects with null prompt property (treats as legacy)',
+        prompt: [
+            { name: 'Null prompt', prompt: null },
+            { name: 'Another null prompt', prompt: null }
+        ],
+        expectedLegacy: true
+    },
+    {
+        name: 'handles array with null elements (treats as legacy)',
+        prompt: [
+            null,
+            'Some string prompt',
+            null
+        ],
+        expectedLegacy: true
+    },
+    {
+        name: 'handles single string element',
+        prompt: ['Only prompt'],
+        expectedLegacy: true
+    },
+    {
+        name: 'handles single object element',
+        prompt: [{ name: 'Only prompt', prompt: 'Only prompt text' }],
+        expectedLegacy: false
+    }
+]) {
+    test(`isLegacyPromptFormat ${name}`, t => {
+        const userId = 'testUser';
+        const pathwayName = 'testPathway';
 
-test('isLegacyPromptFormat identifies new format (array of objects)', t => {
-    const userId = 'testUser';
-    const pathwayName = 'testPathway';
-    
-    // Set up pathway with new format prompts
-    t.context.pathwayManager.pathways = {
-        [userId.toLowerCase()]: {
-            [pathwayName]: {
-                prompt: [
-                    { name: 'First Prompt', prompt: 'First prompt text' },
-                    { name: 'Second Prompt', prompt: 'Second prompt text' },
-                    { prompt: 'Third prompt text' } // name is optional
-                ]
-            }
-        }
-    };
-    
-    const result = t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
-    t.false(result);
-});
+        setStoredPathway(t, userId, pathwayName, { prompt });
 
-test('isLegacyPromptFormat handles empty array (defaults to new format)', t => {
-    const userId = 'testUser';
-    const pathwayName = 'testPathway';
-    
-    // Set up pathway with empty prompts array
-    t.context.pathwayManager.pathways = {
-        [userId.toLowerCase()]: {
-            [pathwayName]: {
-                prompt: []
-            }
-        }
-    };
-    
-    const result = t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
-    t.false(result);
-});
-
-test('isLegacyPromptFormat handles mixed format (treats as legacy)', t => {
-    const userId = 'testUser';
-    const pathwayName = 'testPathway';
-    
-    // Set up pathway with mixed format prompts
-    t.context.pathwayManager.pathways = {
-        [userId.toLowerCase()]: {
-            [pathwayName]: {
-                prompt: [
-                    'Legacy string prompt',
-                    { name: 'New format prompt', prompt: 'New format text' }
-                ]
-            }
-        }
-    };
-    
-    const result = t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
-    t.true(result);
-});
+        t.is(t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName), expectedLegacy);
+    });
+}
 
 test('isLegacyPromptFormat throws error for invalid parameters', t => {
     t.throws(() => {
@@ -639,101 +646,6 @@ test('isLegacyPromptFormat throws error for invalid parameters', t => {
     t.throws(() => {
         t.context.pathwayManager.isLegacyPromptFormat('userId', null);
     }, { message: 'pathwayName must be a non-empty string' });
-});
-
-test('isLegacyPromptFormat handles objects with missing prompt property (treats as legacy)', t => {
-    const userId = 'testUser';
-    const pathwayName = 'testPathway';
-    
-    // Set up pathway with invalid objects
-    t.context.pathwayManager.pathways = {
-        [userId.toLowerCase()]: {
-            [pathwayName]: {
-                prompt: [
-                    { name: 'Missing prompt property' },
-                    { name: 'Another invalid object', notPrompt: 'invalid' }
-                ]
-            }
-        }
-    };
-    
-    const result = t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
-    t.true(result);
-});
-
-test('isLegacyPromptFormat handles objects with null prompt property (treats as legacy)', t => {
-    const userId = 'testUser';
-    const pathwayName = 'testPathway';
-    
-    // Set up pathway with null prompt properties
-    t.context.pathwayManager.pathways = {
-        [userId.toLowerCase()]: {
-            [pathwayName]: {
-                prompt: [
-                    { name: 'Null prompt', prompt: null },
-                    { name: 'Another null prompt', prompt: null }
-                ]
-            }
-        }
-    };
-    
-    const result = t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
-    t.true(result);
-});
-
-test('isLegacyPromptFormat handles array with null elements (treats as legacy)', t => {
-    const userId = 'testUser';
-    const pathwayName = 'testPathway';
-    
-    // Set up pathway with null elements
-    t.context.pathwayManager.pathways = {
-        [userId.toLowerCase()]: {
-            [pathwayName]: {
-                prompt: [
-                    null,
-                    'Some string prompt',
-                    null
-                ]
-            }
-        }
-    };
-    
-    const result = t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
-    t.true(result);
-});
-
-test('isLegacyPromptFormat handles single string element', t => {
-    const userId = 'testUser';
-    const pathwayName = 'testPathway';
-    
-    // Set up pathway with single string element
-    t.context.pathwayManager.pathways = {
-        [userId.toLowerCase()]: {
-            [pathwayName]: {
-                prompt: ['Only prompt']
-            }
-        }
-    };
-    
-    const result = t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
-    t.true(result);
-});
-
-test('isLegacyPromptFormat handles single object element', t => {
-    const userId = 'testUser';
-    const pathwayName = 'testPathway';
-    
-    // Set up pathway with single object element
-    t.context.pathwayManager.pathways = {
-        [userId.toLowerCase()]: {
-            [pathwayName]: {
-                prompt: [{ name: 'Only prompt', prompt: 'Only prompt text' }]
-            }
-        }
-    };
-    
-    const result = t.context.pathwayManager.isLegacyPromptFormat(userId, pathwayName);
-    t.false(result);
 });
 
 test('isLegacyPromptFormat throws error when pathway not found', t => {

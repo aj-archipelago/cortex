@@ -18,6 +18,5 @@ export default {
     },
     model: `azure-extension`,
     useInputChunking: false,
-    enableDuplicateRequests: false,
 }
 

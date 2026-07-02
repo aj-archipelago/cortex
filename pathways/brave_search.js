@@ -27,6 +27,5 @@ export default {
         summary: false,
     },
     timeout: 400,
-    enableDuplicateRequests: false,
     model: 'brave-search',
 };

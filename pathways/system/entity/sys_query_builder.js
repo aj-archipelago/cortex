@@ -95,7 +95,6 @@ Example JSON objects and messages for different queries:
     ],
     model: 'oai-gpt4o',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     json: true,
     ...config.get('entityConstants')
 }

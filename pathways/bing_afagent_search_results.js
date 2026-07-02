@@ -33,7 +33,6 @@ Rules:
         set_lang: 'en',
     },
     timeout: 400,
-    enableDuplicateRequests: false,
     model: 'azure-bing-agent-responses',
     useInputChunking: false,
     instructions: `You are a Bing search agent that returns structured search results.

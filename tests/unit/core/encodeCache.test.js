@@ -1,6 +1,5 @@
 import test from 'ava';
 import { faker } from '@faker-js/faker';
-import { performance } from 'perf_hooks';
 import { encode, decode } from '../../../lib/encodeCache.js';
 import { encoding_for_model } from '@dqbd/tiktoken';
 
@@ -44,82 +43,39 @@ test('cached encode and decode are identical to noncached', t => {
     t.is(decoded, normalizedTiktokenDecoded);
 })
 
-// Test whether decoding adds the encoded value to the encode cache
-// the only way to tell is if the encode is faster after the cached decode
 test('decode operation adds to encode cache', t => {
-    const original = faker.lorem.paragraph(50);
+    const original = 'Decode should seed the encode cache for this exact text.';
     const encodedOriginal = encoder.encode(original);
-
-    const startEncode = performance.now();
-    const encoded = encode(original);
-    const endEncode = performance.now();
-    const encodeTime = endEncode - startEncode;
-    console.log("pre-decode encode time", encodeTime);
-
-    // Compare arrays using our helper
-    t.is(tokenArrayToString(encoded), tokenArrayToString(encodedOriginal));
-
-    const original2 = faker.lorem.paragraph(50);
-    const encodedOriginal2 = encoder.encode(original2);
     
     // Decode should add to cache
-    const decodedOriginal2 = decode(encodedOriginal2);
+    const decodedOriginal = decode(encodedOriginal);
     
-    const startEncode2 = performance.now();
-    const encoded2 = encode(original2);
-    const endEncode2 = performance.now();
-    const encodeTime2 = endEncode2 - startEncode2;
-    console.log("post-decode encode time", encodeTime2);
-
-    t.is(tokenArrayToString(encoded2), tokenArrayToString(encodedOriginal2));
-    
-    // Allow some buffer for timing variations
-    t.true(encodeTime2 <= encodeTime);
+    t.is(decodedOriginal, original);
+    t.is(encode(original), encodedOriginal);
 })
 
 // Test encode and decode caching
 test('caching', t => {
-    const original = faker.lorem.paragraph(50);
+    const original = 'Encoding this text twice should reuse the cached token array.';
     
     // First encode should be uncached
-    const startEncode1 = performance.now();
     const encoded1 = encode(original);
-    const endEncode1 = performance.now();
-    const encodeTime1 = endEncode1 - startEncode1;
 
-    const original2 = faker.lorem.paragraph(50);
+    const original2 = 'Decoding this token array twice should reuse the cached string.';
     const encodedOriginal2 = encoder.encode(original2);
     
     // First decode should be uncached
-    const startDecode1 = performance.now();
     const decoded1 = decode(encodedOriginal2);
-    const endDecode1 = performance.now();
-    const decodeTime1 = endDecode1 - startDecode1;
 
     t.is(tokenArrayToString(encoded1), tokenArrayToString(encoder.encode(original)));
     
     // Compare with normalized tiktoken output
     const normalizedOriginal2 = normalizeDecoded(encoder.decode(encodedOriginal2));
     t.is(decoded1, normalizedOriginal2);
-
-    console.log('uncached encode time', encodeTime1);
-    console.log('uncached decode time', decodeTime1);
     
-    // Second time encoding and decoding, it should be from the cache
-    const startEncode2 = performance.now();
     const encoded2 = encode(original);
-    const endEncode2 = performance.now();
-    const encodeTime2 = endEncode2 - startEncode2;
-
-    const startDecode2 = performance.now();
     const decoded2 = decode(encodedOriginal2);
-    const endDecode2 = performance.now();
-    const decodeTime2 = endDecode2 - startDecode2;
-    
-    console.log('cached encode time', encodeTime2);
-    console.log('cached decode time', decodeTime2);
 
-    // Allow some buffer for timing variations
-    t.true(encodeTime2 <= encodeTime1);
-    t.true(decodeTime2 <= decodeTime1);
+    t.is(encoded2, encoded1);
+    t.is(decoded2, decoded1);
 });

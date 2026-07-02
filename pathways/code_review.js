@@ -11,7 +11,6 @@ export default {
     ],
     model: 'gemini-flash-35-vision',
     reasoningEffort: 'high',
-    enableDuplicateRequests: false,
     useInputChunking: false,
     geminiSafetySettings: [
         { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
@@ -20,4 +19,3 @@ export default {
         { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
     ],
 }
-

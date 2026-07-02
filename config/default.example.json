@@ -358,7 +358,7 @@
                 }
             ],
             "maxTokenLength": 200000,
-            "maxReturnTokens": 128000,
+            "maxReturnTokens": 64000,
             "maxImageSize": 31457280,
             "supportsStreaming": true,
             "metadata": {

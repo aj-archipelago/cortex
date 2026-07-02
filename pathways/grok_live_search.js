@@ -17,7 +17,7 @@ export default {
         stream: true,
         // New Responses API format - tools configuration
         // Example: { "x_search": { "from_date": "2025-01-01", "enable_image_understanding": true } }
-        tools: '',
+        tools: '{"web_search":true,"x_search":true}',
         // Enable inline citations by default
         inline_citations: true,
         // Legacy search_parameters format - will be converted to tools format by the plugin

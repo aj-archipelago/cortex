@@ -105,7 +105,6 @@ export default {
   },
   useInputChunking: false,
   model: "oai-gpt4o",
-  enableDuplicateRequests: false,
   timeout: 3600,
   executePathway: async ({args, resolver}) => {
     try {

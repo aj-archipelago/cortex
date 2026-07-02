@@ -9,7 +9,6 @@
 export default {
   prompt: ["Generate a video based on the following description: {{text}}"],
 
-  enableDuplicateRequests: false,
   inputParameters: {
     text: "",
     image: "",

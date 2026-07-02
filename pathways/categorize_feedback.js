@@ -31,6 +31,5 @@ Assistant must choose exactly one category from the provided list per feedback i
     model: 'oai-gpt4o',
     joinChunksWith: '\n',
     tokenRatio: 1,
-    enableDuplicateRequests: false,
     timeout: 1800,
 };

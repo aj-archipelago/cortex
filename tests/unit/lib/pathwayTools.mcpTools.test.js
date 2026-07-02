@@ -3,23 +3,90 @@
 import test from 'ava';
 import { callTool } from '../../../lib/pathwayTools.js';
 
-// ----- _builtin_search_tools tests -----
+const searchToolDefinitions = () => ({
+    searchavailabletools: {
+        pathwayName: '_builtin_search_tools',
+        definition: {
+            type: 'function',
+            function: {
+                name: 'SearchAvailableTools',
+                parameters: { type: 'object', properties: { query: { type: 'string' } } },
+            },
+        },
+    },
+});
 
-test('SearchAvailableTools returns error when query is empty', async (t) => {
-    const toolDefinitions = {
-        searchavailabletools: {
-            pathwayName: '_builtin_search_tools',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'SearchAvailableTools',
-                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
+const inspectToolDefinitions = () => ({
+    inspecttoolresult: {
+        pathwayName: '_builtin_inspect_tool_result',
+        definition: {
+            type: 'function',
+            function: {
+                name: 'InspectToolResult',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        resultRef: { type: 'string' },
+                        mode: { type: 'string' },
+                        offset: { type: 'number' },
+                        limit: { type: 'number' },
+                        query: { type: 'string' },
+                    },
                 },
             },
         },
-    };
+    },
+});
 
-    const result = await callTool('SearchAvailableTools', { query: '' }, toolDefinitions, null);
+const mcpToolDefinitions = (properties = { q: { type: 'string' } }) => ({
+    'server__my_tool': {
+        mcpServer: 'server',
+        mcpToolName: 'MyTool',
+        definition: {
+            function: {
+                parameters: { type: 'object', properties },
+            },
+        },
+        pathwayName: 'mcp_tool_execution',
+    },
+});
+
+const buildSearchResolver = (args = {}) => ({
+    args: {
+        entityTools: {},
+        entityToolsOpenAiFormat: [],
+        ...args,
+    },
+});
+
+const searchAvailableTools = async (query, resolverArgs = {}) => {
+    const result = await callTool(
+        'SearchAvailableTools',
+        { query },
+        searchToolDefinitions(),
+        buildSearchResolver(resolverArgs)
+    );
+
+    return JSON.parse(result.result);
+};
+
+const inspectToolResultCall = (args, snapshots) => callTool(
+    'InspectToolResult',
+    args,
+    inspectToolDefinitions(),
+    { _toolResultSnapshots: snapshots }
+);
+
+const inspectToolResult = async (args, snapshots) => {
+    const result = await inspectToolResultCall(args, snapshots);
+
+    return JSON.parse(result.result);
+};
+
+// ----- _builtin_search_tools tests -----
+
+test('SearchAvailableTools returns error when query is empty', async (t) => {
+    const result = await callTool('SearchAvailableTools', { query: '' }, searchToolDefinitions(), null);
 
     const parsed = JSON.parse(result.result);
     t.true(parsed.error);
@@ -37,31 +104,11 @@ test('SearchAvailableTools returns no matches for unrelated query', async (t) =>
         },
     };
 
-    const toolDefinitions = {
-        searchavailabletools: {
-            pathwayName: '_builtin_search_tools',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'SearchAvailableTools',
-                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
-                },
-            },
-        },
-    };
+    const parsed = await searchAvailableTools('zzzzzznotfound', {
+        mcpToolCatalog: catalog,
+        mcpEntityToolsDeferred: {},
+    });
 
-    const pathwayResolver = {
-        args: {
-            mcpToolCatalog: catalog,
-            mcpEntityToolsDeferred: {},
-            entityTools: {},
-            entityToolsOpenAiFormat: [],
-        },
-    };
-
-    const result = await callTool('SearchAvailableTools', { query: 'zzzzzznotfound' }, toolDefinitions, pathwayResolver);
-
-    const parsed = JSON.parse(result.result);
     t.is(parsed.tools.length, 0);
     t.true(parsed.message.includes('No tools found'));
 });
@@ -115,31 +162,13 @@ test('SearchAvailableTools matches tools by keyword', async (t) => {
     const entityTools = {};
     const entityToolsOpenAiFormat = [];
 
-    const toolDefinitions = {
-        searchavailabletools: {
-            pathwayName: '_builtin_search_tools',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'SearchAvailableTools',
-                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
-                },
-            },
-        },
-    };
+    const parsed = await searchAvailableTools('search issues', {
+        mcpToolCatalog: catalog,
+        mcpEntityToolsDeferred: deferred,
+        entityTools,
+        entityToolsOpenAiFormat,
+    });
 
-    const pathwayResolver = {
-        args: {
-            mcpToolCatalog: catalog,
-            mcpEntityToolsDeferred: deferred,
-            entityTools,
-            entityToolsOpenAiFormat,
-        },
-    };
-
-    const result = await callTool('SearchAvailableTools', { query: 'search issues' }, toolDefinitions, pathwayResolver);
-
-    const parsed = JSON.parse(result.result);
     t.true(parsed.tools.length > 0);
     // search_issues should score highest (matches both "search" and "issues")
     t.is(parsed.tools[0].name, 'jira__search_issues');
@@ -171,29 +200,12 @@ test('SearchAvailableTools dynamically loads matched tools into entityTools', as
     const entityTools = {};
     const entityToolsOpenAiFormat = [];
 
-    const toolDefinitions = {
-        searchavailabletools: {
-            pathwayName: '_builtin_search_tools',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'SearchAvailableTools',
-                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
-                },
-            },
-        },
-    };
-
-    const pathwayResolver = {
-        args: {
-            mcpToolCatalog: catalog,
-            mcpEntityToolsDeferred: deferred,
-            entityTools,
-            entityToolsOpenAiFormat,
-        },
-    };
-
-    await callTool('SearchAvailableTools', { query: 'tool' }, toolDefinitions, pathwayResolver);
+    await searchAvailableTools('tool', {
+        mcpToolCatalog: catalog,
+        mcpEntityToolsDeferred: deferred,
+        entityTools,
+        entityToolsOpenAiFormat,
+    });
 
     // Tool should now be loaded into entityTools
     t.truthy(entityTools['server__tool_a']);
@@ -229,31 +241,13 @@ test('SearchAvailableTools searches and loads local deferred tools', async (t) =
     const entityTools = { workspacessh: deferred.workspacessh };
     const entityToolsOpenAiFormat = [];
 
-    const toolDefinitions = {
-        searchavailabletools: {
-            pathwayName: '_builtin_search_tools',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'SearchAvailableTools',
-                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
-                },
-            },
-        },
-    };
+    const parsed = await searchAvailableTools('workspace command', {
+        localToolCatalog: catalog,
+        localEntityToolsDeferred: deferred,
+        entityTools,
+        entityToolsOpenAiFormat,
+    });
 
-    const pathwayResolver = {
-        args: {
-            localToolCatalog: catalog,
-            localEntityToolsDeferred: deferred,
-            entityTools,
-            entityToolsOpenAiFormat,
-        },
-    };
-
-    const result = await callTool('SearchAvailableTools', { query: 'workspace command' }, toolDefinitions, pathwayResolver);
-
-    const parsed = JSON.parse(result.result);
     t.is(parsed.tools[0].name, 'WorkspaceSSH');
     t.is(entityToolsOpenAiFormat.length, 1);
     t.is(entityToolsOpenAiFormat[0].function.name, 'WorkspaceSSH');
@@ -287,24 +281,11 @@ test('SearchAvailableTools does not duplicate loaded local schemas', async (t) =
         function: { name: 'WorkspaceSSH', description: 'Execute commands', parameters: { type: 'object', properties: {} } },
     }];
 
-    await callTool('SearchAvailableTools', { query: 'commands' }, {
-        searchavailabletools: {
-            pathwayName: '_builtin_search_tools',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'SearchAvailableTools',
-                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
-                },
-            },
-        },
-    }, {
-        args: {
-            localToolCatalog: catalog,
-            localEntityToolsDeferred: deferred,
-            entityTools: { workspacessh: deferred.workspacessh },
-            entityToolsOpenAiFormat,
-        },
+    await searchAvailableTools('commands', {
+        localToolCatalog: catalog,
+        localEntityToolsDeferred: deferred,
+        entityTools: { workspacessh: deferred.workspacessh },
+        entityToolsOpenAiFormat,
     });
 
     t.is(entityToolsOpenAiFormat.length, 1);
@@ -342,29 +323,12 @@ test('SearchAvailableTools does not duplicate already-loaded tools', async (t) =
         function: { name: 'server__tool_a', description: 'A tool', parameters: { type: 'object', properties: {} } },
     }];
 
-    const toolDefinitions = {
-        searchavailabletools: {
-            pathwayName: '_builtin_search_tools',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'SearchAvailableTools',
-                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
-                },
-            },
-        },
-    };
-
-    const pathwayResolver = {
-        args: {
-            mcpToolCatalog: catalog,
-            mcpEntityToolsDeferred: deferred,
-            entityTools,
-            entityToolsOpenAiFormat,
-        },
-    };
-
-    await callTool('SearchAvailableTools', { query: 'tool' }, toolDefinitions, pathwayResolver);
+    await searchAvailableTools('tool', {
+        mcpToolCatalog: catalog,
+        mcpEntityToolsDeferred: deferred,
+        entityTools,
+        entityToolsOpenAiFormat,
+    });
 
     // Should not duplicate
     t.is(entityToolsOpenAiFormat.length, 1);
@@ -398,31 +362,13 @@ test('SearchAvailableTools limits results to top 5', async (t) => {
     const entityTools = {};
     const entityToolsOpenAiFormat = [];
 
-    const toolDefinitions = {
-        searchavailabletools: {
-            pathwayName: '_builtin_search_tools',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'SearchAvailableTools',
-                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
-                },
-            },
-        },
-    };
+    const parsed = await searchAvailableTools('tool', {
+        mcpToolCatalog: catalog,
+        mcpEntityToolsDeferred: deferred,
+        entityTools,
+        entityToolsOpenAiFormat,
+    });
 
-    const pathwayResolver = {
-        args: {
-            mcpToolCatalog: catalog,
-            mcpEntityToolsDeferred: deferred,
-            entityTools,
-            entityToolsOpenAiFormat,
-        },
-    };
-
-    const result = await callTool('SearchAvailableTools', { query: 'tool' }, toolDefinitions, pathwayResolver);
-
-    const parsed = JSON.parse(result.result);
     t.true(parsed.tools.length <= 5);
     t.true(parsed.message.includes('Found'));
 });
@@ -452,31 +398,11 @@ test('SearchAvailableTools ranks by keyword match score', async (t) => {
         },
     };
 
-    const toolDefinitions = {
-        searchavailabletools: {
-            pathwayName: '_builtin_search_tools',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'SearchAvailableTools',
-                    parameters: { type: 'object', properties: { query: { type: 'string' } } },
-                },
-            },
-        },
-    };
+    const parsed = await searchAvailableTools('search issues', {
+        mcpToolCatalog: catalog,
+        mcpEntityToolsDeferred: {},
+    });
 
-    const pathwayResolver = {
-        args: {
-            mcpToolCatalog: catalog,
-            mcpEntityToolsDeferred: {},
-            entityTools: {},
-            entityToolsOpenAiFormat: [],
-        },
-    };
-
-    const result = await callTool('SearchAvailableTools', { query: 'search issues' }, toolDefinitions, pathwayResolver);
-
-    const parsed = JSON.parse(result.result);
     // "search_issues" should be first because it matches both keywords
     t.is(parsed.tools[0].name, 'server__search_issues');
 });
@@ -484,48 +410,22 @@ test('SearchAvailableTools ranks by keyword match score', async (t) => {
 // ----- MCP tool execution path tests -----
 
 test('callTool for MCP tool throws when mcpClients not initialized', async (t) => {
-    const toolDefinitions = {
-        'server__my_tool': {
-            mcpServer: 'server',
-            mcpToolName: 'MyTool',
-            definition: {
-                function: {
-                    parameters: { type: 'object', properties: { q: { type: 'string' } } },
-                },
-            },
-            pathwayName: 'mcp_tool_execution',
-        },
-    };
-
     const pathwayResolver = {
         args: { mcpClients: null },
     };
 
-    const result = await callTool('server__my_tool', { q: 'test' }, toolDefinitions, pathwayResolver);
+    const result = await callTool('server__my_tool', { q: 'test' }, mcpToolDefinitions(), pathwayResolver);
 
     t.truthy(result.error);
     t.true(result.error.includes('MCP clients not initialized'));
 });
 
 test('callTool for MCP tool throws when mcpClients is empty', async (t) => {
-    const toolDefinitions = {
-        'server__my_tool': {
-            mcpServer: 'server',
-            mcpToolName: 'MyTool',
-            definition: {
-                function: {
-                    parameters: { type: 'object', properties: { q: { type: 'string' } } },
-                },
-            },
-            pathwayName: 'mcp_tool_execution',
-        },
-    };
-
     const pathwayResolver = {
         args: { mcpClients: new Map() },
     };
 
-    const result = await callTool('server__my_tool', { q: 'test' }, toolDefinitions, pathwayResolver);
+    const result = await callTool('server__my_tool', { q: 'test' }, mcpToolDefinitions(), pathwayResolver);
 
     t.truthy(result.error);
     t.true(result.error.includes('MCP clients not initialized'));
@@ -534,24 +434,10 @@ test('callTool for MCP tool throws when mcpClients is empty', async (t) => {
 test('callTool for MCP tool filters args to only tool-specific parameters', async (t) => {
     // This test verifies that callTool only passes tool-defined parameters to MCP,
     // not the full args (which include chatHistory, entityTools, etc.)
-    const toolDefinitions = {
-        'server__my_tool': {
-            mcpServer: 'server',
-            mcpToolName: 'MyTool',
-            definition: {
-                function: {
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            query: { type: 'string' },
-                            limit: { type: 'number' },
-                        },
-                    },
-                },
-            },
-            pathwayName: 'mcp_tool_execution',
-        },
-    };
+    const toolDefinitions = mcpToolDefinitions({
+        query: { type: 'string' },
+        limit: { type: 'number' },
+    });
 
     // Extract the filtering logic (same as in callTool)
     const toolDef = toolDefinitions['server__my_tool'];
@@ -578,27 +464,6 @@ test('callTool for MCP tool filters args to only tool-specific parameters', asyn
 });
 
 test('InspectToolResult returns bounded summary and chunks from snapshot store', async (t) => {
-    const toolDefinitions = {
-        inspecttoolresult: {
-            pathwayName: '_builtin_inspect_tool_result',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'InspectToolResult',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            resultRef: { type: 'string' },
-                            mode: { type: 'string' },
-                            offset: { type: 'number' },
-                            limit: { type: 'number' },
-                        },
-                    },
-                },
-            },
-        },
-    };
-
     const fullEnvelope = JSON.stringify({
         _toolResultEnvelope: true,
         resultRef: 'tr_1',
@@ -610,13 +475,10 @@ test('InspectToolResult returns bounded summary and chunks from snapshot store',
         stdoutPreview: '0123456789abcdefghijklmnopqrstuvwxyz',
     });
 
-    const summaryResult = await callTool('InspectToolResult', {
-        resultRef: 'tr_1',
-    }, toolDefinitions, {
-        _toolResultSnapshots: new Map([['tr_1', { content: fullEnvelope, length: fullEnvelope.length }]]),
-    });
-
+    const snapshots = new Map([['tr_1', { content: fullEnvelope, length: fullEnvelope.length }]]);
+    const summaryResult = await inspectToolResultCall({ resultRef: 'tr_1' }, snapshots);
     const summary = JSON.parse(summaryResult.result);
+
     t.true(summary.ok);
     t.is(summary.mode, 'summary');
     t.is(summary.resultRef, 'tr_1');
@@ -624,16 +486,13 @@ test('InspectToolResult returns bounded summary and chunks from snapshot store',
     t.is(summary.readableChars, 36);
     t.falsy(summaryResult.historyMutation);
 
-    const chunkResult = await callTool('InspectToolResult', {
+    const chunk = await inspectToolResult({
         resultRef: 'tr_1',
         mode: 'chunk',
         offset: 10,
         limit: 5,
-    }, toolDefinitions, {
-        _toolResultSnapshots: new Map([['tr_1', { content: fullEnvelope, length: fullEnvelope.length }]]),
-    });
+    }, snapshots);
 
-    const chunk = JSON.parse(chunkResult.result);
     t.true(chunk.ok);
     t.is(chunk.mode, 'chunk');
     t.is(chunk.offset, 10);
@@ -644,26 +503,6 @@ test('InspectToolResult returns bounded summary and chunks from snapshot store',
 });
 
 test('InspectToolResult includes stderr for mixed stdout and stderr snapshots', async (t) => {
-    const toolDefinitions = {
-        inspecttoolresult: {
-            pathwayName: '_builtin_inspect_tool_result',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'InspectToolResult',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            resultRef: { type: 'string' },
-                            mode: { type: 'string' },
-                            query: { type: 'string' },
-                        },
-                    },
-                },
-            },
-        },
-    };
-
     const fullEnvelope = JSON.stringify({
         _toolResultEnvelope: true,
         resultRef: 'tr_mixed',
@@ -676,54 +515,27 @@ test('InspectToolResult includes stderr for mixed stdout and stderr snapshots', 
     });
 
     const snapshotStore = new Map([['tr_mixed', { content: fullEnvelope, length: fullEnvelope.length }]]);
-    const headResult = await callTool('InspectToolResult', {
+    const head = await inspectToolResult({
         resultRef: 'tr_mixed',
         mode: 'head',
-    }, toolDefinitions, {
-        _toolResultSnapshots: snapshotStore,
-    });
+    }, snapshotStore);
 
-    const head = JSON.parse(headResult.result);
     t.true(head.ok);
     t.true(head.content.includes('[stdout]\nstdout line'));
     t.true(head.content.includes('[stderr]\nstderr diagnostic'));
     t.is(head.stderrTotalChars, 17);
 
-    const searchResult = await callTool('InspectToolResult', {
+    const search = await inspectToolResult({
         resultRef: 'tr_mixed',
         mode: 'search',
         query: 'diagnostic',
-    }, toolDefinitions, {
-        _toolResultSnapshots: snapshotStore,
-    });
+    }, snapshotStore);
 
-    const search = JSON.parse(searchResult.result);
     t.is(search.matchCount, 1);
     t.true(search.matches[0].snippet.includes('stderr diagnostic'));
 });
 
 test('InspectToolResult supports bounded search within a snapshot', async (t) => {
-    const toolDefinitions = {
-        inspecttoolresult: {
-            pathwayName: '_builtin_inspect_tool_result',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'InspectToolResult',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            resultRef: { type: 'string' },
-                            mode: { type: 'string' },
-                            query: { type: 'string' },
-                            limit: { type: 'number' },
-                        },
-                    },
-                },
-            },
-        },
-    };
-
     const fullEnvelope = JSON.stringify({
         _toolResultEnvelope: true,
         resultRef: 'tr_1',
@@ -734,16 +546,13 @@ test('InspectToolResult supports bounded search within a snapshot', async (t) =>
         contentPreview: 'alpha needle beta gamma NEEDLE delta',
     });
 
-    const result = await callTool('InspectToolResult', {
+    const parsed = await inspectToolResult({
         resultRef: 'tr_1',
         mode: 'search',
         query: 'needle',
         limit: 18,
-    }, toolDefinitions, {
-        _toolResultSnapshots: new Map([['tr_1', { content: fullEnvelope }]]),
-    });
+    }, new Map([['tr_1', { content: fullEnvelope }]]));
 
-    const parsed = JSON.parse(result.result);
     t.true(parsed.ok);
     t.is(parsed.mode, 'search');
     t.is(parsed.query, 'needle');
@@ -754,27 +563,6 @@ test('InspectToolResult supports bounded search within a snapshot', async (t) =>
 });
 
 test('InspectToolResult search returns concise JSON leaf snippets', async (t) => {
-    const toolDefinitions = {
-        inspecttoolresult: {
-            pathwayName: '_builtin_inspect_tool_result',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'InspectToolResult',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            resultRef: { type: 'string' },
-                            mode: { type: 'string' },
-                            query: { type: 'string' },
-                            limit: { type: 'number' },
-                        },
-                    },
-                },
-            },
-        },
-    };
-
     const repeatedWrapper = {
         searchResultId: 'result-wrapper-one',
         metadata: {
@@ -800,16 +588,13 @@ test('InspectToolResult search returns concise JSON leaf snippets', async (t) =>
         ]),
     });
 
-    const result = await callTool('InspectToolResult', {
+    const parsed = await inspectToolResult({
         resultRef: 'tr_1',
         mode: 'search',
         query: 'tariff',
         limit: 2000,
-    }, toolDefinitions, {
-        _toolResultSnapshots: new Map([['tr_1', { content: fullEnvelope }]]),
-    });
+    }, new Map([['tr_1', { content: fullEnvelope }]]));
 
-    const parsed = JSON.parse(result.result);
     t.true(parsed.ok);
     t.is(parsed.matchCount, 2);
     t.is(parsed.matches[0].path, '$[0].snippet');
@@ -820,31 +605,10 @@ test('InspectToolResult search returns concise JSON leaf snippets', async (t) =>
 });
 
 test('InspectToolResult returns an error when the snapshot is not present', async (t) => {
-    const toolDefinitions = {
-        inspecttoolresult: {
-            pathwayName: '_builtin_inspect_tool_result',
-            definition: {
-                type: 'function',
-                function: {
-                    name: 'InspectToolResult',
-                    parameters: {
-                        type: 'object',
-                        properties: {
-                            resultRef: { type: 'string' },
-                        },
-                    },
-                },
-            },
-        },
-    };
-
-    const result = await callTool('InspectToolResult', {
+    const parsed = await inspectToolResult({
         resultRef: 'tr_missing',
-    }, toolDefinitions, {
-        _toolResultSnapshots: new Map(),
-    });
+    }, new Map());
 
-    const parsed = JSON.parse(result.result);
     t.true(parsed.error);
     t.true(parsed.message.includes('not available'));
 });

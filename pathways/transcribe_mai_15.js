@@ -254,8 +254,6 @@ const transcribeMai15 = {
     contextId: "",
   },
   timeout: 3600,
-  enableDuplicateRequests: false,
-
   executePathway: async function ({ args, resolver }) {
     const {
       file,

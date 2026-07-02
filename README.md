@@ -13,7 +13,7 @@ It is built for teams that want the modern AI stack without welding their produc
 ## What You Get
 
 - **One API for many providers.** Route OpenAI, Azure OpenAI, Gemini, Claude on Vertex, Grok, Replicate-hosted media models, Ollama, local models, and custom provider plugins through GraphQL, REST, OpenAI-compatible chat/completions/responses, and Anthropic-style messages APIs.
-- **Routing that can adapt.** Use model groups, redirects, per-request model overrides, endpoint health, duplicate-request hedging, and background latency sampling so "the default model" can be a strategy instead of a hardcoded string.
+- **Routing that can adapt.** Use model groups, redirects, per-request model overrides, endpoint health, and background latency sampling so "the default model" can be a strategy instead of a hardcoded string.
 - **An agent harness you can own.** `sys_entity_agent` combines entity configuration, tools, MCP discovery, client-side tools, request-scoped tools, streaming progress, tool-result compaction, and memory-aware context into one reusable agent pathway.
 - **Private workspaces for real work.** Attach each entity to an isolated Docker or Azure Container Instances workspace with shell access, file APIs, checkpoint/restore, warm-pool provisioning, and secret injection.
 - **Simple extension points.** Add a capability with one pathway file, then graduate to `executePathway` when you need validation, orchestration, custom tools, provider-specific handling, or richer result metadata.
@@ -809,7 +809,7 @@ Prompt and execution:
 | `temperature` | `number` | `0.9` | Passed into model plugins that support it. Also enables request caching when `temperature == 0` and global cache is on. |
 | `json` | `boolean` | `false` | Tells the response parser to parse/repair JSON output before returning. |
 | `parser` | `function` | unset | Custom output parser. Runs before built-in `list` or `json` parsing. |
-| `timeout` | `number` | `120` | Pathway timeout in seconds. Also influences provider request timeout and duplicate-request expiration. |
+| `timeout` | `number` | `120` | Pathway timeout in seconds. Also influences provider request timeout. |
 | `requestLoggingDisabled` | `boolean` | `false` | Suppresses non-error request logging while this pathway runs. |
 
 Inputs and generated parameters:
@@ -839,14 +839,12 @@ Chunking and context management:
 | `truncateFromFront` | `boolean` | `false` | Makes token truncation keep the beginning of long input instead of the end. Available to plugins through prompt parameters. |
 | `manageTokenLength` | `boolean` | `true` | Plugin-level hint to manage/truncate oversized prompts for model calls that support this behavior. Agentic pathways often set this false. |
 
-Caching, duplicate requests, and GraphQL cache:
+Caching and GraphQL cache:
 
 | Property | Type | Default | What it does |
 | --- | --- | --- | --- |
 | `enableCache` | `boolean` | unset | Enables provider-response cache for this pathway when global `CORTEX_ENABLE_CACHE` is true. Temperature `0` also enables caching. |
 | `enableGraphqlCache` | `boolean` | unset | Enables Apollo response cache hints when the pathway temperature is `0` and GraphQL cache is configured. |
-| `enableDuplicateRequests` | `boolean` | `false` | Allows hedged duplicate provider requests for latency spikes. If unset, the global config can still enable duplicates. |
-| `duplicateRequestAfter` | `number` | `10` | Seconds before Cortex sends a duplicate provider request when duplicate requests are enabled. |
 
 Tools and agent integration:
 
@@ -862,7 +860,7 @@ REST emulation:
 | --- | --- | --- | --- |
 | `emulateOpenAIChatModel` | `string` | unset | Exposes this pathway through `/v1/chat/completions` under the given model id when REST is enabled. |
 | `emulateOpenAICompletionModel` | `string` | unset | Exposes this pathway through `/v1/completions` under the given model id when REST is enabled. |
-| `restStreaming` | `object` | unset | Model-config helper used by generated REST streaming pathways. Can add input parameters, safety settings, timeout, or duplicate-request behavior. |
+| `restStreaming` | `object` | unset | Model-config helper used by generated REST streaming pathways. Can add input parameters, safety settings, or timeout. |
 
 Provider and plugin-specific pathway parameters:
 
@@ -919,7 +917,6 @@ Common environment variables:
 | `CORTEX_ENABLE_REST` | Enable REST routes. |
 | `CORTEX_ENABLE_CACHE` | Enable pathway cache. |
 | `CORTEX_ENABLE_GRAPHQL_CACHE` | Enable Apollo response cache. |
-| `CORTEX_ENABLE_DUPLICATE_REQUESTS` | Enable hedged duplicate requests. |
 | `OPENAI_API_KEY` | OpenAI API key. |
 | `CLAUDE_API_KEY` | Anthropic API key. |
 | `GEMINI_API_KEY` | Gemini API key. |
@@ -986,10 +983,35 @@ Run Cortex:
 npm start
 ```
 
-Run tests:
+Run the fast hermetic unit and script suite:
 
 ```sh
 npm test
+```
+
+This is the default local and CI gate. It uses `config/default.example.json`
+and a dummy `OPENAI_API_KEY`, and does not load `.env`.
+
+Run live integration tests explicitly:
+
+```sh
+npm run test:integration
+```
+
+Integration tests load `.env`, enable REST routes for the test process, and
+may require provider keys, Redis, MongoDB, workspace services, or other local
+infrastructure. Some live REST compatibility groups are further gated by
+`CORTEX_RUN_REST_LIVE_TESTS=true` or vendor-specific live-test flags. For the
+REST integration subset only, use:
+
+```sh
+npm run test:integration:rest
+```
+
+To run both lanes:
+
+```sh
+npm run test:all
 ```
 
 Focused helper tests may use their own package scripts, for example:

@@ -1,7 +1,6 @@
 export default {
     prompt: ["{{{text}}}"],
 
-    enableDuplicateRequests: false,
     inputParameters: {
         model: "replicate-topaz-image-upscale",
         image: "",

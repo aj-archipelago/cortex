@@ -40,6 +40,67 @@ const getResponsesModelName = (model, endpoint) => {
     return endpoint?.params?.model || model.params?.model || model.emulateOpenAIChatModel || model.name;
 };
 
+const normalizeNativeResponsesTool = (tool) => {
+    if (!tool || typeof tool !== 'object') return tool;
+
+    // Chat Completions compatibility: callers often send
+    // { type: "function", function: { name, description, parameters } }.
+    // Native Responses expects the function metadata at the top level.
+    if (tool.type === 'function' && tool.function && typeof tool.function === 'object') {
+        return {
+            type: 'function',
+            name: tool.function.name,
+            description: tool.function.description,
+            parameters: tool.function.parameters,
+            strict: tool.function.strict,
+        };
+    }
+
+    return tool;
+};
+
+const normalizeNativeResponsesToolChoice = (toolChoice) => {
+    if (!toolChoice || typeof toolChoice !== 'object') return toolChoice;
+
+    if (toolChoice.type === 'function') {
+        const name =
+            typeof toolChoice.function === 'string'
+                ? toolChoice.function
+                : toolChoice.function?.name;
+        if (name) {
+            return { type: 'function', name };
+        }
+    }
+
+    return toolChoice;
+};
+
+const normalizeNativeResponsesRequest = (body) => {
+    const requestBody = { ...body };
+
+    if (Array.isArray(requestBody.tools)) {
+        requestBody.tools = requestBody.tools.map(normalizeNativeResponsesTool);
+    }
+    if (requestBody.tool_choice) {
+        requestBody.tool_choice = normalizeNativeResponsesToolChoice(requestBody.tool_choice);
+    }
+
+    return requestBody;
+};
+
+const withOutputTextAlias = (responseBody) => {
+    if (!responseBody || typeof responseBody !== 'object') return responseBody;
+    if (typeof responseBody.output_text === 'string') return responseBody;
+
+    const outputText = normalizeResponseOutputText(responseBody);
+    if (!outputText) return responseBody;
+
+    return {
+        ...responseBody,
+        output_text: outputText,
+    };
+};
+
 /**
  * Native passthrough for Responses API models - streams SSE directly without conversion
  */
@@ -58,7 +119,7 @@ const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
     const isStreaming = Boolean(req.body.stream);
 
     // Build the request - minimal transformation, just pass through
-    const requestBody = { ...req.body };
+    const requestBody = normalizeNativeResponsesRequest(req.body);
 
     // Ensure model is set in request body
     const modelName = getResponsesModelName(model, endpoint);
@@ -93,14 +154,15 @@ const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
 
         if (!isStreaming) {
             // Non-streaming: just return the response
+            const responseBody = withOutputTextAlias(response.data);
             logTokenUsage({
                 req,
-                usage: response.data?.usage,
-                model: response.data?.model || modelName,
+                usage: responseBody?.usage,
+                model: responseBody?.model || modelName,
                 route: req.path,
                 requestId
             });
-            res.json(response.data);
+            res.json(responseBody);
             return;
         }
 
@@ -113,6 +175,7 @@ const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
         let usageLogged = false;
         const onParse = (event) => {
             if (event.type === 'event') {
+                let forwardedData = event.data;
                 if (!usageLogged && event.data) {
                     try {
                         const parsed = JSON.parse(event.data);
@@ -133,6 +196,35 @@ const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
                             });
                             usageLogged = Boolean(req._cortexUsageLogged);
                         }
+
+                        if (
+                            eventType === 'response.output_item.added' &&
+                            parsed.item &&
+                            typeof parsed.item === 'object' &&
+                            !parsed.item.status
+                        ) {
+                            parsed.item = { ...parsed.item, status: 'in_progress' };
+                            forwardedData = JSON.stringify(parsed);
+                        }
+
+                        if (
+                            eventType === 'response.output_item.done' &&
+                            parsed.item &&
+                            typeof parsed.item === 'object' &&
+                            !parsed.item.status
+                        ) {
+                            parsed.item = { ...parsed.item, status: 'completed' };
+                            forwardedData = JSON.stringify(parsed);
+                        }
+
+                        if (
+                            (eventType === 'response.completed' || eventType === 'response.done') &&
+                            parsed.response &&
+                            typeof parsed.response === 'object'
+                        ) {
+                            parsed.response = withOutputTextAlias(parsed.response);
+                            forwardedData = JSON.stringify(parsed);
+                        }
                     } catch {
                         // ignore non-JSON events
                     }
@@ -140,7 +232,7 @@ const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
                 // Forward the raw SSE event directly - no conversion needed!
                 if (!res.writableEnded) {
                     res.write(`event: ${event.event || 'message'}\n`);
-                    res.write(`data: ${event.data}\n\n`);
+                    res.write(`data: ${forwardedData}\n\n`);
                 }
             }
         };

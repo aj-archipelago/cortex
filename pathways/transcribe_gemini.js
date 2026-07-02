@@ -45,7 +45,6 @@ export default {
         contextId: ``,
     },
     timeout: 3600, // in seconds
-    enableDuplicateRequests: false,
     geminiSafetySettings: geminiTranscriptionSafetySettings,
 
     executePathway: async ({args, runAllPrompts, resolver}) => {

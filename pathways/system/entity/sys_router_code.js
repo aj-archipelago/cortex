@@ -32,6 +32,5 @@ Always output just the valid JSON object with all these fields.`,
     ],
     model: 'oai-gpt4o',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     json: true,
 }
