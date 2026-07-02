@@ -95,7 +95,6 @@ function formatVeoVideoInput(videoUrl) {
 export default {
     prompt: [],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     inputParameters: {
         model: 'oai-gpt4o',
         contextId: '',

@@ -1,7 +1,6 @@
 export default {
     prompt: "",
     model: "azure-video-translate",
-    enableDuplicateRequests: false,
     inputParameters: {
         mode: "",
         apiversion: "",

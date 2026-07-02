@@ -30,6 +30,5 @@ Rules:
     },
     json: true,
     temperature: 0,
-    enableDuplicateRequests: false,
     timeout: 60,
 };

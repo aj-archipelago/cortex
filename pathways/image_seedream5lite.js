@@ -1,6 +1,5 @@
 export default {
   prompt: ["{{text}}"],
-  enableDuplicateRequests: false,
   inputParameters: {
     model: "replicate-seedream-5-lite",
     size: "2K", // Options: "2K", "3K"

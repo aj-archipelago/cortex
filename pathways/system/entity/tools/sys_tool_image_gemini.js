@@ -6,7 +6,6 @@ import { uploadImageToCloud, addFileToCollection, resolveFileParameter, buildFil
 export default {
     prompt: [],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     inputParameters: {
         model: 'oai-gpt4o',
         contextId: '',

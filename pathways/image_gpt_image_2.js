@@ -8,7 +8,6 @@ const inputImageSlots = Object.fromEntries(
 export default {
     prompt: ["{{text}}"],
     model: 'oai-gpt-image-2',
-    enableDuplicateRequests: false,
     timeout: 600,
     inputParameters: {
         text: "",

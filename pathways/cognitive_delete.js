@@ -6,6 +6,5 @@ export default {
         chatId: ``,
     },
     mode: 'delete', 
-    enableDuplicateRequests: false,
     timeout: 300,
 };

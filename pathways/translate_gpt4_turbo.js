@@ -14,6 +14,5 @@ export default {
     },
     inputChunkSize: 500,
     model: 'oai-gpt4-turbo',
-    enableDuplicateRequests: false,
 
 }

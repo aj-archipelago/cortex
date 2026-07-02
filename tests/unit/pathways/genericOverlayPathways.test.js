@@ -8,7 +8,6 @@ const internalNamesPattern = new RegExp(`${'Al ' + 'Jazeera'}|${'La' + 'beeb'}`,
 
 test('categorize_feedback exposes generic feedback categories and CSV-style output', t => {
     t.is(categorizeFeedback.model, 'oai-gpt4o');
-    t.false(categorizeFeedback.enableDuplicateRequests);
     t.regex(categorizeFeedback.inputParameters.categories, /Brand Praise/);
     t.regex(categorizeFeedback.inputParameters.categories, /Feature Suggestion/);
 
@@ -21,7 +20,6 @@ test('categorize_feedback exposes generic feedback categories and CSV-style outp
 
 test('greeting generates dashboard copy using generic entity defaults', t => {
     t.is(greeting.model, 'oai-gpt41');
-    t.false(greeting.enableDuplicateRequests);
     t.is(greeting.inputParameters.aiName, 'Jarvis');
     t.is(greeting.inputParameters.language, 'English');
 

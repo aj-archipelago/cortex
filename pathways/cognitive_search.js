@@ -9,6 +9,5 @@ export default {
         semanticConfiguration: ``,
         chatId: ``,
     },
-    enableDuplicateRequests: false,
     timeout: 300,
 };

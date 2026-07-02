@@ -16,7 +16,6 @@ export default {
     },
     model: 'oai-gpt4o',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     executePathway: async ({args, runAllPrompts, resolver}) => {
         let result;

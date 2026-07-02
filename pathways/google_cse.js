@@ -22,6 +22,5 @@ export default {
         fileType: ''
     },
     timeout: 400,
-    enableDuplicateRequests: false,
     model: 'google-cse',
 };

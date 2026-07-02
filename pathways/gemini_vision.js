@@ -15,6 +15,5 @@ export default {
     max_tokens: 2048,
     model: 'gemini-pro-vision',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
 }

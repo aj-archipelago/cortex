@@ -35,7 +35,6 @@ async function sendMessageToQueue(data) {
 
 export default {
     useInputChunking: false,
-    enableDuplicateRequests: false,
     model: 'oai-gpt4o',
     useSingleTokenStream: false,
     inputParameters: {

@@ -761,7 +761,6 @@ export default {
     },
     model: 'oai-gpt4o', // placeholder — executePathway delegates to sub-pathways
     timeout: 60 * 30,
-    enableDuplicateRequests: false,
 
     executePathway: async ({ args, resolver }) => {
         const modelId = args.model;

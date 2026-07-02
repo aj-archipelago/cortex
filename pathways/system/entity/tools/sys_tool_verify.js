@@ -21,7 +21,6 @@ export default {
     },
     max_tokens: 100000,
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     toolDefinition: [{
         type: "function",

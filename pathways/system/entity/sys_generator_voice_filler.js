@@ -16,7 +16,6 @@ export default {
     },
     model: 'oai-gpt4o-mini',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     json: true,
     timeout: 600,
 }

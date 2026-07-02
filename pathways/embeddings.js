@@ -8,7 +8,6 @@ export default {
     inputParameters: {
         input: [],
     },
-    enableDuplicateRequests: false,
     timeout: 300,
 };
 

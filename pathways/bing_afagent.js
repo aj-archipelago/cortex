@@ -15,7 +15,6 @@ export default {
         set_lang: 'en'
     },
     timeout: 400,
-    enableDuplicateRequests: false,
     model: 'azure-bing-agent',
     useInputChunking: false,
     instructions: `You are a Bing search agent responding to user queries.

@@ -79,7 +79,6 @@ export default {
     max_tokens: 32000,
     model: 'gemini-flash-25-image',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     geminiSafetySettings: [
         {category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE'},

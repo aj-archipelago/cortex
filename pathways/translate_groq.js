@@ -31,6 +31,5 @@ export default {
     },
     inputChunkSize: 1000,
     model: 'groq-chat',
-    enableDuplicateRequests: false,
     useParallelChunkProcessing: true,
 }

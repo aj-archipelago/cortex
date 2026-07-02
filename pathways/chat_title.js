@@ -23,5 +23,4 @@ export default {
     model: 'oai-gpt41-mini',
     useInputChunking: false,
     temperature: 0,
-    enableDuplicateRequests: false
 };

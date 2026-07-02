@@ -13,7 +13,6 @@ export default {
     //inputChunkSize: 1000,
     joinChunksWith: '\n',
     tokenRatio: 1,
-    enableDuplicateRequests: false,
     timeout: 1800,
 }
 

@@ -76,6 +76,5 @@ Return only the JSON object without additional commentary.`,
         ]}),
     ],
     useInputChunking: false,
-    enableDuplicateRequests: false,
     json: true,
 }

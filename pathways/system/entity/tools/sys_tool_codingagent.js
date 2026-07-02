@@ -42,7 +42,6 @@ export default {
     max_tokens: 100000,
     model: 'oai-gpt41',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     toolDefinition: [{
         type: "function",

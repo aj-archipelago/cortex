@@ -17,7 +17,6 @@ export default {
     },
     model: 'oai-o3-mini',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     executePathway: async ({args, runAllPrompts, resolver}) => {
         let timeoutId;

@@ -21,7 +21,6 @@ export default {
     model: 'oai-gpt51',
     reasoningEffort: 'high',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 600,
     toolDefinition: {
         type: "function",

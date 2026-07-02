@@ -13,7 +13,6 @@ export default {
         tokenRatio: 0.2,
     },
     model: 'oai-gpt4o',
-    enableDuplicateRequests: false,
     useInputChunking: false,
     enableCache: true,
     json: true,

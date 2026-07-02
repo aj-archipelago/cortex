@@ -23,7 +23,6 @@ export default {
     model: 'cortex-default-small-fast',
     reasoningEffort: 'none',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     timeout: 300,
     executePathway: async ({args, resolver}) => {
         try {

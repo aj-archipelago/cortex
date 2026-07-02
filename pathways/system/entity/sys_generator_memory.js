@@ -12,7 +12,6 @@ export default {
     },
     model: 'oai-gpt41-mini',
     useInputChunking: false,
-    enableDuplicateRequests: false,
     executePathway: async ({args, resolver}) => {
 
         const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;

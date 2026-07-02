@@ -2,7 +2,6 @@ import { Prompt } from '../../../server/prompt.js';
 
 export default {
     useInputChunking: false,
-    enableDuplicateRequests: false,
     useSingleTokenStream: false,
     prompt: [
         new Prompt({

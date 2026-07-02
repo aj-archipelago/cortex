@@ -16,7 +16,6 @@ export default {
     inputChunkSize: 1000,
     joinChunksWith: '\n',
     tokenRatio: 0.75,
-    enableDuplicateRequests: false,
     timeout: 1800,
 }
 
