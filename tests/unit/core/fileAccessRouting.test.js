@@ -105,6 +105,63 @@ test.serial('user-files file access target lists the full user file share read-o
     }
 });
 
+test.serial('app-private file access target reads applet-user and legacy workspace scopes', async t => {
+    const { axios } = await loadRequestExecutor();
+    const { getWriteFileAccessTarget, listFilesForFileAccessPlan } = await loadFileUtils();
+    const originalGet = axios.get;
+    const capturedUrls = [];
+
+    axios.get = async (url) => {
+        capturedUrls.push(url);
+        const parsed = new URL(url);
+        const fileScope = parsed.searchParams.get('fileScope');
+        return {
+            data: {
+                files: [
+                    {
+                        name: `${fileScope}/report.txt`,
+                        hash: `${fileScope}-hash`,
+                        url: `https://files.test/${fileScope}/report.txt`,
+                    },
+                ],
+            },
+        };
+    };
+
+    const fileAccessPlan = [
+        {
+            kind: 'app-private',
+            userContextId: 'user-456',
+            appletId: 'applet-123',
+            workspaceId: 'workspace-789',
+            write: true,
+        },
+    ];
+
+    try {
+        const writeTarget = getWriteFileAccessTarget(fileAccessPlan);
+        t.is(writeTarget.contextId, 'applet-user:applet-123:user-456');
+        t.is(writeTarget.writeFileScope, 'applet-user');
+
+        const files = await listFilesForFileAccessPlan(fileAccessPlan);
+
+        t.is(files.length, 2);
+        t.deepEqual(files.map(file => file._readFileScope).sort(), [
+            'applet-user',
+            'workspace-user-legacy',
+        ]);
+        t.deepEqual(capturedUrls.map(url => new URL(url).searchParams.get('fileScope')), [
+            'applet-user',
+            'workspace-user-legacy',
+        ]);
+        t.is(new URL(capturedUrls[0]).searchParams.get('contextId'), 'applet-user:applet-123:user-456');
+        t.is(new URL(capturedUrls[1]).searchParams.get('contextId'), 'user-456');
+        t.is(new URL(capturedUrls[1]).searchParams.get('workspaceId'), 'workspace-789');
+    } finally {
+        axios.get = originalGet;
+    }
+});
+
 test.serial('scoped name listing makes documented global prefixes relative to user-global scope', async t => {
     const { axios } = await loadRequestExecutor();
     const { listFileNamesForFileAccessPlan } = await loadFileUtils();

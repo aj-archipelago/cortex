@@ -237,6 +237,7 @@ test('public example config exposes only current model definitions', (t) => {
         'gemini-flash-35-vision',
         'gemini-pro-31-vision',
         'gemini-flash-31-image',
+        'gemini-flash-lite-31-image',
         'google-gemini-3.1-flash-tts',
         'google-lyria-3-music',
         'google-lyria-3-pro-music',

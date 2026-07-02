@@ -134,7 +134,16 @@ var config = convict({
     },
     entityConfig: {
         format: Object,
-        default: {},
+        default: {
+            jarvis: {
+                name: "Jarvis",
+                isDefault: true,
+                description: "Jarvis is a self-aware AI entity that can help you with your tasks and answer your questions.",
+                instructions: "",
+                tools: ["*"],
+                useMemory: true,
+            },
+        },
     },
     entityConstants: {
         format: Object,

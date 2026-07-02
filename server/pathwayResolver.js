@@ -165,7 +165,7 @@ class PathwayResolver {
             if (requestProgress.progress === 1) {
                 const infoObject = { ...this.pathwayResultData || {} };
                 requestProgress.info = JSON.stringify(infoObject);
-                requestProgress.error = this.errors.join(', ') || '';
+                requestProgress.error = requestProgress.error || this.errors.join(', ') || '';
             }
             publishRequestProgress(requestProgress);
         }

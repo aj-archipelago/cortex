@@ -13,6 +13,32 @@ test("should create storage service with factory", (t) => {
   t.truthy(service);
 });
 
+test("_extractContainerFromUrl ignores local file handler URLs", (t) => {
+  const service = new StorageService({
+    getPrimaryProvider: async () => ({}),
+    getGCSProvider: () => null,
+  });
+
+  t.is(service._extractContainerFromUrl("http://localhost:3100/files/request/file.png"), null);
+  t.is(service._extractContainerFromUrl("http://127.0.0.1:7071/files/request/file.png"), null);
+});
+
+test("_extractContainerFromUrl extracts Azure and Azurite containers", (t) => {
+  const service = new StorageService({
+    getPrimaryProvider: async () => ({}),
+    getGCSProvider: () => null,
+  });
+
+  t.is(
+    service._extractContainerFromUrl("https://acct.blob.core.windows.net/user-container/path/file.png?sas=1"),
+    "user-container",
+  );
+  t.is(
+    service._extractContainerFromUrl("http://127.0.0.1:10000/devstoreaccount1/azurite-container/path/file.png"),
+    "azurite-container",
+  );
+});
+
 test("getExpectedGCSUrl derives deterministic per-owner GCS path", async (t) => {
   const service = new StorageService({
     getPrimaryProvider: async () => ({}),
