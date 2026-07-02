@@ -20,6 +20,22 @@ import latencyTrace from '../lib/latencyTrace.js';
 
 const modelTypesExcludedFromProgressUpdates = ['OPENAI-DALLE2', 'OPENAI-DALLE3'];
 
+const extractTextFromStreamData = (data) => {
+    if (!data || typeof data !== 'string') return '';
+
+    try {
+        const parsed = JSON.parse(data);
+        const deltaContent = parsed?.choices?.[0]?.delta?.content;
+        if (typeof deltaContent === 'string') return deltaContent;
+        const text = parsed?.choices?.[0]?.text;
+        if (typeof text === 'string') return text;
+    } catch {
+        return data;
+    }
+
+    return '';
+};
+
 class PathwayResolver {
     // Optional endpoints override parameter is for testing purposes
     constructor({ config, pathway, args, endpoints }) {
@@ -449,6 +465,10 @@ class PathwayResolver {
                             streamErrorOccurred = true;
                             streamErrorMessage = requestProgress.error;
                         }
+                        const streamedText = extractTextFromStreamData(requestProgress?.data);
+                        if (streamedText) {
+                            this.streamedContent += streamedText;
+                        }
                         // Check if plugin signaled a tool callback was invoked
                         if (requestProgress.toolCallbackInvoked) {
                             toolCallbackInvoked = true;
@@ -653,7 +673,7 @@ class PathwayResolver {
                 const errorMessage = streamErrorOccurred
                     ? (streamErrorMessage || this.errors.join(', ') || 'Stream read failed')
                     : '';
-                publishRequestProgress({
+                this.publishNestedRequestProgress({
                     requestId,
                     progress: 1,
                     data: '',

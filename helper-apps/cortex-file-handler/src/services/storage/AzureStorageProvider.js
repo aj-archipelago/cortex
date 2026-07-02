@@ -104,8 +104,8 @@ export class AzureStorageProvider extends StorageProvider {
     await this.ensureInitialized();
 
     // Create container if it doesn't exist (only checked once per instance).
-    // Only cache success; a failed create must retry on the next call so a
-    // transient error does not poison this provider instance.
+    // Only cache success — a failed create must retry on the next call so a
+    // transient error doesn't permanently poison this provider instance.
     if (createContainer && !this._containerEnsured) {
       try {
         await this._containerClient.createIfNotExists();
@@ -359,7 +359,7 @@ export class AzureStorageProvider extends StorageProvider {
       throw new Error(`Generated invalid Azure URL (container-only) from uploadStream: ${url}, blobName: ${blobName}`);
     }
     
-    return { url, shortLivedUrl };
+    return { url, shortLivedUrl, blobName };
   }
 
   // Use shared utility for MIME type checking
@@ -558,6 +558,43 @@ export class AzureStorageProvider extends StorageProvider {
   }
 
   /**
+   * List blob names/properties under a folder prefix without generating URLs or
+   * enriching metadata. Returns compact tuples: [blobPath, size, lastModified].
+   */
+  async listNames(folderPath, options = {}) {
+    const { containerClient } = await this.getBlobClient({ createContainer: false });
+    const prefix = folderPath === '' ? undefined : (folderPath.endsWith('/') ? folderPath : `${folderPath}/`);
+    const maxResults = Math.min(Math.max(parseInt(options.maxResults, 10) || 10000, 1), 50000);
+    const scanLimit = maxResults + 1;
+    const results = [];
+    let truncated = false;
+
+    try {
+      for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+        results.push([
+          blob.name,
+          blob.properties.contentLength ?? null,
+          blob.properties.lastModified?.toISOString?.() || blob.properties.lastModified || null,
+        ]);
+
+        if (results.length >= scanLimit) {
+          truncated = true;
+          results.length = maxResults;
+          break;
+        }
+      }
+    } catch (e) {
+      const code = e?.code || e?.details?.errorCode;
+      if (e?.statusCode === 404 || code === "ContainerNotFound") {
+        return { items: [], truncated: false };
+      }
+      throw e;
+    }
+
+    return { items: results, truncated };
+  }
+
+  /**
    * Rename a blob by copying to a new name and deleting the old one.
    * @param {string} oldBlobName - The current blob name
    * @param {string} newBlobName - The new blob name
@@ -608,4 +645,5 @@ export class AzureStorageProvider extends StorageProvider {
       blobName: newBlobName,
     };
   }
+
 }

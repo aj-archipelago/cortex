@@ -33,7 +33,7 @@ export default {
                 properties: {
                     detailedInstructions: {
                         type: "string",
-                        description: "A very detailed, SELF-CONTAINED prompt describing the slide content. CRITICAL: The image generation model has NO access to conversation history, uploaded files, or prior tool results. You MUST embed ALL data, text, numbers, labels, and values directly in these instructions. For charts or data visualizations, list EVERY data point explicitly (e.g., 'Bar chart showing: example.com: 16, sample.org: 12, demo.net: 11, ...'). Never refer to 'the data above' or 'the attached file' - the model cannot see them. Also specify layout, design style, color scheme, and typography (e.g., 'Professional slide with a horizontal bar chart, blue and white color scheme, modern sans-serif fonts, title at top.'). The more complete and self-contained the prompt, the better the result."
+                        description: "A very detailed, SELF-CONTAINED prompt describing the slide content. CRITICAL: The image generation model has NO access to conversation history, uploaded files, or prior tool results. You MUST embed ALL data, text, numbers, labels, and values directly in these instructions. For charts or data visualizations, list EVERY data point explicitly (e.g., 'Bar chart showing: omd.com: 16, novartis.com: 12, mindshareworld.com: 11, ...'). Never refer to 'the data above' or 'the attached file' — the model cannot see them. Also specify layout, design style, color scheme, and typography (e.g., 'Professional slide with a horizontal bar chart, blue and white color scheme, modern sans-serif fonts, title at top.'). The more complete and self-contained the prompt, the better the result."
                     },
                     filenamePrefix: {
                         type: "string",
@@ -163,11 +163,11 @@ export default {
                                 })
                                 : null;
                             const uploadResult = await uploadImageToCloud(artifact.data, artifact.mimeType, pathwayResolver, fileLocation, uploadFilename);
-                            
+
                             const imageUrl = uploadResult.url || uploadResult;
                             const imageGcs = uploadResult.gcs || null;
                             const imageHash = uploadResult.hash || null;
-                            
+
                             // Prepare image data
                             const imageData = {
                                 type: 'image',
@@ -176,7 +176,7 @@ export default {
                                 hash: imageHash,
                                 mimeType: artifact.mimeType
                             };
-                            
+
                             // Add uploaded image to file collection if contextId is available
                             if (writeTarget?.contextId && imageUrl) {
                                 try {
@@ -222,7 +222,7 @@ export default {
                 if (successfulImages.length > 0) {
                     return buildFileCreationResponse(successfulImages, {
                         mediaType: 'image',
-                        action: 'Slide/infographic generation'
+                        action: 'Slide/infographic generation',
                     });
                 } else {
                     throw new Error('Slide generation failed: Content was generated but could not be uploaded to storage');

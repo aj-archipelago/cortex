@@ -36,6 +36,17 @@ export default class ContainerBackend {
     }
 
     /**
+     * Resolve the current URL for an existing container, if the backend can.
+     * Backends with stable URLs may omit this method.
+     * @param {string} containerId - Container/resource identifier
+     * @param {string} containerName - Human-readable container name
+     * @returns {Promise<string|null>}
+     */
+    async getContainerUrl(containerId, containerName) {
+        throw new Error('getContainerUrl() not implemented');
+    }
+
+    /**
      * Stop a running container (preserves state for restart).
      * @param {string} containerId - Container/resource identifier
      * @param {string} containerName - Human-readable container name

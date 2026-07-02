@@ -45,6 +45,11 @@ export default {
                         name: 'Google Translator',
                         description: 'Google Cloud Translation service',
                         supportedLanguages: 'Over 100 languages supported'
+                    },
+                    'translate_google_llm': {
+                        name: 'Google TranslateLLM',
+                        description: 'Google Translation LLM via Vertex AI; requires configured Google Cloud access',
+                        supportedLanguages: 'Cloud Translation LLM supported languages'
                     }
                 };
 

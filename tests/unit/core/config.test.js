@@ -5,6 +5,8 @@ import path from 'path';
 import { config, buildPathways, buildModels } from '../../../config.js';
 
 test.before(async () => {
+    process.env.AZURE_COGNITIVE_API_URL_QA = 'https://qa-search.example.test';
+    process.env.AZURE_COGNITIVE_API_KEY_QA = 'abc=def&ghi';
     await buildPathways(config);
     buildModels(config);
 });
@@ -45,7 +47,7 @@ test('config enableRestEndpoints', (t) => {
 });
 
 test('config openaiDefaultModel', (t) => {
-    const expectedDefault = 'gpt-5.4-mini';
+    const expectedDefault = 'gpt-3.5-turbo';
     t.is(config.get('openaiDefaultModel'), expectedDefault);
 });
 
@@ -66,4 +68,38 @@ test('buildModels adds models to config', (t) => {
 
 test('buildModels sets defaultModelName if not provided', (t) => {
     t.truthy(config.get('defaultModelName'));
+});
+
+test('buildModels resolves model dataSources templates', (t) => {
+    const testModelName = 'unit-test-data-sources-template-model';
+    const models = config.get('models');
+
+    config.load({
+        models: {
+            ...models,
+            [testModelName]: {
+                type: 'OPENAI',
+                url: 'https://example.test',
+                headers: {},
+                dataSources: [
+                    {
+                        type: 'AzureCognitiveSearch',
+                        parameters: {
+                            endpoint: '{{{AZURE_COGNITIVE_API_URL_QA}}}',
+                            key: '{{{AZURE_COGNITIVE_API_KEY_QA}}}',
+                        },
+                    },
+                ],
+            },
+        },
+    });
+
+    buildModels(config);
+
+    const dataSources = config.get('models')[testModelName].dataSources;
+    const serializedDataSources = JSON.stringify(dataSources);
+
+    t.false(serializedDataSources.includes('{{'));
+    t.is(dataSources[0].parameters.endpoint, process.env.AZURE_COGNITIVE_API_URL_QA);
+    t.is(dataSources[0].parameters.key, process.env.AZURE_COGNITIVE_API_KEY_QA);
 });

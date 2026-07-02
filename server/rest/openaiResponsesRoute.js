@@ -19,7 +19,7 @@ import {
     setupPassthroughStreaming,
     logTokenUsage,
 } from './restUtils.js';
-import { modelEndpoints, selectEndpoint, axios } from '../../lib/requestExecutor.js';
+import { modelEndpoints, selectEndpoint, axios, buildLimiterScheduleOptions } from '../../lib/requestExecutor.js';
 import { createParser } from 'eventsource-parser';
 
 // Model types that support native Responses API passthrough (no conversion needed)
@@ -79,7 +79,7 @@ const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
 
     try {
         // Rate limit via endpoint limiter
-        const response = await endpoint.limiter.schedule({ id: requestId }, async () => {
+        const response = await endpoint.limiter.schedule(buildLimiterScheduleOptions(requestId), async () => {
             return axios({
                 method: 'POST',
                 url,

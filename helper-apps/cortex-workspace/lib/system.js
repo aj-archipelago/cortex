@@ -11,7 +11,7 @@ import { listBackgroundJobs } from './shell.js';
 const startedAt = Date.now();
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '/workspace';
 const PERSIST_DIR = process.env.WORKSPACE_PERSIST_DIR || '/persist';
-const BLOB_FILES_DIR = process.env.WORKSPACE_BLOB_FILES_DIR || '/blob-files';
+const BLOB_FILES_DIR = process.env.WORKSPACE_BLOB_FILES_DIR || '/cloud-files';
 const CHECKPOINT_NAME = 'workspace.tar.gz';
 const CHECKPOINT_PATH = process.env.WORKSPACE_CHECKPOINT_PATH || path.join(PERSIST_DIR, CHECKPOINT_NAME);
 const CHECKPOINT_PREV_PATH = path.join(path.dirname(CHECKPOINT_PATH), 'workspace.prev.tar.gz');
@@ -120,20 +120,12 @@ async function exposeBlobFiles() {
         if (e.code !== 'EBUSY') throw e;
         return { mode: 'existing', warning: `${WORKSPACE_FILES_DIR} is busy; leaving existing exposure in place` };
     }
-    await fs.mkdir(WORKSPACE_FILES_DIR, { recursive: true });
 
     try {
-        execSync(`mount --bind "${BLOB_FILES_DIR}" "${WORKSPACE_FILES_DIR}"`, { stdio: 'ignore', timeout: 5000 });
-        return { mode: 'bind' };
-    } catch (e) {
-        try {
-            await fs.rm(WORKSPACE_FILES_DIR, { recursive: true, force: true });
-        } catch (rmErr) {
-            if (rmErr.code !== 'EBUSY') throw rmErr;
-            return { mode: 'existing', warning: `${WORKSPACE_FILES_DIR} is busy after bind mount failure: ${e.message}` };
-        }
         await fs.symlink(BLOB_FILES_DIR, WORKSPACE_FILES_DIR, 'dir');
-        return { mode: 'symlink', warning: e.message };
+        return { mode: 'symlink' };
+    } catch (e) {
+        return { mode: 'existing', warning: `failed to symlink ${WORKSPACE_FILES_DIR} to ${BLOB_FILES_DIR}: ${e.message}` };
     }
 }
 

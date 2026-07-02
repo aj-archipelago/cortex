@@ -102,6 +102,7 @@ export function buildMetadataEntry(modelId, sourceConfig, { isModelGroup = false
     if (metadata.referenceImageRoleLimits) entry.referenceImageRoleLimits = metadata.referenceImageRoleLimits;
     if (metadata.videoFrameReferenceRoles) entry.videoFrameReferenceRoles = metadata.videoFrameReferenceRoles;
     if (metadata.videoInputModes) entry.videoInputModes = metadata.videoInputModes;
+    if (metadata.mediaInputModes) entry.mediaInputModes = metadata.mediaInputModes;
     if (metadata.preferredUrlFormat) entry.preferredUrlFormat = metadata.preferredUrlFormat;
     if (metadata.mediaToggles) entry.mediaToggles = metadata.mediaToggles;
     if (metadata.availableResolutions) entry.availableResolutions = metadata.availableResolutions;

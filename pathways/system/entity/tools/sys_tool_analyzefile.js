@@ -21,7 +21,7 @@ export default {
         language: "English",
     },
     max_tokens: 8192,
-    model: 'gemini-flash-3-vision',
+    model: 'gemini-flash-35-vision',
     useInputChunking: false,
     enableDuplicateRequests: false,
     timeout: 600,

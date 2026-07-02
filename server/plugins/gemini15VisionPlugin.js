@@ -521,13 +521,22 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
             return super.parseResponse(data);
         }
 
+        if (data.promptFeedback?.blockReason) {
+            return new CortexResponse({
+                output_text: `\n\n*** Response blocked: ${data.promptFeedback.blockReason} ***`,
+                finishReason: "content_filter",
+                usage: data.usageMetadata || null,
+                metadata: { model: this.modelName }
+            });
+        }
+
         // Handle non-streaming response with tool calls
         if (data.candidates && data.candidates[0]) {
             const candidate = data.candidates[0];
             const { content, finishReason, safetyRatings } = candidate;
 
             // Check for safety blocks
-            if (safetyRatings?.some(rating => rating.blocked)) {
+            if (finishReason === 'SAFETY' || safetyRatings?.some(rating => rating.blocked)) {
                 const cortexResponse = new CortexResponse({
                     output_text: "\n\n*** Response blocked due to safety ratings ***",
                     finishReason: "content_filter",
@@ -613,7 +622,7 @@ class Gemini15VisionPlugin extends Gemini15ChatPlugin {
         // Reset state for a genuinely new stream (new responseId = new model response).
         // Gemini includes a unique responseId in every SSE event of the same response.
         // Only reset when a NEW responseId is seen, so tool calls accumulate across
-        // events within the same model response (e.g. Gemini 3 Flash sends each
+        // events within the same model response (e.g. Gemini 3.5 Flash sends each
         // functionCall as a separate SSE event).
         const responseId = eventData.responseId;
         if (responseId && responseId !== this._currentResponseId) {

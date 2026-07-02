@@ -1,4 +1,5 @@
 import test from 'ava';
+import { MongoEntityStore } from '../../../lib/MongoEntityStore.js';
 
 // Test the upsertEntity partial-update logic in isolation by simulating
 // the field-merge behavior without needing a real MongoDB connection.
@@ -40,6 +41,22 @@ function buildDoc(entity, existingEntity) {
         secrets: pick('secrets', null),
     };
 }
+
+test('upsertEntity rejects id-less unnamed partial updates', async t => {
+    const store = new MongoEntityStore();
+    store.isConfigured = () => true;
+    store._getCollection = async () => ({
+        updateOne: async () => t.fail('partial update should not create a new entity'),
+    });
+
+    const result = await store.upsertEntity({
+        workspace: {
+            checkpointBlobPath: 'workspace-checkpoints/test/entity/workspace.tar.gz',
+        },
+    });
+
+    t.is(result, null);
+});
 
 test('partial update preserves workspace when not provided', t => {
     const existing = {

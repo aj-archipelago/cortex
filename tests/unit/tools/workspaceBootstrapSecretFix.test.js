@@ -479,6 +479,180 @@ test.serial('warmPool pool containers get unique bootstrap secrets', async (t) =
     }
 });
 
+test.serial('warmPool claim protects container from orphan reaper until release', async (t) => {
+    const restoreConfig = stubConfig({
+        workspaceImageVersion: '1.0.12',
+        warmPoolSize: 0,
+    });
+    const originalList = ACIBackend.prototype.listWorkspaceContainers;
+    const originalSetEntityTag = ACIBackend.prototype.setEntityTag;
+    const containerName = 'workspace-dev-pool-claim123';
+    const entityId = 'entity-claim-race';
+    const redisEntries = new Map([
+        [containerName, JSON.stringify({
+            status: 'READY',
+            containerId: containerName,
+            url: 'http://pool-claim.test:3100',
+            bootstrapSecret: 'bootstrap-secret',
+            createdAt: new Date().toISOString(),
+            imageVersion: '1.0.12',
+        })],
+    ]);
+    const readyMembers = new Set([containerName]);
+    const tagged = [];
+
+    ACIBackend.prototype.listWorkspaceContainers = async () => [{
+        name: containerName,
+        tags: {
+            workspaceRole: 'pool',
+            imageVersion: '1.0.12',
+        },
+    }];
+    ACIBackend.prototype.setEntityTag = async function (name, tagEntityId) {
+        tagged.push({ name, tagEntityId });
+    };
+
+    const fakeRedis = {
+        async spop() {
+            const [member] = readyMembers;
+            if (member) readyMembers.delete(member);
+            return member || null;
+        },
+        async hget(_key, field) {
+            return redisEntries.get(field) || null;
+        },
+        async hset(_key, field, value) {
+            redisEntries.set(field, value);
+            return 1;
+        },
+        async hdel(_key, field) {
+            const existed = redisEntries.delete(field);
+            return existed ? 1 : 0;
+        },
+        async srem(_key, member) {
+            readyMembers.delete(member);
+            return 1;
+        },
+        async hgetall() {
+            return Object.fromEntries(redisEntries);
+        },
+    };
+
+    try {
+        const claimed = await warmPoolModule.claimContainer(entityId, fakeRedis);
+
+        t.true(claimed.success);
+        t.is(claimed.containerName, containerName);
+        t.false(readyMembers.has(containerName));
+        t.deepEqual(tagged, [{ name: containerName, tagEntityId: entityId }]);
+
+        const claimedEntry = JSON.parse(redisEntries.get(containerName));
+        t.is(claimedEntry.status, 'CLAIMED');
+        t.is(claimedEntry.claimedByEntityId, entityId);
+        t.truthy(claimedEntry.claimedAt);
+
+        const protectedContainers = await warmPoolModule.getWarmPoolActiveContainerNames(fakeRedis);
+        t.true(protectedContainers.has(containerName));
+
+        await warmPoolModule.__testables.releaseClaimedContainer(containerName, fakeRedis);
+        t.false(redisEntries.has(containerName));
+    } finally {
+        ACIBackend.prototype.listWorkspaceContainers = originalList;
+        ACIBackend.prototype.setEntityTag = originalSetEntityTag;
+        restoreConfig();
+    }
+});
+
+test.serial('warmPool replenishment does not count CLAIMED containers as available capacity', async (t) => {
+    const restoreConfig = stubConfig({
+        cortexId: 'test-cortex',
+        warmPoolSize: 1,
+        workspaceImage: 'cortex-workspace',
+        workspaceImageVersion: '1.0.12',
+        workspaceCpus: '1',
+        workspaceMemory: '512m',
+        workspaceDiskSize: '10g',
+    });
+    const originalFetch = global.fetch;
+    const originalList = ACIBackend.prototype.listWorkspaceContainers;
+    const originalCreateAndStart = ACIBackend.prototype.createAndStart;
+    const redisEntries = new Map([
+        ['workspace-dev-pool-claimed', JSON.stringify({
+            status: 'CLAIMED',
+            containerId: 'workspace-dev-pool-claimed',
+            url: 'http://claimed.test:3100',
+            bootstrapSecret: 'claimed-secret',
+            createdAt: new Date().toISOString(),
+            claimedAt: new Date().toISOString(),
+            claimedByEntityId: 'entity-claimed',
+            imageVersion: '1.0.12',
+        })],
+    ]);
+    const readyMembers = [];
+    let lockOwner = null;
+    let createCounter = 0;
+
+    global.fetch = async () => ({ ok: true });
+    ACIBackend.prototype.listWorkspaceContainers = async () => [{
+        name: 'workspace-dev-pool-claimed',
+        tags: {
+            workspaceRole: 'pool',
+            imageVersion: '1.0.12',
+        },
+    }];
+    ACIBackend.prototype.createAndStart = async function ({ containerName }) {
+        createCounter += 1;
+        return {
+            containerId: `${containerName}-id`,
+            url: `http://pool-${createCounter}.test:3100`,
+        };
+    };
+
+    const fakeRedis = {
+        async hgetall() {
+            return Object.fromEntries(redisEntries);
+        },
+        async hdel(_key, field) {
+            const existed = redisEntries.delete(field);
+            return existed ? 1 : 0;
+        },
+        async srem() {},
+        async hset(_key, field, value) {
+            redisEntries.set(field, value);
+            return 1;
+        },
+        async sadd(_key, member) {
+            readyMembers.push(member);
+            return 1;
+        },
+        async set(_key, value) {
+            lockOwner = value;
+            return 'OK';
+        },
+        async get() {
+            return lockOwner;
+        },
+        async del() {
+            lockOwner = null;
+            return 1;
+        },
+    };
+
+    try {
+        await warmPoolModule.__testables.replenish(fakeRedis);
+
+        t.is(createCounter, 1);
+        t.is(readyMembers.length, 1);
+        t.true(redisEntries.has('workspace-dev-pool-claimed'));
+        t.is(JSON.parse(redisEntries.get('workspace-dev-pool-claimed')).status, 'CLAIMED');
+    } finally {
+        global.fetch = originalFetch;
+        ACIBackend.prototype.listWorkspaceContainers = originalList;
+        ACIBackend.prototype.createAndStart = originalCreateAndStart;
+        restoreConfig();
+    }
+});
+
 test.serial('warmPool prunes READY entries missing from ACI inventory before counting pool size', async (t) => {
     const originalList = ACIBackend.prototype.listWorkspaceContainers;
     const logCapture = stubLogger();
@@ -1919,6 +2093,120 @@ test.serial('getWorkspaceBackgroundJobsStatus recovers bootstrap auth before che
     }
 });
 
+test.serial('getWorkspaceBackgroundJobsStatus refreshes ACI URL before bootstrap auth recovery', async (t) => {
+    const restoreConfig = stubConfig({
+        workspaceBackend: 'aci',
+    });
+    const originalFetch = global.fetch;
+    const originalGetContainerUrl = ACIBackend.prototype.getContainerUrl;
+    const entityId = 'entity-background-jobs-url-refresh';
+    const calls = [];
+    let freshSecret = null;
+    const store = stubMutableEntityStore({
+        id: entityId,
+        workspace: {
+            url: 'http://old-ip.test:3100',
+            secret: 'stale-secret',
+            bootstrapSecret: 'bootstrap-secret',
+            containerId: 'workspace-entity-url-refresh',
+            status: 'running',
+        },
+    });
+
+    ACIBackend.prototype.getContainerUrl = async function (containerId) {
+        calls.push({ type: 'getContainerUrl', containerId });
+        return 'http://new-ip.test:3100';
+    };
+
+    global.fetch = async (url, options = {}) => {
+        const urlString = String(url);
+        calls.push({
+            type: 'fetch',
+            url: urlString,
+            secret: options.headers?.['x-workspace-secret'],
+        });
+
+        if (urlString === 'http://old-ip.test:3100/shell/jobs') {
+            t.is(options.headers?.['x-workspace-secret'], 'stale-secret');
+            return {
+                ok: false,
+                status: 401,
+                statusText: 'Unauthorized',
+                async json() {
+                    return { error: 'Invalid secret' };
+                },
+            };
+        }
+
+        if (urlString === 'http://new-ip.test:3100/shell/jobs' &&
+            options.headers?.['x-workspace-secret'] === 'stale-secret') {
+            return {
+                ok: false,
+                status: 401,
+                statusText: 'Unauthorized',
+                async json() {
+                    return { error: 'Invalid secret' };
+                },
+            };
+        }
+
+        if (urlString === 'http://new-ip.test:3100/reconfigure') {
+            t.is(options.headers?.['x-workspace-secret'], 'bootstrap-secret');
+            const body = JSON.parse(options.body);
+            t.truthy(body.secret);
+            freshSecret = body.secret;
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { success: true };
+                },
+            };
+        }
+
+        if (urlString === 'http://new-ip.test:3100/shell/jobs' &&
+            options.headers?.['x-workspace-secret'] === freshSecret) {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return [];
+                },
+            };
+        }
+
+        t.fail(`unexpected fetch url ${urlString}`);
+    };
+
+    try {
+        const details = await workspaceClientModule.__testables.getWorkspaceBackgroundJobsStatus(store.getEntity());
+
+        t.true(details.ok);
+        t.false(details.hasRunningJobs);
+        t.true(details.authRecovered);
+        t.is(store.getEntity().workspace.url, 'http://new-ip.test:3100');
+        t.is(store.getEntity().workspace.secret, freshSecret);
+        t.deepEqual(
+            calls
+                .filter(call => call.type === 'fetch')
+                .map(call => `${call.url} ${call.secret}`),
+            [
+                'http://old-ip.test:3100/shell/jobs stale-secret',
+                'http://new-ip.test:3100/shell/jobs stale-secret',
+                'http://new-ip.test:3100/reconfigure bootstrap-secret',
+                `http://new-ip.test:3100/shell/jobs ${freshSecret}`,
+            ],
+        );
+        t.false(calls.some(call => call.url === 'http://old-ip.test:3100/reconfigure'));
+    } finally {
+        global.fetch = originalFetch;
+        ACIBackend.prototype.getContainerUrl = originalGetContainerUrl;
+        workspaceClientModule.__testables.resetActivityStateForTest();
+        store.restore();
+        restoreConfig();
+    }
+});
+
 test.serial('hasRunningBackgroundJobs allows stop when only completed jobs remain', async (t) => {
     const originalFetch = global.fetch;
 
@@ -2484,6 +2772,50 @@ test.serial('destroyWorkspace destroyVolume deletes checkpoint blobs before clea
         workspaceClientModule.__testables.resetActivityStateForTest();
         ACIBackend.prototype.remove = originalRemove;
         ACIBackend.prototype.destroyVolume = originalDestroyVolume;
+        store.restore();
+        restoreConfig();
+    }
+});
+
+test.serial('destroyWorkspace loads existing entity config when caller passes only id', async (t) => {
+    const entityId = 'entity-destroy-id-only';
+    const containerName = 'workspace-entity-destroy-id-only';
+    const restoreConfig = stubConfig({
+        cortexId: 'test-cortex',
+        storageConnectionString: '',
+        workspaceBackend: 'aci',
+        workspaceIdleTimeoutMs: 30 * 60 * 1000,
+    });
+    const store = stubMutableEntityStore({
+        id: entityId,
+        name: 'Entity Destroy Id Only',
+        workspace: {
+            containerId: containerName,
+            status: 'running',
+            url: 'http://workspace.test:3100',
+            secret: 'workspace-secret',
+        },
+    });
+    const originalRemove = ACIBackend.prototype.remove;
+    const removedContainers = [];
+
+    ACIBackend.prototype.remove = async function (containerId, requestedName) {
+        removedContainers.push({ containerId, requestedName });
+    };
+
+    try {
+        const result = await workspaceClientModule.destroyWorkspace(entityId, undefined, {
+            skipCheckpoint: true,
+        });
+
+        t.true(result.success);
+        t.deepEqual(removedContainers, [{ containerId: containerName, requestedName: containerName }]);
+        t.is(store.getEntity().id, entityId);
+        t.is(store.getEntity().name, 'Entity Destroy Id Only');
+        t.deepEqual(store.getEntity().workspace, {});
+    } finally {
+        workspaceClientModule.__testables.resetActivityStateForTest();
+        ACIBackend.prototype.remove = originalRemove;
         store.restore();
         restoreConfig();
     }
@@ -4733,6 +5065,7 @@ test.serial('workspaceRequest aborts stale image reprovision when checkpoint fai
         },
     });
     const originalFetch = global.fetch;
+    const originalGetContainerInfo = ACIBackend.prototype.getContainerInfo;
     const originalRemove = ACIBackend.prototype.remove;
     const originalCreateAndStart = ACIBackend.prototype.createAndStart;
     const lifecycleEvents = [];
@@ -4758,6 +5091,11 @@ test.serial('workspaceRequest aborts stale image reprovision when checkpoint fai
         removeCalled = true;
         return {};
     };
+    ACIBackend.prototype.getContainerInfo = async () => ({
+        exists: true,
+        name: 'workspace-stale-checkpoint-failure',
+        url: 'http://workspace.test:3100',
+    });
     ACIBackend.prototype.createAndStart = async () => {
         createCalled = true;
         throw new Error('provision should not run after checkpoint failure');
@@ -4783,10 +5121,453 @@ test.serial('workspaceRequest aborts stale image reprovision when checkpoint fai
         );
     } finally {
         workspaceClientModule.__testables.resetActivityStateForTest();
+        ACIBackend.prototype.getContainerInfo = originalGetContainerInfo;
         ACIBackend.prototype.remove = originalRemove;
         ACIBackend.prototype.createAndStart = originalCreateAndStart;
         global.fetch = originalFetch;
         restoreEntityStore();
+        restoreConfig();
+    }
+});
+
+test.serial('workspaceRequest recovers bootstrap auth after refreshed ACI URL returns 401', async (t) => {
+    const entityId = 'entity-request-url-refresh-auth-recovery';
+    const restoreConfig = stubConfig({
+        cortexId: 'test-cortex',
+        storageConnectionString: '',
+        workspaceBackend: 'aci',
+        workspaceImageVersion: '1.0.14',
+        workspaceCpus: '1',
+        workspaceMemory: '512m',
+        workspaceDiskSize: '10g',
+        warmPoolSize: 0,
+    });
+    const store = stubMutableEntityStore({
+        id: entityId,
+        secrets: null,
+        workspace: {
+            url: 'http://old-ip.test:3100',
+            secret: 'stale-secret',
+            bootstrapSecret: 'bootstrap-secret',
+            containerId: 'workspace-url-refresh-auth-recovery',
+            status: 'running',
+            imageVersion: '1.0.14',
+        },
+    });
+    const originalFetch = global.fetch;
+    const originalGetContainerUrl = ACIBackend.prototype.getContainerUrl;
+    const originalRemove = ACIBackend.prototype.remove;
+    const originalCreateAndStart = ACIBackend.prototype.createAndStart;
+    const calls = [];
+    let freshSecret = null;
+    let removeCalled = false;
+    let createCalled = false;
+
+    ACIBackend.prototype.getContainerUrl = async function (containerId) {
+        calls.push({ type: 'getContainerUrl', containerId });
+        return 'http://new-ip.test:3100';
+    };
+    ACIBackend.prototype.remove = async () => {
+        removeCalled = true;
+        throw new Error('reprovision should not remove the live workspace');
+    };
+    ACIBackend.prototype.createAndStart = async () => {
+        createCalled = true;
+        throw new Error('reprovision should not create a replacement workspace');
+    };
+
+    global.fetch = async (url, options = {}) => {
+        const urlString = String(url);
+        calls.push({
+            type: 'fetch',
+            url: urlString,
+            secret: options.headers?.['x-workspace-secret'],
+        });
+
+        if (urlString === 'http://old-ip.test:3100/health') {
+            throw new TypeError('fetch failed');
+        }
+
+        if (urlString === 'http://new-ip.test:3100/health' &&
+            options.headers?.['x-workspace-secret'] === 'stale-secret') {
+            return {
+                ok: false,
+                status: 401,
+                statusText: 'Unauthorized',
+                async json() {
+                    return { error: 'Invalid secret' };
+                },
+            };
+        }
+
+        if (urlString === 'http://new-ip.test:3100/reconfigure') {
+            t.is(options.headers?.['x-workspace-secret'], 'bootstrap-secret');
+            const body = JSON.parse(options.body);
+            t.truthy(body.secret);
+            freshSecret = body.secret;
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { success: true };
+                },
+            };
+        }
+
+        if (urlString === 'http://new-ip.test:3100/health' &&
+            options.headers?.['x-workspace-secret'] === freshSecret) {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { status: 'ok' };
+                },
+            };
+        }
+
+        t.fail(`unexpected fetch url ${urlString}`);
+    };
+
+    try {
+        const result = await workspaceClientModule.workspaceRequest(entityId, '/health');
+
+        t.true(result.success);
+        t.is(result.status, 'ok');
+        t.is(store.getEntity().workspace.url, 'http://new-ip.test:3100');
+        t.is(store.getEntity().workspace.secret, freshSecret);
+        t.false(removeCalled);
+        t.false(createCalled);
+        t.deepEqual(
+            calls
+                .filter(call => call.type === 'fetch')
+                .map(call => `${call.url} ${call.secret}`),
+            [
+                'http://old-ip.test:3100/health stale-secret',
+                'http://new-ip.test:3100/health stale-secret',
+                'http://new-ip.test:3100/reconfigure bootstrap-secret',
+                `http://new-ip.test:3100/health ${freshSecret}`,
+            ],
+        );
+    } finally {
+        workspaceClientModule.__testables.resetActivityStateForTest();
+        ACIBackend.prototype.getContainerUrl = originalGetContainerUrl;
+        ACIBackend.prototype.remove = originalRemove;
+        ACIBackend.prototype.createAndStart = originalCreateAndStart;
+        global.fetch = originalFetch;
+        store.restore();
+        restoreConfig();
+    }
+});
+
+test.serial('workspaceRequest stale image reprovision proceeds without background-job gate', async (t) => {
+    const entityId = 'entity-stale-image-running-job';
+    const restoreConfig = stubConfig({
+        cortexId: 'test-cortex',
+        storageConnectionString: '',
+        workspaceBackend: 'aci',
+        workspaceImage: 'cortex-workspace',
+        workspaceImageVersion: '1.0.14',
+        workspaceCpus: '1',
+        workspaceMemory: '512m',
+        workspaceDiskSize: '10g',
+        warmPoolSize: 0,
+    });
+    const store = stubMutableEntityStore({
+        id: entityId,
+        workspace: {
+            url: 'http://old-workspace.test:3100',
+            secret: 'old-secret',
+            bootstrapSecret: 'old-bootstrap-secret',
+            containerId: 'workspace-old-running-job',
+            status: 'running',
+            imageVersion: '1.0.12',
+        },
+    });
+    const originalFetch = global.fetch;
+    const originalGetContainerInfo = ACIBackend.prototype.getContainerInfo;
+    const originalRemove = ACIBackend.prototype.remove;
+    const originalCreateAndStart = ACIBackend.prototype.createAndStart;
+    const removedContainers = [];
+    const fetchCalls = [];
+    let freshSecret = null;
+
+    workspaceClientModule.__testables.setWorkspaceCheckpointUploadForTest(async () => ({
+        blobPath: 'workspace-checkpoints/test-cortex/entity-stale-image-running-job/workspace.tar.gz',
+        sizeBytes: 128,
+        sizeMB: 0.01,
+        timestamp: '2026-06-26T12:00:00.000Z',
+    }));
+
+    ACIBackend.prototype.remove = async function (containerId, containerName) {
+        removedContainers.push({ containerId, containerName });
+    };
+    ACIBackend.prototype.getContainerInfo = async () => ({
+        exists: true,
+        name: 'workspace-old-running-job',
+        url: 'http://old-workspace.test:3100',
+    });
+    ACIBackend.prototype.createAndStart = async function (args) {
+        return {
+            containerId: args.containerName,
+            url: 'http://new-workspace.test:3100',
+        };
+    };
+
+    global.fetch = async (url, options = {}) => {
+        const urlString = String(url);
+        fetchCalls.push(urlString);
+        if (urlString.endsWith('/shell/jobs')) {
+            t.fail('stale image reprovision should not block on running background jobs');
+        }
+
+        if (urlString === 'http://old-workspace.test:3100/health') {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { version: '1.0.12' };
+                },
+            };
+        }
+        if (urlString === 'http://old-workspace.test:3100/status') {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { version: '1.0.12' };
+                },
+            };
+        }
+        if (urlString === 'http://old-workspace.test:3100/backup') {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return {
+                        path: '/persist/workspace.tar.gz',
+                        sizeBytes: 128,
+                        timestamp: '2026-06-26T12:00:00.000Z',
+                    };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/health' && !options.headers?.['x-workspace-secret']) {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { ok: true };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/restore-url') {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { sizeBytes: 128 };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/reconfigure') {
+            t.regex(options.headers?.['x-workspace-secret'], /^[0-9a-f]{64}$/);
+            const body = JSON.parse(options.body);
+            freshSecret = body.secret;
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { success: true };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/health') {
+            t.is(options.headers?.['x-workspace-secret'], freshSecret);
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { ok: true };
+                },
+            };
+        }
+
+        t.fail(`unexpected fetch url ${urlString}`);
+    };
+
+    try {
+        const result = await workspaceClientModule.workspaceRequest(entityId, '/health', null, {
+            checkpointSasUrl: 'https://checkpoint.example/workspace.tar.gz?sas',
+        });
+
+        t.true(result.success);
+        t.deepEqual(removedContainers, [{
+            containerId: 'workspace-old-running-job',
+            containerName: 'workspace-old-running-job',
+        }]);
+        t.is(store.getEntity().workspace.url, 'http://new-workspace.test:3100');
+        t.is(store.getEntity().workspace.imageVersion, '1.0.14');
+        t.false(fetchCalls.some(url => url.endsWith('/shell/jobs')));
+    } finally {
+        workspaceClientModule.__testables.resetActivityStateForTest();
+        ACIBackend.prototype.getContainerInfo = originalGetContainerInfo;
+        ACIBackend.prototype.remove = originalRemove;
+        ACIBackend.prototype.createAndStart = originalCreateAndStart;
+        global.fetch = originalFetch;
+        store.restore();
+        restoreConfig();
+    }
+});
+
+test.serial('workspaceRequest stale image self-heals when the recorded ACI container is missing', async (t) => {
+    const entityId = 'entity-stale-missing-container';
+    const legacyShareName = 'workspace-pool-legacy-share';
+    const restoreConfig = stubConfig({
+        cortexId: 'test-cortex',
+        storageConnectionString: '',
+        workspaceBackend: 'aci',
+        workspaceContainerPrefix: 'workspace-dev',
+        workspaceImage: 'cortex-workspace',
+        workspaceImageVersion: '1.0.14',
+        workspaceCpus: '1',
+        workspaceMemory: '512m',
+        workspaceDiskSize: '10g',
+        warmPoolSize: 0,
+    });
+    const store = stubMutableEntityStore({
+        id: entityId,
+        workspace: {
+            url: 'http://old-missing-workspace.test:3100',
+            secret: 'old-secret',
+            bootstrapSecret: 'old-bootstrap-secret',
+            containerId: `workspace-${entityId}`,
+            shareName: legacyShareName,
+            status: 'running',
+            imageVersion: '1.0.7',
+        },
+    });
+    const originalFetch = global.fetch;
+    const originalGetContainerInfo = ACIBackend.prototype.getContainerInfo;
+    const originalRemove = ACIBackend.prototype.remove;
+    const originalCreateAndStart = ACIBackend.prototype.createAndStart;
+    const createdContainers = [];
+    const removedContainers = [];
+    const fetchCalls = [];
+    let freshSecret = null;
+
+    workspaceClientModule.__testables.setWorkspaceLegacyShareUploadForTest(async ({ shareName, blobPath }) => {
+        t.is(shareName, legacyShareName);
+        return {
+            blobPath,
+            sizeBytes: 128,
+        };
+    });
+
+    ACIBackend.prototype.getContainerInfo = async function (containerId, containerName) {
+        t.is(containerId, `workspace-${entityId}`);
+        t.is(containerName, `workspace-${entityId}`);
+        return { exists: false, name: containerName, url: null };
+    };
+    ACIBackend.prototype.remove = async function (containerId, containerName) {
+        removedContainers.push({ containerId, containerName });
+    };
+    ACIBackend.prototype.createAndStart = async function (args) {
+        createdContainers.push(args);
+        return {
+            containerId: args.containerName,
+            url: 'http://new-workspace.test:3100',
+        };
+    };
+
+    global.fetch = async (url, options = {}) => {
+        const urlString = String(url);
+        fetchCalls.push(urlString);
+        if (urlString.startsWith('http://old-missing-workspace.test')) {
+            t.fail(`stale missing workspace should not be contacted: ${urlString}`);
+        }
+
+        if (urlString === 'http://new-workspace.test:3100/health' && !options.headers?.['x-workspace-secret']) {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { ok: true };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/shell') {
+            t.is(options.headers?.['x-workspace-secret'], createdContainers[0]?.env?.[0]?.replace('WORKSPACE_SECRET=', ''));
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { exitCode: 1 };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/reconfigure') {
+            t.is(options.headers?.['x-workspace-secret'], createdContainers[0]?.env?.[0]?.replace('WORKSPACE_SECRET=', ''));
+            const body = JSON.parse(options.body);
+            freshSecret = body.secret;
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { success: true };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/backup-upload-url') {
+            t.is(options.headers?.['x-workspace-secret'], freshSecret);
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return {
+                        sizeBytes: 128,
+                        encryption: {
+                            algorithm: 'aes-256-gcm',
+                            keyId: 'test-key',
+                            ivBase64: Buffer.alloc(12).toString('base64'),
+                            tagBase64: Buffer.alloc(16).toString('base64'),
+                        },
+                    };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/health') {
+            t.is(options.headers?.['x-workspace-secret'], freshSecret);
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { ok: true };
+                },
+            };
+        }
+
+        t.fail(`unexpected fetch url ${urlString}`);
+    };
+
+    try {
+        const result = await workspaceClientModule.workspaceRequest(entityId, '/health');
+
+        t.true(result.success);
+        t.is(removedContainers.length, 0);
+        t.is(createdContainers.length, 1);
+        t.is(createdContainers[0].containerName, `workspace-dev-${entityId}`);
+        t.is(createdContainers[0].shareName, legacyShareName);
+        t.true(createdContainers[0].mountAzureFiles);
+        t.false(fetchCalls.some(url => url.startsWith('http://old-missing-workspace.test')));
+        t.is(store.getEntity().workspace.containerId, `workspace-dev-${entityId}`);
+        t.is(store.getEntity().workspace.imageVersion, '1.0.14');
+    } finally {
+        workspaceClientModule.__testables.resetActivityStateForTest();
+        ACIBackend.prototype.getContainerInfo = originalGetContainerInfo;
+        ACIBackend.prototype.remove = originalRemove;
+        ACIBackend.prototype.createAndStart = originalCreateAndStart;
+        global.fetch = originalFetch;
+        store.restore();
         restoreConfig();
     }
 });

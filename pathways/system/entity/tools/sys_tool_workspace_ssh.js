@@ -1,6 +1,7 @@
 // sys_tool_workspace_ssh.js
 // Consolidated workspace tool — one shell interface replaces 14 individual tools.
 // Built-in pseudo-commands: bg, poll, reset.
+import path from 'node:path';
 import logger from '../../../../lib/logger.js';
 import { sendToolStart, sendToolFinish } from '../../../../lib/pathwayTools.js';
 import { workspaceRequest, destroyWorkspace } from './shared/workspace_client.js';
@@ -8,6 +9,9 @@ import { loadEntityConfig } from './shared/sys_entity_tools.js';
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 300000;
 const RESET_DESTROY_TIMEOUT_MS = 900000;
+const WORKSPACE_ROOT = '/workspace';
+const CLOUD_FILES_ROOT = '/cloud-files';
+const WORKSPACE_FILES_ROOT = '/workspace/files';
 
 function timeoutSecondsToMs(timeoutSeconds, defaultMs = DEFAULT_COMMAND_TIMEOUT_MS) {
     return timeoutSeconds ? timeoutSeconds * 1000 : defaultMs;
@@ -54,7 +58,375 @@ export function tokenize(input) {
 
 /** Normalize a path so relative paths resolve under /workspace/ (matching shell cwd). */
 export function toAbsWorkspacePath(p) {
-    return p.startsWith('/') ? p : `/workspace/${p}`;
+    return p.startsWith('/') ? p : `${WORKSPACE_ROOT}/${p}`;
+}
+
+function normalizeShellPath(value) {
+    if (!value || typeof value !== 'string') return '';
+    let normalized = value.trim().replace(/\\/g, '/');
+    normalized = normalized.replace(/\/+$/g, '');
+    if (normalized === '') return '/';
+    if (normalized.startsWith('./')) normalized = normalized.slice(2);
+    return normalized;
+}
+
+function resolveShellPath(value, cwd = WORKSPACE_ROOT) {
+    const normalized = normalizeShellPath(value);
+    if (!normalized) return '';
+    if (normalized.startsWith('/')) return path.posix.normalize(normalized);
+    return path.posix.normalize(path.posix.join(cwd || WORKSPACE_ROOT, normalized));
+}
+
+function isPathAncestorOrSelf(candidate, target) {
+    const normalizedCandidate = path.posix.normalize(candidate || '');
+    const normalizedTarget = path.posix.normalize(target || '');
+    return normalizedCandidate === normalizedTarget
+        || normalizedTarget.startsWith(`${normalizedCandidate.replace(/\/+$/g, '')}/`);
+}
+
+function pathMayIncludeCloudFiles(value, cwd = WORKSPACE_ROOT) {
+    const resolved = resolveShellPath(value, cwd);
+    return resolved === CLOUD_FILES_ROOT
+        || resolved.startsWith(`${CLOUD_FILES_ROOT}/`)
+        || isPathAncestorOrSelf(resolved, CLOUD_FILES_ROOT);
+}
+
+function isWorkspaceFilesPath(value, cwd = WORKSPACE_ROOT) {
+    const resolved = resolveShellPath(value, cwd);
+    return resolved === WORKSPACE_FILES_ROOT
+        || resolved.startsWith(`${WORKSPACE_FILES_ROOT}/`);
+}
+
+function pathMayIncludeWorkspaceFilesSymlink(value, cwd = WORKSPACE_ROOT) {
+    const resolved = resolveShellPath(value, cwd);
+    return isWorkspaceFilesPath(value, cwd)
+        || isPathAncestorOrSelf(resolved, WORKSPACE_FILES_ROOT);
+}
+
+function shellSegments(command) {
+    return command
+        .split(/(?:&&|\|\||[;\n|])/)
+        .map(segment => tokenize(segment.trim()))
+        .filter(tokens => tokens.length > 0);
+}
+
+function commandStartIndex(tokens) {
+    let index = 0;
+    while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[index])) {
+        index++;
+    }
+    if (tokens[index] === 'command') index++;
+    return index;
+}
+
+function positionalArgs(tokens, startIndex, optionsWithValues = new Set()) {
+    const positionals = [];
+    let afterDoubleDash = false;
+
+    for (let i = startIndex; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (!afterDoubleDash && token === '--') {
+            afterDoubleDash = true;
+            continue;
+        }
+
+        if (!afterDoubleDash && token.startsWith('-')) {
+            const [optionName] = token.split('=', 1);
+            if (!token.includes('=') && optionsWithValues.has(optionName)) {
+                i++;
+            }
+            continue;
+        }
+
+        positionals.push(token);
+    }
+
+    return positionals;
+}
+
+function hasRipgrepFilesExclude(tokens) {
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        const value = token === '-g' || token === '--glob'
+            ? tokens[i + 1]
+            : token.startsWith('-g!')
+              ? token.slice(2)
+              : token.startsWith('--glob=')
+                ? token.slice('--glob='.length)
+                : null;
+
+        if (value && (
+            value === '!files/**'
+            || value === '!/workspace/files/**'
+            || value === '!cloud-files/**'
+            || value === '!/cloud-files/**'
+        )) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function hasRipgrepSymlinkFollow(tokens) {
+    return tokens.some((token) => token === '-L' || token === '--follow');
+}
+
+function hasGrepFilesExclude(tokens) {
+    return tokens.some((token, index) => (
+        token === '--exclude-dir=files'
+        || token === '--exclude-dir=/workspace/files'
+        || (token === '--exclude-dir' && (tokens[index + 1] === 'files' || tokens[index + 1] === '/workspace/files'))
+    ));
+}
+
+function findHasFilesPrune(tokens) {
+    const hasPrune = tokens.includes('-prune');
+    if (!hasPrune) return false;
+
+    return tokens.some((token, index) => (
+        token === '-path'
+        && (
+            isCloudFilesPath(tokens[index + 1])
+            || normalizeShellPath(tokens[index + 1]) === './files'
+        )
+    ));
+}
+
+function findSymlinkFollowMode(tokens, commandIndex) {
+    for (let i = commandIndex + 1; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (token === '-L') return 'all';
+        if (token === '-H') return 'command-line';
+        if (token !== '-P' && !token.startsWith('-D') && !token.startsWith('-O')) {
+            break;
+        }
+    }
+    return 'none';
+}
+
+function classifyFindScan(tokens, commandIndex, cwd = WORKSPACE_ROOT) {
+    const paths = [];
+    let startIndex = commandIndex + 1;
+    while (startIndex < tokens.length) {
+        const token = tokens[startIndex];
+        if (token === '-H' || token === '-L' || token === '-P') {
+            startIndex++;
+        } else if (token === '-D' || token === '-O') {
+            startIndex += 2;
+        } else {
+            break;
+        }
+    }
+
+    for (let i = startIndex; i < tokens.length; i++) {
+        const token = tokens[i];
+        if (token === '--') continue;
+        if (token.startsWith('-') || token === '(' || token === ')' || token === '!') break;
+        paths.push(token);
+    }
+
+    const scanPaths = paths.length > 0 ? paths : ['.'];
+    if (scanPaths.some((scanPath) => pathMayIncludeCloudFiles(scanPath, cwd))) {
+        return 'recursive find over cloud files';
+    }
+
+    if (scanPaths.some((scanPath) => isWorkspaceFilesPath(scanPath, cwd))) {
+        return 'recursive find over /workspace/files';
+    }
+
+    const followMode = findSymlinkFollowMode(tokens, commandIndex);
+    if (
+        followMode === 'all'
+        && scanPaths.some((scanPath) => pathMayIncludeWorkspaceFilesSymlink(scanPath, cwd))
+        && !findHasFilesPrune(tokens)
+    ) {
+        return 'symlink-following find that may enter /workspace/files';
+    }
+
+    if (
+        followMode === 'command-line'
+        && scanPaths.some((scanPath) => isWorkspaceFilesPath(scanPath, cwd))
+    ) {
+        return 'symlink-following find over /workspace/files';
+    }
+
+    return null;
+}
+
+function classifyRipgrepScan(tokens, commandIndex, cwd = WORKSPACE_ROOT) {
+    const optionsWithValues = new Set([
+        '-A', '-B', '-C', '-e', '--regexp', '-g', '--glob', '-m', '--max-count',
+        '--max-depth', '--type', '-t', '--type-not', '-T', '--sort', '--sortr',
+        '--colors', '--context', '--ignore-file', '--path-separator', '--engine',
+        '--pre', '--encoding',
+    ]);
+    const positionals = positionalArgs(tokens, commandIndex + 1, optionsWithValues);
+    const filesMode = tokens.includes('--files');
+    const explicitPattern = tokens.includes('-e')
+        || tokens.includes('--regexp')
+        || tokens.some(token => token.startsWith('--regexp='));
+    const scanPaths = filesMode
+        ? positionals
+        : explicitPattern
+          ? positionals
+          : positionals.slice(1);
+    const effectivePaths = scanPaths.length > 0 ? scanPaths : ['.'];
+
+    if (effectivePaths.some((scanPath) => pathMayIncludeCloudFiles(scanPath, cwd))) {
+        return 'ripgrep over cloud files';
+    }
+
+    if (effectivePaths.some((scanPath) => isWorkspaceFilesPath(scanPath, cwd))) {
+        return 'ripgrep over /workspace/files';
+    }
+
+    if (
+        hasRipgrepSymlinkFollow(tokens)
+        && effectivePaths.some((scanPath) => pathMayIncludeWorkspaceFilesSymlink(scanPath, cwd))
+        && !hasRipgrepFilesExclude(tokens)
+    ) {
+        return 'symlink-following ripgrep that may enter /workspace/files';
+    }
+
+    return null;
+}
+
+function grepFollowsSymlinks(tokens, commandIndex) {
+    return tokens.some((token, index) => {
+        if (index <= commandIndex) return false;
+        return token === '-R'
+            || token === '--dereference-recursive'
+            || /^-[A-Za-z]*R[A-Za-z]*$/.test(token);
+    });
+}
+
+function classifyGrepScan(tokens, commandIndex, cwd = WORKSPACE_ROOT) {
+    const recursive = tokens.some((token, index) => {
+        if (index <= commandIndex) return false;
+        return token === '-R'
+            || token === '-r'
+            || token === '--recursive'
+            || token === '--dereference-recursive'
+            || /^-[A-Za-z]*[Rr][A-Za-z]*$/.test(token);
+    });
+    if (!recursive) return null;
+
+    const optionsWithValues = new Set(['-A', '-B', '-C', '-e', '-f', '--regexp', '--file', '--include', '--exclude', '--exclude-dir']);
+    const positionals = positionalArgs(tokens, commandIndex + 1, optionsWithValues);
+    const scanPaths = positionals.slice(1);
+    const effectivePaths = scanPaths.length > 0 ? scanPaths : ['.'];
+
+    if (effectivePaths.some((scanPath) => pathMayIncludeCloudFiles(scanPath, cwd))) {
+        return 'recursive grep over cloud files';
+    }
+
+    if (
+        effectivePaths.some((scanPath) => isWorkspaceFilesPath(scanPath, cwd))
+        && !hasGrepFilesExclude(tokens)
+    ) {
+        return 'recursive grep over /workspace/files';
+    }
+
+    if (
+        grepFollowsSymlinks(tokens, commandIndex)
+        && effectivePaths.some((scanPath) => pathMayIncludeWorkspaceFilesSymlink(scanPath, cwd))
+        && !hasGrepFilesExclude(tokens)
+    ) {
+        return 'symlink-following recursive grep that may enter /workspace/files';
+    }
+
+    return null;
+}
+
+function hasLsSymlinkFollow(tokens, commandIndex) {
+    return tokens.some((token, index) => (
+        index > commandIndex
+        && /^-[A-Za-z]*L[A-Za-z]*$/.test(token)
+    ));
+}
+
+function hasTreeSymlinkFollow(tokens, commandIndex) {
+    return tokens.some((token, index) => (
+        index > commandIndex
+        && /^-[A-Za-z]*l[A-Za-z]*$/.test(token)
+    ));
+}
+
+function classifyLsOrTreeScan(tokens, commandIndex, cwd = WORKSPACE_ROOT) {
+    const command = tokens[commandIndex];
+    if (command === 'ls') {
+        const recursive = tokens.some((token, index) => index > commandIndex && /^-[A-Za-z]*R[A-Za-z]*$/.test(token));
+        if (!recursive) return null;
+        const paths = positionalArgs(tokens, commandIndex + 1);
+        const effectivePaths = paths.length > 0 ? paths : ['.'];
+        if (effectivePaths.some((scanPath) => pathMayIncludeCloudFiles(scanPath, cwd))) return 'recursive ls over cloud files';
+        if (effectivePaths.some((scanPath) => isWorkspaceFilesPath(scanPath, cwd))) return 'recursive ls over /workspace/files';
+        if (
+            hasLsSymlinkFollow(tokens, commandIndex)
+            && effectivePaths.some((scanPath) => pathMayIncludeWorkspaceFilesSymlink(scanPath, cwd))
+        ) {
+            return 'symlink-following recursive ls that may enter /workspace/files';
+        }
+        return null;
+    }
+
+    if (command === 'tree') {
+        const paths = positionalArgs(tokens, commandIndex + 1, new Set(['-L', '-P', '-I', '-o']));
+        const effectivePaths = paths.length > 0 ? paths : ['.'];
+        if (effectivePaths.some((scanPath) => pathMayIncludeCloudFiles(scanPath, cwd))) return 'tree over cloud files';
+        if (effectivePaths.some((scanPath) => isWorkspaceFilesPath(scanPath, cwd))) return 'tree over /workspace/files';
+        if (
+            hasTreeSymlinkFollow(tokens, commandIndex)
+            && effectivePaths.some((scanPath) => pathMayIncludeWorkspaceFilesSymlink(scanPath, cwd))
+        ) {
+            return 'symlink-following tree that may enter /workspace/files';
+        }
+    }
+
+    return null;
+}
+
+export function shouldBlockExpensiveCloudFileScan(command) {
+    let cwd = WORKSPACE_ROOT;
+    for (const tokens of shellSegments(command)) {
+        const commandIndex = commandStartIndex(tokens);
+        const executable = tokens[commandIndex];
+        if (!executable) continue;
+
+        if (executable === 'cd') {
+            const nextCwd = tokens[commandIndex + 1] || WORKSPACE_ROOT;
+            cwd = resolveShellPath(nextCwd, cwd);
+            continue;
+        }
+
+        let reason = null;
+        if (executable === 'find') {
+            reason = classifyFindScan(tokens, commandIndex, cwd);
+        } else if (executable === 'rg' || executable === 'ripgrep') {
+            reason = classifyRipgrepScan(tokens, commandIndex, cwd);
+        } else if (executable === 'grep' || executable === 'egrep' || executable === 'fgrep') {
+            reason = classifyGrepScan(tokens, commandIndex, cwd);
+        } else if (executable === 'ls' || executable === 'tree') {
+            reason = classifyLsOrTreeScan(tokens, commandIndex, cwd);
+        }
+
+        if (reason) {
+            return {
+                success: false,
+                blocked: true,
+                error: `Blocked likely-expensive ${reason}. /workspace/files is a symlink to /cloud-files and may be backed by remote cloud storage.`,
+                alternatives: [
+                    'Use FileCollection with operation "search" to find user files by filename; it returns workspacePath values for selected files.',
+                    'Then read/process selected workspacePath values with WorkspaceSSH, e.g. python/csv/head on that exact path.',
+                    'Plain recursive scans of /workspace are allowed when symlinks are not followed.',
+                    'If you need a broad cloud-file search, use FileCollection instead of shell recursion.',
+                ],
+            };
+        }
+    }
+
+    return null;
 }
 
 /**
@@ -194,6 +566,7 @@ async function handleReset(tokens, args, resolver) {
         const timeoutMs = resetDestroyTimeoutMs(timeoutSeconds);
         const entityConfig = await loadEntityConfig(entityId);
         if (!entityConfig) {
+
             return JSON.stringify({ success: false, error: 'Entity not found' });
         }
 
@@ -300,7 +673,7 @@ Pre-installed: Python 3 + pip, Node.js, bash, and common CLI tools (curl, jq, gi
 
 Persistence: files, packages, virtual environments, and project structures survive between sessions. Read /workspace/README.md if present. For multi-step research, use /workspace/research-notes.md as a concise scratchpad for facts synthesized from tool results so you do not repeat the same lookups.
 
-User files: /workspace/files/ syncs to the user's cloud storage. Use /workspace/files only for files the user should receive or see in their file collection. If you need cloud URL or metadata for a created file, call FileCollection with fileRef set to the workspace path.
+User files: /cloud-files is the user's cloud storage mount. /workspace/files is a compatibility symlink to /cloud-files. Do not recursively scan /cloud-files or direct /workspace/files paths with find, rg, grep -R, ls -R, or tree. Plain recursive scans of /workspace are allowed when symlinks are not followed. For filename discovery under /workspace/files, use the FileCollection tool first with operation "search"; it returns workspacePath values that you can pass back to WorkspaceSSH for reading or processing selected files. Use FileCollection operation "resolve" only after selecting a specific result and needing URL/full metadata.
 
 BUILT-IN COMMANDS — IMPORTANT: The commands below are special commands handled by this tool, NOT bash commands. They MUST be the ENTIRE command string passed to this tool. NEVER combine them with bash syntax — no "cd /workspace && bg ...", no "bg ... && echo done", no embedding them in scripts or subshells. Just pass the built-in command as the complete command string.
 
@@ -359,6 +732,10 @@ Everything else runs as a bash command. Relative and absolute paths both work.`,
 
             if (!route) {
                 // Plain shell command
+                const blockedScan = shouldBlockExpensiveCloudFileScan(command);
+                if (blockedScan) {
+                    return JSON.stringify(blockedScan);
+                }
                 return handleShell(command, args, resolver);
             }
 
@@ -374,10 +751,11 @@ Everything else runs as a bash command. Relative and absolute paths both work.`,
                 return route.handler(args);
             }
 
-            // files and reset handlers receive tokens
+            // reset handler receives tokens
             return route.handler(route.tokens, args, resolver);
         } catch (e) {
             logger.error(`WorkspaceSSH error: ${e.message}`);
+
             return JSON.stringify({ success: false, error: e.message });
         }
     },

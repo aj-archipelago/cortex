@@ -3,7 +3,7 @@ import { PathwayResolver } from './pathwayResolver.js';
 import CortexResponse from '../lib/cortexResponse.js';
 import logger, { withRequestLoggingDisabled } from '../lib/logger.js';
 import { sanitizeBase64 } from '../lib/util.js';
-import { resolveClientToolCallback } from './clientToolCallbacks.js';
+import { recordClientToolHeartbeat, resolveClientToolCallback } from './clientToolCallbacks.js';
 import { queueUserMessage } from './pendingUserMessages.js';
 
 /** GraphQL declares pathway errors/warnings as [String]; coerce any accumulated values. */
@@ -154,6 +154,17 @@ const submitClientToolResultResolver = async (parent, args, contextValue, _info)
     }
 }
 
+const clientToolHeartbeatResolver = async (parent, args, contextValue, _info) => {
+    const { requestId, toolCallbackId } = args;
+
+    try {
+        return await recordClientToolHeartbeat(toolCallbackId, requestId);
+    } catch (error) {
+        logger.debug(`Error recording client tool heartbeat: ${error.message}`);
+        return false;
+    }
+}
+
 const injectAgentMessageResolver = async (parent, args, contextValue, _info) => {
     const { requestId, message } = args;
 
@@ -164,5 +175,5 @@ const injectAgentMessageResolver = async (parent, args, contextValue, _info) => 
 };
 
 export {
-    resolver, rootResolver, cancelRequestResolver, submitClientToolResultResolver, injectAgentMessageResolver
+    resolver, rootResolver, cancelRequestResolver, submitClientToolResultResolver, clientToolHeartbeatResolver, injectAgentMessageResolver
 };

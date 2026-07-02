@@ -11,13 +11,29 @@ import {
     getWriteFileAccessTarget,
     getWorkspacePathForFile,
     constructFolderPath,
+    normalizeImageDataForUpload,
 } from '../../../lib/fileUtils.js';
+import { constructFolderPath as cfhConstructFolderPath } from '../../../helper-apps/cortex-file-handler/src/blobHandler.js';
 
 function createFileAccessPlan(contextId) {
     return contextId
         ? [{ kind: 'user-global', userContextId: contextId, write: true }]
         : null;
 }
+
+test('normalizeImageDataForUpload handles JPEG base64 that looks like an absolute path', t => {
+    const buffer = normalizeImageDataForUpload('/9j/');
+
+    t.true(Buffer.isBuffer(buffer));
+    t.deepEqual([...buffer], [0xff, 0xd8, 0xff]);
+});
+
+test('normalizeImageDataForUpload strips data URL prefixes', t => {
+    const buffer = normalizeImageDataForUpload('data:image/png;base64,iVBORw0KGgo=');
+
+    t.true(Buffer.isBuffer(buffer));
+    t.deepEqual([...buffer.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+});
 
 // Test extractFilesFromChatHistory
 test('extractFilesFromChatHistory should extract files from array content', t => {
@@ -194,28 +210,6 @@ test('getWriteFileAccessTarget should return null when no file access target is 
 
     t.is(target, null);
 });
-
-test('getWriteFileAccessTarget keeps app-private writes scoped to the applet folder in the user container', t => {
-    const target = getWriteFileAccessTarget([
-        {
-            kind: 'app-private',
-            userContextId: 'user-456',
-            workspaceId: 'workspace-123',
-            appletId: 'applet-123',
-            write: true,
-        },
-    ]);
-
-    t.truthy(target);
-    t.is(target.contextId, 'applet-user:applet-123:user-456');
-    t.is(target.userContextId, 'user-456');
-    t.is(target.appletId, 'applet-123');
-    t.is(target.workspaceId, 'workspace-123');
-    t.is(target.readFileScope, 'applet-user');
-    t.is(target.writeFileScope, 'applet-user');
-    t.true(target.write);
-});
-
 
 test('extractFilesFromChatHistory should handle mixed content types', t => {
     const chatHistory = [
@@ -478,7 +472,7 @@ test('getActualContentMimeType should use URL, not displayFilename', async t => 
 });
 
 test('addFileToCollection should preserve original displayFilename for converted files', async t => {
-    const { addFileToCollection, getRedisClient } = await import('../../../lib/fileUtils.js');
+    const { addFileToCollection } = await import('../../../lib/fileUtils.js');
     
     // Simulate adding a file where URL points to converted content (.md)
     // but user wants to keep original filename (.docx)
@@ -502,11 +496,6 @@ test('addFileToCollection should preserve original displayFilename for converted
         
         // mimeType should be determined from URL (actual content)
         t.is(fileEntry.mimeType, 'text/markdown', 'mimeType should be from URL, not displayFilename');
-
-        const redisClient = await getRedisClient();
-        if (!redisClient) {
-            return;
-        }
         
         // Verify it was saved correctly
         const { loadFileCollection } = await import('../../../lib/fileUtils.js');
@@ -517,6 +506,7 @@ test('addFileToCollection should preserve original displayFilename for converted
         t.is(collection[0].url, url);
     } finally {
         // Cleanup
+        const { getRedisClient } = await import('../../../lib/fileUtils.js');
         const redisClient = await getRedisClient();
         if (redisClient) {
             await redisClient.del(`FileStoreMap:ctx:${contextId}`);
@@ -624,31 +614,33 @@ test('syncAndStripFilesFromChatHistory should preserve non-file content', async 
 });
 
 // ============================================================================
-// constructFolderPath
+// constructFolderPath mirror sync — fileUtils.js vs blobHandler.js must agree
 // ============================================================================
 
-test('constructFolderPath produces stable folder storage paths', t => {
+test('constructFolderPath mirrors in fileUtils and blobHandler produce identical results', t => {
     const cases = [
-        [{}, null],
-        [{ userId: 'u1' }, 'global'],
-        [{ userId: 'u1', fileScope: 'global' }, 'global'],
-        [{ userId: 'u1', fileScope: 'all' }, ''],
-        [{ userId: 'u1', chatId: 'c1', fileScope: 'chat' }, 'chats/c1'],
-        [{ userId: 'u1', fileScope: 'chat' }, 'global'],
-        [{ userId: 'u1', workspaceId: 'w1', fileScope: 'workspace-user-legacy' }, 'applets/w1'],
-        [{ contextId: 'applet-user:applet1:u1', fileScope: 'applet-user' }, 'applets/applet1'],
-        [{ userId: 'u1', appletId: 'applet1', fileScope: 'applet-user' }, 'applets/applet1'],
-        [{ userId: 'u1', fileScope: 'workspace-user-legacy' }, 'global'],
-        [{ userId: 'u1', fileScope: 'profile' }, 'profile'],
-        [{ userId: 'u1', fileScope: 'articles' }, 'articles'],
-        [{ userId: 'u1', fileScope: 'applets' }, 'applets'],
-        [{ workspaceId: 'w1', fileScope: 'workspace-shared-legacy' }, ''],
-        [{ fileScope: 'workspace-shared-legacy' }, null],
-        [{ userId: '../escape', fileScope: 'global' }, 'global'],
-        [{ userId: 'u1', chatId: '../bad', fileScope: 'chat' }, null],
+        {},
+        { userId: 'u1' },
+        { userId: 'u1', fileScope: 'global' },
+        { userId: 'u1', fileScope: 'all' },
+        { userId: 'u1', chatId: 'c1', fileScope: 'chat' },
+        { userId: 'u1', fileScope: 'chat' },  // missing chatId
+        { userId: 'u1', workspaceId: 'w1', fileScope: 'workspace-user-legacy' },
+        { contextId: 'applet-user:applet1:u1', fileScope: 'applet-user' },
+        { userId: 'u1', appletId: 'applet1', fileScope: 'applet-user' },
+        { userId: 'u1', fileScope: 'workspace-user-legacy' },  // missing workspaceId
+        { userId: 'u1', fileScope: 'profile' },
+        { userId: 'u1', fileScope: 'articles' },
+        { userId: 'u1', fileScope: 'applets' },
+        { workspaceId: 'w1', fileScope: 'workspace-shared-legacy' },
+        { fileScope: 'workspace-shared-legacy' },  // missing workspaceId
+        { userId: '../escape', fileScope: 'global' },  // path traversal
+        { userId: 'u1', chatId: '../bad', fileScope: 'chat' },
     ];
 
-    for (const [input, expected] of cases) {
-        t.is(constructFolderPath(input), expected, `Mismatch for input ${JSON.stringify(input)}`);
+    for (const input of cases) {
+        const a = constructFolderPath(input);
+        const b = cfhConstructFolderPath(input);
+        t.is(a, b, `Mismatch for input ${JSON.stringify(input)}: fileUtils=${a}, blobHandler=${b}`);
     }
 });

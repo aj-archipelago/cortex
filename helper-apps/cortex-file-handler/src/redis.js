@@ -12,14 +12,26 @@ const legacyContainerKey = (hash, containerName) => {
 // Create a mock client for test environment when Redis is not configured
 const createMockClient = () => {
   const store = new Map();
+  const expirations = new Map();
   const hashMap = new Map();
   const locks = new Map(); // For lock simulation
+
+  const getIfFresh = (key) => {
+    const expiresAt = expirations.get(key);
+    if (expiresAt && Date.now() >= expiresAt) {
+      expirations.delete(key);
+      store.delete(key);
+      return null;
+    }
+    return store.has(key) ? store.get(key) : null;
+  };
 
   return {
     connected: false,
     // Reset all in-memory state (used between test files to prevent leakage)
     _reset() {
       store.clear();
+      expirations.clear();
       hashMap.clear();
       locks.clear();
     },
@@ -63,11 +75,20 @@ const createMockClient = () => {
         }
         return 'OK';
       }
-      locks.set(key, Date.now());
+      store.set(key, value);
+      const exIndex = options.indexOf('EX');
+      if (exIndex !== -1 && options[exIndex + 1]) {
+        expirations.set(key, Date.now() + (options[exIndex + 1] * 1000));
+      }
       return 'OK';
+    },
+    async get(key) {
+      return getIfFresh(key);
     },
     async del(key) {
       locks.delete(key);
+      store.delete(key);
+      expirations.delete(key);
       return 1;
     },
     async eval(script, numKeys, ...args) {
@@ -198,6 +219,7 @@ const setFileStoreMap = async (hash, value, contextId = null) => {
     delete valueToStore.message;
     
     // Remove shortLivedUrl fields - they're only for responses, not for persistence
+    // Store only persisted URLs (url, gcs, converted.url, converted.gcs)
     delete valueToStore.shortLivedUrl;
     if (valueToStore.converted) {
       const convertedCopy = { ...valueToStore.converted };
@@ -248,6 +270,27 @@ const getAllFilesForContext = async (contextId) => {
     const redactedContextId = redactContextId(contextId);
     console.error(`Error getting all files for context ${redactedContextId}: ${error}`);
     return {};
+  }
+};
+
+const getCachedValue = async (key) => {
+  try {
+    if (!key) return null;
+    const value = await client.get(key);
+    if (!value) return null;
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+const setCachedValue = async (key, value, ttlSeconds = 30) => {
+  try {
+    if (!key || value === undefined) return false;
+    await client.set(key, JSON.stringify(value), "EX", ttlSeconds);
+    return true;
+  } catch {
+    return false;
   }
 };
 
@@ -382,10 +425,10 @@ const removeFromFileStoreMap = async (hash, contextId = null) => {
     
     let result = 0;
     
-    // Always try to delete from the unscoped map. Older callers and legacy
-    // uploads may have written there even when the delete request has a
-    // logical contextId.
-    result = await client.hdel("FileStoreMap", hash);
+    // First, try to delete from unscoped map
+    if (!contextId) {
+      result = await client.hdel("FileStoreMap", hash);
+    }
     
     // Also try to delete from context-scoped map if contextId is provided
     if (contextId) {
@@ -459,7 +502,7 @@ const cleanupRedisFileStoreMapAge = async (
     // Convert to array and sort by timestamp (oldest first)
     const entries = Object.entries(map)
       .filter(([_, value]) => {
-        return value?.timestamp;
+        return Boolean(value?.timestamp);
       })
       .sort(([_, a], [__, b]) => {
         const timeA = new Date(a.timestamp).getTime();
@@ -528,6 +571,8 @@ export {
   getFileStoreMap,
   removeFromFileStoreMap,
   getAllFilesForContext,
+  getCachedValue,
+  setCachedValue,
   cleanupRedisFileStoreMap,
   cleanupRedisFileStoreMapAge,
   acquireLock,

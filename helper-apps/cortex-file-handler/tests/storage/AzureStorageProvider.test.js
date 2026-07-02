@@ -309,6 +309,60 @@ test("listFolder propagates non-404 errors", async (t) => {
   await t.throwsAsync(() => provider.listFolder("global"), { message: "boom" });
 });
 
+test("listNames returns compact blob tuples without requiring SAS generation", async (t) => {
+  const provider = new AzureStorageProvider(
+    AZURITE_CONN_STRING,
+    "test-container",
+  );
+
+  let receivedPrefix;
+  const fakeContainerClient = {
+    containerName: "test-container",
+    createIfNotExists: async () => {},
+    listBlobsFlat: (options) => {
+      receivedPrefix = options.prefix;
+      return {
+        async *[Symbol.asyncIterator]() {
+          yield {
+            name: "global/reports/first.pdf",
+            properties: {
+              contentLength: 123,
+              lastModified: new Date("2026-01-02T03:04:05.000Z"),
+            },
+          };
+          yield {
+            name: "global/reports/second.txt",
+            properties: {
+              contentLength: 456,
+              lastModified: new Date("2026-01-03T03:04:05.000Z"),
+            },
+          };
+        },
+      };
+    },
+  };
+
+  provider.generateShortLivedSASToken = () => {
+    throw new Error("should not generate SAS tokens");
+  };
+  provider._doInitialize = async () => {
+    provider._blobServiceClient = { fake: "service" };
+    provider._containerClient = fakeContainerClient;
+    provider._sharedKeyCredential = new StorageSharedKeyCredential(
+      "devstoreaccount1",
+      "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==",
+    );
+  };
+
+  const result = await provider.listNames("global/reports", { maxResults: 1 });
+
+  t.is(receivedPrefix, "global/reports/");
+  t.true(result.truncated);
+  t.deepEqual(result.items, [
+    ["global/reports/first.pdf", 123, "2026-01-02T03:04:05.000Z"],
+  ]);
+});
+
 test("uploadStream recreates missing container and retries once", async (t) => {
   const provider = new AzureStorageProvider(
     AZURITE_CONN_STRING,

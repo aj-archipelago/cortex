@@ -1,4 +1,6 @@
-import transcribeGemini from "./transcribe_gemini.js";
+import transcribeGemini, {
+  geminiTranscriptionSafetySettings,
+} from "./transcribe_gemini.js";
 import logger from "../lib/logger.js";
 import subvibe from "@aj-archipelago/subvibe";
 import { alignWords } from "./shared/transcribe_xai/alignment.js";
@@ -10,13 +12,125 @@ import {
   getXaiChunks,
   mapChunksWithConcurrency,
   mergeOverlappedChunks,
+  redactTextForLog,
   redactUrlForLog,
   segmentsToCues,
   withChunkRetry,
 } from "./shared/transcribe_xai/shared.js";
 
+// ---------- Pathway ----------
+
 const DEFAULT_CHUNK_OVERLAP_SECONDS = 30;
 const MAX_CHUNK_OVERLAP_SECONDS = 30;
+
+function splitTranscriptWords(text) {
+  return String(text || "")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+export function buildXaiFallbackWords(xWords) {
+  return xWords.map((w, i) => {
+    const next = xWords[i + 1];
+    return {
+      text: w.text,
+      start: w.start,
+      end: w.end,
+      gapAfter: next ? Math.max(0, next.start - w.end) : 0,
+      type: "anchor",
+      source: "xai",
+    };
+  });
+}
+
+export async function getGeminiChunkWords({
+  gTextResultPromise,
+  retryGeminiTranscription,
+  chunkLabel,
+  logger,
+}) {
+  const gTextResult = await gTextResultPromise;
+  let gWords =
+    gTextResult.status === "fulfilled"
+      ? splitTranscriptWords(gTextResult.value)
+      : [];
+  let issue = "";
+
+  if (gTextResult.status === "rejected") {
+    issue = "Gemini failure";
+    logger?.warn?.(
+      `[xai_gemini] Gemini failed for ${chunkLabel}; retrying chunk: ` +
+        redactTextForLog(gTextResult.reason?.message || gTextResult.reason),
+    );
+  } else if (!gWords.length) {
+    issue = "empty Gemini output";
+    logger?.warn?.(
+      `[xai_gemini] Gemini returned no text for ${chunkLabel}; retrying chunk`,
+    );
+  }
+
+  if (!gWords.length) {
+    try {
+      gWords = splitTranscriptWords(await retryGeminiTranscription());
+    } catch (error) {
+      issue = "Gemini retry failure";
+      logger?.warn?.(
+        `[xai_gemini] Gemini retry failed for ${chunkLabel}: ` +
+          redactTextForLog(error?.message || error),
+      );
+    }
+  }
+
+  return { words: gWords, issue };
+}
+
+function createChildResolver(parentResolver, pathway, args) {
+  if (typeof parentResolver?.constructor !== "function") {
+    return null;
+  }
+
+  try {
+    const childResolver = new parentResolver.constructor({
+      config: parentResolver.config,
+      pathway,
+      args,
+      endpoints: parentResolver.endpoints,
+    });
+    childResolver.rootRequestId =
+      parentResolver.rootRequestId || parentResolver.requestId || null;
+    if (typeof childResolver.promptAndParse !== "function") {
+      return null;
+    }
+    return childResolver;
+  } catch {
+    return null;
+  }
+}
+
+export async function runWithChildResolver({
+  parentResolver,
+  pathway,
+  args,
+  run,
+}) {
+  const childResolver = createChildResolver(parentResolver, pathway, args);
+  if (!childResolver) {
+    throw new Error("Could not create isolated resolver for Gemini chunk");
+  }
+
+  const result = await run({
+    runAllPrompts: childResolver.promptAndParse.bind(childResolver),
+    resolver: childResolver,
+  });
+  if (
+    (result == null || result === "") &&
+    Array.isArray(childResolver.errors) &&
+    childResolver.errors.length
+  ) {
+    throw new Error(childResolver.errors.join(", "));
+  }
+  return result;
+}
 
 function getChunkOverlapSeconds() {
   const parsed = Number.parseFloat(
@@ -36,7 +150,8 @@ const transcribeXaiGemini = {
   },
   // Required by Cortex PathwayResolver and used for Gemini transcript text.
   // xAI supplies word timing; Gemini remains the text provider in this hybrid.
-  model: process.env.XAI_GEMINI_TRANSCRIBE_MODEL || "gemini-flash-3-vision",
+  model: process.env.XAI_GEMINI_TRANSCRIBE_MODEL || "gemini-flash-35-vision",
+  geminiSafetySettings: geminiTranscriptionSafetySettings,
   timeout: 3600,
 
   executePathway: async function ({ args, runAllPrompts, resolver }) {
@@ -61,19 +176,38 @@ const transcribeXaiGemini = {
         `wordTimestamped=${wordTimestamped} mlw=${maxLineWidth} mwp=${maxWordsPerLine} model=${this.model}`,
     );
 
+    const runGeminiTranscription = (extraArgs = {}, options = {}) => {
+      const geminiArgs = {
+        ...args,
+        allowTranscriptionFallback: false,
+        async: false,
+        stream: false,
+        ...extraArgs,
+      };
+      const run = (child = {}) =>
+        transcribeGemini.executePathway.call(this, {
+          args: geminiArgs,
+          runAllPrompts: child.runAllPrompts || runAllPrompts,
+          resolver: child.resolver || resolver,
+        });
+      return options.isolatedResolver
+        ? runWithChildResolver({
+            parentResolver: resolver,
+            pathway: this,
+            args: geminiArgs,
+            run,
+          })
+        : run();
+    };
+
     // Plain-text fast path: skip the per-chunk alignment, just run Gemini once.
     if (!needTimestamps) {
-      const geminiText = await transcribeGemini.executePathway.call(this, {
-        args: {
-          ...args,
-          responseFormat: "text",
-          wordTimestamped: false,
-          maxLineWidth: 0,
-          maxLineCount: 0,
-          maxWordsPerLine: 0,
-        },
-        runAllPrompts,
-        resolver,
+      const geminiText = await runGeminiTranscription({
+        responseFormat: "text",
+        wordTimestamped: false,
+        maxLineWidth: 0,
+        maxLineCount: 0,
+        maxWordsPerLine: 0,
       });
       return String(geminiText || "");
     }
@@ -88,7 +222,7 @@ const transcribeXaiGemini = {
     });
     progress.start();
 
-    let perChunk;
+    let perChunk = [];
     const chunkOverlapSeconds = getChunkOverlapSeconds();
     try {
       // Get one chunk plan for both providers. Gemini may prefer gcs/uri, but
@@ -102,54 +236,81 @@ const transcribeXaiGemini = {
           `with ${chunkOverlapSeconds}s overlap`,
       );
 
-      // Per-chunk Gemini + xAI. Each chunk's Gemini text is bounded in time by
-      // the chunk's offset/duration, so anchors cannot drift across chunks.
+      // Per-chunk Gemini + xAI keeps Gemini text bounded to the same time
+      // window as the xAI timestamps, avoiding full-file timing drift.
       perChunk = await mapChunksWithConcurrency(chunks, async (c, idx) => {
         const chunkUrl = c.url;
         const geminiFile = c.geminiFile || chunkUrl;
         const offset = c.offset || 0;
+        const geminiTextArgs = {
+          responseFormat: "text",
+          wordTimestamped: false,
+          maxLineWidth: 0,
+          maxLineCount: 0,
+          maxWordsPerLine: 0,
+        };
+        const chunkLabel = `chunk ${idx + 1}/${chunks.length}`;
 
-        const [gText, xRaw] = await withChunkRetry(
-          `chunk ${idx + 1}/${chunks.length}`,
-          ({ signal }) =>
-            Promise.all([
-              transcribeGemini.executePathway.call(this, {
-                args: {
-                  ...args,
-                  file: geminiFile,
-                  responseFormat: "text",
-                  wordTimestamped: false,
-                  maxLineWidth: 0,
-                  maxLineCount: 0,
-                  maxWordsPerLine: 0,
-                },
-                runAllPrompts,
-                resolver,
-              }),
-              callXaiStt(chunkUrl, language, { signal }),
-            ]),
+        const gTextResultPromise = runGeminiTranscription({
+          file: geminiFile,
+          ...geminiTextArgs,
+        }, { isolatedResolver: true }).then(
+          (value) => ({ status: "fulfilled", value }),
+          (reason) => ({ status: "rejected", reason }),
+        );
+        const xRaw = await withChunkRetry(
+          chunkLabel,
+          ({ signal }) => callXaiStt(chunkUrl, language, { signal }),
           { logger },
         );
-
-        const gWords = String(gText || "")
-          .split(/\s+/)
-          .filter(Boolean);
-        const xWords = xRaw.words;
+        const xWords = xRaw.words; // chunk-local timestamps
         const chunkDur =
           xRaw.duration || (xWords.length ? xWords[xWords.length - 1].end : 0);
+        const { words: gWords, issue: geminiIssue } =
+          await getGeminiChunkWords({
+            gTextResultPromise,
+            retryGeminiTranscription: () =>
+              runGeminiTranscription({
+                file: geminiFile,
+                ...geminiTextArgs,
+              }, { isolatedResolver: true }),
+            chunkLabel,
+            logger,
+          });
 
-        const alignedLocal = alignWords(gWords, xWords, chunkDur, { logger });
+        if (!gWords.length && !xWords.length) {
+          logger.warn(
+            `[xai_gemini] ${chunkLabel} produced no transcription words; keeping empty chunk`,
+          );
+          progress.completeStep();
+          return { words: [], start: offset, end: offset + chunkDur };
+        }
+
+        let source = "gemini";
+        let alignedLocal;
+        if (!gWords.length && xWords.length) {
+          source = "xai";
+          alignedLocal = buildXaiFallbackWords(xWords);
+          logger.warn(
+            `[xai_gemini] using xAI text for ${chunkLabel} after ${geminiIssue || "no Gemini text"}`,
+          );
+        } else {
+          // Align WITHIN this chunk (small problem, tight bounds)
+          alignedLocal = alignWords(gWords, xWords, chunkDur, { logger });
+        }
         const anchorsCount = alignedLocal.filter(
           (w) => w.type === "anchor",
         ).length;
         logger.info(
           `[xai_gemini] chunk ${idx + 1}/${chunks.length} ` +
             `(@${offset}s): gem=${gWords.length}w xai=${xWords.length}w ` +
+            `source=${source} ` +
             `anchors=${anchorsCount}/${alignedLocal.length} ` +
             `(${((anchorsCount / Math.max(1, alignedLocal.length)) * 100).toFixed(0)}%)`,
         );
         progress.completeStep();
 
+        // Apply chunk offset to all timestamps so they're absolute
         const words = alignedLocal.map((w) => ({
           ...w,
           start: w.start + offset,
@@ -162,6 +323,10 @@ const transcribeXaiGemini = {
           end: offset + chunkDur,
         };
       });
+    } catch (error) {
+      logger.warn(
+        `[xai_gemini] hybrid timing unavailable; trying fallbacks: ${redactTextForLog(error?.message || error)}`,
+      );
     } finally {
       progress.stop();
     }
@@ -173,9 +338,11 @@ const transcribeXaiGemini = {
         `(${((totalAnchors / Math.max(1, aligned.length)) * 100).toFixed(0)}%)`,
     );
 
-    if (!aligned.length) {
-      logger.warn("[xai_gemini] no words produced");
-      return "";
+    if (!totalAnchors) {
+      logger.warn(
+        "[xai_gemini] no xAI timing anchors; using Gemini timed output",
+      );
+      return runGeminiTranscription();
     }
 
     const segs = buildSegments(

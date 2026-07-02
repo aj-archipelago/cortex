@@ -104,3 +104,91 @@ test.serial('user-files file access target lists the full user file share read-o
         axios.get = originalGet;
     }
 });
+
+test.serial('scoped name listing makes documented global prefixes relative to user-global scope', async t => {
+    const { axios } = await loadRequestExecutor();
+    const { listFileNamesForFileAccessPlan } = await loadFileUtils();
+    const originalGet = axios.get;
+    const capturedUrls = [];
+
+    axios.get = async (url) => {
+        capturedUrls.push(url);
+        return {
+            data: {
+                items: [
+                    ['global/reports/q1.csv', 123, '2026-01-01T00:00:00.000Z'],
+                ],
+                truncated: false,
+            },
+        };
+    };
+
+    try {
+        await listFileNamesForFileAccessPlan(
+            [{ kind: 'user-global', userContextId: 'user-456', write: true }],
+            { subPath: '/workspace/files/global', maxResultsPerTarget: 10 },
+        );
+        await listFileNamesForFileAccessPlan(
+            [{ kind: 'user-global', userContextId: 'user-456', write: true }],
+            { subPath: '/workspace/files/global/reports', maxResultsPerTarget: 10 },
+        );
+
+        t.is(capturedUrls.length, 2);
+
+        const rootUrl = new URL(capturedUrls[0]);
+        t.is(rootUrl.searchParams.get('operation'), 'listNames');
+        t.is(rootUrl.searchParams.get('fileScope'), 'global');
+        t.false(rootUrl.searchParams.has('subPath'));
+
+        const nestedUrl = new URL(capturedUrls[1]);
+        t.is(nestedUrl.searchParams.get('fileScope'), 'global');
+        t.is(nestedUrl.searchParams.get('subPath'), 'reports');
+    } finally {
+        axios.get = originalGet;
+    }
+});
+
+test.serial('scoped name listing makes documented chat prefixes relative to chat scope', async t => {
+    const { axios } = await loadRequestExecutor();
+    const { listFileNamesForFileAccessPlan } = await loadFileUtils();
+    const originalGet = axios.get;
+    const capturedUrls = [];
+
+    axios.get = async (url) => {
+        capturedUrls.push(url);
+        return {
+            data: {
+                items: [
+                    ['chats/chat-123/session-notes.txt', 456, '2026-01-01T00:00:00.000Z'],
+                ],
+                truncated: false,
+            },
+        };
+    };
+
+    try {
+        await listFileNamesForFileAccessPlan(
+            [{ kind: 'chat', userContextId: 'user-456', chatId: 'chat-123', write: true }],
+            { subPath: '/workspace/files/chats/chat-123', maxResultsPerTarget: 10 },
+        );
+        await listFileNamesForFileAccessPlan(
+            [{ kind: 'chat', userContextId: 'user-456', chatId: 'chat-123', write: true }],
+            { subPath: '/workspace/files/chats/chat-123/uploads', maxResultsPerTarget: 10 },
+        );
+
+        t.is(capturedUrls.length, 2);
+
+        const rootUrl = new URL(capturedUrls[0]);
+        t.is(rootUrl.searchParams.get('operation'), 'listNames');
+        t.is(rootUrl.searchParams.get('fileScope'), 'chat');
+        t.is(rootUrl.searchParams.get('chatId'), 'chat-123');
+        t.false(rootUrl.searchParams.has('subPath'));
+
+        const nestedUrl = new URL(capturedUrls[1]);
+        t.is(nestedUrl.searchParams.get('fileScope'), 'chat');
+        t.is(nestedUrl.searchParams.get('chatId'), 'chat-123');
+        t.is(nestedUrl.searchParams.get('subPath'), 'uploads');
+    } finally {
+        axios.get = originalGet;
+    }
+});

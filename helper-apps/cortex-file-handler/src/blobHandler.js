@@ -26,6 +26,7 @@ import {
 } from "./constants.js";
 import { FileConversionService } from "./services/FileConversionService.js";
 import { StorageFactory } from "./services/storage/StorageFactory.js";
+import { StorageService } from "./services/storage/StorageService.js";
 
 const pipeline = promisify(_pipeline);
 
@@ -650,7 +651,6 @@ function uploadBlob(
             // Extract content-type from busboy info (preserves charset if provided)
             const contentType = info.mimeType || null;
             const azureStream = !saveToLocal ? new PassThrough() : null;
-            const gcsStream = gcs ? new PassThrough() : null;
             let diskWriteStream, tempDir, tempFilePath;
             let diskWritePromise;
             let diskWriteError = null;
@@ -704,7 +704,6 @@ function uploadBlob(
               receivedAnyData = true;
             });
             if (azureStream) file.pipe(azureStream);
-            if (gcsStream) file.pipe(gcsStream);
             if (diskWriteStream) file.pipe(diskWriteStream);
 
             // Listen for end event to check for empty file
@@ -713,7 +712,6 @@ function uploadBlob(
                 errorOccurred = true;
                 // Abort all streams
                 if (azureStream) azureStream.destroy();
-                if (gcsStream) gcsStream.destroy();
                 if (diskWriteStream) diskWriteStream.destroy();
                 const err = new Error("Invalid file: file is empty");
                 err.status = 400;
@@ -756,33 +754,6 @@ function uploadBlob(
                 throw err;
               });
             }
-            let gcsPromise;
-            if (gcsStream) {
-              // GCS uses a shared bucket, so prefix with the scoped container owner
-              // to preserve the same isolation boundaries as Azure containers.
-              const gcsFolderPath = containerOwnerId
-                ? `${containerOwnerId}/${folderPath || ''}`.replace(/\/+$/, '')
-                : folderPath;
-              gcsPromise = saveToGoogleStorage(
-                context,
-                uploadName,
-                gcsStream,
-                contentType,
-                gcsFolderPath,
-              ).catch(async (err) => {
-                cloudUploadError = err;
-                if (diskWritePromise) {
-                  await diskWritePromise;
-                  const diskStream = fs.createReadStream(tempFilePath, {
-                    highWaterMark: 1024 * 1024,
-                    autoClose: true,
-                  });
-                  return saveToGoogleStorage(context, uploadName, diskStream, contentType, gcsFolderPath);
-                }
-                throw err;
-              });
-            }
-
             // Wait for cloud uploads to finish
             try {
               const results = await Promise.all(
@@ -792,9 +763,6 @@ function uploadBlob(
                     : null,
                   !azurePromise && saveToLocal
                     ? Promise.resolve({ result: { url: null }, type: "primary-local" }) // placeholder for local, url handled later
-                    : null,
-                  gcsPromise
-                    ? gcsPromise.then((gcs) => ({ gcs, type: "gcs" }))
                     : null,
                 ].filter(Boolean),
               );
@@ -807,12 +775,33 @@ function uploadBlob(
                   if (item.type === "primary") {
                     acc.url = item.result.url || item.result;
                     acc.shortLivedUrl = item.result.shortLivedUrl || item.result.url || item.result;
+                    if (item.result.blobName) {
+                      acc.blobName = item.result.blobName;
+                      acc.blobPath = item.result.blobName;
+                    }
                   }
-                  if (item.type === "gcs")
-                    acc.gcs = ensureUnencodedGcsUrl(item.gcs);
                   return acc;
                 }, {}),
               };
+
+              if (!saveToLocal && gcs && result.url && result.blobName) {
+                const storageService = new StorageService();
+                try {
+                  const ensuredFile = await storageService.ensureGCSUpload(context, {
+                    url: result.shortLivedUrl || result.url,
+                    blobName: result.blobName,
+                    blobPath: result.blobPath || result.blobName,
+                    containerOwnerId,
+                    mimeType: contentType,
+                  });
+                  if (ensuredFile?.gcs) {
+                    result.gcs = ensureUnencodedGcsUrl(ensuredFile.gcs);
+                  }
+                } catch (error) {
+                  context.log?.(`Warning: GCS backup failed for ${result.blobName}: ${error.message}`);
+                }
+              }
+
               // Wait for busboy to finish parsing the entire request so
               // that form fields appended after the file (e.g. hash) are
               // available.  The file data is already consumed, so busboy
@@ -1515,25 +1504,8 @@ async function deleteGCS(blobName) {
 
 // Helper function to ensure GCS upload for existing files
 async function ensureGCSUpload(context, existingFile) {
-  if (!existingFile.gcs && gcs) {
-    context.log("GCS file was missing - uploading.");
-    // Use LLM-friendly naming instead of extracting original filename
-    const fileExtension = path.extname(existingFile.url.split("?")[0]);
-    const shortId = generateShortId();
-    const fileName = `${shortId}${fileExtension}`;
-    const response = await axios({
-      method: "get",
-      url: existingFile.url,
-      responseType: "stream",
-    });
-    
-    const storageFactory = StorageFactory.getInstance();
-    const gcsProvider = storageFactory.getGCSProvider();
-    if (gcsProvider) {
-      existingFile.gcs = await gcsProvider.uploadStream(context, fileName, response.data);
-    }
-  }
-  return existingFile;
+  const storageService = new StorageService();
+  return storageService.ensureGCSUpload(context, existingFile);
 }
 
 async function uploadChunkToGCS(chunkPath, requestId, filename = null, folderPath = null) {

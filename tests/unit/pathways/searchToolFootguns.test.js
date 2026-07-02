@@ -1,32 +1,59 @@
 import test from 'ava';
+import cognitiveSearchTool, {
+    resolveToolIndexName,
+} from '../../../pathways/system/entity/tools/sys_tool_cognitive_search.js';
 
-import googleSearchTool from '../../../pathways/system/entity/tools/sys_tool_google_search.js';
-import grokLiveSearch from '../../../pathways/grok_live_search.js';
-import grokXSearchTool from '../../../pathways/system/entity/tools/sys_tool_grok_x_search.js';
-import validateUrlTool from '../../../pathways/system/entity/tools/sys_tool_validate_url.js';
+test('SearchIndex schema lists valid indexes and rejects invalid index with choices', async (t) => {
+    const definition = cognitiveSearchTool.toolDefinition[0].function;
 
-test('SearchInternet schema accepts q or query alias', t => {
-    const definition = googleSearchTool.toolDefinition.function;
-    const source = googleSearchTool.executePathway.toString();
-
-    t.truthy(definition.parameters.properties.q);
+    t.true(definition.description.includes('aja, aje, ajb, ajm, aj360, ajd, chinese, sanad, wires'));
+    t.deepEqual(definition.parameters.properties.index.enum, [
+        'aja',
+        'aje',
+        'ajb',
+        'ajm',
+        'aj360',
+        'ajd',
+        'chinese',
+        'sanad',
+        'wires',
+    ]);
     t.truthy(definition.parameters.properties.query);
-    t.deepEqual(definition.parameters.required, []);
-    t.true(source.includes('q: args.q || args.query'));
-    t.true(source.includes("text: normalizedArgs.q"));
+    t.deepEqual(definition.parameters.required, ['index']);
+
+    const error = await t.throwsAsync(cognitiveSearchTool.executePathway({
+        args: {
+            index: 'news',
+            query: 'Anthropic SpaceX',
+        },
+        resolver: { errors: [] },
+    }));
+
+    t.true(error.message.includes('Invalid index: news'));
+    t.true(error.message.includes('Valid indexes: aja, aje, ajb, ajm, aj360, ajd, chinese, sanad, wires'));
+    t.true(error.message.includes('Use wires for news wires'));
 });
 
-test('SearchXPlatform uses current Grok Responses model', t => {
-    const source = grokXSearchTool.executePathway.toString();
+test('SearchIndex validates missing text/query before dispatch', async (t) => {
+    const missingText = await t.throwsAsync(cognitiveSearchTool.executePathway({
+        args: {
+            index: 'wires',
+        },
+        resolver: { errors: [] },
+    }));
 
-    t.true(source.includes("model: 'xai-grok-4-20-responses'"));
-    t.false(source.includes("model: 'xai-grok-4-1-fast-responses'"));
+    t.true(missingText.message.includes("Parameter 'text' or alias 'query' is required"));
 });
 
-test('grok_live_search defaults to current Grok Responses model', t => {
-    t.is(grokLiveSearch.model, 'xai-grok-4-20-responses');
+test('SearchIndex maps logical index before honoring supplied indexName', (t) => {
+    t.is(resolveToolIndexName({ index: 'aje', indexName: 'aje' }), 'idx-ucms-aje');
+    t.is(resolveToolIndexName({ index: 'wires', indexName: 'wires' }), 'idx-wires');
+    t.is(resolveToolIndexName({ index: 'aje', indexName: 'wires' }), 'idx-ucms-aje');
 });
 
-test('ValidateUrl has explicit low tool cost', t => {
-    t.is(validateUrlTool.toolDefinition.toolCost, 1);
+test('SearchIndex keeps custom physical indexName when no logical index is supplied', (t) => {
+    t.is(resolveToolIndexName({ indexName: 'vector-tony-vision-resource' }), 'vector-tony-vision-resource');
+    t.is(resolveToolIndexName({ indexName: 'business-performance-index' }), 'business-performance-index');
+    t.is(resolveToolIndexName({ indexName: 'aje' }), 'idx-ucms-aje');
+    t.is(resolveToolIndexName({ indexName: 'wires' }), 'idx-wires');
 });

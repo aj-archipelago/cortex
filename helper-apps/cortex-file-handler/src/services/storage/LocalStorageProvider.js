@@ -159,40 +159,47 @@ export class LocalStorageProvider extends StorageProvider {
     await fs.promises.copyFile(sourcePath, destinationPath);
   }
 
-  extractBlobNameFromUrl(url) {
-    const filePath = this.urlToFilePath(url);
-    if (!filePath) return null;
-    return path.relative(this.publicFolder, filePath);
-  }
+  async listNames(folderPath, options = {}) {
+    const maxResults = Math.min(Math.max(parseInt(options.maxResults, 10) || 10000, 1), 50000);
+    const scanLimit = maxResults + 1;
+    const normalizedPrefix = String(folderPath || '').replace(/^\/+|\/+$/g, '');
+    const rootPath = normalizedPrefix
+      ? path.join(this.publicFolder, normalizedPrefix)
+      : this.publicFolder;
+    const results = [];
+    let truncated = false;
 
-  async renameBlob(oldBlobName, newBlobName) {
-    if (!oldBlobName || !newBlobName) {
-      throw new Error("Missing blob name parameter");
+    async function walk(directory) {
+      if (truncated || !fs.existsSync(directory)) return;
+
+      const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+          if (truncated) return;
+          continue;
+        }
+
+        if (!entry.isFile()) continue;
+
+        const stat = await fs.promises.stat(fullPath);
+        results.push([
+          path.relative(this.publicFolder, fullPath).replace(/\\/g, "/"),
+          stat.size,
+          stat.mtime.toISOString(),
+        ]);
+
+        if (results.length >= scanLimit) {
+          truncated = true;
+          results.length = maxResults;
+          return;
+        }
+      }
     }
 
-    const sourcePath = path.join(this.publicFolder, oldBlobName);
-    const destinationPath = path.join(this.publicFolder, newBlobName);
-
-    if (!fs.existsSync(sourcePath)) {
-      throw new Error(`File not found: ${oldBlobName}`);
-    }
-
-    await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
-    await fs.promises.rename(sourcePath, destinationPath);
-
-    try {
-      await fs.promises.rmdir(path.dirname(sourcePath));
-    } catch {
-      // Ignore non-empty parent directories.
-    }
-
-    const normalizedBlobName = newBlobName.split(path.sep).join("/");
-    const url = `http://${ipAddress}:${port}/files/${normalizedBlobName}`;
-    return {
-      url,
-      shortLivedUrl: url,
-      blobName: normalizedBlobName,
-    };
+    await walk(rootPath);
+    return { items: results, truncated };
   }
 
   async cleanup(urls) {
