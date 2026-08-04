@@ -27,6 +27,7 @@ import subscriptions from './subscriptions.js';
 import { getMessageTypeDefs } from './typeDef.js';
 import { buildRestEndpoints } from './rest.js';
 import { executeWorkspaceResolver, getExecuteWorkspaceTypeDefs } from './executeWorkspace.js';
+import { listenHttpServer } from '../lib/listenHttpServer.js';
 import crypto from 'crypto';
 
 // Utility functions
@@ -221,6 +222,9 @@ const build = async (config) => {
     const keepAlive = config.get('subscriptionKeepAlive');
     logger.info(`Starting web socket server with subscription keep alive: ${keepAlive}`);
     const serverCleanup = useServer({ schema }, wsServer, keepAlive);
+    // graphql-ws only attaches once('error'); absorb later bind errors so port
+    // fallback / rare listen races cannot crash the process as unhandled.
+    wsServer.on('error', () => {});
 
     const server = new ApolloServer({
         schema: schema,
@@ -310,9 +314,18 @@ const build = async (config) => {
         buildRestEndpoints(pathways, app, server, config);
 
         // Now that our HTTP server is fully set up, we can listen to it.
-        httpServer.listen(config.get('PORT'), () => {
-            logger.info(`🚀 Server is now running at http://localhost:${config.get('PORT')}/graphql`);
-        });
+        // In development, fall back to the next free port if the preferred one is busy.
+        const preferredPort = config.get('PORT');
+        const allowFallback = config.get('env') === 'development' || config.get('env') === 'debug';
+        const boundPort = await listenHttpServer(httpServer, preferredPort, { allowFallback });
+
+        if (boundPort !== preferredPort) {
+            logger.warn(`Port ${preferredPort} is in use; bound to ${boundPort} instead`);
+            config.set('PORT', boundPort);
+            process.env.CORTEX_PORT = String(boundPort);
+        }
+
+        logger.info(`🚀 Server is now running at http://localhost:${boundPort}/graphql`);
     };
 
     return { server, startServer, startTestServer, cache, plugins, typeDefs, resolvers }

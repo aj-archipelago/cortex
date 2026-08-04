@@ -4,5 +4,7 @@ import { loadLocalEnvFiles } from './lib/loadLocalEnv.js';
   loadLocalEnvFiles();
   const { default: startServerFactory } = await import('./index.js');
   const { startServer } = await startServerFactory();
-  startServer && startServer();
+  if (startServer) {
+    await startServer();
+  }
 })();
