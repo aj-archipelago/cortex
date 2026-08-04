@@ -222,6 +222,9 @@ const build = async (config) => {
     const keepAlive = config.get('subscriptionKeepAlive');
     logger.info(`Starting web socket server with subscription keep alive: ${keepAlive}`);
     const serverCleanup = useServer({ schema }, wsServer, keepAlive);
+    // graphql-ws only attaches once('error'); absorb later bind errors so port
+    // fallback / rare listen races cannot crash the process as unhandled.
+    wsServer.on('error', () => {});
 
     const server = new ApolloServer({
         schema: schema,
