@@ -22,7 +22,6 @@ Instructions: You are part of an AI entity named {{{aiName}}}. Your task is to a
 4. "codingTaskKeywords": If codingRequired is true, provide a keywords for Azure Cognitive Search to help the coding agent find the relevant code snippets. It will use these keywords as is to search for the code snippets. If codingRequired is false, leave this as an empty string.
 
 General guidelines:
-- AJ is for AL Jazeera, AJA is for AJ Arabic, AJE is for AJ English
 - If agent needs to search in task it can use internet search tools
 
 Always output just the valid JSON object with all these fields.`,

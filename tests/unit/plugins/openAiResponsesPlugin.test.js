@@ -75,6 +75,7 @@ for (const scenario of [
                 type: 'function',
                 name: 'search',
                 description: 'Search the web',
+                strict: false,
                 parameters: { type: 'object', properties: {} }
             }
         ])
@@ -215,6 +216,70 @@ test('getRequestParameters should not send chat stream_options to Responses API'
     }));
 
     t.false(Object.prototype.hasOwnProperty.call(params, 'stream_options'));
+});
+
+test('Responses dispatch preserves optional connector arguments without strict normalization', async t => {
+    const plugin = createMockPlugin();
+    const parameters = {
+        type: 'object',
+        properties: {
+            issueIdOrKey: { type: 'string' },
+            commentBody: { type: 'string' },
+            commentId: { type: 'string' },
+            commentVisibility: {
+                type: 'object',
+                properties: {
+                    type: { type: 'string', enum: ['group', 'role'] },
+                    value: { type: 'string' },
+                },
+                required: ['type', 'value'],
+            },
+        },
+        required: ['issueIdOrKey', 'commentBody'],
+    };
+    const functionTool = { name: 'atlassian__addcommenttojiraissue', parameters };
+    const tools = [
+        { type: 'function', function: functionTool },
+        { type: 'function', ...functionTool },
+    ];
+    const originalTools = JSON.stringify(tools);
+    plugin.getRequestParameters = async () => ({ tools });
+    let dispatched;
+    plugin.executeRequest = async request => {
+        dispatched = request.data.tools;
+        return { output_text: 'ok' };
+    };
+
+    await plugin.execute('', {}, null, {});
+
+    for (const tool of dispatched) {
+        t.is(tool.strict, false);
+        t.deepEqual(tool.parameters, parameters);
+        t.false(tool.parameters.required.includes('commentVisibility'));
+        t.false(tool.parameters.required.includes('commentId'));
+    }
+    t.is(JSON.stringify(tools), originalTools);
+});
+
+test('Responses tool conversion honors explicit strict mode and native tools', t => {
+    const plugin = createMockPlugin();
+    for (const strict of [true, false]) {
+        t.is(plugin.convertToolToResponsesFormat({
+            type: 'function', function: { name: 'nested', strict },
+        }).strict, strict);
+        t.is(plugin.convertToolToResponsesFormat({
+            type: 'function', name: 'flat', strict,
+        }).strict, strict);
+    }
+    const nativeTool = { type: 'web_search_preview' };
+    t.deepEqual(plugin.convertToolToResponsesFormat(nativeTool), nativeTool);
+    t.deepEqual(plugin.validateAndTransformTools({
+        functions: { name: 'lookup', parameters: { type: 'object', properties: {} } },
+        code_interpreter: { container: { type: 'auto' } },
+    }), [
+        { type: 'function', name: 'lookup', strict: false, parameters: { type: 'object', properties: {} } },
+        { type: 'code_interpreter', container: { type: 'auto' } },
+    ]);
 });
 
 test('execute should resolve configured runtime model aliases before dispatch', async t => {
@@ -665,7 +730,7 @@ for (const scenario of [
             { type: 'code_interpreter' }
         ],
         assert: (t, result) => t.deepEqual(result, [
-            { type: 'function', name: 'get_weather', parameters: {} },
+            { type: 'function', name: 'get_weather', parameters: {}, strict: false },
             { type: 'code_interpreter' }
         ])
     },

@@ -8,10 +8,19 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
         super(pathway, model);
     }
 
+    async getAzureAccessToken() {
+        const azureAuthTokenHelper = this.config.get('azureAuthTokenHelper');
+        if (!azureAuthTokenHelper) {
+            throw new Error('azureAuthTokenHelper is not configured');
+        }
+
+        return azureAuthTokenHelper.getAccessToken();
+    }
+
     // Convert to Azure Foundry Agents messages array format
     convertToAzureFoundryMessages(context, examples, messages) {
         let azureMessages = [];
-        
+
         // Add context as a system message if provided
         if (context) {
             azureMessages.push({
@@ -19,7 +28,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 content: context,
             });
         }
-        
+
         // Add examples to the messages array
         if (examples && examples.length > 0) {
             examples.forEach(example => {
@@ -33,7 +42,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 });
             });
         }
-        
+
         // Add remaining messages to the messages array
         messages.forEach(message => {
             azureMessages.push({
@@ -41,7 +50,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                 content: message.content,
             });
         });
-        
+
         return azureMessages;
     }
 
@@ -49,12 +58,12 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
     getRequestParameters(text, parameters, prompt) {
         const { modelPromptText, modelPromptMessages, tokenLength, modelPrompt } = this.getCompiledPrompt(text, parameters, prompt);
         const { stream } = parameters;
-    
+
         // Define the model's max token length
         const modelTargetTokenLength = this.getModelMaxPromptTokens();
-    
+
         let requestMessages = modelPromptMessages || [{ "role": "user", "content": modelPromptText }];
-        
+
         // Check if the messages are in Palm format and convert them to Azure format if necessary
         const isPalmFormat = requestMessages.some(message => 'author' in message);
         if (isPalmFormat) {
@@ -62,13 +71,13 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
             const examples = modelPrompt.examples || [];
             requestMessages = this.convertToAzureFoundryMessages(context, examples, modelPromptMessages);
         }
-    
+
         // Check if the token length exceeds the model's max token length
         if (tokenLength > modelTargetTokenLength && this.promptParameters?.manageTokenLength) {
             // Remove older messages until the token length is within the model's limit
             requestMessages = this.truncateMessagesToTargetLength(requestMessages, modelTargetTokenLength);
         }
-    
+
         const requestParameters = {
             assistant_id: this.assistantId,
             thread: {
@@ -89,7 +98,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
             ...(parameters.parallel_tool_calls !== undefined && { parallel_tool_calls: parameters.parallel_tool_calls }),
             ...(parameters.truncation_strategy && { truncation_strategy: parameters.truncation_strategy })
         };
-    
+
         return requestParameters;
     }
 
@@ -105,31 +114,22 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
         cortexRequest.data = requestParameters;
 
         // Get authentication token and add to headers
-        const azureAuthTokenHelper = this.config.get('azureAuthTokenHelper');
-        let authToken = null;
-        if (azureAuthTokenHelper) {
-            try {
-                authToken = await azureAuthTokenHelper.getAccessToken();
-            } catch (error) {
-                logger.warn(`[Azure Foundry Agent] Failed to get auth token: ${error.message}`);
-                // Continue without auth token
-            }
-        }
-        
+        const authToken = await this.getAzureAccessToken();
+
         cortexRequest.headers = {
             'Content-Type': 'application/json',
             ...cortexRequest.headers,
-            ...(authToken && { 'Authorization': `Bearer ${authToken}` })
+            'Authorization': `Bearer ${authToken}`
         };
 
         // Execute the initial request to create the run
         const runResponse = await this.executeRequest(cortexRequest);
-        
+
         // If we got a run response, poll for completion and get messages
         if (runResponse && runResponse.id && runResponse.thread_id) {
             return await this.pollForCompletion(runResponse.thread_id, runResponse.id, cortexRequest);
         }
-        
+
         return runResponse;
     }
 
@@ -138,110 +138,92 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
         const maxPollingAttempts = 60; // 60 seconds max
         const pollingInterval = 1000; // 1 second
         let attempts = 0;
-        
+
         while (attempts < maxPollingAttempts) {
             attempts++;
-            
+
             // Wait before polling
             await new Promise(resolve => setTimeout(resolve, pollingInterval));
-            
+
             try {
                 // Add authentication token if available
-                const azureAuthTokenHelper = this.config.get('azureAuthTokenHelper');
-                let authToken = null;
-                if (azureAuthTokenHelper) {
-                    try {
-                        authToken = await azureAuthTokenHelper.getAccessToken();
-                    } catch (error) {
-                        logger.warn(`[Azure Foundry Agent] Failed to get auth token for polling: ${error.message}`);
-                        // Continue without auth token
-                    }
-                }
-                
+                const authToken = await this.getAzureAccessToken();
+
                 const pollUrl = `${this.baseUrl}/threads/${threadId}/runs/${runId}`;
                 const pollResponse = await axios.get(pollUrl, {
                     headers: {
                         'Content-Type': 'application/json',
                         ...cortexRequest.headers,
-                        ...(authToken && { 'Authorization': `Bearer ${authToken}` })
+                        'Authorization': `Bearer ${authToken}`
                     },
                     params: cortexRequest.params
                 });
                 const runStatus = pollResponse?.data;
-                
+
                 if (!runStatus) {
                     logger.warn(`[Azure Foundry Agent] No run status received for run: ${runId}`);
                     continue;
                 }
-                
+
                 // Check if run is completed
                 if (runStatus.status === 'completed') {
                     logger.info(`[Azure Foundry Agent] Run completed successfully: ${runId}`);
                     return await this.retrieveMessages(threadId);
                 }
-                
+
                 // Check if run failed
                 if (runStatus.status === 'failed') {
                     logger.error(`[Azure Foundry Agent] Run failed: ${runId} ${runStatus?.lastError ? JSON.stringify(runStatus.lastError) : ''}`);
                     return null;
                 }
-                
+
                 // Check if run was cancelled
                 if (runStatus.status === 'cancelled') {
                     logger.warn(`[Azure Foundry Agent] Run was cancelled: ${runId}`);
                     return null;
                 }
-                
+
                 // Continue polling for queued or in_progress status
                 if (runStatus.status === 'queued' || runStatus.status === 'in_progress') {
                     continue;
                 }
-                
+
                 // Unknown status
                 logger.warn(`[Azure Foundry Agent] Unknown run status: ${runStatus.status}`);
                 break;
-                
+
             } catch (error) {
                 logger.error(`[Azure Foundry Agent] Error polling run status: ${error.message}`);
                 break;
             }
         }
-        
+
         logger.error(`[Azure Foundry Agent] Polling timeout after ${maxPollingAttempts} attempts for run: ${runId}`);
         return null;
     }
 
     // Retrieve messages from the completed thread
     async retrieveMessages(threadId) {
-        try { 
+        try {
             // Add authentication token if available
-            const azureAuthTokenHelper = this.config.get('azureAuthTokenHelper');
-            let authToken = null;
-            if (azureAuthTokenHelper) {
-                try {
-                    authToken = await azureAuthTokenHelper.getAccessToken();
-                } catch (error) {
-                    logger.warn(`[Azure Foundry Agent] Failed to get auth token for messages: ${error.message}`);
-                    // Continue without auth token
-                }
-            }
-            
+            const authToken = await this.getAzureAccessToken();
+
             const messagesUrl = `${this.baseUrl}/threads/${threadId}/messages`;
             const axiosResponse = await axios.get(messagesUrl, {
                 headers: {
                     'Content-Type': 'application/json',
                     ...this.model.headers,
-                    ...(authToken && { 'Authorization': `Bearer ${authToken}` })
+                    'Authorization': `Bearer ${authToken}`
                 },
                 params: { 'api-version': '2025-05-01', order: 'asc' }
             });
             const messagesResponse = axiosResponse?.data;
-            
+
             if (!messagesResponse || !messagesResponse.data) {
                 logger.warn(`[Azure Foundry Agent] No messages received from thread: ${threadId}`);
                 return null;
             }
-            
+
             // Find the last assistant message
             const messages = messagesResponse.data;
             for (let i = messages.length - 1; i >= 0; i--) {
@@ -253,10 +235,10 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
                     }
                 }
             }
-            
+
             logger.warn(`[Azure Foundry Agent] No assistant messages found in thread: ${threadId}`);
             return null;
-            
+
         } catch (error) {
             logger.error(`[Azure Foundry Agent] Error retrieving messages: ${error.message}`);
             return null;
@@ -266,12 +248,12 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
     // Parse the response from the Azure Foundry Agents API
     parseResponse(data) {
         if (!data) return "";
-        
+
         // If data is already a string (the final message content), return it
         if (typeof data === 'string') {
             return data;
         }
-        
+
         // Handle the run response format (for backward compatibility)
         if (data.id && data.status) {
             // This is a run response, we need to handle the status
@@ -312,14 +294,14 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
     // Override the logging function to display the messages and responses
     logRequestData(data, responseData, prompt) {
         const { stream, thread } = data;
-        
+
         if (thread && thread.messages && thread.messages.length > 1) {
             logger.info(`[Azure Foundry Agent request sent containing ${thread.messages.length} messages]`);
             let totalLength = 0;
             let totalUnits;
-            
+
             thread.messages.forEach((message, index) => {
-                const content = message.content === undefined ? JSON.stringify(message) : 
+                const content = message.content === undefined ? JSON.stringify(message) :
                     (Array.isArray(message.content) ? message.content.map(item => {
                         return JSON.stringify(item);
                     }).join(', ') : message.content);
@@ -336,7 +318,7 @@ class AzureFoundryAgentsPlugin extends ModelPlugin {
             const { length, units } = this.getLength(content);
             logger.info(`[Azure Foundry Agent request sent containing ${length} ${units}]`);
         }
-    
+
         if (stream) {
             logger.info(`[Azure Foundry Agent response received as an SSE stream]`);
         } else {

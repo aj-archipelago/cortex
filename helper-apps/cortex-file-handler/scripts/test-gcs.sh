@@ -30,8 +30,9 @@ cleanup() {
     if [ ! -z "$AZURITE_PID" ]; then
         kill $AZURITE_PID 2>/dev/null || true
     fi
-    docker stop fake-gcs-server 2>/dev/null || true
-    docker rm fake-gcs-server 2>/dev/null || true
+    if [ -n "$GCS_TEST_CONTAINER_ID" ]; then
+        docker rm -f "$GCS_TEST_CONTAINER_ID" >/dev/null 2>&1 || true
+    fi
 }
 
 # Set up cleanup trap
@@ -53,9 +54,9 @@ fi
 # Start fake-gcs-server if not running
 if ! nc -z localhost 4443; then
     echo "Starting fake-gcs-server..."
-    docker run -d --name fake-gcs-server \
-        -p 4443:4443 \
-        fsouza/fake-gcs-server -scheme http
+    GCS_TEST_CONTAINER_ID=$(docker run -d \
+        -p 127.0.0.1:4443:4443 \
+        fsouza/fake-gcs-server -scheme http)
     # Wait for fake-gcs-server to be ready
     until nc -z localhost 4443; do
         sleep 1
@@ -68,4 +69,4 @@ DOTENV_CONFIG_PATH=.env.test.gcs NODE_ENV=test node -r dotenv/config scripts/set
 
 # Run the tests
 echo "Running tests..."
-DOTENV_CONFIG_PATH=.env.test.gcs NODE_ENV=test node -r dotenv/config node_modules/ava/entrypoints/cli.mjs "$@" 
+DOTENV_CONFIG_PATH=.env.test.gcs NODE_ENV=test node -r dotenv/config node_modules/ava/entrypoints/cli.mjs "$@"

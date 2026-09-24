@@ -1,8 +1,12 @@
+import { assistantExecutionUser } from '../../../../../lib/assistantExecution.js';
+import { resolveColleagueWorkspace } from '../../../../../lib/colleagues.js';
 // workspace_client.js
 // Shared module for workspace tools: HTTP client, auto-provisioning, backend abstraction.
+import { publishWorkspaceCheckpoint, checkpointReviewSummary } from './workspace_checkpoint_safety.js';
+import { inventoryFromMetadata, validCheckpointInventory, assertCheckpointInventory } from '../../../../../helper-apps/cortex-workspace/lib/checkpoint_inventory.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { Agent } from 'undici';
 import logger from '../../../../../lib/logger.js';
@@ -31,6 +35,7 @@ export function resolveWorkspaceImage() {
 
 // In-memory lock to prevent concurrent provisioning for the same entity
 const provisioningLocks = new Map();
+const localLifecycleLocks = new Set();
 const reprovisionLocks = new Map();
 const WORKSPACE_TRANSITION_STATUSES = new Set(['starting', 'provisioning']);
 const WORKSPACE_TRANSITION_WAIT_MS = 90_000;
@@ -38,6 +43,7 @@ const WORKSPACE_TRANSITION_POLL_MS = 2_000;
 const WORKSPACE_PROVISIONING_LOCK_TTL_MS = 5 * 60 * 1000;
 const WORKSPACE_CHECKPOINT_PATH = '/persist/workspace.tar.gz';
 const WORKSPACE_CHECKPOINT_ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+const UNCHANGED_CHECKPOINT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 // Local activity mirror: entityId → timestamp (ms). Redis is the durable source
 // of reaper candidates; this map only helps the current process notice fresher
@@ -408,6 +414,8 @@ function getWorkspaceCheckpointMetadata(workspace = {}) {
         checkpointSizeBytes: workspace.checkpointSizeBytes || null,
         checkpointSizeMB: workspace.checkpointSizeMB || null,
         checkpointedAt: workspace.checkpointedAt || null,
+        ...(workspace.checkpointInventory ? { checkpointInventory: workspace.checkpointInventory } : {}),
+        ...(workspace.checkpointReview ? { checkpointReview: workspace.checkpointReview } : {}),
     };
     if (workspace.checkpointEncryption) {
         metadata.checkpointEncryption = workspace.checkpointEncryption;
@@ -630,7 +638,9 @@ async function releaseWorkspaceReaperLock(entityId, redis) {
 async function acquireWorkspaceProvisioningLock(entityId) {
     const redis = await getActivityRedisClient();
     if (!redis) {
-        return { acquired: true, redis: null, key: null, token: null };
+        if (isActivityRedisConfigured() || localLifecycleLocks.has(entityId)) return { acquired: false };
+        localLifecycleLocks.add(entityId);
+        return { acquired: true, redis: null, localEntityId: entityId };
     }
 
     const key = workspaceProvisioningLockKey(entityId);
@@ -640,21 +650,61 @@ async function acquireWorkspaceProvisioningLock(entityId) {
         return { acquired: result === 'OK', redis, key, token };
     } catch (e) {
         logger.warn(`Failed to acquire workspace provisioning lock for ${entityId}: ${e.message}`);
-        return { acquired: true, redis: null, key: null, token: null };
+        return { acquired: false, redis: null, key: null, token: null };
     }
 }
 
 async function releaseWorkspaceProvisioningLock(lock) {
+    if (lock?.localEntityId) localLifecycleLocks.delete(lock.localEntityId);
     if (!lock?.redis || !lock.key || !lock.token) return;
 
     try {
-        const owner = await lock.redis.get(lock.key);
-        if (owner === lock.token) {
-            await lock.redis.del(lock.key);
-        }
+        await lock.redis.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end", 1, lock.key, lock.token);
     } catch (e) {
         logger.warn(`Failed to release workspace provisioning lock ${lock.key}: ${e.message}`);
     }
+}
+
+function maintainWorkspaceProvisioningLock(lock) {
+    let lost = false;
+    let renewal = null;
+    const renew = () => {
+        if (!lock.redis || lost) return Promise.resolve();
+        if (renewal) return renewal;
+        renewal = (async () => {
+            try {
+                const result = await lock.redis.eval("if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('pexpire', KEYS[1], ARGV[2]) else return 0 end", 1, lock.key, lock.token, WORKSPACE_PROVISIONING_LOCK_TTL_MS);
+                if (Number(result) !== 1) lost = true;
+            } catch {
+                lost = true;
+            } finally {
+                renewal = null;
+            }
+        })();
+        return renewal;
+    };
+    const timer = lock.redis ? setInterval(renew, WORKSPACE_PROVISIONING_LOCK_TTL_MS / 3) : null;
+    timer?.unref?.();
+    return { renew, assertOwned() { if (lost) throw new Error('Workspace provisioning lease was lost'); }, stop() { if (timer) clearInterval(timer); } };
+}
+
+async function withWorkspaceLifecycleLease(entityId, options, operation) {
+    if (options.lifecycleLease) return operation(options);
+    const lock = await acquireWorkspaceProvisioningLock(entityId);
+    if (!lock.acquired) throw new Error('Workspace lifecycle operation is in progress; retry shortly');
+    const lease = maintainWorkspaceProvisioningLock(lock);
+    try {
+        return await operation({ ...options, lifecycleLease: lease });
+    } finally {
+        lease.stop();
+        await releaseWorkspaceProvisioningLock(lock);
+    }
+}
+
+async function markProvisioningFailed(entityId, attemptId) {
+    const current = await loadEntityConfig(entityId, { fresh: true });
+    if (current?.workspace?.provisioningAttemptId !== attemptId || current.workspace.status !== 'provisioning') return false;
+    return getEntityStore().compareAndSetWorkspace(entityId, current.workspace, { ...current.workspace, status: 'error' });
 }
 
 /**
@@ -689,6 +739,18 @@ export function parseMemoryToMB(str) {
  * @returns {Promise<Object>} Parsed JSON response
  */
 export async function workspaceRequest(entityId, endpoint, body = null, options = {}) {
+    const requestingEntityId = entityId;
+    try {
+        const binding = await resolveColleagueWorkspace(entityId, id => getEntityStore().getEntity(id, { fresh: true }));
+        if (binding.directory) {
+            if (['/reset', '/reconfigure', '/restore', '/restore-url'].includes(endpoint)) return { success: false, error: 'Manage the shared workspace from your personal entity' };
+            if (endpoint === '/shell' && body?.command) {
+                body = { ...body, command: `mkdir -p '${binding.directory}' && cd '${binding.directory}' && ${body.command}` };
+            }
+            entityId = binding.entityId;
+        }
+    } catch (error) { return { success: false, error: error.message }; }
+
     if (!isValidWorkspaceEntityId(entityId)) {
         logger.warn('Workspace request skipped: missing entityId');
         return invalidWorkspaceEntityResult();
@@ -696,6 +758,22 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
 
     const method = options.method || (body ? 'POST' : 'GET');
     const timeoutMs = options.timeoutMs || 30000;
+    // The jobs endpoint returns an array. Spreading it into an object loses
+    // its type and hides the list from downstream tool-result formatting.
+    const successResult = (data, response) => {
+        const checkpointReview = requestingEntityId === entityId ? checkpointReviewSummary(entityConfig?.workspace?.checkpointReview) : null;
+        if (endpoint === '/shell/jobs' && response.ok === false) {
+            return { success: false, error: `Workspace job list request failed (HTTP ${response.status})` };
+        }
+        if (endpoint !== '/shell/jobs' || data?.success === false) {
+            return { success: true, ...data, ...(checkpointReview ? { checkpointReview } : {}) };
+        }
+        const jobs = Array.isArray(data) ? data : data?.jobs;
+        if (!Array.isArray(jobs)) {
+            return { success: false, error: 'Workspace returned an invalid background job list' };
+        }
+        return { success: true, ...(Array.isArray(data) ? {} : data), jobs, ...(checkpointReview ? { checkpointReview } : {}) };
+    };
     const shouldRecordActivity = options.recordActivity !== false;
     const markActivity = () => {
         if (shouldRecordActivity) recordWorkspaceActivity(entityId);
@@ -780,7 +858,7 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
                         bootstrapSecret: workspace.bootstrapSecret,
                         containerId: workspace.containerId,
                         claimedFromPool: workspace.claimedFromPool,
-                    }, backend, { destroyOnFailure: false });
+                    }, backend, { destroyOnFailure: false, recoverRuntime: true });
 
                     // Retry the request with the fresh secret
                     entityConfig = await loadEntityConfig(entityId);
@@ -797,10 +875,10 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
                         if (retryData.error) {
                             return { success: false, error: retryData.error };
                         }
-                        return { success: true, ...retryData };
+                        return successResult(retryData, retryResponse);
                     }
                 } catch (reconfigErr) {
-                    logger.warn(`Reconfigure failed for ${entityId}: ${reconfigErr.message} — falling back to full reprovision`);
+                    return { success: false, error: `Workspace recovery failed; saved backup preserved: ${reconfigErr.message}` };
                 }
             }
 
@@ -838,7 +916,7 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
                 if (retryData.error) {
                     return { success: false, error: retryData.error };
                 }
-                return { success: true, ...retryData };
+                return successResult(retryData, retryResponse);
             } catch (retryErr) {
                 return { success: false, error: `Workspace re-provisioned but request still failed: ${retryErr.message}` };
             }
@@ -850,7 +928,7 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
             return { success: false, error: data.error };
         }
 
-        return { success: true, ...data };
+        return successResult(data, response);
     } catch (e) {
         // Detect connection-level failures (ECONNREFUSED, ENOTFOUND, ECONNRESET, "fetch failed", etc.)
         const causeCode = e.cause?.code;
@@ -860,6 +938,7 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
             (e.name === 'TypeError' && e.message === 'fetch failed');
 
         if (isConnectionError) {
+            const failedWorkspace = entityConfig?.workspace || workspace;
             try {
                 const refreshedEntityConfig = await refreshWorkspaceUrlFromBackend(entityId, entityConfig);
                 if (refreshedEntityConfig?.workspace?.url && refreshedEntityConfig.workspace.url !== entityConfig.workspace.url) {
@@ -895,7 +974,7 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
                                 if (recoveredData.error) {
                                     return { success: false, error: recoveredData.error };
                                 }
-                                return { success: true, ...recoveredData };
+                                return successResult(recoveredData, recoveredResponse);
                             }
                         }
                     }
@@ -904,21 +983,63 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
                         if (retryData.error) {
                             return { success: false, error: retryData.error };
                         }
-                        return { success: true, ...retryData };
+                        return successResult(retryData, retryResponse);
                     }
                 }
             } catch (refreshErr) {
                 logger.warn(`Workspace URL refresh failed for ${entityId} after connection error: ${refreshErr.message}`);
             }
 
+            // A connection failure is the normal signal when an ACI container
+            // has disappeared. Reconcile against both ACI and fresh Mongo state
+            // before mutating the entity: another Cortex host may already have
+            // preserved a checkpoint or installed a replacement runtime after
+            // this host cached failedWorkspace.
+            let reconciledMissingContainer = false;
+            let runtimeChanged = false;
+            try {
+                const backend = await getBackend();
+                const missingContainerResult = await clearMissingWorkspaceContainerFromBackend(
+                    entityId,
+                    entityConfig,
+                    backend,
+                );
+                entityConfig = missingContainerResult.entityConfig || entityConfig;
+                reconciledMissingContainer = Boolean(missingContainerResult.cleared);
+
+                if (!reconciledMissingContainer) {
+                    entityConfig = (await loadEntityConfig(entityId, { fresh: true })) || entityConfig;
+                }
+            } catch (reconcileErr) {
+                logger.warn(`Workspace container reconciliation failed for ${entityId} after connection error: ${reconcileErr.message}`);
+                entityConfig = (await loadEntityConfig(entityId, { fresh: true })) || entityConfig;
+            }
+            const currentWorkspace = entityConfig?.workspace;
+            runtimeChanged =
+                currentWorkspace?.containerId !== failedWorkspace?.containerId ||
+                currentWorkspace?.url !== failedWorkspace?.url ||
+                currentWorkspace?.secret !== failedWorkspace?.secret;
+
+            if ((reconciledMissingContainer || runtimeChanged) && !options._connectionRecoveryRetried) {
+                logger.warn(
+                    `Workspace runtime changed for ${entityId} after connection failure; retrying from fresh durable state`,
+                );
+                return await workspaceRequest(entityId, endpoint, body, {
+                    ...options,
+                    _connectionRecoveryRetried: true,
+                });
+            }
+
             // Container is dead — re-provision and retry the request in the same call
             logger.warn(`Workspace for ${entityId} unreachable — re-provisioning`);
-            try {
-                await getEntityStore().upsertEntity({
-                    ...entityConfig,
-                    workspace: { ...entityConfig.workspace, status: 'error' },
-                });
-            } catch { /* best effort */ }
+            if (!reconciledMissingContainer && !runtimeChanged) {
+                try {
+                    await getEntityStore().upsertEntity({
+                        ...entityConfig,
+                        workspace: { ...entityConfig.workspace, status: 'error' },
+                    });
+                } catch { /* best effort */ }
+            }
 
             await emitWorkspaceLifecycle(onWorkspaceLifecycle, { type: 'start', phase: 'reconnect', message: 'Reconnecting workspace' });
             const provisionResult = await provisionWorkspace(entityId, entityConfig, options);
@@ -955,7 +1076,7 @@ export async function workspaceRequest(entityId, endpoint, body = null, options 
                 if (retryData.error) {
                     return { success: false, error: retryData.error };
                 }
-                return { success: true, ...retryData };
+                return successResult(retryData, retryResponse);
             } catch (retryErr) {
                 return { success: false, error: `Workspace re-provisioned but request still failed: ${retryErr.message}` };
             }
@@ -987,8 +1108,7 @@ async function provisionWorkspace(entityId, entityConfig, options = {}) {
     if (provisioningLocks.has(entityId)) {
         // Wait for existing provisioning to finish
         try {
-            await provisioningLocks.get(entityId);
-            return { success: true };
+            return await provisioningLocks.get(entityId);
         } catch {
             return { success: false, error: 'Concurrent provisioning failed' };
         }
@@ -1011,13 +1131,15 @@ async function provisionWorkspace(entityId, entityConfig, options = {}) {
         entityConfig = (await loadEntityConfig(entityId, { fresh: true })) || entityConfig;
     }
 
-    const provisionPromise = _doProvision(entityId, entityConfig, options);
+    const lease = maintainWorkspaceProvisioningLock(distributedLock);
+    const provisionPromise = _doProvision(entityId, entityConfig, { ...options, lease });
     provisioningLocks.set(entityId, provisionPromise);
 
     try {
         const result = await provisionPromise;
         return result;
     } finally {
+        lease.stop();
         provisioningLocks.delete(entityId);
         await releaseWorkspaceProvisioningLock(distributedLock);
     }
@@ -1094,8 +1216,7 @@ async function workspaceCheckpointBlobExists(blobPath, storageConfig) {
     try {
         const containerClient = await getWorkspaceCheckpointContainerClient(storageConfig, {
             ensure: false,
-            ignoreOverride: true,
-        });
+            });
         return await containerClient.getBlockBlobClient(blobPath).exists();
     } catch (e) {
         logger.warn(`Could not check workspace checkpoint blob ${blobPath} in ${storageConfig.accountName}: ${e.message}`);
@@ -1106,7 +1227,6 @@ async function workspaceCheckpointBlobExists(blobPath, storageConfig) {
 async function validateWorkspaceCheckpointBlobIdentity(blobPath, entityId, storageConfig) {
     const containerClient = await getWorkspaceCheckpointContainerClient(storageConfig, {
         ensure: false,
-        ignoreOverride: true,
     });
     const properties = await containerClient.getBlockBlobClient(blobPath).getProperties();
     validateWorkspaceCheckpointMetadata(properties.metadata || {}, entityId);
@@ -1125,6 +1245,7 @@ async function readWorkspaceCheckpointBlobFields(blobPath, entityId, storageConf
     const sizeBytes = properties.contentLength || null;
     return {
         checkpointBlobPath: blobPath,
+        checkpointBlobEtag: properties.etag || null,
         checkpointPreviousBlobPath: blobPath.endsWith('/workspace.tar.gz')
             ? blobPath.replace(/\/workspace\.tar\.gz$/, '/workspace.prev.tar.gz')
             : workspaceCheckpointBlobPath(entityId, 'workspace.prev.tar.gz'),
@@ -1137,6 +1258,7 @@ async function readWorkspaceCheckpointBlobFields(blobPath, entityId, storageConf
             : null,
         checkpointEncryption: checkpointEncryptionFromMetadata(properties.metadata || {}),
         checkpointCompression: metadataValue(properties.metadata || {}, 'checkpointCompression') || null,
+        checkpointInventory: inventoryFromMetadata(properties.metadata),
     };
 }
 
@@ -1248,7 +1370,7 @@ async function deleteWorkspaceCheckpointBlobs(entityId, workspace = {}) {
         const containerClient = await getWorkspaceCheckpointContainerClient(storageConfig);
         for (const blobPath of blobPaths) {
             attempted++;
-            const result = await containerClient.getBlockBlobClient(blobPath).deleteIfExists();
+            const result = await containerClient.getBlockBlobClient(blobPath).deleteIfExists({ deleteSnapshots: 'include' });
             if (result.succeeded) deleted += 1;
         }
     }
@@ -1256,16 +1378,22 @@ async function deleteWorkspaceCheckpointBlobs(entityId, workspace = {}) {
 }
 
 async function recoverExistingWorkspaceCheckpoint(entityId, entityConfig) {
-    if (entityConfig?.workspace?.checkpointBlobPath) return entityConfig;
-
     let checkpointFields = null;
     try {
         checkpointFields = await readExistingWorkspaceCheckpointBlobFields(entityId, entityConfig?.workspace || {});
     } catch (e) {
         logger.warn(`Could not validate existing workspace checkpoint for ${entityId}: ${e.message}`);
+        if (entityConfig?.workspace?.checkpointBlobPath) throw e;
         return entityConfig;
     }
-    if (!checkpointFields) return entityConfig;
+    if (!checkpointFields) {
+        if (entityConfig?.workspace?.checkpointBlobPath) throw new Error('Could not verify workspace checkpoint metadata from Blob');
+        return entityConfig;
+    }
+    const storedKeyId = entityConfig?.workspace?.checkpointEncryptionKey?.keyId;
+    if (checkpointFields.checkpointEncryption && checkpointFields.checkpointEncryption.keyId !== storedKeyId) {
+        throw new Error('Workspace checkpoint encryption key identity does not match Blob metadata');
+    }
 
     logger.info(`Recovered existing workspace checkpoint metadata for ${entityId}`);
     return {
@@ -1444,7 +1572,7 @@ async function uploadWorkspaceArchiveFromContainer(entityId, workspace, archiveP
         const freshConfig = await loadEntityConfig(entityId, { fresh: true });
         let retryWorkspace = freshConfig?.workspace || workspace;
         if (recoverAuth && retryWorkspace?.bootstrapSecret && retryWorkspace?.url) {
-            const recoveredConfig = await recoverWorkspaceAuthWithBootstrapSecret(entityId, freshConfig || { workspace: retryWorkspace });
+            const recoveredConfig = await recoverWorkspaceAuthWithBootstrapSecret(entityId, freshConfig || { workspace: retryWorkspace }, options);
             retryWorkspace = recoveredConfig?.workspace || retryWorkspace;
         }
         if (!retryWorkspace?.url || !retryWorkspace?.secret) return null;
@@ -1537,7 +1665,7 @@ async function uploadStreamingWorkspaceCheckpointFromContainer(entityId, entityC
         const freshConfig = await loadEntityConfig(entityId, { fresh: true });
         let retryWorkspace = freshConfig?.workspace || workspace;
         if (recoverAuth && retryWorkspace?.bootstrapSecret && retryWorkspace?.url) {
-            const recoveredConfig = await recoverWorkspaceAuthWithBootstrapSecret(entityId, freshConfig || { workspace: retryWorkspace });
+            const recoveredConfig = await recoverWorkspaceAuthWithBootstrapSecret(entityId, freshConfig || { workspace: retryWorkspace }, options);
             retryWorkspace = recoveredConfig?.workspace || retryWorkspace;
         }
         if (!retryWorkspace?.url || !retryWorkspace?.secret) return null;
@@ -1597,85 +1725,40 @@ async function uploadStreamingWorkspaceCheckpointFromContainer(entityId, entityC
 }
 
 async function uploadWorkspaceCheckpoint(entityId, workspace, backupBody, timeoutMs, options = {}) {
-    const checkpointBlobPath = workspaceCheckpointBlobPath(entityId);
-    if (!backupBody) {
-        const previousBlobPath = workspaceCheckpointBlobPath(entityId, 'workspace.prev.tar.gz');
-        let copiedPrevious = false;
-        try {
-            copiedPrevious = await copyExistingWorkspaceCheckpointToPrevious(entityId, checkpointBlobPath, previousBlobPath, options);
-        } catch (e) {
-            logger.warn(`Failed to copy previous workspace checkpoint for ${entityId}: ${e.message}`);
-        }
-        const checkpointedAt = new Date().toISOString();
-        const streamingUpload = await uploadStreamingWorkspaceCheckpointFromContainer(
-            entityId,
-            options.entityConfig || { id: entityId, workspace },
-            workspace,
-            checkpointBlobPath,
-            timeoutMs,
-            { ...options, checkpointedAt },
-        );
-        if (streamingUpload.unsupported) {
-            return { unsupported: true };
-        }
-        return {
-            path: WORKSPACE_CHECKPOINT_PATH,
-            blobPath: streamingUpload.blobPath,
-            previousBlobPath: copiedPrevious ? previousBlobPath : null,
-            sizeBytes: streamingUpload.sizeBytes,
-            sizeMB: streamingUpload.sizeBytes
-                ? Math.round(streamingUpload.sizeBytes / 1024 / 1024 * 100) / 100
-                : null,
-            timestamp: streamingUpload.timestamp || checkpointedAt,
-            durationMs: streamingUpload.durationMs || null,
-            encryption: streamingUpload.encryption,
-            compression: streamingUpload.encryption?.compression || null,
-            entityConfig: streamingUpload.entityConfig,
-        };
-    }
-    const checkpointUpload = await uploadWorkspaceArchiveFromContainer(
-        entityId,
-        workspace,
-        backupBody.path || WORKSPACE_CHECKPOINT_PATH,
-        checkpointBlobPath,
-        timeoutMs,
-        options,
-    );
-
-    let previousBlobPath = null;
-    if (backupBody.previousPath) {
-        try {
-            previousBlobPath = workspaceCheckpointBlobPath(entityId, 'workspace.prev.tar.gz');
-            await uploadWorkspaceArchiveFromContainer(
-                entityId,
-                workspace,
-                backupBody.previousPath,
-                previousBlobPath,
-                timeoutMs,
-                options,
-            );
-        } catch (e) {
-            logger.warn(`Failed to upload previous workspace checkpoint for ${entityId}: ${e.message}`);
-            previousBlobPath = null;
-        }
-    }
-
+    const currentPath = workspaceCheckpointBlobPath(entityId);
+    const storage = getWorkspaceCheckpointStorageConfig();
+    const checkpointedAt = backupBody?.timestamp || new Date().toISOString();
+    const checkpoint = await publishWorkspaceCheckpoint({
+        currentPath,
+        previousPath: workspaceCheckpointBlobPath(entityId, 'workspace.prev.tar.gz'),
+        container: await getWorkspaceCheckpointContainerClient(storage),
+        validateMetadata: metadata => validateWorkspaceCheckpointMetadata(metadata, entityId),
+        beforePublish: async () => { await options.lifecycleLease?.renew(); options.lifecycleLease?.assertOwned(); },
+        onReduction: review => saveCheckpointReview(entityId, workspace, review, options),
+        readUrl: path => createWorkspaceCheckpointSasUrl(path, 'r', storage, options),
+        upload: async candidatePath => {
+            if (!backupBody) {
+                return uploadStreamingWorkspaceCheckpointFromContainer(
+                    entityId, options.entityConfig || { id: entityId, workspace }, workspace,
+                    candidatePath, timeoutMs, { ...options, checkpointedAt },
+                );
+            }
+            return uploadWorkspaceArchiveFromContainer(entityId, workspace,
+                backupBody.path || WORKSPACE_CHECKPOINT_PATH, candidatePath, timeoutMs, options);
+        },
+    });
+    if (checkpoint.unsupported || checkpoint.pendingReview) return checkpoint;
     return {
-        path: backupBody.path || WORKSPACE_CHECKPOINT_PATH,
-        blobPath: checkpointUpload.blobPath,
-        previousBlobPath,
-        sizeBytes: checkpointUpload.sizeBytes || backupBody.sizeBytes || null,
-        sizeMB: backupBody.sizeMB || (
-            checkpointUpload.sizeBytes
-                ? Math.round(checkpointUpload.sizeBytes / 1024 / 1024 * 100) / 100
-                : null
-        ),
-        timestamp: backupBody.timestamp || new Date().toISOString(),
-        durationMs: backupBody.durationMs || null,
+        ...checkpoint,
+        path: backupBody?.path || WORKSPACE_CHECKPOINT_PATH,
+        sizeMB: Math.round(checkpoint.sizeBytes / 1024 / 1024 * 100) / 100,
+        timestamp: checkpoint.timestamp || checkpointedAt,
+        durationMs: checkpoint.durationMs || backupBody?.durationMs || null,
+        compression: checkpoint.encryption?.compression || backupBody?.compression || null,
     };
 }
 
-function workspaceCheckpointFields(checkpoint) {
+function workspaceCheckpointFields(checkpoint, options = {}) {
     if (!checkpoint?.blobPath) return null;
     const checkpointedAtMs = parseTimestampMs(checkpoint.timestamp) || Date.now();
     const fields = {
@@ -1684,6 +1767,10 @@ function workspaceCheckpointFields(checkpoint) {
         checkpointSizeBytes: checkpoint.sizeBytes || null,
         checkpointSizeMB: checkpoint.sizeMB || null,
         checkpointedAt: new Date(checkpointedAtMs).toISOString(),
+        checkpointHasRunningJobs: Boolean(options.backgroundJobsRunning),
+        checkpointInventory: checkpoint.inventory || null,
+        checkpointReview: null,
+        checkpointCheckedAt: new Date().toISOString(),
     };
     if (checkpoint.encryption) {
         fields.checkpointEncryption = checkpoint.encryption;
@@ -1695,8 +1782,18 @@ function workspaceCheckpointFields(checkpoint) {
 }
 
 async function persistWorkspaceCheckpoint(entityId, entityConfig, checkpoint, options = {}) {
-    const fields = workspaceCheckpointFields(checkpoint);
+    const fields = workspaceCheckpointFields(checkpoint, options);
     if (!fields) return entityConfig;
+
+    // A newer publisher may have won since this request completed. Never store
+    // stale encryption metadata over the currently authoritative Blob.
+    if (checkpoint.etag) {
+        const latest = await readExistingWorkspaceCheckpointBlobFields(entityId, { checkpointBlobPath: checkpoint.blobPath });
+        if (!latest) throw new Error('Could not verify published workspace checkpoint');
+        if (latest.checkpointBlobEtag !== checkpoint.etag) {
+            return await loadEntityConfig(entityId, { fresh: true });
+        }
+    }
 
     const current = (await loadEntityConfig(entityId, { fresh: true })) || entityConfig;
     if (!current?.workspace) return current;
@@ -1736,6 +1833,13 @@ async function markWorkspaceCheckpointFresh(entityId, entityConfig, timestamp = 
 }
 
 async function checkpointAndPersistWorkspace(entityId, entityConfig, options = {}) {
+    try {
+        return await withWorkspaceLifecycleLease(entityId, options, lockedOptions =>
+            checkpointAndPersistWorkspaceUnderLease(entityId, entityConfig, lockedOptions));
+    } catch (error) { return { success: false, error: error.message }; }
+}
+
+async function checkpointAndPersistWorkspaceUnderLease(entityId, entityConfig, options) {
     const checkpointResult = await checkpointWorkspace(entityId, entityConfig, options);
     if (!checkpointResult.success || checkpointResult.skipped || !checkpointResult.checkpoint?.blobPath) {
         return checkpointResult;
@@ -1753,7 +1857,110 @@ async function checkpointAndPersistWorkspace(entityId, entityConfig, options = {
     };
 }
 
-async function recoverWorkspaceAuthWithBootstrapSecret(entityId, entityConfig) {
+function workspaceRuntimeIdentity(workspace = {}) {
+    return crypto.createHash('sha256').update(JSON.stringify([workspace.containerId, workspace.url, workspace.secret])).digest('hex');
+}
+
+async function readCheckpointInventory(workspace) {
+    try {
+        const { response, body } = await fetchWorkspaceJson(workspace.url, workspace.secret, '/checkpoint-inventory');
+        return response.ok && validCheckpointInventory(body) ? body : null;
+    } catch { return null; } // Uncertain scans never authorize skipping a backup.
+}
+
+function checkpointReviewRequired(review) {
+    return { success: false, error: 'workspace_checkpoint_review_required', checkpointReview: checkpointReviewSummary(review) };
+}
+
+function publicCheckpointResult(result) {
+    return { success: result.success, error: result.error, skipped: result.skipped, reason: result.reason,
+        checkpointReview: result.checkpointReview,
+        checkpoint: result.checkpoint ? { sizeBytes: result.checkpoint.sizeBytes, timestamp: result.checkpoint.timestamp, inventory: result.checkpoint.inventory } : undefined };
+}
+
+async function saveCheckpointReview(entityId, workspace, review, options) {
+    await options.lifecycleLease?.renew();
+    options.lifecycleLease?.assertOwned();
+    const current = await loadEntityConfig(entityId, { fresh: true });
+    if (workspaceRuntimeIdentity(current?.workspace) !== workspaceRuntimeIdentity(workspace)) throw new Error('Workspace changed before checkpoint review');
+    review.runtimeIdentity = workspaceRuntimeIdentity(workspace);
+    if (!await getEntityStore().compareAndSetWorkspace(entityId, current.workspace, { ...current.workspace, checkpointReview: review })) {
+        throw new Error('Workspace changed before checkpoint review');
+    }
+}
+
+export async function manageWorkspaceCheckpoint(entityId, operation = 'status', reviewId, options = {}) {
+    let entity = await loadEntityConfig(entityId, { fresh: true });
+    if (!entity || entity.kind === 'colleague') return { success: false, error: 'Only the workspace-owning personal agent can review its checkpoints' };
+    if (operation === 'status') return { success: true, checkpointedAt: entity.workspace?.checkpointedAt, checkpointReview: checkpointReviewSummary(entity.workspace?.checkpointReview) };
+    if (!['create', 'approve', 'reject'].includes(operation)) return { success: false, error: 'Use checkpoint [status|approve <id>|reject <id>]' };
+    if (operation === 'create') {
+        const ready = await ensureWorkspaceReady(entityId, options);
+        if (!ready.success) return ready;
+    }
+    try {
+        return await withWorkspaceLifecycleLease(entityId, options, async locked => {
+            entity = await loadEntityConfig(entityId, { fresh: true });
+            if (!entity || entity.kind === 'colleague') throw new Error('Only the workspace-owning personal agent can review its checkpoints');
+            if (operation === 'create') return publicCheckpointResult(await checkpointAndPersistWorkspace(entityId, entity, { ...locked, forceCheckpoint: true }));
+            const ws = entity.workspace, review = ws?.checkpointReview;
+            if (!review || review.id !== reviewId || review.status !== 'pending') throw new Error('No matching pending workspace checkpoint review');
+            if (operation === 'reject') {
+                const rejected = { ...review, status: 'rejected', decidedAt: new Date().toISOString() };
+                if (!await getEntityStore().compareAndSetWorkspace(entityId, ws, { ...ws, checkpointReview: rejected })) throw new Error('Workspace review changed');
+                return { success: true, checkpointReview: checkpointReviewSummary(rejected) };
+            }
+            const verifyRuntime = async () => {
+                const fresh = await loadEntityConfig(entityId, { fresh: true });
+                const inventory = await readCheckpointInventory(fresh?.workspace);
+                if (fresh?.workspace?.checkpointReview?.id !== reviewId || fresh.workspace.checkpointReview.status !== 'pending'
+                    || workspaceRuntimeIdentity(fresh.workspace) !== review.runtimeIdentity
+                    || !inventory || inventory.fingerprint !== review.after?.fingerprint) {
+                    throw new Error('Workspace contents or runtime changed since review; run checkpoint to request a new review');
+                }
+                await locked.lifecycleLease?.renew();
+                locked.lifecycleLease?.assertOwned();
+            };
+            await verifyRuntime();
+            const jobs = await getWorkspaceBackgroundJobsStatus(entity);
+            if (!jobs.ok) throw new Error('Could not verify workspace background jobs');
+            const currentPath = workspaceCheckpointBlobPath(entityId);
+            const storage = getWorkspaceCheckpointStorageConfig();
+            const checkpoint = await publishWorkspaceCheckpoint({
+                currentPath, previousPath: workspaceCheckpointBlobPath(entityId, 'workspace.prev.tar.gz'),
+                container: await getWorkspaceCheckpointContainerClient(storage), approvedReview: review,
+                validateMetadata: metadata => validateWorkspaceCheckpointMetadata(metadata, entityId),
+                readUrl: path => createWorkspaceCheckpointSasUrl(path, 'r', storage, locked),
+                beforePublish: verifyRuntime,
+            });
+            await persistWorkspaceCheckpoint(entityId, entity, checkpoint, { ...locked, backgroundJobsRunning: jobs.hasRunningJobs });
+            return { success: true, approvedReviewId: reviewId, checkpoint: { sizeBytes: checkpoint.sizeBytes, timestamp: checkpoint.timestamp } };
+        });
+    } catch (error) { return { success: false, error: error.statusCode === 404 || error.code === 'BlobNotFound' ? 'Checkpoint candidate expired or is missing; run checkpoint to request a new review' : error.message }; }
+}
+
+export async function resetWorkspaceContents(entityId, preservePaths, options = {}) {
+    const entity = await loadEntityConfig(entityId, { fresh: true });
+    if (!entity || entity.kind === 'colleague') return { success: false, error: 'Only the workspace-owning personal agent can reset its workspace' };
+    const ready = await ensureWorkspaceReady(entityId, options);
+    if (!ready.success) return ready;
+    try {
+        return await withWorkspaceLifecycleLease(entityId, options, async locked => {
+            const current = await loadEntityConfig(entityId, { fresh: true });
+            const backup = await checkpointAndPersistWorkspace(entityId, current, { ...locked, forceCheckpoint: true });
+            if (!backup.success || backup.skipped) return { ...publicCheckpointResult(backup), success: false, resetCompleted: false };
+            const fresh = await loadEntityConfig(entityId, { fresh: true });
+            const { response, body } = await fetchWorkspaceJson(fresh.workspace.url, fresh.workspace.secret, '/reset', {
+                method: 'POST', body: { preservePaths }, timeoutMs: 60000,
+            });
+            if (!response.ok || body.error) return { success: false, error: body.error || 'Workspace reset failed' };
+            const result = await checkpointAndPersistWorkspace(entityId, await loadEntityConfig(entityId, { fresh: true }), { ...locked, forceCheckpoint: true });
+            return { ...publicCheckpointResult(result), resetCompleted: true, message: 'Workspace reset completed. The pre-reset recovery checkpoint was preserved; review any pending reduction before it becomes the new backup baseline.' };
+        });
+    } catch (error) { return { success: false, error: error.message }; }
+}
+
+async function recoverWorkspaceAuthWithBootstrapSecret(entityId, entityConfig, options = {}) {
     entityConfig = await refreshWorkspaceUrlFromBackend(entityId, entityConfig);
     let workspace = entityConfig?.workspace;
     if (!workspace?.bootstrapSecret || !workspace?.url) return null;
@@ -1770,7 +1977,7 @@ async function recoverWorkspaceAuthWithBootstrapSecret(entityId, entityConfig) {
         bootstrapSecret: workspace.bootstrapSecret,
         containerId: workspace.containerId,
         claimedFromPool: workspace.claimedFromPool,
-    }, backend, { destroyOnFailure: false });
+    }, backend, { ...options, destroyOnFailure: false, recoverRuntime: true });
 
     return await loadEntityConfig(entityId, { fresh: true });
 }
@@ -1827,7 +2034,7 @@ async function fetchWorkspaceJsonWithAuthRecovery(entityId, entityConfig, endpoi
         }
     }
 
-    const recoveredConfig = await recoverWorkspaceAuthWithBootstrapSecret(entityId, currentConfig);
+    const recoveredConfig = await recoverWorkspaceAuthWithBootstrapSecret(entityId, currentConfig, options);
     if (!recoveredConfig?.workspace?.url || !recoveredConfig?.workspace?.secret) {
         return {
             ...result,
@@ -1849,6 +2056,13 @@ async function fetchWorkspaceJsonWithAuthRecovery(entityId, entityConfig, endpoi
 }
 
 async function checkpointWorkspace(entityId, entityConfig, options = {}) {
+    try {
+        return await withWorkspaceLifecycleLease(entityId, options, lockedOptions =>
+            checkpointWorkspaceUnderLease(entityId, entityConfig, lockedOptions));
+    } catch (error) { return { success: false, error: error.message }; }
+}
+
+async function checkpointWorkspaceUnderLease(entityId, entityConfig, options) {
     let workspace = entityConfig?.workspace;
     if (!workspace?.url || !workspace?.secret) {
         return { success: false, error: 'Workspace URL or secret is missing' };
@@ -1870,6 +2084,7 @@ async function checkpointWorkspace(entityId, entityConfig, options = {}) {
     };
     try {
         let healthResult = await fetchWorkspaceJsonWithAuthRecovery(entityId, entityConfig, '/health', {
+            lifecycleLease: options.lifecycleLease,
             timeoutMs: Math.min(timeoutMs, 30000),
         });
         entityConfig = healthResult.entityConfig;
@@ -1880,6 +2095,7 @@ async function checkpointWorkspace(entityId, entityConfig, options = {}) {
         }
 
         let statusResult = await fetchWorkspaceJsonWithAuthRecovery(entityId, entityConfig, '/status', {
+            lifecycleLease: options.lifecycleLease,
             timeoutMs: Math.min(timeoutMs, 30000),
         });
         entityConfig = statusResult.entityConfig;
@@ -1900,12 +2116,38 @@ async function checkpointWorkspace(entityId, entityConfig, options = {}) {
         const uploadCheckpoint = options.uploadCheckpoint || _workspaceCheckpointUploadOverride || uploadWorkspaceCheckpoint;
         const canUseStreamingCheckpoint = uploadCheckpoint === uploadWorkspaceCheckpoint
             && isEncryptedStreamingCheckpointWorkspace(workspaceVersion);
+        if (canUseStreamingCheckpoint && healthBody.checkpointInventory === 1) {
+            const inventory = await readCheckpointInventory(workspace);
+            const pending = workspace.checkpointReview;
+            if (pending && ['pending', 'rejected'].includes(pending.status)
+                && !options.forceCheckpoint
+                && pending.runtimeIdentity === workspaceRuntimeIdentity(workspace)
+                && inventory?.fingerprint === pending.after?.fingerprint) {
+                return checkpointReviewRequired(pending);
+            }
+            if (inventory && !pending && !options.forceCheckpoint && !options.backgroundJobsRunning
+                && !workspace.checkpointHasRunningJobs
+                && Date.now() - parseTimestampMs(workspace.checkpointedAt) < UNCHANGED_CHECKPOINT_MAX_AGE_MS) {
+                const saved = await readExistingWorkspaceCheckpointBlobFields(entityId, workspace);
+                if (saved?.checkpointInventory?.fingerprint === inventory.fingerprint) {
+                    const current = await loadEntityConfig(entityId, { fresh: true });
+                    if (workspaceRuntimeIdentity(current.workspace) !== workspaceRuntimeIdentity(workspace)) throw new Error('Workspace changed during inventory check');
+                    const next = { ...current.workspace, ...saved, checkpointCheckedAt: new Date().toISOString() };
+                    if (!await getEntityStore().compareAndSetWorkspace(entityId, current.workspace, next)) throw new Error('Workspace changed during inventory check');
+                    return { success: true, skipped: true, reason: 'unchanged', entityConfig: { ...current, workspace: next } };
+                }
+            }
+        }
         if (canUseStreamingCheckpoint) {
             await startPhase('checkpointUpload', 'Backing up and saving workspace');
             const checkpoint = await uploadCheckpoint(entityId, workspace, null, timeoutMs, {
                 ...options,
                 entityConfig,
             });
+            if (checkpoint.pendingReview) {
+                await finishPhase(false, 'Workspace reduction requires the owning agent decision');
+                return checkpointReviewRequired(checkpoint.pendingReview);
+            }
             if (!checkpoint?.unsupported) {
                 await finishPhase(true);
                 return { success: true, checkpoint };
@@ -1916,6 +2158,7 @@ async function checkpointWorkspace(entityId, entityConfig, options = {}) {
 
         await startPhase('checkpointBackup', 'Backing up workspace');
         const backupResult = await fetchWorkspaceJsonWithAuthRecovery(entityId, entityConfig, '/backup', {
+            lifecycleLease: options.lifecycleLease,
             method: 'POST',
             timeoutMs,
         });
@@ -1934,6 +2177,10 @@ async function checkpointWorkspace(entityId, entityConfig, options = {}) {
 
         await startPhase('checkpointUpload', 'Saving workspace backup');
         const checkpoint = await uploadCheckpoint(entityId, workspace, body, timeoutMs, options);
+        if (checkpoint.pendingReview) {
+            await finishPhase(false, 'Workspace reduction requires the owning agent decision');
+            return checkpointReviewRequired(checkpoint.pendingReview);
+        }
         await finishPhase(true);
         return { success: true, checkpoint };
     } catch (e) {
@@ -2020,7 +2267,7 @@ async function ensureWorkspaceReady(entityId, options = {}) {
         : null;
     const waitForTransition = options.waitForTransition !== false;
 
-    let entityConfig = await loadEntityConfig(entityId);
+    let entityConfig = await loadEntityConfig(entityId, { fresh: true });
     if (!entityConfig) {
         return { success: false, error: 'Entity not found' };
     }
@@ -2033,12 +2280,20 @@ async function ensureWorkspaceReady(entityId, options = {}) {
         const staleMs = Number.isFinite(transitionStartedAt)
             ? Date.now() - transitionStartedAt
             : Infinity;
-        if (staleMs > 5 * 60 * 1000) {
+        const redis = staleMs > WORKSPACE_PROVISIONING_LOCK_TTL_MS ? await getActivityRedisClient() : null;
+        // A slow Azure operation can outlive the initial five-minute window.
+        // A renewed lease, or a local active attempt, still owns the transition.
+        let activeLease = provisioningLocks.has(entityId) || (isActivityRedisConfigured() && !redis);
+        if (redis && !activeLease) {
+            try { activeLease = Boolean(await redis.get(workspaceProvisioningLockKey(entityId))); }
+            catch { activeLease = true; } // Do not steal ownership while Redis is unavailable.
+        }
+        if (staleMs > WORKSPACE_PROVISIONING_LOCK_TTL_MS && !activeLease) {
             logger.warn(`Workspace for ${entityId} stuck in '${ws.status}' — marking as error`);
             try {
-                await getEntityStore().upsertEntity({ ...entityConfig, workspace: { ...ws, status: 'error' } });
+                await getEntityStore().compareAndSetWorkspace(entityId, ws, { ...ws, status: 'error' });
             } catch { /* best effort */ }
-            entityConfig = await loadEntityConfig(entityId);
+            entityConfig = await loadEntityConfig(entityId, { fresh: true });
         } else if (waitForTransition) {
             const lifecycle = workspaceTransitionLifecycle(ws.status);
             await emitWorkspaceLifecycle(onWorkspaceLifecycle, {
@@ -2226,6 +2481,7 @@ async function restoreWorkspaceCheckpointToContainer(entityId, entityConfig, con
             body: JSON.stringify({
                 archiveUrl: checkpointUrl,
                 archivePath: WORKSPACE_CHECKPOINT_PATH,
+                ...(entityConfig.workspace.checkpointInventory ? { inventory: entityConfig.workspace.checkpointInventory } : {}),
                 ...(checkpointEncryption ? { encryption: checkpointEncryption } : {}),
             }),
             signal: AbortSignal.timeout(timeoutMs),
@@ -2288,6 +2544,16 @@ const { pipeline } = require('node:stream/promises');
             restoreBody = await restoreWorkspaceArchiveInContainer(container, WORKSPACE_CHECKPOINT_PATH, timeoutMs);
         }
 
+        if (entityConfig.workspace.checkpointInventory) {
+            const restoredInventory = await readCheckpointInventory({ url: container.url, secret: container.bootstrapSecret });
+            assertCheckpointInventory(entityConfig.workspace.checkpointInventory, restoredInventory);
+        }
+        if (entityConfig.workspace.checkpointBlobEtag) {
+            const latest = await readExistingWorkspaceCheckpointBlobFields(entityId, entityConfig.workspace);
+            if (latest?.checkpointBlobEtag !== entityConfig.workspace.checkpointBlobEtag) {
+                throw new Error('Workspace checkpoint changed during restore; retry with the current backup');
+            }
+        }
         await emitWorkspaceLifecycle(onWorkspaceLifecycle, { type: 'finish', phase: 'restore', success: true });
         logger.info(`Restored workspace checkpoint for ${entityId} from ${checkpointBlobPath}`);
         return {
@@ -2359,7 +2625,7 @@ async function restoreLegacyShareArchiveToContainer(entityId, entityConfig, cont
     };
 }
 
-async function checkpointLegacyShareAfterProvision(entityId, entityConfig) {
+async function checkpointLegacyShareAfterProvision(entityId, entityConfig, options = {}) {
     const legacyShareName = getLegacyShareName(entityConfig?.workspace);
     if (legacyShareName) {
         try {
@@ -2398,6 +2664,7 @@ async function checkpointLegacyShareAfterProvision(entityId, entityConfig) {
 
     const freshEntityConfig = await loadEntityConfig(entityId, { fresh: true });
     const checkpointResult = await checkpointAndPersistWorkspace(entityId, freshEntityConfig || entityConfig, {
+        ...options,
         clearShareName: true,
         legacyShareName,
     });
@@ -2411,12 +2678,15 @@ async function checkpointLegacyShareAfterProvision(entityId, entityConfig) {
 
 async function setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend, options = {}) {
     try {
+        options.lease?.assertOwned();
         let restoreResult = await restoreWorkspaceCheckpointToContainer(entityId, entityConfig, container, options);
         if (restoreResult.skipped) {
             restoreResult = await restoreLegacyShareArchiveToContainer(entityId, entityConfig, container);
         }
+        options.lease?.assertOwned();
         await reconfigureForEntity(entityId, entityConfig, container, backend, {
             forceEnvRewrite: Boolean(restoreResult?.success && !restoreResult.skipped),
+            lease: options.lease,
         });
         return restoreResult;
     } catch (e) {
@@ -2439,12 +2709,22 @@ async function setupWorkspaceContainerForEntity(entityId, entityConfig, containe
  *   4. reconfigureForEntity() — inject secrets, mount blob storage, rotate secret
  */
 async function _doProvision(entityId, entityConfig, options = {}) {
+    const { lease } = options;
     if (!isValidWorkspaceEntityId(entityId)) {
         throw new Error('Workspace entityId is required');
     }
 
     const backend = await getBackend();
-    entityConfig = await recoverExistingWorkspaceCheckpoint(entityId, entityConfig);
+    entityConfig = await loadEntityConfig(entityId, { fresh: true });
+    if (!entityConfig || entityConfig.id !== entityId) return { success: false, error: 'Entity not found' };
+    if (entityConfig.workspace?.status === 'running' && entityConfig.workspace.url) return { success: true };
+    const expectedWorkspace = entityConfig.workspace;
+    const attemptId = crypto.randomUUID();
+    try {
+        entityConfig = await recoverExistingWorkspaceCheckpoint(entityId, entityConfig);
+    } catch (error) {
+        return { success: false, error: `Provisioning failed: ${error.message}` };
+    }
 
     // Azure Files is now legacy-only. If a Blob checkpoint exists, the entity is
     // warm-pool eligible even when an old share name is still present.
@@ -2457,14 +2737,19 @@ async function _doProvision(entityId, entityConfig, options = {}) {
     try {
         // Update entity status to provisioning (preserve shareName so it's not lost)
         const entityStore = getEntityStore();
-        await entityStore.upsertEntity({
+        lease?.assertOwned();
+        entityConfig = {
             ...entityConfig,
             workspace: {
                 ...(entityConfig.workspace || {}),
                 status: 'provisioning',
                 provisionedAt: new Date(),
+                provisioningAttemptId: attemptId,
             },
-        });
+        };
+        if (!await entityStore.compareAndSetWorkspace(entityId, expectedWorkspace, entityConfig.workspace)) {
+            return { success: false, error: 'Workspace changed before provisioning; retry from current state' };
+        }
 
         // Step 1: Try to claim a pre-provisioned container from the warm pool.
         // Legacy share-only entities need one generic ACI with the old share
@@ -2490,12 +2775,12 @@ async function _doProvision(entityId, entityConfig, options = {}) {
         // Step 2: If no pool container, create a generic one.
         if (!container) {
             container = await createGenericContainer(entityId, backend, {
+                uniqueRuntime: true,
                 shareName: needsLegacyShareMigration ? legacyShareName : null,
                 mountAzureFiles: needsLegacyShareMigration,
             });
         }
 
-        let migratedLegacyShare = false;
         let setupResult = null;
         // Step 3/4: Restore any Blob checkpoint before entity env/secrets are
         // written, so restored .env files cannot win over current secrets. If
@@ -2509,32 +2794,23 @@ async function _doProvision(entityId, entityConfig, options = {}) {
             if (container?.claimedFromPool) {
                 await releaseClaimedContainer(container.containerName);
             }
-            if (checkpointBlobPath && legacyShareName && backend.backendName === 'aci') {
-                logger.warn(`Blob checkpoint restore failed for ${entityId}; falling back to legacy share migration: ${provisionErr.message}`);
-                const legacyEntityConfig = {
-                    ...entityConfig,
-                    workspace: {
-                        ...(entityConfig.workspace || {}),
-                        checkpointBlobPath: null,
-                    },
-                };
-                container = await createGenericContainer(entityId, backend, {
-                    shareName: legacyShareName,
-                    mountAzureFiles: true,
-                });
-                setupResult = await setupWorkspaceContainerForEntity(entityId, legacyEntityConfig, container, backend, options);
-                migratedLegacyShare = true;
-            } else if (container.claimedFromPool) {
+            lease?.assertOwned();
+            const current = await loadEntityConfig(entityId, { fresh: true });
+            if (current?.workspace?.provisioningAttemptId !== attemptId || current.workspace.status !== 'provisioning') throw provisionErr;
+            // A verified Blob checkpoint is authoritative. Never replace it with
+            // an older legacy-share archive after a failed restore.
+            if (container.claimedFromPool) {
                 logger.warn(`[WarmPool] Claimed container ${container.containerName} failed setup — falling back to fresh container: ${provisionErr.message}`);
-                container = await createGenericContainer(entityId, backend);
+                lease?.assertOwned();
+                container = await createGenericContainer(entityId, backend, { uniqueRuntime: true });
                 setupResult = await setupWorkspaceContainerForEntity(entityId, entityConfig, container, backend, options);
             } else {
                 throw provisionErr;
             }
         }
 
-        if (needsLegacyShareMigration || migratedLegacyShare) {
-            await checkpointLegacyShareAfterProvision(entityId, entityConfig);
+        if (needsLegacyShareMigration) {
+            await checkpointLegacyShareAfterProvision(entityId, entityConfig, { lifecycleLease: lease });
         }
 
         logger.info(`Workspace provisioned for entity ${entityId}: ${container.url}`);
@@ -2544,14 +2820,7 @@ async function _doProvision(entityId, entityConfig, options = {}) {
 
         // Mark as error
         try {
-            const entityStore = getEntityStore();
-            await entityStore.upsertEntity({
-                ...entityConfig,
-                workspace: {
-                    ...(entityConfig.workspace || {}),
-                    status: 'error',
-                },
-            });
+            await markProvisioningFailed(entityId, attemptId);
         } catch {
             // Best effort
         }
@@ -2576,7 +2845,9 @@ async function createGenericContainer(entityId, backend, options = {}) {
         throw new Error('Workspace entityId is required');
     }
 
-    const baseContainerName = workspaceContainerNameForEntity(entityId);
+    const baseContainerName = options.uniqueRuntime
+        ? buildRuntimeContainerName(workspaceContainerNameForEntity(entityId), 1)
+        : workspaceContainerNameForEntity(entityId);
     const requestedShareName = options.shareName || null;
     const shareName = backend.backendName === 'aci'
         ? (options.mountAzureFiles ? requestedShareName : null)
@@ -2648,7 +2919,7 @@ async function createGenericContainer(entityId, backend, options = {}) {
 
 function buildRuntimeContainerName(baseContainerName, attempt) {
     if (attempt === 0) return baseContainerName;
-    return `${baseContainerName}-${crypto.randomUUID().replace(/-/g, '').slice(0, 6)}`;
+    return `${baseContainerName.slice(0, 56).replace(/-+$/, '')}-${crypto.randomUUID().replace(/-/g, '').slice(0, 6)}`;
 }
 
 function isCrossRegionContainerNameConflict(error) {
@@ -2667,7 +2938,59 @@ function isCrossRegionContainerNameConflict(error) {
  * @param {Object} container - Container info from claimContainer or createGenericContainer
  * @param {Object} backend - Container backend instance
  */
+async function restoreRestartedWorkspace(entityId, entityConfig, container, backend, options = {}) {
+    if (provisioningLocks.has(entityId)) throw new Error('Workspace recovery is already in progress; retry shortly');
+    const lock = options.lifecycleLease ? null : await acquireWorkspaceProvisioningLock(entityId);
+    if (lock && !lock.acquired) throw new Error('Workspace recovery is already in progress; retry shortly');
+    const lease = options.lifecycleLease || maintainWorkspaceProvisioningLock(lock);
+    let attemptId = null;
+    const operation = (async () => {
+        let fresh = (await loadEntityConfig(entityId, { fresh: true })) || entityConfig;
+        const expected = fresh.workspace;
+        if (expected?.containerId !== container.containerId) {
+            throw new Error('Workspace runtime changed during recovery; retry from current state');
+        }
+        // Another caller may already have restored and rotated this runtime.
+        const probe = await fetchWorkspaceJson(container.url, expected.secret, '/status', { timeoutMs: 10000 });
+        if (probe.response.ok && !probe.body.error) return { success: true, entityConfig: fresh };
+        if (probe.response.status !== 401) throw new Error(`Workspace recovery probe returned ${probe.response.status}`);
+
+        fresh = await recoverExistingWorkspaceCheckpoint(entityId, fresh);
+        if (!fresh.workspace?.checkpointBlobPath) {
+            throw new Error('Restarted workspace has no verified Blob backup; preserving it for recovery');
+        }
+        attemptId = crypto.randomUUID();
+        fresh = { ...fresh, workspace: { ...fresh.workspace, status: 'provisioning',
+            provisionedAt: new Date(), provisioningAttemptId: attemptId } };
+        lease.assertOwned();
+        if (!await getEntityStore().compareAndSetWorkspace(entityId, expected, fresh.workspace)) {
+            throw new Error('Workspace changed before recovery; retry from current state');
+        }
+        logger.warn(`Restoring restarted workspace for ${entityId} before accepting requests or backups`);
+        const restored = await restoreWorkspaceCheckpointToContainer(entityId, fresh, container, options);
+        if (!restored.success || restored.skipped) throw new Error('Workspace backup restoration did not complete');
+        await lease.renew();
+        lease.assertOwned();
+        await reconfigureForEntity(entityId, fresh, container, backend, {
+            ...options, recoverRuntime: false, destroyOnFailure: false, forceEnvRewrite: true, lease,
+        });
+        return { success: true, entityConfig: await loadEntityConfig(entityId, { fresh: true }) };
+    })();
+    provisioningLocks.set(entityId, operation);
+    try {
+        return await operation;
+    } catch (error) {
+        if (attemptId) await markProvisioningFailed(entityId, attemptId);
+        throw error;
+    } finally {
+        if (lock) lease.stop();
+        if (provisioningLocks.get(entityId) === operation) provisioningLocks.delete(entityId);
+        await releaseWorkspaceProvisioningLock(lock);
+    }
+}
+
 async function reconfigureForEntity(entityId, entityConfig, container, backend, options = {}) {
+    if (options.recoverRuntime) return restoreRestartedWorkspace(entityId, entityConfig, container, backend, options);
     const { containerName, shareName, legacyShareName, url, bootstrapSecret, containerId, claimedFromPool } = container;
     const { destroyOnFailure = true, forceEnvRewrite = false } = options;
     const newSecret = crypto.randomBytes(32).toString('hex');
@@ -2745,10 +3068,15 @@ async function reconfigureForEntity(entityId, entityConfig, container, backend, 
             nextWorkspace.legacyShareName = retainedLegacyShareName;
         }
 
-        await entityStore.upsertEntity({
-            ...entityConfig,
-            workspace: nextWorkspace,
-        });
+        if (previousWorkspace.provisioningAttemptId && previousWorkspace.status === 'provisioning') {
+            await options.lease?.renew();
+            options.lease?.assertOwned();
+            if (!await entityStore.compareAndSetWorkspace(entityId, previousWorkspace, nextWorkspace)) {
+                throw new Error('Workspace provisioning attempt was superseded');
+            }
+        } else {
+            await entityStore.upsertEntity({ ...entityConfig, workspace: nextWorkspace });
+        }
     } catch (e) {
         if (destroyOnFailure) {
             // Remove the container on failure — but NEVER destroy the volume.
@@ -2800,7 +3128,20 @@ async function buildBlobMountPayload(entityConfig) {
  * When destroyVolume is false (default), a Blob checkpoint is preserved in the
  * entity config so the next provision can restore it into a warm container.
  */
+async function usesSharedAssistantWorkspace(entityId) {
+    const entity = await getEntityStore().getEntity(entityId, { fresh: true });
+    return entity?.kind === 'colleague' || Boolean(assistantExecutionUser() && entity && !entity.personalOwnerId && !entity.isSystem);
+}
+
 export async function destroyWorkspace(entityId, entityConfig, options = {}) {
+    if (await usesSharedAssistantWorkspace(entityId)) return { success: false, error: 'Manage the shared workspace from your personal entity' };
+    try {
+        return await withWorkspaceLifecycleLease(entityId, options, lockedOptions =>
+            destroyWorkspaceUnderLease(entityId, entityConfig, lockedOptions));
+    } catch (error) { return { success: false, error: error.message }; }
+}
+
+async function destroyWorkspaceUnderLease(entityId, entityConfig, options) {
     const {
         destroyVolume: shouldDestroyVolume = false,
         skipCheckpoint = false,
@@ -2810,14 +3151,23 @@ export async function destroyWorkspace(entityId, entityConfig, options = {}) {
     const onWorkspaceLifecycle = typeof options.onWorkspaceLifecycle === 'function'
         ? options.onWorkspaceLifecycle
         : null;
-    if (!entityConfig) {
-        entityConfig = await loadEntityConfig(entityId, { fresh: true });
+    const freshEntity = await loadEntityConfig(entityId, { fresh: true });
+    if (freshEntity) {
+        if (entityConfig?.workspace?.containerId && freshEntity.workspace?.containerId !== entityConfig.workspace.containerId) {
+            return { success: false, error: 'Workspace runtime changed before deletion; retry from current state' };
+        }
+        entityConfig = freshEntity;
+    }
+    if (!shouldDestroyVolume && WORKSPACE_TRANSITION_STATUSES.has(entityConfig?.workspace?.status)) {
+        return { success: false, error: 'Workspace restoration is incomplete; container and backup preserved' };
     }
     let workspace = entityConfig?.workspace;
     // Use stored containerId — pool-claimed containers have names like
     // workspace-pool-{shortId}, not workspace-{entityId}.
     const containerName = workspace?.containerId || `workspace-${entityId}`;
     const legacyShareName = getLegacyShareName(workspace);
+
+    if (workspace?.checkpointReview) return checkpointReviewRequired(workspace.checkpointReview);
 
     try {
         const backend = await getBackend();
@@ -2832,9 +3182,15 @@ export async function destroyWorkspace(entityId, entityConfig, options = {}) {
         let checkpointAlreadyFresh = Boolean(
             effectiveLastActivityAt && isWorkspaceCheckpointFresh(workspace, effectiveLastActivityAt)
         );
+        let inventoryChanged = false;
+        if (!shouldDestroyVolume && !skipCheckpoint && workspace?.checkpointInventory) {
+            const live = await readCheckpointInventory(workspace);
+            inventoryChanged = !live || live.fingerprint !== workspace.checkpointInventory.fingerprint;
+            if (inventoryChanged) checkpointAlreadyFresh = false;
+        }
 
         if (!shouldDestroyVolume && !skipCheckpoint && backend.backendName === 'aci' && workspace?.url) {
-            if (!checkpointAlreadyFresh && workspace?.checkpointBlobPath) {
+            if (!checkpointAlreadyFresh && !inventoryChanged && workspace?.checkpointBlobPath && !workspace.checkpointHasRunningJobs) {
                 try {
                     const recoveredEntityConfig = await recoverFreshWorkspaceCheckpointFromBlob(entityId, entityConfig, effectiveLastActivityAt);
                     if (recoveredEntityConfig?.workspace) {
@@ -2851,7 +3207,7 @@ export async function destroyWorkspace(entityId, entityConfig, options = {}) {
             if (checkpointAlreadyFresh) {
                 logger.info(`Skipped workspace checkpoint for ${entityId} before destroy: checkpoint is already fresh`);
             } else {
-                checkpointResult = await checkpointWorkspace(entityId, entityConfig, { timeoutMs, onWorkspaceLifecycle });
+                checkpointResult = await checkpointWorkspace(entityId, entityConfig, { timeoutMs, onWorkspaceLifecycle, lifecycleLease: options.lifecycleLease });
                 if (!checkpointResult.success) {
                     logger.warn(`Skipping destroy for ${entityId}; workspace checkpoint failed: ${checkpointResult.error}`);
                     return { success: false, error: checkpointResult.error };
@@ -2863,7 +3219,7 @@ export async function destroyWorkspace(entityId, entityConfig, options = {}) {
                 }
             }
 
-            if (effectiveLastActivityAt && !checkpointResult?.skipped) {
+            if (effectiveLastActivityAt && (!checkpointResult?.skipped || checkpointResult.reason === 'unchanged')) {
                 const latestActivity = await readLatestWorkspaceActivityTimestamp(entityId, effectiveLastActivityAt);
                 if (!latestActivity.ok) {
                     logger.warn(`Skipping destroy for ${entityId}; latest workspace activity could not be verified`);
@@ -2871,7 +3227,7 @@ export async function destroyWorkspace(entityId, entityConfig, options = {}) {
                 }
                 const checkpointedAt = checkpointResult?.checkpoint
                     ? parseTimestampMs(checkpointResult.checkpoint.timestamp)
-                    : parseTimestampMs(workspace.checkpointedAt);
+                    : workspaceCheckpointVerifiedAt(checkpointResult?.entityConfig?.workspace || workspace);
                 if (!checkpointedAt || checkpointedAt < latestActivity.timestamp) {
                     logger.warn(`Skipping destroy for ${entityId}; workspace changed after the latest checkpoint`);
                     return { success: false, error: 'Workspace checkpoint is stale' };
@@ -2888,6 +3244,13 @@ export async function destroyWorkspace(entityId, entityConfig, options = {}) {
 
         await emitWorkspaceLifecycle(onWorkspaceLifecycle, { type: 'start', phase: 'destroy', message: 'Destroying workspace container' });
         try {
+            await options.lifecycleLease?.renew();
+            options.lifecycleLease?.assertOwned();
+            const expectedInventory = checkpointResult?.checkpoint?.inventory || checkpointResult?.entityConfig?.workspace?.checkpointInventory || workspace?.checkpointInventory;
+            if (!shouldDestroyVolume && !skipCheckpoint && expectedInventory) {
+                const live = await readCheckpointInventory(workspace);
+                if (!live || live.fingerprint !== expectedInventory.fingerprint) throw new Error('Workspace changed after its checkpoint; runtime preserved');
+            }
             await backend.remove(containerName, containerName);
             await emitWorkspaceLifecycle(onWorkspaceLifecycle, { type: 'finish', phase: 'destroy', success: true });
         } catch (e) {
@@ -2953,6 +3316,7 @@ export async function destroyWorkspace(entityId, entityConfig, options = {}) {
  * @returns {Promise<{success: boolean, error?: string}>}
  */
 export async function stopWorkspace(entityId, entityConfig) {
+    if (await usesSharedAssistantWorkspace(entityId)) return { success: false, error: 'Manage the shared workspace from your personal entity' };
     const workspace = entityConfig?.workspace;
     if (!workspace?.containerId) {
         return { success: false, error: 'No workspace container to stop' };
@@ -3040,7 +3404,7 @@ async function wakeWorkspace(entityId, entityConfig) {
                 bootstrapSecret: workspace.bootstrapSecret,
                 containerId: workspace.containerId,
                 claimedFromPool: workspace.claimedFromPool || false,
-            }, backend, { destroyOnFailure: false, forceEnvRewrite: true });
+            }, backend, { destroyOnFailure: false, forceEnvRewrite: true, recoverRuntime: true });
         } else {
             await entityStore.upsertEntity({
                 ...entityConfig,
@@ -3197,7 +3561,8 @@ export async function syncSecretsToWorkspace(entityId, secrets) {
  * @param {string} localPath - Destination path on Cortex host
  * @returns {Promise<{success: boolean, bytesWritten?: number, error?: string}>}
  */
-export async function workspaceDownloadToFile(entityId, remotePath, localPath) {
+export async function workspaceDownloadToFile(entityId, remotePath, localPath, { maxBytes = Infinity } = {}) {
+    entityId = (await resolveColleagueWorkspace(entityId, id => getEntityStore().getEntity(id, { fresh: true }))).entityId;
     const workspaceResult = await ensureWorkspaceReady(entityId);
     if (!workspaceResult.success) {
         return workspaceResult;
@@ -3219,9 +3584,18 @@ export async function workspaceDownloadToFile(entityId, remotePath, localPath) {
         return { success: false, error: errMsg || `Download failed: ${response.status}` };
     }
 
+    if (Number(response.headers.get('content-length') || 0) > maxBytes) {
+        await response.body.cancel();
+        return { success: false, error: 'Artifact exceeds the download size limit' };
+    }
+    let received = 0;
+    const bounded = new Transform({ transform(chunk, encoding, callback) {
+        received += chunk.length;
+        callback(received > maxBytes ? new Error('Artifact exceeds the download size limit') : null, chunk);
+    } });
     const nodeStream = Readable.fromWeb(response.body);
     const ws = fs.createWriteStream(localPath);
-    await pipeline(nodeStream, ws);
+    await pipeline(nodeStream, bounded, ws);
 
     const stat = fs.statSync(localPath);
     recordWorkspaceActivity(entityId);
@@ -3238,6 +3612,7 @@ export async function workspaceDownloadToFile(entityId, remotePath, localPath) {
  * @returns {Promise<{success: boolean, bytesWritten?: number, error?: string}>}
  */
 export async function workspaceUploadFile(entityId, localPath, remotePath) {
+    entityId = (await resolveColleagueWorkspace(entityId, id => getEntityStore().getEntity(id, { fresh: true }))).entityId;
     const workspaceResult = await ensureWorkspaceReady(entityId);
     if (!workspaceResult.success) {
         return workspaceResult;
@@ -3302,9 +3677,16 @@ function parseTimestampMs(value) {
     return Number.isFinite(normalizedParsed) ? normalizedParsed : 0;
 }
 
+function workspaceCheckpointVerifiedAt(workspace) {
+    return Math.max(parseTimestampMs(workspace?.checkpointedAt), parseTimestampMs(workspace?.checkpointCheckedAt));
+}
+
 function isWorkspaceCheckpointFresh(workspace, lastActivityAt) {
     if (!workspace?.checkpointBlobPath || !lastActivityAt) return false;
-    return parseTimestampMs(workspace.checkpointedAt) >= lastActivityAt;
+    // Jobs can keep writing after a periodic checkpoint without user activity.
+    // Require a final checkpoint once they finish before reaping the container.
+    if (workspace.checkpointHasRunningJobs || workspace.checkpointReview) return false;
+    return workspaceCheckpointVerifiedAt(workspace) >= lastActivityAt;
 }
 
 function serializeWorkspaceForReaperLog(workspace) {
@@ -3358,16 +3740,22 @@ function logWorkspaceReaperDecision(decision) {
     logger.info(`[WorkspaceReaper] ${JSON.stringify(decision)}`);
 }
 
-async function checkpointIdleWorkspaceIfNeeded(entityId, entityConfig, lastActivityAt, decisionLog) {
+async function checkpointIdleWorkspaceIfNeeded(entityId, entityConfig, lastActivityAt, decisionLog, options = {}) {
     const checkpointedAt = parseTimestampMs(entityConfig.workspace?.checkpointedAt);
-    const checkpointFresh = isWorkspaceCheckpointFresh(entityConfig.workspace, lastActivityAt);
+    const maxCheckpointAgeMs = Number(options.maxCheckpointAgeMs) || 0;
+    const checkpointFresh = maxCheckpointAgeMs > 0
+        ? Boolean(
+            entityConfig.workspace?.checkpointBlobPath
+            && checkpointedAt >= (Number(options.now) || Date.now()) - maxCheckpointAgeMs
+        )
+        : isWorkspaceCheckpointFresh(entityConfig.workspace, lastActivityAt);
     decisionLog.checkpointedAt = checkpointedAt || null;
     decisionLog.checkpointFresh = checkpointFresh;
     if (checkpointFresh) {
         return { success: true, entityConfig, checkpointed: false, fresh: true };
     }
 
-    const checkpointResult = await checkpointAndPersistWorkspace(entityId, entityConfig);
+    const checkpointResult = await checkpointAndPersistWorkspace(entityId, entityConfig, options);
     decisionLog.checkpointResult = {
         success: Boolean(checkpointResult.success),
         skipped: Boolean(checkpointResult.skipped),
@@ -3385,7 +3773,7 @@ async function checkpointIdleWorkspaceIfNeeded(entityId, entityConfig, lastActiv
     if (checkpointResult.skipped) {
         return {
             success: true,
-            entityConfig,
+            entityConfig: checkpointResult.entityConfig || entityConfig,
             checkpointed: false,
             skipped: true,
         };
@@ -3495,10 +3883,27 @@ async function reapIdleWorkspaces() {
 
                 const jobsCheck = await getWorkspaceBackgroundJobsStatus(entityConfig);
                 decisionLog.jobsCheck = serializeJobsCheckForReaperLog(jobsCheck);
+                if (!jobsCheck.ok) {
+                    decisionLog.action = 'skip';
+                    decisionLog.reason = 'background-job-check-failed';
+                    logWorkspaceReaperDecision(decisionLog);
+                    continue;
+                }
                 if (jobsCheck.hasRunningJobs) {
                     logger.info(`Skipping idle stop for entity ${entityId}; workspace has running background jobs`);
-                    decisionLog.action = 'skip';
-                    decisionLog.reason = 'running-background-jobs';
+                    const checkpointResult = await checkpointIdleWorkspaceIfNeeded(
+                        entityId,
+                        entityConfig,
+                        effectiveLastTs,
+                        decisionLog,
+                        { now, maxCheckpointAgeMs: checkpointIdleMs, backgroundJobsRunning: true },
+                    );
+                    decisionLog.action = checkpointResult.checkpointed ? 'checkpoint' : 'skip';
+                    decisionLog.reason = checkpointResult.success
+                        ? (checkpointResult.checkpointed
+                            ? 'running-background-jobs-checkpointed'
+                            : 'running-background-jobs-checkpoint-fresh')
+                        : 'running-background-jobs-checkpoint-failed';
                     logWorkspaceReaperDecision(decisionLog);
                     continue;
                 }
@@ -3741,6 +4146,18 @@ async function reapAciWorkspaceInventory({ backend, redis, now, idleTimeoutMs, c
             checkpointResult: null,
         };
 
+        // Azure can take longer than the orphan grace period to allocate or
+        // restore a container. Its entity assignment is finalized afterward.
+        // Never cancel an in-flight control-plane operation as orphan cleanup.
+        if (['creating', 'updating', 'deleting', 'pending'].includes(
+            String(container.provisioningState || '').toLowerCase(),
+        )) {
+            decisionLog.action = 'skip';
+            decisionLog.reason = 'container-provisioning';
+            logWorkspaceReaperDecision(decisionLog);
+            continue;
+        }
+
         if (inWarmPool && !entityConfig) {
             decisionLog.action = 'skip';
             decisionLog.reason = 'active-warm-pool';
@@ -3839,11 +4256,52 @@ async function reapAciWorkspaceInventory({ backend, redis, now, idleTimeoutMs, c
             }
 
             if (entityConfig.workspace?.status === 'running') {
+                // Mongo can still say "running" after ACI terminates a group.
+                // Its old IP may be reassigned: do not send workspace credentials
+                // or attempt bootstrap reconfiguration at that stale address.
+                const runtimeUnavailable = ['Failed', 'Stopped', 'Succeeded', 'Terminated'].includes(container.instanceViewState)
+                    || (container.ip === null && !container.fqdn);
+                if (runtimeUnavailable) {
+                    decisionLog.jobsCheck = serializeJobsCheckForReaperLog({
+                        attempted: false,
+                        ok: false,
+                        hasRunningJobs: true,
+                        reason: 'workspace-runtime-unavailable',
+                    });
+                    decisionLog.runtime = {
+                        instanceViewState: container.instanceViewState || null,
+                        provisioningState: container.provisioningState || null,
+                        hasAddress: Boolean(container.ip || container.fqdn),
+                    };
+                    // Preserve the failed container and checkpoints for recovery;
+                    // an unavailable endpoint is not evidence of a safe backup.
+                    decisionLog.action = 'skip';
+                    decisionLog.reason = 'workspace-runtime-unavailable';
+                    logWorkspaceReaperDecision(decisionLog);
+                    continue;
+                }
                 const jobsCheck = await getWorkspaceBackgroundJobsStatus(entityConfig);
                 decisionLog.jobsCheck = serializeJobsCheckForReaperLog(jobsCheck);
-                if (jobsCheck.hasRunningJobs) {
+                if (!jobsCheck.ok) {
                     decisionLog.action = 'skip';
-                    decisionLog.reason = 'running-background-jobs';
+                    decisionLog.reason = 'background-job-check-failed';
+                    logWorkspaceReaperDecision(decisionLog);
+                    continue;
+                }
+                if (jobsCheck.hasRunningJobs) {
+                    const checkpointResult = await checkpointIdleWorkspaceIfNeeded(
+                        entityConfig.id,
+                        entityConfig,
+                        effectiveActivity,
+                        decisionLog,
+                        { now, maxCheckpointAgeMs: checkpointIdleMs, backgroundJobsRunning: true },
+                    );
+                    decisionLog.action = checkpointResult.checkpointed ? 'checkpoint' : 'skip';
+                    decisionLog.reason = checkpointResult.success
+                        ? (checkpointResult.checkpointed
+                            ? 'running-background-jobs-checkpointed'
+                            : 'running-background-jobs-checkpoint-fresh')
+                        : 'running-background-jobs-checkpoint-failed';
                     logWorkspaceReaperDecision(decisionLog);
                     continue;
                 }
@@ -4084,7 +4542,13 @@ async function clearRedisActivityForTest(entityId) {
 
 // Test-only exports for targeted unit coverage of recovery/provision paths.
 export const __testables = {
+    provisionWorkspace,
+    markProvisioningFailed,
+    maintainWorkspaceProvisioningLock,
+    releaseWorkspaceProvisioningLock,
+    recoverExistingWorkspaceCheckpoint,
     checkpointWorkspace,
+    checkpointAndPersistWorkspace,
     checkpointLegacyShareAfterProvision,
     createGenericContainer,
     getWorkspaceBackgroundJobsStatus,

@@ -1,0 +1,905 @@
+{
+  "bytedance/seedance-2.5": {
+    "version": "a10a543dffa352140391fc66d360fe2ed5a78a9c8f8d3d7cf07548b9e312813f",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "title": "Seed",
+          "x-order": 12,
+          "nullable": true,
+          "description": "Random seed. Set for reproducible generation. Reproducibility is not guaranteed."
+        },
+        "image": {
+          "type": "string",
+          "title": "Image",
+          "format": "uri",
+          "x-order": 1,
+          "nullable": true,
+          "description": "First-frame image for image-to-video or first/last-frame generation. Cannot be combined with reference images, videos, or audios."
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "default": "",
+          "x-order": 0,
+          "description": "Text prompt for video generation. Optional when a media input (image, reference images/videos/audios) is supplied. Seedance 2.5 works best with detailed, structured 'production brief' style prompts."
+        },
+        "duration": {
+          "type": "integer",
+          "title": "Duration",
+          "default": 5,
+          "maximum": 30,
+          "minimum": -1,
+          "x-order": 6,
+          "description": "Video duration in seconds. Set to -1 for intelligent duration (the model picks the best length). Editing mode requires -1."
+        },
+        "watermark": {
+          "type": "boolean",
+          "title": "Watermark",
+          "default": false,
+          "x-order": 10,
+          "description": "Add a watermark to the generated video."
+        },
+        "resolution": {
+          "enum": [
+            "480p",
+            "720p"
+          ],
+          "type": "string",
+          "title": "resolution",
+          "description": "Video resolution.",
+          "default": "720p",
+          "x-order": 7
+        },
+        "aspect_ratio": {
+          "enum": [
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16",
+            "21:9",
+            "adaptive"
+          ],
+          "type": "string",
+          "title": "aspect_ratio",
+          "description": "Video aspect ratio. Set to 'adaptive' to let the model choose the best ratio based on inputs. First/last-frame, editing, and extension modes require 'adaptive'.",
+          "default": "16:9",
+          "x-order": 8
+        },
+        "output_format": {
+          "enum": [
+            "mp4",
+            "mov"
+          ],
+          "type": "string",
+          "title": "output_format",
+          "description": "Output video container format.",
+          "default": "mp4",
+          "x-order": 11
+        },
+        "generate_audio": {
+          "type": "boolean",
+          "title": "Generate Audio",
+          "default": true,
+          "x-order": 9,
+          "description": "Generate synchronized audio with the video, including dialogue (use double quotes in prompt), sound effects, and background music."
+        },
+        "last_frame_image": {
+          "type": "string",
+          "title": "Last Frame Image",
+          "format": "uri",
+          "x-order": 2,
+          "nullable": true,
+          "description": "Last-frame image. Requires a first-frame image. Cannot be combined with reference images, videos, or audios."
+        },
+        "reference_audios": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": "Reference Audios",
+          "default": [],
+          "x-order": 5,
+          "description": "Reference audio files (up to 10, combined duration max 30s) for audio-driven generation and lip-sync. Requires at least one reference image or video. Reference them in your prompt as [Audio1], [Audio2], etc."
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": "Reference Images",
+          "default": [],
+          "x-order": 3,
+          "description": "Reference images (up to 30) for character consistency, style guidance, and scene composition. Cannot be combined with first/last frame images. Reference them in your prompt as [Image1], [Image2], etc."
+        },
+        "reference_videos": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": "Reference Videos",
+          "default": [],
+          "x-order": 4,
+          "description": "Reference videos (up to 10, combined duration max 30s) for motion transfer, style reference, editing, and extension. Reference them in your prompt as [Video1], [Video2], etc."
+        }
+      }
+    },
+    "Output": {
+      "type": "string",
+      "title": "Output",
+      "format": "uri"
+    }
+  },
+  "lightricks/ltx-2.5-fast": {
+    "version": "74e7b8dcd8865b04ec52c53293ac04714666a0a7e37c633ac5e1f649d5bb8743",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "fps": {
+          "enum": [
+            24,
+            25,
+            48,
+            50
+          ],
+          "type": "integer",
+          "title": "fps",
+          "description": "Frame rate in frames per second",
+          "default": 25,
+          "x-order": 6
+        },
+        "image": {
+          "type": "string",
+          "title": "Image",
+          "format": "uri",
+          "x-order": 1,
+          "nullable": true,
+          "description": "First frame image for image-to-video generation"
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "Text prompt describing the video to generate"
+        },
+        "duration": {
+          "enum": [
+            2,
+            3,
+            4,
+            5,
+            6,
+            8,
+            10,
+            12,
+            14,
+            16,
+            18,
+            20
+          ],
+          "type": "integer",
+          "title": "duration",
+          "description": "Duration of the video in seconds. Durations longer than 10 seconds are only available at 720p or 1080p resolution with 24 or 25 FPS. 48/50 FPS caps at 10 seconds.",
+          "default": 6,
+          "x-order": 4
+        },
+        "resolution": {
+          "enum": [
+            "720p",
+            "1080p",
+            "2k",
+            "4k"
+          ],
+          "type": "string",
+          "title": "resolution",
+          "description": "Resolution quality of the generated video. Higher resolutions cap the maximum duration.",
+          "default": "1080p",
+          "x-order": 3
+        },
+        "aspect_ratio": {
+          "enum": [
+            "16:9",
+            "9:16"
+          ],
+          "type": "string",
+          "title": "aspect_ratio",
+          "description": "Aspect ratio of the generated video",
+          "default": "16:9",
+          "x-order": 5
+        },
+        "generate_audio": {
+          "type": "boolean",
+          "title": "Generate Audio",
+          "default": true,
+          "x-order": 7,
+          "description": "Generate audio for the video. Used for text_to_video and image_to_video tasks."
+        },
+        "last_frame_image": {
+          "type": "string",
+          "title": "Last Frame Image",
+          "format": "uri",
+          "x-order": 2,
+          "nullable": true,
+          "description": "Last frame image for image-to-video generation. When provided, the video interpolates between the first frame and this last frame."
+        }
+      }
+    },
+    "Output": {
+      "type": "string",
+      "title": "Output",
+      "format": "uri"
+    }
+  },
+  "alibaba/qwen-image-3-pro": {
+    "version": "ff0fecb672d6fab3ce3ece8264b525b74a4cdae2655eaab5bbdc9799a170845d",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "title": "Seed",
+          "x-order": 6,
+          "nullable": true,
+          "description": "Random seed for reproducible generation. Range: 0-2147483647"
+        },
+        "image": {
+          "type": "string",
+          "title": "Image",
+          "format": "uri",
+          "x-order": 1,
+          "nullable": true,
+          "description": "Optional reference image for image editing, style transfer, or image-to-image generation"
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "Text prompt for image generation or editing"
+        },
+        "aspect_ratio": {
+          "enum": [
+            "1:1",
+            "16:9",
+            "9:16",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3",
+            "2:1",
+            "1:2"
+          ],
+          "type": "string",
+          "title": "aspect_ratio",
+          "description": "Aspect ratio of the generated image",
+          "default": "1:1",
+          "x-order": 3
+        },
+        "negative_prompt": {
+          "type": "string",
+          "title": "Negative Prompt",
+          "default": "",
+          "x-order": 5,
+          "description": "Negative prompt to specify elements to avoid in the generated image"
+        },
+        "match_input_image": {
+          "type": "boolean",
+          "title": "Match Input Image",
+          "default": false,
+          "x-order": 2,
+          "description": "When true and an image is provided, use the input image's aspect ratio and resolution instead of the aspect_ratio parameter"
+        },
+        "enable_prompt_expansion": {
+          "type": "boolean",
+          "title": "Enable Prompt Expansion",
+          "default": true,
+          "x-order": 4,
+          "description": "Automatically expand and optimize the prompt for better results"
+        }
+      }
+    },
+    "Output": {
+      "type": "string",
+      "title": "Output",
+      "format": "uri"
+    }
+  },
+  "bytedance/seedream-5-pro": {
+    "version": "f43c090c8ff8ef086f9c094d60c4f004c2ec48d56263e7acf17e5741a06e0ea9",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "properties": {
+        "size": {
+          "enum": [
+            "1K",
+            "1.5K",
+            "2K",
+            "auto"
+          ],
+          "type": "string",
+          "title": "size",
+          "description": "Image resolution. Standard mode supports 1K and 2K. Layer decomposition mode supports 1K, 1.5K, 2K, and auto; auto sizes the base image and layers from the input image.",
+          "default": "2K",
+          "x-order": 3
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "default": "",
+          "x-order": 0,
+          "maxLength": 4000,
+          "description": "Text prompt. In standard mode, describes the image to generate. In layer decomposition mode it is optional: describe which elements to split out, or leave blank to auto-detect all major elements. Maximum 4000 characters."
+        },
+        "image_input": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": "Image Input",
+          "default": [],
+          "x-order": 1,
+          "description": "Input image(s). In standard mode, 1-10 reference images for image-to-image generation. In layer decomposition mode, exactly one image to decompose."
+        },
+        "aspect_ratio": {
+          "enum": [
+            "match_input_image",
+            "1:1",
+            "4:3",
+            "3:4",
+            "16:9",
+            "9:16",
+            "3:2",
+            "2:3",
+            "21:9"
+          ],
+          "type": "string",
+          "title": "aspect_ratio",
+          "description": "Image aspect ratio (ignored in layer decomposition mode). Use 'match_input_image' to automatically match the input image's aspect ratio.",
+          "default": "match_input_image",
+          "x-order": 4
+        },
+        "output_format": {
+          "enum": [
+            "png",
+            "jpeg"
+          ],
+          "type": "string",
+          "title": "output_format",
+          "description": "Output image format. In layer decomposition mode this only controls the base image; layers are always returned as PNG.",
+          "default": "png",
+          "x-order": 5
+        },
+        "layer_decomposition": {
+          "type": "boolean",
+          "title": "Layer Decomposition",
+          "default": false,
+          "x-order": 2,
+          "description": "Split a single input image into a base image plus separate element layers (up to 16). Requires exactly one input image. Each returned layer includes its stacking order, bounding box, name, and description."
+        }
+      }
+    },
+    "Output": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri"
+      },
+      "title": "Output"
+    }
+  },
+  "recraft-ai/recraft-v4-styles-pro": {
+    "version": "19dfe6ccd0a26b6fea194ef2a89f79bf89945c2f279218b48238efad31433f2c",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt",
+        "style_reference_images"
+      ],
+      "properties": {
+        "size": {
+          "enum": [
+            "2048x2048",
+            "3072x1536",
+            "1536x3072",
+            "2560x1664",
+            "1664x2560",
+            "2432x1792",
+            "1792x2432",
+            "2304x1792",
+            "1792x2304",
+            "1664x2688",
+            "2560x1792",
+            "1792x2560",
+            "2688x1536",
+            "1536x2688"
+          ],
+          "type": "string",
+          "title": "size",
+          "description": "Width and height of the generated image. Size is ignored if an aspect ratio is set.",
+          "default": "2048x2048",
+          "x-order": 2
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "Text prompt for image generation (up to 10,000 characters)"
+        },
+        "style_id": {
+          "type": "string",
+          "title": "Style Id",
+          "default": "",
+          "x-order": 3,
+          "description": "Reusable Recraft style ID created with the Create style endpoint. Mutually exclusive with style_reference_images."
+        },
+        "style_match": {
+          "enum": [
+            "precise",
+            "flexible"
+          ],
+          "type": "string",
+          "title": "style_match",
+          "description": "How closely the generated image should follow the style.",
+          "default": "precise",
+          "x-order": 5
+        },
+        "aspect_ratio": {
+          "enum": [
+            "Not set",
+            "1:1",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3",
+            "16:9",
+            "9:16",
+            "1:2",
+            "2:1",
+            "4:5",
+            "5:4",
+            "6:10",
+            "14:10",
+            "10:14"
+          ],
+          "type": "string",
+          "title": "aspect_ratio",
+          "description": "Aspect ratio of the generated image",
+          "default": "Not set",
+          "x-order": 1
+        },
+        "style_reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": "Style Reference Images",
+          "x-order": 4,
+          "description": "PNG, JPG, or WEBP reference images used to create a private style for this generation. Supports 1-10 images. Mutually exclusive with style_id."
+        }
+      }
+    },
+    "Output": {
+      "type": "object",
+      "title": "Output",
+      "required": [
+        "image"
+      ],
+      "properties": {
+        "image": {
+          "type": "string",
+          "title": "Image",
+          "format": "uri"
+        },
+        "style_id": {
+          "type": "string",
+          "title": "Style Id",
+          "nullable": true
+        }
+      }
+    }
+  },
+  "recraft-ai/recraft-v4-styles-pro-svg": {
+    "version": "88bcb64da9246a35b68e997ae1646dfa2dd378d5d6d7893981de95fef5347872",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt",
+        "style_reference_images"
+      ],
+      "properties": {
+        "size": {
+          "enum": [
+            "2048x2048",
+            "3072x1536",
+            "1536x3072",
+            "2560x1664",
+            "1664x2560",
+            "2432x1792",
+            "1792x2432",
+            "2304x1792",
+            "1792x2304",
+            "1664x2688",
+            "2560x1792",
+            "1792x2560",
+            "2688x1536",
+            "1536x2688"
+          ],
+          "type": "string",
+          "title": "size",
+          "description": "Width and height of the generated image. Size is ignored if an aspect ratio is set.",
+          "default": "2048x2048",
+          "x-order": 2
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "Text prompt for image generation (up to 10,000 characters)"
+        },
+        "style_id": {
+          "type": "string",
+          "title": "Style Id",
+          "default": "",
+          "x-order": 3,
+          "description": "Reusable Recraft style ID created with the Create style endpoint. Mutually exclusive with style_reference_images."
+        },
+        "style_match": {
+          "enum": [
+            "precise",
+            "flexible"
+          ],
+          "type": "string",
+          "title": "style_match",
+          "description": "How closely the generated image should follow the style.",
+          "default": "precise",
+          "x-order": 5
+        },
+        "aspect_ratio": {
+          "enum": [
+            "Not set",
+            "1:1",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3",
+            "16:9",
+            "9:16",
+            "1:2",
+            "2:1",
+            "4:5",
+            "5:4",
+            "6:10",
+            "14:10",
+            "10:14"
+          ],
+          "type": "string",
+          "title": "aspect_ratio",
+          "description": "Aspect ratio of the generated image",
+          "default": "Not set",
+          "x-order": 1
+        },
+        "style_reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": "Style Reference Images",
+          "x-order": 4,
+          "description": "PNG, JPG, or WEBP reference images used to create a private style for this generation. Supports 1-10 images. Mutually exclusive with style_id."
+        }
+      }
+    },
+    "Output": {
+      "type": "object",
+      "title": "Output",
+      "required": [
+        "image"
+      ],
+      "properties": {
+        "image": {
+          "type": "string",
+          "title": "Image",
+          "format": "uri"
+        },
+        "style_id": {
+          "type": "string",
+          "title": "Style Id",
+          "nullable": true
+        }
+      }
+    }
+  },
+  "elevenlabs/dubbing": {
+    "version": "a36c6d8b9224ac1d06aedd11cb981385448543d1945ee8f3397313d70c0b7055",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "target_language"
+      ],
+      "properties": {
+        "source_url": {
+          "type": "string",
+          "title": "Source Url",
+          "x-order": 2,
+          "description": "Public URL of the source audio or video file to dub (e.g. a direct link, YouTube, or TikTok URL). Provide this or audio_or_video_file."
+        },
+        "source_language": {
+          "enum": [
+            "auto",
+            "af",
+            "ak",
+            "sq",
+            "am",
+            "ar",
+            "ar-EG",
+            "hy",
+            "as",
+            "az",
+            "eu",
+            "be",
+            "bs",
+            "bg",
+            "my",
+            "yue",
+            "ca",
+            "ceb",
+            "zh",
+            "zh-TW",
+            "hr",
+            "cs",
+            "da",
+            "dgo",
+            "nl",
+            "en",
+            "en-AU",
+            "en-CA",
+            "en-GB",
+            "en-US",
+            "et",
+            "fil",
+            "fi",
+            "fr",
+            "fr-CA",
+            "fr-FR",
+            "gl",
+            "ka",
+            "de",
+            "el",
+            "gu",
+            "ha",
+            "he",
+            "hi",
+            "hu",
+            "is",
+            "id",
+            "it",
+            "ja",
+            "jv",
+            "kn",
+            "kk",
+            "ki",
+            "rw",
+            "rn",
+            "ko",
+            "ky",
+            "lv",
+            "lt",
+            "lg",
+            "mk",
+            "ms",
+            "ml",
+            "cmn",
+            "mr",
+            "mn",
+            "ne",
+            "no",
+            "fa",
+            "pl",
+            "pt",
+            "pt-BR",
+            "pt-PT",
+            "pa",
+            "ro",
+            "ru",
+            "nso",
+            "st",
+            "sd",
+            "sk",
+            "sl",
+            "es",
+            "es-AR",
+            "es-CL",
+            "es-ES",
+            "es-MX",
+            "su",
+            "sw",
+            "ss",
+            "sv",
+            "tg",
+            "ta",
+            "te",
+            "th",
+            "bo",
+            "ts",
+            "tn",
+            "tr",
+            "uk",
+            "ur",
+            "ug",
+            "uz",
+            "ve",
+            "vi",
+            "war",
+            "cy",
+            "wo",
+            "yo",
+            "zu"
+          ],
+          "type": "string",
+          "title": "source_language",
+          "description": "Language of the source media, as a BCP-47 tag. Leave as 'auto' to detect it automatically.",
+          "default": "auto",
+          "x-order": 3
+        },
+        "target_language": {
+          "enum": [
+            "af",
+            "ak",
+            "sq",
+            "am",
+            "ar",
+            "ar-EG",
+            "hy",
+            "as",
+            "az",
+            "eu",
+            "be",
+            "bs",
+            "bg",
+            "my",
+            "yue",
+            "ca",
+            "ceb",
+            "zh",
+            "zh-TW",
+            "hr",
+            "cs",
+            "da",
+            "dgo",
+            "nl",
+            "en",
+            "en-AU",
+            "en-CA",
+            "en-GB",
+            "en-US",
+            "et",
+            "fil",
+            "fi",
+            "fr",
+            "fr-CA",
+            "fr-FR",
+            "gl",
+            "ka",
+            "de",
+            "el",
+            "gu",
+            "ha",
+            "he",
+            "hi",
+            "hu",
+            "is",
+            "id",
+            "it",
+            "ja",
+            "jv",
+            "kn",
+            "kk",
+            "ki",
+            "rw",
+            "rn",
+            "ko",
+            "ky",
+            "lv",
+            "lt",
+            "lg",
+            "mk",
+            "ms",
+            "ml",
+            "cmn",
+            "mr",
+            "mn",
+            "ne",
+            "no",
+            "fa",
+            "pl",
+            "pt",
+            "pt-BR",
+            "pt-PT",
+            "pa",
+            "ro",
+            "ru",
+            "nso",
+            "st",
+            "sd",
+            "sk",
+            "sl",
+            "es",
+            "es-AR",
+            "es-CL",
+            "es-ES",
+            "es-MX",
+            "su",
+            "sw",
+            "ss",
+            "sv",
+            "tg",
+            "ta",
+            "te",
+            "th",
+            "bo",
+            "ts",
+            "tn",
+            "tr",
+            "uk",
+            "ur",
+            "ug",
+            "uz",
+            "ve",
+            "vi",
+            "war",
+            "cy",
+            "wo",
+            "yo",
+            "zu"
+          ],
+          "type": "string",
+          "title": "target_language",
+          "description": "Language to dub the content into, as a BCP-47 tag. Some languages also offer region-qualified dialects (e.g. 'es-MX', 'pt-BR', 'en-GB').",
+          "x-order": 0
+        },
+        "cloning_strength": {
+          "type": "integer",
+          "title": "Cloning Strength",
+          "default": 7,
+          "maximum": 10,
+          "minimum": 0,
+          "x-order": 4,
+          "description": "How strongly the dubbed speakers clone the source voices, from 0 to 10. Higher values prioritize resemblance to the original voice; lower values give the model more freedom for natural delivery in the target language. The default of 7 works well for most content."
+        },
+        "audio_or_video_file": {
+          "type": "string",
+          "title": "Audio Or Video File",
+          "format": "uri",
+          "x-order": 1,
+          "description": "Audio or video file to dub. Provide this or source_url."
+        }
+      }
+    },
+    "Output": {
+      "type": "string",
+      "title": "Output",
+      "format": "uri"
+    }
+  }
+}

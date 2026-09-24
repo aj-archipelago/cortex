@@ -1,11 +1,11 @@
 // openAiWhisperPlugin.js
 import ModelPlugin from './modelPlugin.js';
-import { config } from '../../config.js';
 import FormData from 'form-data';
 import fs from 'fs';
 import { publishRequestProgress } from '../../lib/redisSubscription.js';
 import logger from '../../lib/logger.js';
 import CortexRequest from '../../lib/cortexRequest.js';
+import { WHISPER_JOB_MS, whisperExecutionPolicy, cleanupDeadline, settleBatch, waitForCleanup } from '../../lib/whisperLifecycle.js';
 import { convertSrtToText, alignSubtitles } from '../../lib/util.js';
 import { downloadFile, deleteTempPath, getMediaChunks, markCompletedForCleanUp } from '../../lib/fileUtils.js';
 
@@ -17,40 +17,10 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         super(pathway, model);
     }
 
-    // Minimal 429 retry wrapper for Whisper API calls
+    // Busy is the only retryable outcome: it guarantees no job was accepted.
     async executeWhisperRequest(cortexRequest) {
-        const maxRetries = 9;
-        
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
-            try {
-                return await this.executeRequest(cortexRequest);
-            } catch (error) {
-                
-                // Check if it's a 429 error
-                const is429 = error?.status === 429 || 
-                             error?.response?.status === 429 ||
-                             error?.message?.includes('429');
-                
-                if (!is429 || attempt === maxRetries - 1) {
-                    // Not a 429 or max retries reached, rethrow
-                    throw error;
-                }
-                
-                // Calculate backoff delay (exponential with jitter)
-                const retryAfter = error?.response?.headers?.['retry-after'];
-                // Fix: Validate parseInt result to prevent NaN
-                const baseDelay = retryAfter && !isNaN(parseInt(retryAfter)) 
-                    ? parseInt(retryAfter) * 1000 
-                    : 2000 * Math.pow(2, attempt);
-                const jitter = baseDelay * 0.2 * Math.random();
-                const delay = baseDelay + jitter;
-                
-                logger.warn(`Whisper 429 error (attempt ${attempt + 1}/${maxRetries}). Retrying in ${Math.round(delay)}ms`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
-        }
-        
-        // Remove unreachable code - this line was never reached
+        cortexRequest.executionPolicy = whisperExecutionPolicy;
+        return this.executeRequest(cortexRequest);
     }
 
     // Execute the request to the OpenAI Whisper API
@@ -60,11 +30,12 @@ class OpenAIWhisperPlugin extends ModelPlugin {
         const { responseFormat, wordTimestamped, highlightWords, maxLineWidth, maxLineCount, maxWordsPerLine } = parameters;
 
         const chunks = [];
+        let cleanupNotBefore = 0;
         const processChunk = async (uri) => {
             try {
                 const cortexRequest = new CortexRequest({ pathwayResolver });
 
-                const chunk = await downloadFile(uri);
+                const chunk = await downloadFile(uri, { timeoutMs: 60000 });
                 chunks.push(chunk);
 
                 const { language, responseFormat } = parameters;
@@ -84,7 +55,7 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 };
 
                 cortexRequest.initCallback = whisperInitCallback;
-                
+
                 // return this.executeRequest(cortexRequest);
                 return this.executeWhisperRequest(cortexRequest);
 
@@ -106,15 +77,26 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
             const cortexRequest = new CortexRequest({ pathwayResolver });
             const whisperInitCallback = (requestInstance) => {
-                requestInstance.data = tsparams;
+                requestInstance.data = { ...tsparams };
             };
             cortexRequest.initCallback = whisperInitCallback;
+            // Queue time consumes no worker time. Stamp each attempt only
+            // once it has admission through the endpoint limiter.
+            cortexRequest.beforeDispatch = () => {
+                cortexRequest.data.deadline = (Date.now() + WHISPER_JOB_MS) / 1000;
+            };
 
             sendProgress(true, true);
-            
+
             // const res = await this.executeRequest(cortexRequest);
-            const res = await this.executeWhisperRequest(cortexRequest);
-            
+            let res;
+            try {
+                res = await this.executeWhisperRequest(cortexRequest);
+            } catch (error) {
+                cleanupNotBefore = Math.max(cleanupNotBefore, cleanupDeadline(cortexRequest.data.deadline, error));
+                throw error;
+            }
+
             if (!res) {
                 throw new Error('Received null or empty response');
             }
@@ -122,11 +104,11 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                 throw new Error(res?.message || 'An error occurred.');
             }
 
-            if(!wordTimestamped && !responseFormat){ 
+            if(!wordTimestamped && !responseFormat){
                 //if no response format, convert to text
                 if (!res) {
                     logger.warn("Received null or empty response from timestamped API when expecting SRT/VTT format. Returning empty string.");
-                    return ""; 
+                    return "";
                 }
                 return convertSrtToText(res);
             }
@@ -165,36 +147,19 @@ class OpenAIWhisperPlugin extends ModelPlugin {
             });
         }
 
-        const processURI = async (uri) => {
-            let result = null;
-            let _promise = null;
-            let errorOccurred = false;
-
+        const chunkJobs = new Map();
+        const processURI = (uri) => {
+            if (!chunkJobs.has(uri)) chunkJobs.set(uri, runChunk(uri));
+            return chunkJobs.get(uri);
+        };
+        const runChunk = async (uri) => {
             const intervalId = setInterval(() => sendProgress(true), 3000);
-
-            // use Timestamped API if model is oai-whisper-ts
-            const useTS = this.modelName === 'oai-whisper-ts';
-
-            if (useTS) {
-                _promise = processTS;
-            } else {
-                _promise = processChunk;
-            }
-
-            await _promise(uri).then((ts) => {
-                result = ts;
-            }).catch((err) => {
-                errorOccurred = err;
-            }).finally(() => {
+            try {
+                return await (this.modelName === 'oai-whisper-ts' ? processTS(uri) : processChunk(uri));
+            } finally {
                 clearInterval(intervalId);
                 sendProgress();
-            });
-
-            if(errorOccurred) {
-                throw errorOccurred;
             }
-
-            return result;
         }
 
         let offsets = [];
@@ -202,9 +167,9 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
         try {
             const mediaChunks = await getMediaChunks(file, requestId);
-            
+
             if (!mediaChunks || !mediaChunks.length) {
-                throw new Error(`Error in getting chunks from media helper for file ${file}`);
+                throw new Error('Error getting chunks from media helper');
             }
 
             uris = mediaChunks.map((chunk) => chunk?.uri || chunk);
@@ -217,9 +182,8 @@ class OpenAIWhisperPlugin extends ModelPlugin {
 
             for (let i = 0; i < uris.length; i += batchSize) {
                 const currentBatchURIs = uris.slice(i, i + batchSize);
-                const promisesToProcess = currentBatchURIs.map(uri => processURI(uri));
-                const results = await Promise.all(promisesToProcess); 
-                
+                const results = await settleBatch(currentBatchURIs, processURI);
+
                 for(const res of results) {
                     result.push(res);
                 }
@@ -237,9 +201,13 @@ class OpenAIWhisperPlugin extends ModelPlugin {
                         await deleteTempPath(chunk);
                     } catch (error) {
                         //ignore error
-                    } 
+                    }
                 }
 
+                // Sibling requests have settled. A lost connection may not
+                // carry the worker's acknowledgement; retain inputs until its
+                // hard deadline plus process-reaping grace has elapsed.
+                await waitForCleanup(cleanupNotBefore);
                 await markCompletedForCleanUp(requestId);
 
             } catch (error) {

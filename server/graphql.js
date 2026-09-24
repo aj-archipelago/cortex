@@ -27,13 +27,14 @@ import subscriptions from './subscriptions.js';
 import { getMessageTypeDefs } from './typeDef.js';
 import { buildRestEndpoints } from './rest.js';
 import { executeWorkspaceResolver, getExecuteWorkspaceTypeDefs } from './executeWorkspace.js';
+import { listenHttpServer } from '../lib/listenHttpServer.js';
 import crypto from 'crypto';
 
 // Utility functions
 // Server plugins
 const getPlugins = (config) => {
     const plugins = [
-        ApolloServerPluginLandingPageLocalDefault({ embed: true }), // For local development.   
+        ApolloServerPluginLandingPageLocalDefault({ embed: true }), // For local development.
     ];
 
     //if cache is enabled and Redis is available, use it
@@ -43,17 +44,20 @@ const getPlugins = (config) => {
             ssl: true,
             abortConnect: false,
         });
-        
+
         // Handle Redis connection errors to prevent crashes
         keyvCache.on('error', (error) => {
             logger.error(`GraphQL Keyv Redis connection error: ${error}`);
         });
-        
+
         cache = new KeyvAdapter(keyvCache);
-        //caching similar strings, embedding hashing, ... #delta similarity 
+        //caching similar strings, embedding hashing, ... #delta similarity
         // TODO: custom cache key:
         // https://www.apollographql.com/docs/apollo-server/performance/cache-backends#implementing-your-own-cache-backend
-        plugins.push(responseCachePlugin({ cache }));
+        plugins.push(responseCachePlugin({ cache,
+            shouldReadFromCache: context => !context.request.http?.headers.has('x-cfh-grant'),
+            shouldWriteToCache: context => !context.request.http?.headers.has('x-cfh-grant'),
+        }));
         logger.info('Using Redis for GraphQL cache');
     }
 
@@ -126,17 +130,17 @@ const getTypedefs = (pathways, pathwayManager) => {
 const getResolvers = (config, pathways, pathwayManager) => {
     const queryResolvers = {};
     const mutationResolvers = {};
-    
+
     for (const [name, pathway] of Object.entries(pathways)) {
         if (pathway.disabled) continue;
-        
+
         const resolver = (parent, args, contextValue, info) => {
             // add shared state to contextValue
             contextValue.pathway = pathway;
             contextValue.config = config;
             return pathway.rootResolver(parent, args, contextValue, info);
         };
-        
+
         // Check if pathway is a mutation using the isMutation property
         if (pathway.isMutation) {
             mutationResolvers[name] = resolver;
@@ -179,12 +183,11 @@ const build = async (config) => {
     // OOB sampler keeps modelGroup member latency stats fresh on idle models.
     startModelSampler(config);
 
-    // Sync config-defined entities to MongoDB and warm cache
+    // Sync the small deployment configuration; user entities are fetched on demand.
     try {
         const entityStore = getEntityStore();
         if (entityStore.isConfigured()) {
             await entityStore.syncConfigEntities(config.get('entityConfig'));
-            await entityStore.loadAllEntities();
         }
     } catch (error) {
         logger.error(`Entity sync failed (non-fatal): ${error.message}`);
@@ -221,6 +224,9 @@ const build = async (config) => {
     const keepAlive = config.get('subscriptionKeepAlive');
     logger.info(`Starting web socket server with subscription keep alive: ${keepAlive}`);
     const serverCleanup = useServer({ schema }, wsServer, keepAlive);
+    // graphql-ws only attaches once('error'); absorb later bind errors so port
+    // fallback / rare listen races cannot crash the process as unhandled.
+    wsServer.on('error', () => {});
 
     const server = new ApolloServer({
         schema: schema,
@@ -310,14 +316,22 @@ const build = async (config) => {
         buildRestEndpoints(pathways, app, server, config);
 
         // Now that our HTTP server is fully set up, we can listen to it.
-        httpServer.listen(config.get('PORT'), () => {
-            logger.info(`🚀 Server is now running at http://localhost:${config.get('PORT')}/graphql`);
-        });
+        // In development, fall back to the next free port if the preferred one is busy.
+        const preferredPort = config.get('PORT');
+        const allowFallback = config.get('env') === 'development' || config.get('env') === 'debug';
+        const boundPort = await listenHttpServer(httpServer, preferredPort, { allowFallback });
+
+        if (boundPort !== preferredPort) {
+            logger.warn(`Port ${preferredPort} is in use; bound to ${boundPort} instead`);
+            config.set('PORT', boundPort);
+            process.env.CORTEX_PORT = String(boundPort);
+        }
+
+        logger.info(`🚀 Server is now running at http://localhost:${boundPort}/graphql`);
     };
 
     return { server, startServer, startTestServer, cache, plugins, typeDefs, resolvers }
 }
-
 
 export {
     build,

@@ -112,6 +112,8 @@ export default {
     prompt: [],
     timeout: 300,
     inputParameters: {
+        searchRefresh: false,
+        searchMaxAgeSeconds: 300,
         q: '',
         query: '',
         count: 10,
@@ -144,6 +146,8 @@ export default {
             parameters: {
                 type: 'object',
                 properties: {
+                    searchRefresh: { type: 'boolean', description: 'Fetch fresh results, bypassing previously cached search results.' },
+                    searchMaxAgeSeconds: { type: 'integer', minimum: 0, description: 'Maximum acceptable age of cached results in seconds. Use 60 for rapidly developing news, or 0 for a fresh search.' },
                     q: {
                         type: 'string',
                         description: 'The complete query to pass to Brave Search.',
@@ -280,7 +284,8 @@ export default {
             }
 
             resolver.tool = JSON.stringify({ toolUsed: 'BraveSearch' });
-            return JSON.stringify({ _type: 'SearchResponse', value: normalizeBraveResults(parsedResponse) });
+            return JSON.stringify({ _type: 'SearchResponse', value: normalizeBraveResults(parsedResponse),
+                ...(parsedResponse._searchCache ? { searchCache: parsedResponse._searchCache } : {}) });
         } catch (error) {
             const errorMessage = error?.message || error?.toString() || String(error);
             logger.error(`Error in Brave Search: ${errorMessage}`);

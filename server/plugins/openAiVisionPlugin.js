@@ -22,22 +22,22 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
         this.toolCallsBuffer = [];
         this.contentBuffer = ''; // Initialize content buffer
     }
-    
+
     async tryParseMessages(messages) {
         // Whitelist of content types we accept from parsed JSON strings
         // Only these types will be used if a JSON string parses to an object
         const WHITELISTED_CONTENT_TYPES = ['text', 'image', 'image_url'];
-        
+
         // Helper to check if an object is a valid whitelisted content type
         const isValidContentObject = (obj) => {
             return (
-                typeof obj === 'object' && 
-                obj !== null && 
+                typeof obj === 'object' &&
+                obj !== null &&
                 typeof obj.type === 'string' &&
                 WHITELISTED_CONTENT_TYPES.includes(obj.type)
             );
         };
-        
+
         return await Promise.all(messages.map(async message => {
             try {
                 // Parse tool_calls from string array to object array if present
@@ -55,7 +55,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                         return tc;
                     });
                 }
-                
+
                 // Process content arrays through normal handling
                 // Note: Even assistant messages with tool_calls need their content arrays validated
                 if (Array.isArray(message.content)) {
@@ -65,49 +65,50 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
 
                         // First try to parse it as a JSON string
                         const parsedItem = safeJsonParse(item);
-                        
+
                         // Check if parsed item is a known content object
                         if (isValidContentObject(parsedItem)) {
                             itemToProcess = parsedItem;
                             contentType = parsedItem.type;
-                        } 
+                        }
                         // It's not, so check if original item is already a known content object
                         else if (isValidContentObject(item)) {
                             itemToProcess = item;
                             contentType = item.type;
-                        } 
+                        }
                         // It's not, so return it as a text object. This covers all unknown objects and strings.
                         else {
                             const textContent = typeof item === 'string' ? item : JSON.stringify(item);
                             return { type: 'text', text: textContent };
                         }
-                        
+
                         // Process whitelisted content types (we know contentType is known and valid at this point)
                         if (contentType === 'text') {
                             return { type: 'text', text: itemToProcess.text || '' };
                         }
-                        
+
                         if (contentType === 'image' || contentType === 'image_url') {
                             const url = itemToProcess.url || itemToProcess.image_url?.url;
                             if (url && await this.validateImageUrl(url)) {
                                 return { type: 'image_url', image_url: { url } };
                             }
+                            return { type: 'text', text: `Image preview temporarily unavailable (${itemToProcess.originalFilename || 'image'}). This does not establish that the original file is missing. Request it again with ViewImages or inspect the existing workspace file before drawing conclusions about its contents.` };
                         }
 
                         // If we got here, we failed to process something - likely the image - so we'll return it as a text object.
-                        const textContent = typeof itemToProcess === 'string' 
-                            ? itemToProcess 
+                        const textContent = typeof itemToProcess === 'string'
+                            ? itemToProcess
                             : JSON.stringify(itemToProcess);
                         return { type: 'text', text: textContent };
                     }));
                 }
-                
+
                 // For assistant messages with tool_calls, content can be null or string (not array)
                 // If it's an array, it was already processed above
                 if (message.role === "assistant" && parsedMessage.tool_calls) {
                     return parsedMessage;
                 }
-                
+
                 // For tool messages, validate and convert content to ensure compliance
                 // Tool messages can only have: string or array of text content parts
                 if (message.role === "tool") {
@@ -115,22 +116,22 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                     if (typeof parsedMessage.content === 'string') {
                         return parsedMessage;
                     }
-                    
+
                     // If content is null/undefined, convert to empty string
                     if (parsedMessage.content == null) {
                         parsedMessage.content = '';
                         return parsedMessage;
                     }
-                    
+
                     // If content is an array, ensure all items are text content parts
                     if (Array.isArray(parsedMessage.content)) {
                         parsedMessage.content = parsedMessage.content.map(item => {
                             // If already a text content part, keep it
-                            if (typeof item === 'object' && item !== null && 
+                            if (typeof item === 'object' && item !== null &&
                                 item.type === 'text' && typeof item.text === 'string') {
                                 return item;
                             }
-                            
+
                             // Convert anything else to a text content part
                             if (typeof item === 'string') {
                                 return { type: 'text', text: item };
@@ -142,7 +143,7 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
                         });
                     }
                 }
-                
+
                 return parsedMessage;
             } catch (e) {
                 return message;
@@ -298,21 +299,21 @@ class OpenAIVisionPlugin extends OpenAIChatPlugin {
             }
 
             const delta = parsedMessage?.choices?.[0]?.delta;
-            
+
             // Check if this is an empty/idle event that we should skip
-            const isEmptyEvent = !delta || 
-                (Object.keys(delta).length === 0) || 
+            const isEmptyEvent = !delta ||
+                (Object.keys(delta).length === 0) ||
                 (Object.keys(delta).length === 1 && delta.content === '') ||
                 (Object.keys(delta).length === 1 && delta.tool_calls && delta.tool_calls.length === 0);
-            
+
             // Skip publishing empty events unless they have a finish_reason
             const hasFinishReason = parsedMessage?.choices?.[0]?.finish_reason;
-            
+
             if (isEmptyEvent && !hasFinishReason) {
                 // Return requestProgress without setting data to prevent publishing
                 return requestProgress;
             }
-            
+
             // Set the data for non-empty events or events with finish_reason
             requestProgress.data = event.data;
 

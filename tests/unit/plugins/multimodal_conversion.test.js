@@ -45,7 +45,7 @@ const mockPathway = { name: 'test', temperature: 0.7 };
 const mockModel = { name: 'test-model' };
 
 // Helper function to validate base64 image data
-function validateBase64Image(base64Data) {   
+function validateBase64Image(base64Data) {
     // Decode first few bytes to check for common image format headers
     const decodedData = Buffer.from(base64Data, 'base64').slice(0, 4);
     const validImageHeaders = [
@@ -54,8 +54,8 @@ function validateBase64Image(base64Data) {
         Buffer.from([0x47, 0x49, 0x46]), // GIF
         Buffer.from([0x52, 0x49, 0x46, 0x46]), // WEBP
     ];
-    
-    return validImageHeaders.some(header => 
+
+    return validImageHeaders.some(header =>
         decodedData.slice(0, header.length).equals(header)
     );
 }
@@ -82,7 +82,7 @@ const singleImageMessage = (text, url) => [
 // Test OpenAI to Claude conversion
 test('OpenAI to Claude conversion data url', async (t) => {
     const { openai, claude } = createPlugins();
-    
+
     const openaiMessages = [
         { role: 'system', content: 'You are a helpful assistant.' },
         { role: 'user', content: [
@@ -107,7 +107,7 @@ test('OpenAI to Claude conversion data url', async (t) => {
 // Test OpenAI to Claude conversion with a regular image url
 test('OpenAI to Claude conversion image url', async (t) => {
     const { openai, claude } = createPlugins();
-    
+
     const openaiMessages = [
         { role: 'system', content: 'You are a helpful assistant.' },
         { role: 'user', content: [
@@ -131,7 +131,7 @@ test('OpenAI to Claude conversion image url', async (t) => {
 // Test OpenAI to Gemini conversion
 test('OpenAI to Gemini conversion', async (t) => {
     const { gemini, gemini15 } = createPlugins();
-    
+
     const openaiMessages = [
         { role: 'system', content: 'You are a helpful assistant.' },
         { role: 'user', content: [
@@ -164,7 +164,7 @@ test('OpenAI to Gemini conversion', async (t) => {
 // Test special Cortex properties (gcs and url)
 test('Cortex special properties conversion', async (t) => {
     const { openai, claude, gemini, gemini15 } = createPlugins();
-    
+
     const cortexMessages = [
         { role: 'user', content: [
             { type: 'text', text: 'Analyze this image:' },
@@ -188,7 +188,7 @@ test('Cortex special properties conversion', async (t) => {
 // Test mixed content types
 test('Mixed content types conversion', async (t) => {
     const { openai, claude, gemini, gemini15 } = createPlugins();
-    
+
     const mixedMessages = [
         { role: 'system', content: 'You are a vision analysis AI.' },
         { role: 'user', content: 'What do you see?' },
@@ -240,7 +240,7 @@ test('Mixed content types conversion', async (t) => {
 // Test unsupported mime types (e.g., PDF for Claude)
 test('Unsupported mime type conversion', async (t) => {
     const { openai, claude } = createPlugins();
-    
+
     const pdfMessage = [
         { role: 'user', content: [
             { type: 'text', text: 'Can you analyze this PDF?' },
@@ -253,13 +253,14 @@ test('Unsupported mime type conversion', async (t) => {
 
     t.is(modifiedMessages[0].content.length, 2);
     t.is(modifiedMessages[0].content[0].text, 'Can you analyze this PDF?');
-    t.true(modifiedMessages[0].content[1].text.includes('image_url'));
+    t.regex(modifiedMessages[0].content[1].text, /Image preview temporarily unavailable/);
+    t.false(modifiedMessages[0].content[1].text.includes('https://'));
 });
 
 // Test pathological cases
 test('Pathological cases', async (t) => {
     const { openai, claude, gemini, gemini15 } = createPlugins();
-    
+
     const pathologicalMessages = [
         { role: 'system', content: 'You are a helpful assistant.' },
         { role: 'user', content: 'Hello' },
@@ -277,7 +278,7 @@ test('Pathological cases', async (t) => {
     ];
 
     const parsedOpenAI = await openai.tryParseMessages(pathologicalMessages);
-    
+
     // Test Claude conversion
     const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
 
@@ -292,7 +293,7 @@ test('Pathological cases', async (t) => {
     t.is(claudeMessages[2].content[0].text, 'How are you?');
     t.is(claudeMessages[2].content[1].text, 'What\'s this?');
     t.is(claudeMessages[2].content[2].type, 'image');
-    t.true(claudeMessages[2].content[2].source.data.startsWith('/9j/4AAQ'));  
+    t.true(claudeMessages[2].content[2].source.data.startsWith('/9j/4AAQ'));
     t.is(claudeMessages[2].content[3].text, 'Another question');
 
     // Test Gemini conversion
@@ -321,11 +322,11 @@ test('Pathological cases', async (t) => {
     t.is(geminiMessages15[0].role, 'user');
     t.is(geminiMessages15[0].parts[0].text, 'Hello');
     t.is(geminiMessages15[0].parts[1].text, 'Another greeting');
-    
+
     // Assistant message "Hi there!"
     t.is(geminiMessages15[1].role, 'model');
     t.is(geminiMessages15[1].parts[0].text, 'Hi there!');
-     
+
     // Final user message combines "How are you?", image content, and "Another question"
     t.is(geminiMessages15[2].role, 'user');
     t.is(geminiMessages15[2].parts[0].text, 'How are you?');
@@ -337,11 +338,11 @@ test('Pathological cases', async (t) => {
 // Test empty message array
 test('Empty message array', async (t) => {
     const { openai, claude, gemini, gemini15 } = createPlugins();
-    
+
     const emptyMessages = [];
 
     const parsedOpenAI = await openai.tryParseMessages(emptyMessages);
-    
+
     // Test Claude conversion
     const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
 
@@ -353,7 +354,7 @@ test('Empty message array', async (t) => {
 
     t.is(geminiMessages.length, 0);
 
-    // Test Gemini 1.5 conversion   
+    // Test Gemini 1.5 conversion
     const { modifiedMessages: geminiMessages15, system: geminiSystem15 } = gemini15.convertMessagesToGemini(parsedOpenAI);
 
     t.is(geminiSystem15, null);
@@ -363,7 +364,7 @@ test('Empty message array', async (t) => {
 // Test simple string array content
 test('Simple string array content', async (t) => {
     const { gemini15 } = createPlugins();
-    
+
     const messages = [
         { role: 'user', content: "Initial message" },
         { role: 'assistant', content: [
@@ -391,7 +392,7 @@ test('Simple string array content', async (t) => {
 // Test string-encoded multimodal content
 test('String-encoded multimodal content', async (t) => {
     const { gemini15 } = createPlugins();
-    
+
     const messages = [
         { role: 'user', content: [
             JSON.stringify({
@@ -436,14 +437,14 @@ test('String-encoded multimodal content', async (t) => {
 // Test messages with only system messages
 test('Only system messages', async (t) => {
     const { openai, claude, gemini, gemini15 } = createPlugins();
-    
+
     const onlySystemMessages = [
         { role: 'system', content: 'You are an AI assistant.' },
         { role: 'system', content: 'You are helpful and friendly.' },
     ];
 
     const parsedOpenAI = await openai.tryParseMessages(onlySystemMessages);
-    
+
     // Test Claude conversion
     const { system: claudeSystem, modifiedMessages: claudeMessages } = await claude.convertMessagesToClaudeVertex(parsedOpenAI);
 
@@ -468,7 +469,7 @@ test('Only system messages', async (t) => {
 // Test different image URL types for Gemini 1.5
 test('Gemini 1.5 image URL type handling', t => {
     const { gemini15 } = createPlugins();
-    
+
     const messages = [
         { role: 'user', content: [
             { type: 'text', text: 'Process these images:' },
@@ -515,7 +516,7 @@ test('Gemini 1.5 image URL type handling', t => {
 // Test edge cases for image URLs in Gemini 1.5
 test('Gemini 1.5 image URL edge cases', t => {
     const { gemini15 } = createPlugins();
-    
+
     const messages = [
         { role: 'user', content: [
             { type: 'text', text: 'Process these edge cases:' },
@@ -537,7 +538,7 @@ test('Gemini 1.5 image URL edge cases', t => {
     // Verify basic message structure
     t.is(modifiedMessages.length, 1);
     t.true(Array.isArray(modifiedMessages[0].parts));
-    
+
     // Check each part to ensure no invalid images were converted
     modifiedMessages[0].parts.forEach(part => {
         if (part.text) {
@@ -546,7 +547,7 @@ test('Gemini 1.5 image URL edge cases', t => {
             t.fail('Found non-text part that should have been filtered out: ' + JSON.stringify(part));
         }
     });
-    
+
     // Verify we only have one part (the text)
     t.is(modifiedMessages[0].parts.length, 1, 'Should only have the text part');
 });
@@ -576,7 +577,7 @@ test('Gemini 1.5 preserves mimeType for signed blob URLs', t => {
 // Test multiple images in single message for Claude
 test('Multiple images in single Claude message', async (t) => {
     const { claude } = createPlugins();
-    
+
     const multiImageMessage = [
         { role: 'user', content: [
             { type: 'text', text: 'Compare these images:' },
@@ -601,7 +602,7 @@ test('Multiple images in single Claude message', async (t) => {
 // Test conversation history with mixed image types
 test('Conversation history with mixed image types', async (t) => {
     const { claude, gemini15 } = createPlugins();
-    
+
     const conversationHistory = [
         { role: 'system', content: 'You are a visual analysis assistant.' },
         { role: 'user', content: [
@@ -642,10 +643,10 @@ test('Conversation history with mixed image types', async (t) => {
 // Test handling of large images
 test('Large image handling', async (t) => {
     const { claude, gemini15 } = createPlugins();
-    
+
     // Create a large base64 string (>10MB)
     const largeSampleImage = 'data:image/jpeg;base64,' + 'A'.repeat(10 * 1024 * 1024);
-    
+
     const largeImageMessage = [
         { role: 'user', content: [
             { type: 'text', text: 'Check this large image:' },

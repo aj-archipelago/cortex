@@ -10,18 +10,18 @@ function validateMermaidSyntax(mermaidCode) {
     try {
         // Ensure mermaidCode is a string
         const codeStr = typeof mermaidCode === 'string' ? mermaidCode : String(mermaidCode);
-        
+
         // Extract mermaid code from markdown block if present
         const mermaidMatch = codeStr.match(/```mermaid\s*([\s\S]*?)\s*```/);
         const codeToValidate = mermaidMatch ? mermaidMatch[1].trim() : codeStr.trim();
-        
+
         if (!codeToValidate) {
             return { isValid: false, error: "Empty mermaid code", diagramType: 'unknown' };
         }
-        
+
         // Use our lightweight validator
         const result = validateMermaid(codeToValidate);
-        
+
         return {
             isValid: result.isValid,
             error: result.isValid ? null : result.errors,
@@ -29,10 +29,10 @@ function validateMermaidSyntax(mermaidCode) {
             ast: result.ast
         };
     } catch (error) {
-        return { 
-            isValid: false, 
-            error: `Validation error: ${error.message}`, 
-            diagramType: 'unknown' 
+        return {
+            isValid: false,
+            error: `Validation error: ${error.message}`,
+            diagramType: 'unknown'
         };
     }
 }
@@ -50,7 +50,7 @@ function formatValidationErrors(errors) {
     if (!errors || !Array.isArray(errors)) {
         return 'Unknown validation error';
     }
-    
+
     return errors.map(error => {
         let errorText = `Line ${error.line}, Column ${error.column}: ${error.message}`;
         if (error.code) {
@@ -71,7 +71,7 @@ export default {
         aiName: "Jarvis",
         language: "English",
     },
-    model: 'oai-gpt5-chat',
+    model: 'oai-gpt54-mini',
     useInputChunking: false,
     timeout: 600,
     toolDefinition: [{
@@ -96,24 +96,24 @@ export default {
             }
         }
     }],
-    
+
     executePathway: async ({args, runAllPrompts, resolver}) => {
         if (args.detailedInstructions) {
             args.chatHistory.push({role: "user", content: args.detailedInstructions});
         }
-        
+
         const maxRetries = 10;
         let attempts = 0;
         let lastError = null;
         let lastMermaidCode = null;
         let pathwayResolver = resolver;
-        
+
         while (attempts < maxRetries) {
             attempts++;
-            
+
             try {
                 let result;
-                
+
                 if (attempts === 1) {
                     // First attempt: use full chat history for context
                     // Set the initial prompt with full chat history
@@ -150,7 +150,7 @@ Return only the mermaid chart markdown block with no other notes or comments.
                             "{{chatHistory}}"
                         ]})
                     ];
-                    
+
                     result = await runAllPrompts({ ...args, stream: false });
                 } else {
                     // Retry attempts: use streamlined prompt with just the error and code
@@ -166,35 +166,39 @@ Focus only on fixing the syntax issues mentioned in the error details. Return on
                             {"role": "user", "content": `Here is the mermaid code that was generated:\n\n\`\`\`mermaid\n${lastMermaidCode || ''}\n\`\`\`\n\nAnd here are the detailed error messages:\n\n${lastError || 'Unknown error'}\n\nPlease fix the syntax errors and regenerate the chart.`}
                         ]})
                     ];
-                    
+
                     result = await runAllPrompts({ ...args, stream: false });
                 }
-                
+
                 // Extract mermaid code from the response
+                if (!result && pathwayResolver.errors?.length) {
+                    lastError = pathwayResolver.errors.map(error => error?.message || String(error)).join('; ');
+                    break;
+                }
                 const mermaidCode = extractMermaidFromResponse(result);
-                
+
                 if (mermaidCode) {
                     // Store the mermaid code for potential retry
                     lastMermaidCode = mermaidCode;
-                    
+
                     // Validate the mermaid chart using our lightweight validator
                     const validation = validateMermaidSyntax(mermaidCode);
-                    
+
                     if (validation.isValid) {
-                        pathwayResolver.tool = JSON.stringify({ 
-                            toolUsed: "CreateMermaidChart", 
+                        pathwayResolver.tool = JSON.stringify({
+                            toolUsed: "CreateMermaidChart",
                             diagramType: validation.diagramType,
                             attempts: attempts,
                             validationPassed: true
                         });
-                        
+
                         // Return the validated mermaid chart
                         return result;
                     } else {
                         const formattedErrors = formatValidationErrors(validation.error);
                         logger.warn(`Mermaid chart has syntax errors: ${formattedErrors}`);
                         lastError = formattedErrors;
-                        
+
                         if (attempts < maxRetries) {
                             continue; // Retry with streamlined prompt
                         }
@@ -202,7 +206,7 @@ Focus only on fixing the syntax issues mentioned in the error details. Return on
                 } else {
                     // No mermaid code found in response
                     lastError = "No mermaid chart found in response";
-                    
+
                     if (attempts < maxRetries) {
                         // For retry, we'll use the streamlined prompt with the error message
                         continue;
@@ -210,21 +214,23 @@ Focus only on fixing the syntax issues mentioned in the error details. Return on
                 }
             } catch (error) {
                 lastError = error.message;
+                const status = error.response?.status || error.status;
+                if (status >= 400 && status < 500 && status !== 408 && status !== 429) break;
                 if (attempts < maxRetries) {
                     continue; // Retry with streamlined prompt
                 }
             }
         }
-        
+
         // If we've exhausted all retries, return the last result with error info
-        pathwayResolver.tool = JSON.stringify({ 
-            toolUsed: "CreateMermaidChart", 
+        pathwayResolver.tool = JSON.stringify({
+            toolUsed: "CreateMermaidChart",
             error: lastError,
             attempts: attempts,
             validationFailed: true
         });
-        
+
         // Return a fallback response
-        return `Failed to generate valid mermaid chart after ${maxRetries} attempts. Last error: ${lastError}`;
+        return `Failed to generate valid mermaid chart after ${attempts} attempts. Last error: ${lastError}`;
     }
 }

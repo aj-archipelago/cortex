@@ -101,9 +101,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(
         `Cortex File Handler v${version} running on port ${port} (includes legacy MediaFileChunker endpoint)`,
       );
-      
+
       // Debug: Show configured container name
       console.log(`Configured container name: ${AZURE_STORAGE_CONTAINER_NAME}`);
+      console.log(JSON.stringify({ event: "cfh.storage_grant_mode", mode: process.env.CFH_GRANT_MODE || "audit" }));
     });
   });
 }

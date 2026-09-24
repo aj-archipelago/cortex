@@ -10,12 +10,7 @@ function getCortexApiKey() {
 }
 
 function getCortexUrl() {
-  if (process.env.NODE_ENV === 'production') {
-    return 'https://cortex.aljazeera.com/graphql'
-  } else if (process.env.NODE_ENV === 'test') {
-    return 'https://cortex.aljazeera.com/dev/graphql';
-  }
-  return 'http://localhost:4000/graphql';
+  return process.env.CORTEX_URL || 'http://localhost:4000/graphql';
 }
 
 function getHeaders() {
@@ -27,7 +22,7 @@ function getHeaders() {
 }
 
 export type ChatMessage = { role: string, content: string }
-export type DataSource = "mydata" | "aja" | "aje" | "wires" | "bing"
+export type DataSource = "mydata" | "news_ar" | "news_en" | "wires" | "bing"
 
 export const MemorySection = {
   memorySelf: "memorySelf",
@@ -62,7 +57,7 @@ export type CortexVariables = {
 function truncateBody(body: any): string {
   const str = JSON.stringify(body);
   if (str.length <= 5000) return str;
-  
+
   const halfLength = 2500;
   return str.substring(0, halfLength) + '...' + str.substring(str.length - halfLength);
 }

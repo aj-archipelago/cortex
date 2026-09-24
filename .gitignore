@@ -10,3 +10,6 @@ test-files/
 **/tests/temp/*
 **/src/files/*
 test_output.log
+
+# Locally packaged helper applications
+helper-apps/*/dist/

@@ -6,18 +6,8 @@ import cognitiveSearchTool, {
 test('SearchIndex schema lists valid indexes and rejects invalid index with choices', async (t) => {
     const definition = cognitiveSearchTool.toolDefinition[0].function;
 
-    t.true(definition.description.includes('aja, aje, ajb, ajm, aj360, ajd, chinese, sanad, wires'));
-    t.deepEqual(definition.parameters.properties.index.enum, [
-        'aja',
-        'aje',
-        'ajb',
-        'ajm',
-        'aj360',
-        'ajd',
-        'chinese',
-        'sanad',
-        'wires',
-    ]);
+    t.true(definition.description.includes('wires'));
+    t.deepEqual(definition.parameters.properties.index.enum, ['wires']);
     t.truthy(definition.parameters.properties.query);
     t.deepEqual(definition.parameters.required, ['index']);
 
@@ -30,7 +20,7 @@ test('SearchIndex schema lists valid indexes and rejects invalid index with choi
     }));
 
     t.true(error.message.includes('Invalid index: news'));
-    t.true(error.message.includes('Valid indexes: aja, aje, ajb, ajm, aj360, ajd, chinese, sanad, wires'));
+    t.true(error.message.includes('Valid indexes: wires'));
     t.true(error.message.includes('Use wires for news wires'));
 });
 
@@ -46,14 +36,15 @@ test('SearchIndex validates missing text/query before dispatch', async (t) => {
 });
 
 test('SearchIndex maps logical index before honoring supplied indexName', (t) => {
-    t.is(resolveToolIndexName({ index: 'aje', indexName: 'aje' }), 'idx-ucms-aje');
+    const indexes = { news_en: 'sample-news', wires: 'idx-wires' };
+    t.is(resolveToolIndexName({ index: 'news_en', indexName: 'news_en' }, indexes), 'sample-news');
     t.is(resolveToolIndexName({ index: 'wires', indexName: 'wires' }), 'idx-wires');
-    t.is(resolveToolIndexName({ index: 'aje', indexName: 'wires' }), 'idx-ucms-aje');
+    t.is(resolveToolIndexName({ index: 'NEWS_EN', indexName: 'wires' }, indexes), 'sample-news');
+    t.is(resolveToolIndexName({ index: 'unknown', indexName: 'idx-wires' }, indexes), '');
 });
 
 test('SearchIndex keeps custom physical indexName when no logical index is supplied', (t) => {
-    t.is(resolveToolIndexName({ indexName: 'vector-tony-vision-resource' }), 'vector-tony-vision-resource');
-    t.is(resolveToolIndexName({ indexName: 'business-performance-index' }), 'business-performance-index');
-    t.is(resolveToolIndexName({ indexName: 'aje' }), 'idx-ucms-aje');
+    t.is(resolveToolIndexName({ indexName: 'sample-documents' }), 'sample-documents');
+    t.is(resolveToolIndexName({ indexName: ' news_en ' }, { news_en: 'sample-news' }), 'sample-news');
     t.is(resolveToolIndexName({ indexName: 'wires' }), 'idx-wires');
 });

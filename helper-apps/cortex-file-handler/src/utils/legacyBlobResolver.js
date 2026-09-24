@@ -1,3 +1,6 @@
+import { getStorageGrant } from '../security/storageGrant.js';
+import { assertGrantedStorageUrl } from '../security/grantRequest.js';
+import { assertLegacySharedRead } from '../security/legacyRead.js';
 import path from "path";
 
 import { constructFolderPath } from "../blobHandler.js";
@@ -69,6 +72,12 @@ async function findExistingLegacyBlob(blobPath, providers = []) {
     await entry.provider.ensureInitialized();
     const { containerClient } = await entry.provider.getBlobClient();
     const blockBlobClient = containerClient.getBlockBlobClient(entry.blobPath);
+    try {
+      assertGrantedStorageUrl(blockBlobClient.url);
+    } catch (error) {
+      if (error.status === 403) continue;
+      throw error;
+    }
     const exists = await blockBlobClient.exists();
     if (exists) {
       return {
@@ -82,12 +91,25 @@ async function findExistingLegacyBlob(blobPath, providers = []) {
   return null;
 }
 
-async function buildLegacyBlobCandidates({ blobPath } = {}) {
+async function buildLegacyBlobCandidates({ blobPath, owner, rootOnly = false } = {}) {
   if (!blobPath) {
     return [];
   }
 
   const defaultContainerName = getDefaultContainerName();
+  if (getStorageGrant()) {
+    if (!owner) return [];
+    const provider = await getAzureProviderForContainer(defaultContainerName);
+    const candidates = rootOnly ? [] : [{ label: 'owner-prefixed', provider,
+      blobPath: blobPath.startsWith(`users/${owner}/`) ? blobPath : `users/${owner}/${blobPath}` }];
+    try {
+      assertLegacySharedRead(blobPath, owner);
+      candidates.push({ label: 'default-root', provider, blobPath });
+    } catch (error) {
+      if (error.status !== 403) throw error;
+    }
+    return candidates;
+  }
   return [
     {
       label: "default-root",
@@ -109,6 +131,7 @@ export async function resolveBlobPathWithLegacyFallback({
   fileScope = null,
   storageService,
   setFileStoreMap,
+  rootOnly = false,
 } = {}) {
   if (!blobPath) {
     return null;
@@ -116,11 +139,17 @@ export async function resolveBlobPathWithLegacyFallback({
 
   const source = await findExistingLegacyBlob(
     blobPath,
-    await buildLegacyBlobCandidates({ blobPath }),
+    await buildLegacyBlobCandidates({ blobPath, rootOnly, owner: getTargetContainerOwnerId({ resolvedContextId, userId, workspaceId, fileScope }) }),
   );
 
   if (!source) {
     return null;
+  }
+
+  if (getStorageGrant()) {
+    const sas = source.provider.generateShortLivedSASToken(source.blobPath, 5);
+    const url = `${source.blockBlobClient.url}?${sas}`;
+    return { url, shortLivedUrl: url, blobPath, filename: path.basename(blobPath), ...(hash ? { hash } : {}) };
   }
 
   const targetOwnerId = getTargetContainerOwnerId({
@@ -147,6 +176,7 @@ export async function resolveBlobPathWithLegacyFallback({
     await targetProvider.getBlobClient();
   const targetBlobClient =
     targetContainerClient.getBlockBlobClient(targetBlobPath);
+  assertGrantedStorageUrl(targetBlobClient.url, "upload");
 
   if (
     source.provider.containerName !== targetProvider.containerName ||

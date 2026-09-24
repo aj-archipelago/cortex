@@ -110,7 +110,7 @@ export default {
         icon: "🎨",
         function: {
             name: "CreateMedia",
-            description: "Generate or modify images and videos.\n- To CREATE an image from scratch: set type=\"image\" and provide a prompt\n- To MODIFY/TRANSFORM an image: set type=\"image\" and attach referenceImages from your file collection\n- To CREATE a video: set type=\"video\" and provide a prompt\n- To EXTEND a video: set type=\"video\" and attach one referenceVideos item from your file collection\nVideos are slow and expensive. Use sparingly.",
+            description: "Quick image/video generation with preset models. For exact model choice, parameters, music, speech, or background jobs, discover the Media tool.\n- To CREATE an image from scratch: set type=\"image\" and provide a prompt\n- To MODIFY/TRANSFORM an image: set type=\"image\" and attach referenceImages from your file collection\n- To CREATE a video: set type=\"video\" and provide a prompt\n- To EXTEND a video: set type=\"video\" and attach one referenceVideos item from your file collection\nVideos are slow and expensive. Use sparingly.",
             parameters: {
                 type: "object",
                 properties: {

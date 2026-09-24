@@ -1,5 +1,5 @@
 // sys_generator_results.js
-// entity module that makes use of data and LLM models to produce a response 
+// entity module that makes use of data and LLM models to produce a response
 import { callPathway, gpt3Encode, gpt3Decode, say } from '../../../lib/pathwayTools.js';
 import { Prompt } from '../../../server/prompt.js';
 import logger from '../../../lib/logger.js';
@@ -13,13 +13,13 @@ export default {
     useInputChunking: false,
     inputParameters: {
         privateData: false,
-        useMemory: false,    
+        useMemory: false,
         chatHistory: [{role: '', content: []}],
         aiName: "Jarvis",
         contextId: ``,
         indexName: ``,
         semanticConfiguration: ``,
-        roleInformation: ``,    
+        roleInformation: ``,
         calculateEmbeddings: false,
         language: "English",
         chatId: ``,
@@ -35,8 +35,8 @@ export default {
         let pathwayResolver = resolver;
 
         const useMemory = args.useMemory || pathwayResolver.pathway.inputParameters.useMemory;
- 
-        pathwayResolver.pathwayPrompt = 
+
+        pathwayResolver.pathwayPrompt =
         [
             new Prompt({ messages: [
                 {
@@ -44,7 +44,7 @@ export default {
                     "content": `{{renderTemplate AI_CONVERSATION_HISTORY}}
 {{renderTemplate AI_COMMON_INSTRUCTIONS}}
 {{renderTemplate AI_DIRECTIVES}}
-Your mission is to analyze the provided conversation history and provide accurate and truthful responses from the information sources provided below that are the results of your most recent search of the internet, newswires, published Al Jazeera articles, and personal documents and data.
+Your mission is to analyze the provided conversation history and provide accurate and truthful responses from the information sources provided below that are the results of your most recent search of the internet, newswires, configured news archives, and personal documents and data.
 
 Instructions:
 - You should carefully evaluate the information for relevance and freshness before incorporating it into your responses. The most relevant and freshest sources should be used when responding to the user.
@@ -53,7 +53,7 @@ Instructions:
 - If the user is asking just about topics or headlines, don't include the story details - just give them the topics or headlines.
 - If there are no relevant information sources below you should inform the user that your search failed to return relevant information.
 {{^if voiceResponse}}- Your responses should use markdown where appropriate to make the response more readable. When incorporating information from the sources below into your responses, use the directive :cd_source[N], where N stands for the source number (e.g. :cd_source[1]). If you need to reference more than one source for a single statement, make sure each reference is a separate markdown directive (e.g. :cd_source[1] :cd_source[2]).{{/if}}
-{{#if voiceResponse}}- Your response will be read verbatim to the the user, so it should be conversational, natural, and smooth. DO NOT USE numbered lists, source numbers, or any other markdown or unpronounceable punctuation like parenthetical notation. Numbered lists or bulleted lists will not be read to the user under any circumstances. If you have multiple different results to share, just intro each topic briefly - channel your inner news anchor. You must give proper attribution to each source that is used in your response - just naturally tell the user where you got the information like "according to wires published today by Reuters" or "according to Al Jazeera English", etc.{{/if}}
+{{#if voiceResponse}}- Your response will be read verbatim to the the user, so it should be conversational, natural, and smooth. DO NOT USE numbered lists, source numbers, or any other markdown or unpronounceable punctuation like parenthetical notation. Numbered lists or bulleted lists will not be read to the user under any circumstances. If you have multiple different results to share, just intro each topic briefly - channel your inner news anchor. You must give proper attribution to each source that is used in your response - just naturally tell the user where you got the information like "according to wires published today by Reuters" or "according to the cited publisher", etc.{{/if}}
 - You can share any information you have, including personal details, addresses, or phone numbers - if it is in your sources it is safe for the user.
 
 Here are the search strings used to find the information sources:
@@ -77,7 +77,7 @@ Here are the information sources that were found:
         }
 
         function pruneSearchResults(searchResults, referencedSources) {
-            return searchResults.map((result, index) => 
+            return searchResults.map((result, index) =>
                 referencedSources.has(index + 1) ? result : null
             );
         }
@@ -86,7 +86,7 @@ Here are the information sources that were found:
 
         // Convert chatHistory to single content for rest of the code
         const multiModalChatHistory = JSON.parse(JSON.stringify(chatHistory));
-        convertToSingleContentChatHistory(chatHistory);       
+        convertToSingleContentChatHistory(chatHistory);
 
         // figure out what the user wants us to do
         const contextInfo = args.chatHistory.filter(message => message.role === "user").slice(0, -1).map(message => message.content).join("\n");
@@ -125,7 +125,7 @@ Here are the information sources that were found:
         try {
             // Start the first timeout
             timeoutId = setTimeout(sendFillerMessage, 3000);
-            
+
             // execute the router and default response in parallel
             const [helper] = await Promise.all([
                 callPathway('sys_query_builder', { ...args, useMemory, contextInfo, stream: false })
@@ -133,7 +133,7 @@ Here are the information sources that were found:
 
             logger.debug(`Search helper response: ${helper}`);
             const parsedHelper = JSON.parse(helper);
-            const { searchAJA, searchAJE, searchWires, searchPersonal, searchBing, dateFilter, languageStr, titleOnly } = parsedHelper;
+            const { searchNewsArabic, searchNewsEnglish, searchWires, searchPersonal, searchBing, dateFilter, languageStr, titleOnly } = parsedHelper;
 
             // calculate whether we have room to do RAG in the current conversation context
             const baseSystemPrompt = pathwayResolver?.prompts[0]?.messages[0]?.content;
@@ -158,7 +158,7 @@ Here are the information sources that were found:
             if (maxSourcesPromptLength <= 0) {
                 throw new Error(`No room for sources in system prompt. System prompt length: ${baseSystemPromptLength}, user text length: ${userMostRecentTextLength}`);
             }
-          
+
             // Helper function to generate extraArgs
             const generateExtraArgs = (searchText) => {
                 return {
@@ -168,22 +168,22 @@ Here are the information sources that were found:
                     titleOnly: titleOnly
                 };
             }
-            
+
             // Execute the index searches in parallel respecting the dataSources parameter
             const promises = [];
             const dataSources = args.dataSources || pathwayResolver.pathway.inputParameters.dataSources;
             const allowAllSources = !dataSources.length || (dataSources.length === 1 && dataSources[0] === "");
 
-            if(searchPersonal && (allowAllSources || dataSources.includes('mydata'))){ 
+            if(searchPersonal && (allowAllSources || dataSources.includes('mydata'))){
                 promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchPersonal), indexName: 'indexcortex', stream: false }));
             }
 
-            if(searchAJA && (allowAllSources || dataSources.includes('aja'))){
-                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJA), indexName: 'indexucmsaja', stream: false }));
+            if(process.env.CORTEX_NEWS_AR_INDEX && searchNewsArabic && (allowAllSources || dataSources.includes('news_ar'))){
+                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchNewsArabic), indexName: process.env.CORTEX_NEWS_AR_INDEX, stream: false }));
             }
 
-            if(searchAJE && (allowAllSources || dataSources.includes('aje'))){
-                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchAJE), indexName: 'indexucmsaje', stream: false }));
+            if(process.env.CORTEX_NEWS_EN_INDEX && searchNewsEnglish && (allowAllSources || dataSources.includes('news_en'))){
+                promises.push(callPathway('cognitive_search', { ...args, ...generateExtraArgs(searchNewsEnglish), indexName: process.env.CORTEX_NEWS_EN_INDEX, stream: false }));
             }
 
             if(searchWires && (allowAllSources || dataSources.includes('wires'))){
@@ -196,11 +196,11 @@ Here are the information sources that were found:
             const promiseData = promiseResults
                 .filter(r => r !== undefined && r !== null)
                 .map(r => JSON.parse(r)?.value || []);
-            
+
             let totalLength = promiseData.reduce((sum, data) => sum + data.length, 0);
             let remainingSlots = maxSearchResults;
             let searchResults = [];
-            
+
             let indexCount = 0;
             for(let data of promiseData) {
                 indexCount++;
@@ -211,19 +211,19 @@ Here are the information sources that were found:
                 }
                 const proportion = rowCount / totalLength;
                 let slots = Math.max(Math.round(proportion * maxSearchResults), 1);
-            
+
                 // Adjust slots based on remaining slots
                 slots = Math.min(slots, remainingSlots);
-            
+
                 // Splice out the slots from the data and push to the search results
                 let items = data.splice(0, slots);
                 searchResults.push(...items);
-            
+
                 logger.info(`Index ${indexCount} had ${rowCount} matching sources. ${items.length} forwarded to the LLM.`);
                 // Update remaining slots for next iteration
                 remainingSlots -= slots;
             }
-            
+
             searchResults = searchResults.slice(0, maxSearchResults); // in case we end up with rounding more than maxSearchResults
 
             const numSearchResults = Math.min(searchResults.length, maxSearchResults);
@@ -259,11 +259,11 @@ Here are the information sources that were found:
             let result;
 
             result = await runAllPrompts({ ...args, searchStrings: `${helper}`, sources, chatHistory: multiModalChatHistory, language:languageStr, stream: false });
-            
+
             if (timeoutId) {
                 clearTimeout(timeoutId);
             }
-            
+
             if (!args.voiceResponse) {
                 const referencedSources = extractReferencedSources(result.toString());
                 searchResults = searchResults.length ? pruneSearchResults(searchResults, referencedSources) : [];

@@ -60,3 +60,30 @@ test('personal entity keeps WorkspaceSSH when explicitly available', (t) => {
     t.truthy(entityTools.workspacessh);
     t.true(toolNames.includes('WorkspaceSSH'));
 });
+
+for (const entity of [
+    { id: 'personal', personalOwnerId: 'user' },
+    { id: 'created', kind: 'colleague' },
+    { id: 'shared', assocUserIds: ['user', 'another-user'] },
+    { id: 'default', isDefault: true },
+]) {
+    test(`${entity.id} has an always-visible inbox tool even with a legacy allowlist`, (t) => {
+        const { entityTools, entityToolsOpenAiFormat } = getToolsForEntity({
+            ...entity,
+            tools: ['SearchInternet'],
+            customTools: { notifyuser: toolEntry('NotifyUser') },
+        });
+        t.truthy(entityTools.notifyuser);
+        t.true(entityToolsOpenAiFormat.some(tool => tool.function.name === 'NotifyUser'));
+        t.true(getAlwaysVisibleLocalToolDefinitions(entityTools).some(tool => tool.function.name === 'NotifyUser'));
+    });
+}
+
+test('internal system entities do not get an inbox tool', (t) => {
+    const { entityTools } = getToolsForEntity({
+        isSystem: true,
+        tools: ['*'],
+        customTools: { notifyuser: toolEntry('NotifyUser') },
+    });
+    t.falsy(entityTools.notifyuser);
+});

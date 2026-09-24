@@ -59,4 +59,4 @@ USER appuser
 
 # During debugging, this entry point will be overridden. For more information, please refer to https://aka.ms/vscode-docker-python-debug
 # CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "0", "-k", "uvicorn.workers.UvicornWorker", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "1", "--timeout", "0", "--graceful-timeout", "270", "-k", "uvicorn.workers.UvicornWorker", "app:app"]

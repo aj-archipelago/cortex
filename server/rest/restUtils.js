@@ -1,3 +1,4 @@
+import { weeklyCostLimits } from './weeklyCostMiddleware.js';
 // rest/restUtils.js
 // Shared utilities used by multiple REST route handlers
 
@@ -66,6 +67,34 @@ const extractResponseData = (pathwayResponse) => {
         resultText: pathwayResponse.result || "",
         resultData: pathwayResponse.resultData || null
     };
+};
+
+const readErrorResponseData = async (responseData, maxBytes = 64 * 1024) => {
+    if (!responseData || typeof responseData[Symbol.asyncIterator] !== 'function') {
+        return responseData;
+    }
+
+    const chunks = [];
+    let bytesRead = 0;
+
+    for await (const chunk of responseData) {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const remaining = maxBytes - bytesRead;
+        if (remaining <= 0) break;
+
+        chunks.push(buffer.subarray(0, remaining));
+        bytesRead += Math.min(buffer.length, remaining);
+        if (bytesRead >= maxBytes) break;
+    }
+
+    const content = Buffer.concat(chunks).toString('utf8');
+    if (!content) return null;
+
+    try {
+        return JSON.parse(content);
+    } catch {
+        return { rawContent: content };
+    }
 };
 
 const coerceTokenCount = (value) => {
@@ -186,6 +215,11 @@ const logTokenUsage = ({ req, usage, model, route, requestId }) => {
         request_id: requestId || null,
         stream: Boolean(req.body?.stream)
     };
+    // Start the durable debit immediately, rather than waiting for the buffered
+    // analytics writer. In-flight requests may finish after the cap is reached.
+    weeklyCostLimits.record(req, payload).catch(error => {
+        logger.error(`Weekly cost accounting failed: ${error.name || 'Error'} (${error.code || 'unknown'})`);
+    });
     payload.event_key = buildTokenUsageEventKey(payload);
 
     try {
@@ -398,6 +432,7 @@ export {
     resolveModelName,
     handleModelNotFound,
     extractResponseData,
+    readErrorResponseData,
     normalizeUsage,
     logTokenUsage,
     normalizeResponseOutputText,

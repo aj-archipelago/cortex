@@ -1,150 +1,103 @@
 import test from 'ava';
 import AzureAuthTokenHelper from '../../../lib/azureAuthTokenHelper.js';
 
-test('should initialize with valid credentials', (t) => {
-  const mockConfig = {
-    azureServicePrincipalCredentials: JSON.stringify({
-      tenant_id: '648085d9-6878-44a9-a76b-0223882f8268',
-      client_id: '8796f9a6-cd80-45dd-91b8-9ddf384ee42c',
-      client_secret: 'test-secret',
-      scope: 'https://ai.azure.com/.default'
-    })
-  };
+test.serial('uses managed identity exclusively in Azure App Service', (t) => {
+  const previousInstanceId = process.env.WEBSITE_INSTANCE_ID;
+  const previousClientId = process.env.AZURE_CLIENT_ID;
+  const previousTenantId = process.env.AZURE_TENANT_ID;
+  const previousClientSecret = process.env.AZURE_CLIENT_SECRET;
+  process.env.WEBSITE_INSTANCE_ID = 'test-instance';
+  process.env.AZURE_CLIENT_ID = 'must-not-be-used';
+  process.env.AZURE_TENANT_ID = 'must-not-be-used';
+  process.env.AZURE_CLIENT_SECRET = 'must-not-be-used';
 
-  const azureHelper = new AzureAuthTokenHelper(mockConfig);
-  
-  t.is(azureHelper.tenantId, '648085d9-6878-44a9-a76b-0223882f8268');
-  t.is(azureHelper.clientId, '8796f9a6-cd80-45dd-91b8-9ddf384ee42c');
-  t.is(azureHelper.clientSecret, 'test-secret');
-  t.is(azureHelper.scope, 'https://ai.azure.com/.default');
-  t.is(azureHelper.tokenUrl, 'https://login.microsoftonline.com/648085d9-6878-44a9-a76b-0223882f8268/oauth2/v2.0/token');
+  try {
+    const helper = new AzureAuthTokenHelper({});
+    t.is(helper.getTokenCredential().constructor.name, 'ManagedIdentityCredential');
+  } finally {
+    if (previousInstanceId === undefined) {
+      delete process.env.WEBSITE_INSTANCE_ID;
+    } else {
+      process.env.WEBSITE_INSTANCE_ID = previousInstanceId;
+    }
+    for (const [name, value] of [
+      ['AZURE_CLIENT_ID', previousClientId],
+      ['AZURE_TENANT_ID', previousTenantId],
+      ['AZURE_CLIENT_SECRET', previousClientSecret],
+    ]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
 });
 
-test('should throw error when azureCredentials is missing', (t) => {
-  t.throws(() => {
-    new AzureAuthTokenHelper({});
-  }, { message: 'AZURE_SERVICE_PRINCIPAL_CREDENTIALS is missing or undefined' });
+test.serial('uses the local Azure credential chain outside App Service', (t) => {
+  const previousInstanceId = process.env.WEBSITE_INSTANCE_ID;
+  delete process.env.WEBSITE_INSTANCE_ID;
+
+  try {
+    const helper = new AzureAuthTokenHelper({});
+    t.is(helper.getTokenCredential().constructor.name, 'DefaultAzureCredential');
+  } finally {
+    if (previousInstanceId !== undefined) {
+      process.env.WEBSITE_INSTANCE_ID = previousInstanceId;
+    }
+  }
 });
 
-test('should throw error when required fields are missing', (t) => {
-  const invalidConfig = {
-    azureServicePrincipalCredentials: JSON.stringify({
-      tenant_id: 'test-tenant'
-      // missing client_id and client_secret
-    })
+test('uses one shared Azure token credential', async (t) => {
+  let requestedScope;
+  const credential = {
+    getToken: async (scope) => {
+      requestedScope = scope;
+      return { token: 'managed-identity-token' };
+    },
   };
+  const helper = new AzureAuthTokenHelper({}, { credential });
 
-  t.throws(() => {
-    new AzureAuthTokenHelper(invalidConfig);
-  }, { message: 'Azure credentials must include tenant_id, client_id, and client_secret' });
+  t.is(helper.getTokenCredential(), credential);
+  t.is(await helper.getAccessToken(), 'managed-identity-token');
+  t.is(requestedScope, 'https://ai.azure.com/.default');
 });
 
-test('should support both snake_case and camelCase field names', (t) => {
-  const camelCaseConfig = {
-    azureServicePrincipalCredentials: JSON.stringify({
-      tenantId: '648085d9-6878-44a9-a76b-0223882f8268',
-      clientId: '8796f9a6-cd80-45dd-91b8-9ddf384ee42c',
-      clientSecret: 'test-secret',
-      scope: 'https://ai.azure.com/.default'
-    })
+test('supports an explicit Azure Foundry scope', async (t) => {
+  let requestedScope;
+  const credential = {
+    getToken: async (scope) => {
+      requestedScope = scope;
+      return { token: 'test-token' };
+    },
   };
+  const helper = new AzureAuthTokenHelper(
+    { azureFoundryScope: 'https://example.test/.default' },
+    { credential },
+  );
 
-  const azureHelper = new AzureAuthTokenHelper(camelCaseConfig);
-  
-  t.is(azureHelper.tenantId, '648085d9-6878-44a9-a76b-0223882f8268');
-  t.is(azureHelper.clientId, '8796f9a6-cd80-45dd-91b8-9ddf384ee42c');
-  t.is(azureHelper.clientSecret, 'test-secret');
+  t.is(await helper.getAccessToken(), 'test-token');
+  t.is(requestedScope, 'https://example.test/.default');
 });
 
-test('isTokenValid should return false when no token exists', (t) => {
-  const mockConfig = {
-    azureServicePrincipalCredentials: JSON.stringify({
-      tenant_id: 'test-tenant',
-      client_id: 'test-client',
-      client_secret: 'test-secret'
-    })
+test('reports credential-chain failures clearly', async (t) => {
+  const credential = {
+    getToken: async () => {
+      throw new Error('managed identity unavailable');
+    },
   };
-
-  const azureHelper = new AzureAuthTokenHelper(mockConfig);
-  t.false(azureHelper.isTokenValid());
-});
-
-test('isTokenValid should return false when token is expired', (t) => {
-  const mockConfig = {
-    azureServicePrincipalCredentials: JSON.stringify({
-      tenant_id: 'test-tenant',
-      client_id: 'test-client',
-      client_secret: 'test-secret'
-    })
-  };
-
-  const azureHelper = new AzureAuthTokenHelper(mockConfig);
-  azureHelper.token = 'test-token';
-  azureHelper.expiry = new Date(Date.now() - 1000); // expired 1 second ago
-  t.false(azureHelper.isTokenValid());
-});
-
-test('isTokenValid should return true when token is valid with buffer', (t) => {
-  const mockConfig = {
-    azureServicePrincipalCredentials: JSON.stringify({
-      tenant_id: 'test-tenant',
-      client_id: 'test-client',
-      client_secret: 'test-secret'
-    })
-  };
-
-  const azureHelper = new AzureAuthTokenHelper(mockConfig);
-  azureHelper.token = 'test-token';
-  azureHelper.expiry = new Date(Date.now() + 10 * 60 * 1000); // expires in 10 minutes
-  t.true(azureHelper.isTokenValid());
-});
-
-test('isTokenValid should return false when token expires within buffer time', (t) => {
-  const mockConfig = {
-    azureServicePrincipalCredentials: JSON.stringify({
-      tenant_id: 'test-tenant',
-      client_id: 'test-client',
-      client_secret: 'test-secret'
-    })
-  };
-
-  const azureHelper = new AzureAuthTokenHelper(mockConfig);
-  azureHelper.token = 'test-token';
-  azureHelper.expiry = new Date(Date.now() + 3 * 60 * 1000); // expires in 3 minutes (within 5-minute buffer)
-  t.false(azureHelper.isTokenValid());
-});
-
-test('getAccessToken should return existing token if valid', async (t) => {
-  const mockConfig = {
-    azureServicePrincipalCredentials: JSON.stringify({
-      tenant_id: 'test-tenant',
-      client_id: 'test-client',
-      client_secret: 'test-secret'
-    })
-  };
-
-  const azureHelper = new AzureAuthTokenHelper(mockConfig);
-  azureHelper.token = 'existing-token';
-  azureHelper.expiry = new Date(Date.now() + 10 * 60 * 1000);
-
-  const token = await azureHelper.getAccessToken();
-  t.is(token, 'existing-token');
-});
-
-test('getAccessToken should throw error when token is invalid and no network available', async (t) => {
-  const mockConfig = {
-    azureServicePrincipalCredentials: JSON.stringify({
-      tenant_id: 'test-tenant',
-      client_id: 'test-client',
-      client_secret: 'test-secret'
-    })
-  };
-
-  const azureHelper = new AzureAuthTokenHelper(mockConfig);
-  // No token set, so it will try to refresh and fail
+  const helper = new AzureAuthTokenHelper({}, { credential });
 
   await t.throwsAsync(
-    azureHelper.getAccessToken(),
-    { message: /Failed to refresh Azure token/ }
+    helper.getAccessToken(),
+    { message: 'Failed to acquire Azure token: managed identity unavailable' },
   );
-}); 
+});
+
+test('rejects an empty access-token response', async (t) => {
+  const helper = new AzureAuthTokenHelper({}, {
+    credential: { getToken: async () => null },
+  });
+
+  await t.throwsAsync(
+    helper.getAccessToken(),
+    { message: 'Failed to acquire Azure token: Azure credential returned no access token' },
+  );
+});

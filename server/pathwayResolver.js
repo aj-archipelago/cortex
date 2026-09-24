@@ -1,3 +1,4 @@
+import { getStorageGrant, withStorageGrant } from '../helper-apps/cortex-file-handler/src/security/storageGrant.js';
 import { ModelExecutor } from './modelExecutor.js';
 import { modelEndpoints, resolveModelName } from '../lib/requestExecutor.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -20,6 +21,25 @@ import latencyTrace from '../lib/latencyTrace.js';
 
 const modelTypesExcludedFromProgressUpdates = ['OPENAI-DALLE2', 'OPENAI-DALLE3'];
 
+/**
+ * Strip binary artifact payloads before publishing requestProgress `info`.
+ * Large base64 blobs on Redis pub/sub can disconnect subscribers fleet-wide.
+ */
+export function sanitizePathwayResultDataForProgress(pathwayResultData) {
+    if (!pathwayResultData || typeof pathwayResultData !== 'object') {
+        return pathwayResultData || {};
+    }
+    const infoObject = { ...pathwayResultData };
+    if (Array.isArray(infoObject.artifacts)) {
+        infoObject.artifacts = infoObject.artifacts.map((artifact) => {
+            if (!artifact || typeof artifact !== 'object') return artifact;
+            const { data, ...rest } = artifact;
+            return rest;
+        });
+    }
+    return infoObject;
+}
+
 const extractTextFromStreamData = (data) => {
     if (!data || typeof data !== 'string') return '';
 
@@ -39,6 +59,7 @@ const extractTextFromStreamData = (data) => {
 class PathwayResolver {
     // Optional endpoints override parameter is for testing purposes
     constructor({ config, pathway, args, endpoints }) {
+        Object.defineProperty(this, 'storageGrant', { value: getStorageGrant() });
         this.endpoints = endpoints || modelEndpoints;
         this.config = config;
         this.pathway = pathway;
@@ -109,14 +130,14 @@ class PathwayResolver {
             tools: Array.isArray(args?.entityToolsOpenAiFormat) ? args.entityToolsOpenAiFormat.length : undefined,
         });
     }
-    
+
     // Legacy 'tool' property is now stored in pathwayResultData
-    get tool() {      
+    get tool() {
         // Select fields to serialize for legacy compat, excluding undefined values
         const legacyFields = Object.fromEntries(
             Object.entries({
-                hideFromModel: this.pathwayResultData.hideFromModel,    
-                toolCallbackName: this.pathwayResultData.toolCallbackName, 
+                hideFromModel: this.pathwayResultData.hideFromModel,
+                toolCallbackName: this.pathwayResultData.toolCallbackName,
                 title: this.pathwayResultData.title,
                 search: this.pathwayResultData.search,
                 toolCallbackId: this.pathwayResultData.toolCallbackId,
@@ -163,7 +184,7 @@ class PathwayResolver {
             // this is a root request, so we add the pathwayResultData to the info
             // and allow the end stream message to be sent
             if (requestProgress.progress === 1) {
-                const infoObject = { ...this.pathwayResultData || {} };
+                const infoObject = sanitizePathwayResultDataForProgress(this.pathwayResultData);
                 requestProgress.info = JSON.stringify(infoObject);
                 requestProgress.error = requestProgress.error || this.errors.join(', ') || '';
             }
@@ -175,6 +196,10 @@ class PathwayResolver {
     // This code handles async and streaming responses for either long-running
     // tasks or streaming model responses
     async asyncResolve(args) {
+        return withStorageGrant(this.storageGrant || null, () => this.asyncResolveAuthorized(args));
+    }
+
+    async asyncResolveAuthorized(args) {
         const span = latencyTrace.start('resolver.asyncResolve', {
             requestId: this.requestId,
             rootRequestId: this.rootRequestId || undefined,
@@ -222,10 +247,10 @@ class PathwayResolver {
         } else {
             const { completedCount = 1, totalCount = 1 } = requestState[this.requestId];
             requestState[this.requestId].data = responseData;
-            
+
             // some models don't support progress updates
             if (!modelTypesExcludedFromProgressUpdates.includes(this.model.type)) {
-                const infoObject = { ...this.pathwayResultData || {} };
+                const infoObject = sanitizePathwayResultDataForProgress(this.pathwayResultData);
                 this.publishNestedRequestProgress({
                         requestId: this.rootRequestId || this.requestId,
                         progress: Math.min(completedCount, totalCount) / totalCount,
@@ -541,7 +566,7 @@ class PathwayResolver {
                     }
 
                 }
-                
+
                 const sseParser = createParser(onParse);
 
                 const processStream = (data) => {
@@ -737,6 +762,11 @@ class PathwayResolver {
     }
 
     async executePathway(args) {
+        return withStorageGrant(this.storageGrant || null, () => this.executeAuthorizedPathway(args));
+    }
+
+    async executeAuthorizedPathway(args) {
+        if (this.isCanceled()) throw new Error('Request canceled');
         const span = latencyTrace.start('resolver.executePathway', {
             requestId: this.requestId,
             rootRequestId: this.rootRequestId || undefined,
@@ -783,17 +813,17 @@ class PathwayResolver {
 
         // Get saved context from contextId or change contextId if needed
         const { contextId, useMemory } = args;
-        this.savedContextId = contextId ? contextId : uuidv4();
-        
+        this.savedContextId = args.memoryContextId || contextId || uuidv4();
+
         // Check if memory is enabled (default true for backward compatibility)
         const memoryEnabled = useMemory !== false;
-        
+
         const loadMemory = async () => {
             try {
                 // Always load savedContext (legacy feature)
                 this.savedContext = (getvWithDoubleDecryption && await getvWithDoubleDecryption(this.savedContextId, this.args?.contextKey)) || {};
                 this.initialState = { savedContext: this.savedContext };
-                
+
                 // Only load memory* sections if memory is enabled
                 if (memoryEnabled) {
                     const [memorySelf, memoryDirectives, memoryTopics, memoryUser, memoryContext] = await Promise.all([
@@ -834,7 +864,7 @@ class PathwayResolver {
         const saveChangedMemory = async () => {
             // Always save savedContext (legacy feature, not governed by useMemory)
             this.savedContextId = this.savedContextId || uuidv4();
-            
+
             const currentState = {
                 savedContext: this.savedContext,
             };
@@ -846,7 +876,7 @@ class PathwayResolver {
 
         const MAX_RETRIES = 3;
         let data = null;
-        
+
         for (let retries = 0; retries < MAX_RETRIES; retries++) {
             const loadMemorySpan = latencyTrace.start('resolver.loadMemory', {
                 requestId: this.requestId,
@@ -863,7 +893,7 @@ class PathwayResolver {
                 memoryUserChars: this.memoryUser?.length || 0,
                 memoryContextChars: this.memoryContext?.length || 0,
             });
-            
+
             data = await this.processRequest(args);
             if (!data) {
                 break;
@@ -990,20 +1020,20 @@ class PathwayResolver {
 
         // find the longest prompt
         const maxPromptTokenLength = Math.max(...this.prompts.map((promptData) => this.modelExecutor.plugin.getCompiledPrompt('', this.args, promptData).tokenLength));
-        
+
         // find out if any prompts use both text input and previous result
         const hasBothProperties = this.prompts.some(prompt => prompt.usesTextInput && prompt.usesPreviousResult);
-        
+
         let chunkMaxTokenLength = this.modelExecutor.plugin.getModelMaxPromptTokens() - maxPromptTokenLength - 1;
-        
+
         // if we have to deal with prompts that have both text input
         // and previous result, we need to split the maxChunkToken in half
         chunkMaxTokenLength = hasBothProperties ? chunkMaxTokenLength / 2 : chunkMaxTokenLength;
-        
+
         return chunkMaxTokenLength;
     }
 
-    // Process the request and return the result        
+    // Process the request and return the result
     async processRequest({ text, ...parameters }) {
         const span = latencyTrace.start('resolver.processRequest', {
             requestId: this.requestId,
@@ -1027,9 +1057,9 @@ class PathwayResolver {
             textChars: typeof text === 'string' ? text.length : undefined,
         });
 
-        let anticipatedRequestCount = chunks.length * this.prompts.length   
+        let anticipatedRequestCount = chunks.length * this.prompts.length
 
-        if ((requestState[this.requestId] || {}).canceled) {
+        if (this.isCanceled()) {
             clearPendingMessages(this.requestId);
             throw new Error('Request canceled');
         }
@@ -1037,7 +1067,7 @@ class PathwayResolver {
         // Store the request state
         requestState[this.requestId] = { ...requestState[this.requestId], totalCount: anticipatedRequestCount, completedCount: 0 };
 
-        if (chunks.length > 1) { 
+        if (chunks.length > 1) {
             // stream behaves as async if there are multiple chunks
             if (parameters.stream) {
                 parameters.async = true;
@@ -1066,7 +1096,7 @@ class PathwayResolver {
                 const currentParameters = { ...parameters, previousResult };
 
                 if (currentParameters.stream) { // stream special flow
-                    if (i < this.prompts.length - 1) { 
+                    if (i < this.prompts.length - 1) {
                         currentParameters.stream = false; // if not the last prompt then don't stream
                     }
                     else {
@@ -1147,9 +1177,9 @@ class PathwayResolver {
     }
 
     async applyPrompt(prompt, text, parameters) {
-        if (requestState[this.requestId].canceled) {
+        if (this.isCanceled()) {
             clearPendingMessages(this.requestId);
-            return;
+            throw new Error('Request canceled');
         }
         const span = latencyTrace.start('resolver.applyPrompt', {
             requestId: this.requestId,
@@ -1179,7 +1209,7 @@ class PathwayResolver {
                 resultChars: typeof result === 'string' ? result.length : undefined,
             });
         }
-        
+
         requestState[this.requestId].completedCount++;
 
         if (parameters.async) {

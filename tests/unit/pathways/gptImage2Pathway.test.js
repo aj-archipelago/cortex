@@ -87,10 +87,6 @@ test("media_generate GPT Image 2 size table satisfies Azure constraints", (t) =>
   }
 });
 
-test("media_generate normalizes GPT Image 2 responses through the OpenAI image normalizer", (t) => {
-  t.regex(String(mediaGenerate.executePathway), /pathwayName === ["']image_gpt_image_2["']/);
-  t.regex(String(mediaGenerate.executePathway), /normalizeOpenAIImageResponse\(result\)/);
-});
 
 test("OPENAI-DALLE3 plugin supports GPT Image 2 generation and edit request contracts", async (t) => {
   const src = await readFile(

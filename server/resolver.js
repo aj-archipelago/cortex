@@ -1,3 +1,6 @@
+import { armRequestDeadline, clearRequestDeadline, cancelLocalRequest } from './requestCancellation.js';
+import { publishRequestCancellation } from '../lib/redisSubscription.js';
+import { getStorageGrant, verifyStorageGrant, withStorageGrant } from '../helper-apps/cortex-file-handler/src/security/storageGrant.js';
 import { fulfillWithTimeout } from '../lib/promiser.js';
 import { PathwayResolver } from './pathwayResolver.js';
 import CortexResponse from '../lib/cortexResponse.js';
@@ -5,6 +8,7 @@ import logger, { withRequestLoggingDisabled } from '../lib/logger.js';
 import { sanitizeBase64 } from '../lib/util.js';
 import { recordClientToolHeartbeat, resolveClientToolCallback } from './clientToolCallbacks.js';
 import { queueUserMessage } from './pendingUserMessages.js';
+import { withAssistantExecutionUser } from '../lib/assistantExecution.js';
 
 /** GraphQL declares pathway errors/warnings as [String]; coerce any accumulated values. */
 function coerceGraphqlStringList(values) {
@@ -31,18 +35,23 @@ const rootResolver = async (parent, args, contextValue, info) => {
     const { temperature, enableGraphqlCache } = pathway;
 
     // Turn on graphql caching if enableGraphqlCache true and temperature is 0
-    if (enableGraphqlCache && temperature == 0) { // || 
+    if (enableGraphqlCache && temperature == 0 && !contextValue.req?.headers?.['x-cfh-grant'] && !getStorageGrant()) {
         info.cacheControl.setCacheHint({ maxAge: 60 * 60 * 24, scope: 'PUBLIC' });
     }
 
-    const pathwayResolver = new PathwayResolver({ config, pathway, args });
+    const incomingGrant = contextValue.req?.headers?.['x-cfh-grant'];
+    const inheritedGrant = getStorageGrant();
+    const storageGrant = inheritedGrant || (incomingGrant ? { token: incomingGrant, claims: verifyStorageGrant(incomingGrant) } : null);
+    const pathwayResolver = withStorageGrant(storageGrant, () => new PathwayResolver({ config, pathway, args }));
     contextValue.pathwayResolver = pathwayResolver;
+    armRequestDeadline(pathwayResolver.requestId, contextValue.req?.headers?.['x-cortex-deadline']);
 
     // Execute the request with timeout
     let result = null;
 
     try {
-        const execWithTimeout = () => fulfillWithTimeout(pathway.resolver(parent, args, contextValue, info), pathway.timeout);
+        const executionUser = storageGrant?.claims?.sub || args.fileAccessPlan?.find?.(target => target.userContextId)?.userContextId || (['sys_assistant_artifact', 'sys_colleague_watch'].includes(pathway.name) ? args.userId : null);
+        const execWithTimeout = () => withStorageGrant(storageGrant, () => withAssistantExecutionUser(executionUser, () => fulfillWithTimeout(pathway.resolver(parent, args, contextValue, info), pathway.timeout)));
         if (pathway.requestLoggingDisabled === true) {
             result = await withRequestLoggingDisabled(() => execWithTimeout());
         } else {
@@ -53,6 +62,8 @@ const rootResolver = async (parent, args, contextValue, info) => {
         result = error.message || error.toString();
     }
 
+    if (!args.async && !args.stream) clearRequestDeadline(pathwayResolver.requestId);
+
     if (result instanceof CortexResponse) {
         // Use the smart mergeResultData method that handles CortexResponse objects
         pathwayResolver.pathwayResultData = pathwayResolver.mergeResultData(result);
@@ -60,9 +71,9 @@ const rootResolver = async (parent, args, contextValue, info) => {
     }
 
     let resultData = pathwayResolver.pathwayResultData ? JSON.stringify(pathwayResolver.pathwayResultData) : null;
-    
-    const { warnings, errors, previousResult, savedContextId, tool } = pathwayResolver;    
-    
+
+    const { warnings, errors, previousResult, savedContextId, tool } = pathwayResolver;
+
     // Add request parameters back as debug - sanitize base64 data before returning
     const debug = pathwayResolver.prompts.map(prompt => {
         if (!prompt.debugInfo) return '';
@@ -93,16 +104,16 @@ const rootResolver = async (parent, args, contextValue, info) => {
             return prompt.debugInfo;
         }
     }).join('\n').trim();
-    
-    return { 
-        debug, 
-        result, 
+
+    return {
+        debug,
+        result,
         resultData,
         warnings: coerceGraphqlStringList(warnings),
         errors: coerceGraphqlStringList(errors),
-        previousResult, 
-        tool, 
-        contextId: savedContextId 
+        previousResult,
+        tool,
+        contextId: savedContextId
     }
 }
 
@@ -112,19 +123,19 @@ const resolver = async (parent, args, contextValue, _info) => {
     return await pathwayResolver.resolve(args);
 }
 
-const cancelRequestResolver = (parent, args, contextValue, _info) => {
+const cancelRequestResolver = async (parent, args, contextValue, _info) => {
     const { requestId } = args;
     const { requestState } = contextValue;
-    requestState[requestId] = { ...requestState[requestId], canceled: true };
-    requestState[requestId]?.abortRequest?.();
+    cancelLocalRequest(requestId, requestState);
+    await publishRequestCancellation(requestId);
     return true
 }
 
 const submitClientToolResultResolver = async (parent, args, contextValue, _info) => {
     const { requestId, toolCallbackId, result, success } = args;
-    
+
     logger.info(`Received client tool result submission: requestId=${requestId}, toolCallbackId=${toolCallbackId}, success=${success}`);
-    
+
     try {
         // Parse the result if it's a string
         let parsedResult = result;
@@ -133,19 +144,19 @@ const submitClientToolResultResolver = async (parent, args, contextValue, _info)
         } catch (e) {
             // If parsing fails, use the string as-is
         }
-        
+
         // Resolve the waiting callback (now async, publishes to Redis if available)
         const resolved = await resolveClientToolCallback(toolCallbackId, {
             success,
             data: parsedResult,
             error: !success ? (parsedResult.error || 'Tool execution failed') : null
         });
-        
+
         if (!resolved) {
             logger.warn(`Failed to publish/resolve callback for toolCallbackId: ${toolCallbackId}`);
             return false;
         }
-        
+
         logger.info(`Successfully published/resolved client tool callback: ${toolCallbackId}`);
         return true;
     } catch (error) {

@@ -2,32 +2,27 @@
 // Tool pathway that handles cognitive search across various indexes
 import { callPathway } from '../../../../lib/pathwayTools.js';
 import logger from '../../../../lib/logger.js';
+import { config } from '../../../../config.js';
 import { getSearchResultId } from '../../../../lib/util.js';
 
 const INDEX_MAP = {
-    'aja': 'idx-ucms-aja',
-    'aje': 'idx-ucms-aje',
-    'ajb': 'idx-ucms-ajb',
-    'ajm': 'idx-ucms-ajm',
-    'aj360': 'idx-ucms-aj360',
-    'ajd': 'idx-ucms-ajd',
-    'chinese': 'idx-ucms-chinese',
-    'sanad': 'idx-ucms-sanad',
-    'wires': 'idx-wires'
+    ...config.get('cognitiveSearchIndexes'),
+    ...(process.env.CORTEX_NEWS_EN_INDEX ? { news_en: process.env.CORTEX_NEWS_EN_INDEX } : {}),
+    ...(process.env.CORTEX_NEWS_AR_INDEX ? { news_ar: process.env.CORTEX_NEWS_AR_INDEX } : {}),
 };
 const VALID_INDEXES = Object.keys(INDEX_MAP);
 const VALID_INDEXES_MESSAGE = VALID_INDEXES.join(', ');
 
-export const resolveToolIndexName = ({ index, indexName } = {}) => {
+export const resolveToolIndexName = ({ index, indexName } = {}, indexMap = INDEX_MAP) => {
     const logicalIndex = typeof index === 'string' ? index.toLowerCase() : '';
     if (logicalIndex) {
-        return INDEX_MAP[logicalIndex] || '';
+        return indexMap[logicalIndex] || '';
     }
 
     const suppliedIndexName = typeof indexName === 'string' ? indexName.trim() : '';
     if (!suppliedIndexName) return '';
 
-    return INDEX_MAP[suppliedIndexName.toLowerCase()] || suppliedIndexName;
+    return indexMap[suppliedIndexName.toLowerCase()] || suppliedIndexName;
 };
 
 const SEARCH_PARAMS = {

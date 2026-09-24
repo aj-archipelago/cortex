@@ -15,7 +15,7 @@ test.beforeEach(t => {
     const mockModel = {
         name: 'azure-foundry-agents',
         type: 'AZURE-FOUNDRY-AGENTS',
-        url: 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry',
+        url: 'https://example-foundry-resource.services.ai.azure.com/api/projects/example-foundry',
         headers: {
             'Content-Type': 'application/json'
         },
@@ -78,7 +78,7 @@ test('should create correct request parameters', t => {
         messages: [{ role: 'user', content: text }]
     };
 
-    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.baseUrl = 'https://example-foundry-resource.services.ai.azure.com/api/projects/example-foundry';
     plugin.assistantId = 'asst_testid';
     const result = plugin.getRequestParameters(text, parameters, prompt);
 
@@ -91,7 +91,7 @@ test('should use custom instructions from parameters', t => {
     const { plugin } = t.context;
     const text = 'Hello, can you help me?';
     const customInstructions = 'You are a specialized search agent.';
-    const parameters = { 
+    const parameters = {
         stream: false,
         instructions: customInstructions
     };
@@ -101,7 +101,7 @@ test('should use custom instructions from parameters', t => {
         messages: [{ role: 'user', content: text }]
     };
 
-    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.baseUrl = 'https://example-foundry-resource.services.ai.azure.com/api/projects/example-foundry';
     plugin.assistantId = 'asst_testid';
     const result = plugin.getRequestParameters(text, parameters, prompt);
 
@@ -127,7 +127,7 @@ test('should use custom tools from parameters', t => {
             }
         }
     ];
-    const parameters = { 
+    const parameters = {
         stream: false,
         tools: customTools
     };
@@ -137,7 +137,7 @@ test('should use custom tools from parameters', t => {
         messages: [{ role: 'user', content: text }]
     };
 
-    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.baseUrl = 'https://example-foundry-resource.services.ai.azure.com/api/projects/example-foundry';
     plugin.assistantId = 'asst_testid';
     const result = plugin.getRequestParameters(text, parameters, prompt);
 
@@ -147,7 +147,7 @@ test('should use custom tools from parameters', t => {
 test('should use custom parallel_tool_calls from parameters', t => {
     const { plugin } = t.context;
     const text = 'Hello, can you help me?';
-    const parameters = { 
+    const parameters = {
         stream: false,
         parallel_tool_calls: false
     };
@@ -157,7 +157,7 @@ test('should use custom parallel_tool_calls from parameters', t => {
         messages: [{ role: 'user', content: text }]
     };
 
-    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.baseUrl = 'https://example-foundry-resource.services.ai.azure.com/api/projects/example-foundry';
     plugin.assistantId = 'asst_testid';
     const result = plugin.getRequestParameters(text, parameters, prompt);
 
@@ -174,7 +174,7 @@ test('should not include tools or parallel_tool_calls when not provided', t => {
         messages: [{ role: 'user', content: text }]
     };
 
-    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.baseUrl = 'https://example-foundry-resource.services.ai.azure.com/api/projects/example-foundry';
     plugin.assistantId = 'asst_testid';
     const result = plugin.getRequestParameters(text, parameters, prompt);
 
@@ -201,7 +201,7 @@ test('should handle Bing grounding tools with custom search parameters', t => {
             }
         }
     ];
-    const parameters = { 
+    const parameters = {
         stream: false,
         tools: customTools
     };
@@ -211,7 +211,7 @@ test('should handle Bing grounding tools with custom search parameters', t => {
         messages: [{ role: 'user', content: text }]
     };
 
-    plugin.baseUrl = 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry';
+    plugin.baseUrl = 'https://example-foundry-resource.services.ai.azure.com/api/projects/example-foundry';
     plugin.assistantId = 'asst_testid';
     const result = plugin.getRequestParameters(text, parameters, prompt);
 
@@ -283,7 +283,7 @@ test('should return empty string for null response', t => {
 test('should return correct Azure Foundry Agents endpoint', t => {
     const { plugin } = t.context;
     const url = plugin.requestUrl();
-    t.is(url, 'https://archipelago-foundry-resource.services.ai.azure.com/api/projects/archipelago-foundry');
+    t.is(url, 'https://example-foundry-resource.services.ai.azure.com/api/projects/example-foundry');
 });
 
 test('should be able to access azureAuthTokenHelper from config', (t) => {
@@ -309,7 +309,7 @@ test('should be able to access azureAuthTokenHelper from config', (t) => {
 
   // Create plugin instance
   const plugin = new AzureFoundryAgentsPlugin(mockPathway, mockModel);
-  
+
   // Mock the config property
   plugin.config = mockConfig;
 
@@ -319,27 +319,64 @@ test('should be able to access azureAuthTokenHelper from config', (t) => {
   t.is(typeof authHelper.getAccessToken, 'function');
 });
 
-test('should handle missing azureAuthTokenHelper gracefully', (t) => {
-  // Mock config without azureAuthTokenHelper
-  const mockConfig = {
-    get: (key) => null
+test('should reject requests when azureAuthTokenHelper is missing', async (t) => {
+  const { plugin } = t.context;
+  plugin.config = { get: () => null };
+
+  await t.throwsAsync(
+    plugin.getAzureAccessToken(),
+    { message: 'azureAuthTokenHelper is not configured' },
+  );
+});
+
+test('should propagate Azure token acquisition failures', async (t) => {
+  const { plugin } = t.context;
+  let requestExecuted = false;
+  plugin.config = {
+    get: () => ({
+      getAccessToken: async () => {
+        throw new Error('managed identity unavailable');
+      },
+    }),
+  };
+  plugin.executeRequest = async () => {
+    requestExecuted = true;
   };
 
-  // Mock pathway and model
-  const mockPathway = {};
-  const mockModel = {
-    url: 'https://test.azure.com/api/projects/test',
-    agentId: 'test-agent-id',
-    headers: { 'Content-Type': 'application/json' }
+  await t.throwsAsync(
+    plugin.execute(
+      'Hello',
+      { stream: false },
+      { messages: [{ role: 'user', content: 'Hello' }] },
+      {
+        url: 'https://test.azure.com/api/projects/test',
+        params: { assistant_id: 'test-agent-id' },
+        headers: {},
+      },
+    ),
+    { message: 'managed identity unavailable' },
+  );
+  t.false(requestExecuted);
+});
+
+test('should authenticate every initial Foundry request', async (t) => {
+  const { plugin } = t.context;
+  plugin.config = {
+    get: () => ({ getAccessToken: async () => 'managed-identity-token' }),
+  };
+  plugin.executeRequest = async (cortexRequest) => {
+    t.is(cortexRequest.headers.Authorization, 'Bearer managed-identity-token');
+    return {};
   };
 
-  // Create plugin instance
-  const plugin = new AzureFoundryAgentsPlugin(mockPathway, mockModel);
-  
-  // Mock the config property
-  plugin.config = mockConfig;
-
-  // Test that we can access the auth helper (should be null)
-  const authHelper = plugin.config.get('azureAuthTokenHelper');
-  t.is(authHelper, null);
+  await plugin.execute(
+    'Hello',
+    { stream: false },
+    { messages: [{ role: 'user', content: 'Hello' }] },
+    {
+      url: 'https://test.azure.com/api/projects/test',
+      params: { assistant_id: 'test-agent-id' },
+      headers: {},
+    },
+  );
 });

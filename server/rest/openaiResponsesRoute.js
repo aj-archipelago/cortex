@@ -4,6 +4,7 @@
 import pubsub from '../pubsub.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../../lib/logger.js';
+import { markWeeklyCostUpstreamRejected } from './weeklyCostMiddleware.js';
 import { processRestRequest } from './processRestRequest.js';
 import {
     startSSEStream,
@@ -12,6 +13,7 @@ import {
     resolveModelName,
     handleModelNotFound,
     extractResponseData,
+    readErrorResponseData,
     normalizeUsage,
     normalizeResponseOutputText,
     parseToolCalls,
@@ -106,6 +108,7 @@ const withOutputTextAlias = (responseBody) => {
  */
 const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
     const requestId = uuidv4();
+    req.cortexUsageRequestId = requestId;
     const model = modelEndpoints[pathwayModelName];
     const endpoint = selectEndpoint(model);
 
@@ -141,6 +144,7 @@ const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
     try {
         // Rate limit via endpoint limiter
         const response = await endpoint.limiter.schedule(buildLimiterScheduleOptions(requestId), async () => {
+            req.weeklyCostUpstreamStarted = true;
             return axios({
                 method: 'POST',
                 url,
@@ -182,6 +186,7 @@ const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
                         const eventType = parsed?.type;
                         if (
                             eventType === 'response.completed' ||
+                            eventType === 'response.incomplete' ||
                             eventType === 'response.done' ||
                             eventType === 'response.failed' ||
                             eventType === 'response.cancelled'
@@ -250,16 +255,33 @@ const handleResponsesPassthrough = async (req, res, pathwayModelName) => {
         });
 
     } catch (error) {
+        markWeeklyCostUpstreamRejected(req, error);
         const status = error.response?.status || 500;
+        let responseData = error.response?.data;
+        try {
+            responseData = await readErrorResponseData(responseData);
+        } catch (streamError) {
+            logger.warn(`[${requestId}] Could not read Responses API error stream: ${streamError.message}`);
+        }
+
         // Safely extract error data - avoid circular references from axios response objects
-        let errorData;
-        if (error.response?.data && typeof error.response.data === 'object') {
-            errorData = {
-                type: error.response.data.type || 'error',
-                message: error.response.data.error?.message || error.response.data.message || error.message
-            };
-        } else {
-            errorData = { type: 'error', message: error.message };
+        const providerError = responseData?.error;
+        const errorData = {
+            type: responseData?.type || providerError?.type || 'error',
+            message: providerError?.message || responseData?.message || responseData?.rawContent || error.message
+        };
+        if (providerError?.code != null) {
+            errorData.code = providerError.code;
+        }
+        if (providerError?.param != null) {
+            errorData.param = providerError.param;
+        }
+
+        if (responseData) {
+            const responseDataText = typeof responseData === 'string'
+                ? responseData
+                : JSON.stringify(responseData);
+            logger.error(`[${requestId}] Responses API error response: ${responseDataText.substring(0, 2000)}`);
         }
 
         logger.error(`[${requestId}] Responses API passthrough error: ${status} ${errorData.message}`);
@@ -918,12 +940,14 @@ function registerOpenAIResponsesRoute(app, pathways, openAIChatModels, openAICom
 
         // Handle streaming for Responses API - must be done before processRestRequest completes
         if (Boolean(req.body.stream)) {
+            req.weeklyCostUpstreamStarted = true;
             const streamResponse = await processRestRequest(server, { body: requestBody }, pathway, pathwayName);
             const { resultText: requestId } = extractResponseData(streamResponse);
             processIncomingResponsesStream(requestId, req, res, pathway, modelName, responseId);
             return;
         }
 
+        req.weeklyCostUpstreamStarted = true;
         const pathwayResponse = await processRestRequest(server, { body: requestBody }, pathway, pathwayName);
         const { resultText, resultData } = extractResponseData(pathwayResponse);
         const { messageContent, toolCalls, functionCall, usage } = parseToolCalls(resultData, resultText);

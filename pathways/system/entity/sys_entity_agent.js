@@ -1,7 +1,14 @@
+import { getStorageGrant } from '../../../helper-apps/cortex-file-handler/src/security/storageGrant.js';
+import { canAccessEntity, entityMemoryContextId, getEntityPreferences, memoryArgs } from '../../../lib/entityPreferences.js';
+import { assistantMaterialContext } from '../../../lib/colleagues.js';
+import { CONCIERGE_AGENT_TOOL_NAMES, isLiveMediaStatus, mediaTaskPresentation } from '../../../lib/mediaAgentTools.js';
+import { getAssistantYield } from '../../../lib/assistantHandoffs.js';
+import { buildGroundingInstructions } from '../../../lib/citationInstructions.js';
 // sys_entity_agent.js
 // Agentic extension of the entity system that uses OpenAI's tool calling API
 const TOOL_BUDGET = 500;
 const DEFAULT_TOOL_COST = 10;
+const CONTEXT_FILE_READ_COST = 100;
 const MAX_TOOL_CALLBACK_ITERATIONS = 75; // Hard cap on tool callback iterations (includes post-limit retries)
 const TOOL_TIMEOUT_MS = 120000; // 2 minute timeout per tool call
 const MAX_TOOL_RESULT_LENGTH = 50000; // Truncate oversized tool results to prevent context overflow
@@ -28,6 +35,7 @@ import { publishRequestProgress } from '../../../lib/redisSubscription.js';
 import logger from '../../../lib/logger.js';
 import { config } from '../../../config.js';
 import { syncAndStripFilesFromChatHistory } from '../../../lib/fileUtils.js';
+import { runWithFreshImageUrls } from '../../../lib/imageUrlLifecycle.js';
 import { Prompt } from '../../../server/prompt.js';
 import {
     buildLocalToolCatalog,
@@ -35,14 +43,22 @@ import {
     getToolsForEntity,
     loadEntityConfig,
     resolveExplicitEntityConfig,
+    resolvePersonalEntityConfig,
+    toOpenAiToolDefinition,
 } from './tools/shared/sys_entity_tools.js';
 import { registerRequestScopedTools } from './tools/shared/request_scoped_tools.js';
 import { getEntityStore } from '../../../lib/MongoEntityStore.js';
+import { workspaceCheckpointReviewInstructions } from './tools/shared/workspace_checkpoint_safety.js';
 import CortexResponse from '../../../lib/cortexResponse.js';
-import { initializeMcpClients, discoverMcpTools, closeMcpClients, isTokenExpired } from '../../../lib/mcpClient.js';
+import { initializeMcpClients, discoverMcpTools, closeMcpClients, isTokenExpired, createMcpToolDiscovery } from '../../../lib/mcpClient.js';
 import { drainPendingMessages, hasPendingMessages, clearPendingMessages } from '../../../server/pendingUserMessages.js';
 import { normalizeUsage } from '../../../server/rest/restUtils.js';
 import latencyTrace from '../../../lib/latencyTrace.js';
+import {
+    appendAgentContextFileAccessPlan,
+    appendAgentContextInstructions,
+    loadAgentContext,
+} from '../../../lib/agentContext.js';
 
 function parseBoundedFloat(value, fallback, min, max) {
     const parsed = Number.parseFloat(value);
@@ -58,10 +74,10 @@ function parsePositiveInt(value, fallback) {
 // Helper function to generate a smart error response using the agent
 async function generateErrorResponse(error, args, pathwayResolver) {
     const errorMessage = error?.message || error?.toString() || String(error);
-    
+
     // Clear any accumulated errors since we're handling them intelligently
     pathwayResolver.errors = [];
-    
+
     // Use sys_generator_error to create a smart response
     try {
         const errorResponse = await callPathway('sys_generator_error', {
@@ -70,7 +86,7 @@ async function generateErrorResponse(error, args, pathwayResolver) {
             chatHistory: args.chatHistory || [],
             stream: false
         }, pathwayResolver);
-        
+
         return errorResponse;
     } catch (errorResponseError) {
         // Fallback if sys_generator_error itself fails
@@ -83,20 +99,20 @@ async function generateErrorResponse(error, args, pathwayResolver) {
 function insertSystemMessage(messages, text, requestId = null) {
     // Create a unique marker to avoid collisions with legitimate content
     const marker = requestId ? `[system message: ${requestId}]` : '[system message]';
-    
+
     // Remove any existing challenge messages with this specific requestId to avoid spamming the model
     const filteredMessages = messages.filter(msg => {
         if (msg.role !== 'user') return true;
         const content = typeof msg.content === 'string' ? msg.content : '';
         return !content.startsWith(marker);
     });
-    
+
     // Insert the new system message
     filteredMessages.push({
         role: "user",
         content: `${marker} ${text}`
     });
-    
+
     return filteredMessages;
 }
 
@@ -590,6 +606,30 @@ function summarizeWorkspaceEnvelope(payload) {
 function shapeWorkspaceToolResult(rawResult, pathwayResolver, toolFunction, options = {}) {
     if (!rawResult || typeof rawResult !== 'object') {
         return null;
+    }
+
+    if (toolFunction === 'workspacessh' && rawResult.success !== false && !rawResult.error && Array.isArray(rawResult.jobs)) {
+        const content = JSON.stringify(rawResult);
+        const preview = buildArtifactPreview(pathwayResolver, toolFunction, 'content', content, {
+            maxInlineChars: TOOL_RESULT_DETAILED_INLINE_MAX,
+        });
+        const runningCount = rawResult.jobs.filter(job => job?.status === 'running').length;
+        const payload = {
+            ...buildToolResultEnvelopeBase(pathwayResolver, toolFunction, options),
+            kind: 'workspace-jobs',
+            success: rawResult.success,
+            summary: `Workspace jobs: ${runningCount} running, ${rawResult.jobs.length} total`,
+            contentPreview: preview.preview,
+            contentArtifactRef: preview.artifactRef,
+            contentTotalChars: preview.totalChars,
+            compacted: preview.truncated,
+        };
+        return finalizeToolResultEnvelope(payload, pathwayResolver, {
+            ...payload,
+            contentPreview: content,
+            contentArtifactRef: null,
+            compacted: false,
+        });
     }
 
     const payload = buildToolResultEnvelopeBase(pathwayResolver, toolFunction, options);
@@ -1213,13 +1253,15 @@ export default {
     useSingleTokenStream: false,
     manageTokenLength: false, // Agentic models handle context management themselves
     inputParameters: {
-        privateData: false,    
+        privateData: false,
         chatHistory: [{role: '', content: []}],
         fileAccessPlan: {
             type: 'array',
             items: { objType: 'FileAccessTargetInput' },
             default: [],
         },
+        agentContext: ``,
+        agentToolsToken: '',
         contextId: ``,
         contextKey: ``,
         chatId: ``,
@@ -1231,6 +1273,7 @@ export default {
         voiceResponse: false,
         entityId: ``,
         reasoningEffort: '',
+        citationFormat: 'markdown',
         userInfo: '',
         model: 'oai-gpt41',
         clientSideTools: {
@@ -1241,7 +1284,9 @@ export default {
         mcpConfig: '',
         mcpAvailableServers: ''
     },
-    timeout: 600,
+    // Client-side tools may run for up to 15 minutes. Leave headroom for the
+    // agent's model turns before and after the tool callback.
+    timeout: 1200,
 
     toolCallback: async (args, message, resolver) => {
         if (!args || !message || !resolver) {
@@ -1253,6 +1298,9 @@ export default {
         // can chain (callback1 → promptAndParse → fires callback2). We must NOT
         // close MCP clients until the LAST callback finishes.
         args._mcpToolCallbackFired = true;
+        // This object survives shallow copies of args made by the resolver.
+        // Once a callback starts, the callback chain owns connection cleanup.
+        if (args._mcpLifecycle) args._mcpLifecycle.callbackStarted = true;
         args._mcpActiveCallbacks = (args._mcpActiveCallbacks || 0) + 1;
 
         const resultHasToolCalls = (result) => (
@@ -1281,7 +1329,7 @@ export default {
         } else {
             tool_calls = [...(message.tool_calls || [])];
         }
-        
+
         const pathwayResolver = resolver;
         const { entityTools, entityToolsOpenAiFormat } = args;
 
@@ -1326,6 +1374,16 @@ export default {
         }
 
         const preToolCallMessages = JSON.parse(JSON.stringify(args.chatHistory || []));
+        // Commentary was already streamed to the user. Remember it once for
+        // the whole round, including parallel, cached, and failed tool calls.
+        const assistantContent = message instanceof CortexResponse ? message.output_text : message.content;
+        const hasAssistantContent = typeof assistantContent === 'string' ? assistantContent.trim().length > 0
+            : Array.isArray(assistantContent) && assistantContent.length > 0;
+        const lastMessage = preToolCallMessages.at(-1);
+        if (hasAssistantContent && !(lastMessage?.role === 'assistant'
+            && JSON.stringify(lastMessage.content) === JSON.stringify(assistantContent))) {
+            preToolCallMessages.push({ role: 'assistant', content: assistantContent });
+        }
         let finalMessages = JSON.parse(JSON.stringify(preToolCallMessages));
 
         if (!tool_calls || tool_calls.length === 0) {
@@ -1343,9 +1401,9 @@ export default {
                     // bail out if we're getting invalid tool calls
                     pathwayResolver.toolBudgetUsed = TOOL_BUDGET;
                 }
-                
+
                 const validToolCalls = tool_calls.filter(tc => tc && tc.function && tc.function.name);
-                
+
                 const toolResults = await Promise.all(validToolCalls.map(async (toolCall) => {
                     let toolArgs = {};
                     const toolNameLower = toolCall?.function?.name?.toLowerCase() || '';
@@ -1378,7 +1436,8 @@ export default {
 
                         // Duplicate tool call detection: check if this exact call has been made before
                         const cacheKey = `${toolCall.function.name}:${toolCall.function.arguments}`;
-                        const cacheEntry = pathwayResolver._toolCallCache.get(cacheKey);
+                        const cacheEntry = isLiveMediaStatus(toolFunction, toolEntry?.pathwayName, toolArgs)
+                            ? undefined : pathwayResolver._toolCallCache.get(cacheKey);
                         if (cacheEntry && cacheEntry.count >= MAX_DUPLICATE_TOOL_CALLS) {
                             logger.warn(`Duplicate tool call detected (${cacheEntry.count + 1}x): ${toolCall.function.name}`);
 
@@ -1397,7 +1456,7 @@ export default {
                             const toolCallId = toolCall.id;
                             if (!toolIsSilent) {
                                 try { await sendToolStart(requestId, toolCallId, toolIcon, toolUserMessage); } catch (e) { /* ignore */ }
-                                try { await sendToolFinish(requestId, toolCallId, true, null); } catch (e) { /* ignore */ }
+                                try { await sendToolFinish(requestId, toolCallId, true, null, mediaTaskPresentation(toolFunction, toolEntry?.pathwayName, toolArgs, cachedContent)); } catch (e) { /* ignore */ }
                             }
 
                             // Preserve thoughtSignature for Gemini 3+ models
@@ -1436,10 +1495,17 @@ export default {
                             callTool(toolFunction, {
                                 ...args,
                                 ...toolArgs,
-                                ...(toolFunction === 'workspacessh' ? {
-                                    _toolRequestId: requestId,
-                                    _parentToolCallId: toolCallId,
-                                } : {}),
+                                entityId: args.entityId,
+                                contextId: args.contextId,
+                                contextKey: args.contextKey,
+                                fileAccessPlan: args.fileAccessPlan,
+                                memoryContextId: args.memoryContextId,
+                                memoryLearning: args.memoryLearning,
+                                agentToolsToken: args.agentToolsToken,
+                                _agentToolParameters: CONCIERGE_AGENT_TOOL_NAMES.has(toolFunction) ? toolArgs : undefined,
+                                _toolRequestId: requestId,
+                                _parentToolCallId: toolCallId,
+                                _permissionToolParameters: toolArgs,
                                 toolFunction,
                                 chatHistory: toolMessages,
                                 stream: false,
@@ -1546,7 +1612,10 @@ export default {
                                                 url: toolImage.url,
                                                 gcs: toolImage.gcs,
                                                 image_url: toolImage.image_url,
-                                                originalFilename: toolImage.originalFilename
+                                                originalFilename: toolImage.originalFilename,
+                                                blobPath: toolImage.blobPath,
+                                                _contextId: toolImage._contextId,
+                                                mimeType: toolImage.mimeType
                                             };
                                         } else {
                                             // Fallback for any other format
@@ -1567,7 +1636,7 @@ export default {
                         // We need to check if result has an error field
                         let hasError = false;
                         let errorMessage = null;
-                        
+
                         if (toolResult?.error !== undefined) {
                             // Direct error from callTool (e.g., tool returned null)
                             hasError = true;
@@ -1609,19 +1678,19 @@ export default {
                                 }
                             }
                         }
-                        
+
                         // Send tool finish message
                         if (!toolIsSilent) {
                             try {
-                                await sendToolFinish(requestId, toolCallId, !hasError, errorMessage);
+                                await sendToolFinish(requestId, toolCallId, !hasError, errorMessage, !hasError ? mediaTaskPresentation(toolFunction, toolEntry?.pathwayName, toolArgs, toolResult) : {});
                             } catch (finishError) {
                                 logger.error(`Error sending tool finish message: ${finishError.message}`);
                                 // Continue execution even if finish message fails
                             }
                         }
 
-                        return { 
-                            success: !hasError, 
+                        return {
+                            success: !hasError,
                             result: toolResult,
                             error: errorMessage,
                             toolCall,
@@ -1633,7 +1702,7 @@ export default {
                         // Detect if this is a timeout error for clearer logging
                         const isTimeout = error.message?.includes('timed out');
                         logger.error(`${isTimeout ? 'Timeout' : 'Error'} executing tool ${toolCall?.function?.name || 'unknown'}: ${error.message}`);
-                        
+
                         // Send tool finish message (error)
                         // Get requestId and toolCallId if not already defined (in case error occurred before they were set)
                         const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
@@ -1646,7 +1715,7 @@ export default {
                                 // Continue execution even if finish message fails
                             }
                         }
-                        
+
                         // Create error message history
                         const errorMessages = JSON.parse(JSON.stringify(preToolCallMessages));
                         // Preserve thoughtSignature for Gemini 3+ models
@@ -1673,8 +1742,8 @@ export default {
                             content: `Error: ${error.message}`
                         });
 
-                        return { 
-                            success: false, 
+                        return {
+                            success: false,
                             error: error.message,
                             toolCall,
                             toolArgs,
@@ -1701,6 +1770,19 @@ export default {
                 }
 
                 // Check if any tool calls failed
+                const assistantYield = getAssistantYield(toolResults, entityTools);
+                if (assistantYield) {
+                    const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+                    pathwayResolver.pathwayResultData ||= {};
+                    pathwayResolver.pathwayResultData.assistantWaiting = true;
+                    publishRequestProgress({ requestId, progress: 1,
+                        data: JSON.stringify(assistantYield),
+                        info: JSON.stringify(pathwayResolver.pathwayResultData), error: '' });
+                    await closeMcpClientsIfNeeded();
+                    return assistantYield;
+                }
+
+                // Check if any tool calls failed
                 const failedTools = toolResults.filter(result => result && !result.success);
                 if (failedTools.length > 0) {
                     logger.warn(`Some tool calls failed: ${failedTools.map(t => t.error).join(', ')}`);
@@ -1711,7 +1793,18 @@ export default {
                 const budgetCost = toolResults.reduce((sum, r) => {
                     if (!r) return sum;
                     const def = entityTools[r.toolFunction]?.definition;
-                    return sum + Math.max(1, def?.toolCost ?? DEFAULT_TOOL_COST);
+                    const contextFileRef = r.toolFunction === 'filecollection'
+                        && r.toolArgs?.fileRef?.startsWith('context-file:')
+                        && r.toolArgs?.query
+                        ? r.toolArgs.fileRef
+                        : null;
+                    if (!contextFileRef) {
+                        return sum + Math.max(1, def?.toolCost ?? DEFAULT_TOOL_COST);
+                    }
+                    pathwayResolver.contextFileRefsRead ||= new Set();
+                    const repeated = pathwayResolver.contextFileRefsRead.has(contextFileRef);
+                    pathwayResolver.contextFileRefsRead.add(contextFileRef);
+                    return sum + (repeated ? TOOL_BUDGET : CONTEXT_FILE_READ_COST);
                 }, 0);
                 pathwayResolver.toolBudgetUsed = (pathwayResolver.toolBudgetUsed || 0) + budgetCost;
 
@@ -1733,7 +1826,9 @@ export default {
                     return toolDefinition?.handoff === true;
                 });
 
-            } else {
+            }
+
+            if (pathwayResolver.toolBudgetUsed >= TOOL_BUDGET) {
                 const requestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
                 finalMessages = insertSystemMessage(finalMessages,
                     "Maximum tool call limit reached - no more tool calls will be executed. Provide your response based on the information gathered so far.",
@@ -1805,11 +1900,11 @@ export default {
 
             try {
                 const beforePromptUsage = usageMarker(getLatestPathwayUsage(pathwayResolver));
-                let result = await pathwayResolver.promptAndParse({
+                let result = await runWithFreshImageUrls({
                     ...args,
                     tools: atToolLimit ? undefined : entityToolsOpenAiFormat,
                     tool_choice: atToolLimit ? "none" : "auto",
-                });
+                }, pathwayResolver, next => pathwayResolver.promptAndParse(next), { isCanceled: () => isResolverCanceled(pathwayResolver) });
                 rememberPromptTokenUsage(pathwayResolver, args.chatHistory, buildPromptUsageOptions(args, atToolLimit ? undefined : entityToolsOpenAiFormat, {
                     tool_choice: atToolLimit ? 'none' : 'auto',
                 }), result, beforePromptUsage);
@@ -1882,11 +1977,11 @@ export default {
 
                     const rerunAtLimit = pathwayResolver.toolBudgetUsed >= TOOL_BUDGET;
                     const beforeRerunUsage = usageMarker(getLatestPathwayUsage(pathwayResolver));
-                    result = await pathwayResolver.promptAndParse({
+                    result = await runWithFreshImageUrls({
                         ...args,
                         tools: rerunAtLimit ? undefined : entityToolsOpenAiFormat,
                         tool_choice: rerunAtLimit ? "none" : "auto",
-                    });
+                    }, pathwayResolver, next => pathwayResolver.promptAndParse(next), { isCanceled: () => isResolverCanceled(pathwayResolver) });
                     rememberPromptTokenUsage(pathwayResolver, args.chatHistory, buildPromptUsageOptions(args, rerunAtLimit ? undefined : entityToolsOpenAiFormat, {
                         tool_choice: rerunAtLimit ? 'none' : 'auto',
                     }), result, beforeRerunUsage);
@@ -1936,7 +2031,7 @@ export default {
             }
         }
     },
-  
+
     executePathway: async ({args, runAllPrompts, resolver}) => {
         let pathwayResolver = resolver;
         const traceBase = {
@@ -1958,17 +2053,18 @@ export default {
             reasoningEffort: reasoningEffortOverride,
             clientSideTools,
             mcpConfig,
-            mcpAvailableServers
+            mcpAvailableServers,
+            agentContext,
         } = { ...pathwayResolver.pathway.inputParameters, ...args };
 
-        const userId =
+        const userId = getStorageGrant()?.claims.sub || (
             Array.isArray(args.fileAccessPlan) &&
             args.fileAccessPlan.length > 0
                 ? (
                     args.fileAccessPlan.find((target) => target?.userContextId)
                         || args.fileAccessPlan[0]
                 )?.userContextId || null
-                : null;
+                : null);
 
         // Parse clientSideTools if it's a string (from GraphQL)
         if (typeof clientSideTools === 'string') {
@@ -1981,13 +2077,17 @@ export default {
         }
 
         let entityConfig = null;
+        const personalEntityName = args.aiName || null;
         if (entityId) {
             const entityResolveSpan = latencyTrace.start('sysEntity.resolveExplicitEntity', {
                 ...traceBase,
                 entityId,
                 userId,
             });
-            const resolvedEntity = await resolveExplicitEntityConfig(entityId, { userId });
+            const resolvedEntity = await resolveExplicitEntityConfig(entityId, {
+                userId,
+                personalEntityName,
+            });
             latencyTrace.end(entityResolveSpan, {
                 disabled: Boolean(resolvedEntity?.disabled),
                 resolvedEntityId: resolvedEntity?.entityId,
@@ -1996,7 +2096,7 @@ export default {
             if (resolvedEntity?.disabled) {
                 latencyTrace.end(preflightSpan, { earlyReturn: 'disabledEntity' });
                 return await generateErrorResponse(
-                    new Error(`Entity ${entityId} is disabled - missing required environment variables`),
+                    new Error(resolvedEntity.colleagueUnavailable ? 'Colleague is archived or unavailable' : `Entity ${entityId} is disabled - missing required environment variables`),
                     args,
                     pathwayResolver,
                 );
@@ -2006,6 +2106,27 @@ export default {
                 entityId = Object.prototype.hasOwnProperty.call(resolvedEntity, 'entityId')
                     ? resolvedEntity.entityId
                     : entityId;
+            }
+        }
+
+        // Empty/missing entityId used to fall through to the shared default entity,
+        // which intentionally has no WorkspaceSSH. Prefer the personal entity when
+        // we have a user context so workspace file edits remain available.
+        if (!entityConfig && userId) {
+            const personalResolveSpan = latencyTrace.start('sysEntity.resolvePersonalEntity', {
+                ...traceBase,
+                userId,
+            });
+            const personal = await resolvePersonalEntityConfig(userId, {
+                personalEntityName,
+            });
+            latencyTrace.end(personalResolveSpan, {
+                found: Boolean(personal?.entityConfig),
+                resolvedEntityId: personal?.entityId,
+            });
+            if (personal?.entityConfig) {
+                entityConfig = personal.entityConfig;
+                entityId = personal.entityId;
             }
         }
 
@@ -2021,13 +2142,69 @@ export default {
             });
         }
 
+        // Bind execution preferences and memory after resolving the actual entity.
+        // Never accept a caller-supplied namespace or a tool-supplied identity.
+        if (userId && entityConfig?.id) {
+            if (!canAccessEntity(entityConfig, userId)) throw new Error("Entity not available");
+            const preferences = await getEntityPreferences(getEntityStore(), entityConfig.id, userId);
+            args.memoryContextId = entityMemoryContextId(entityConfig, userId);
+            args.memoryLearning = preferences.memoryLearning ?? aiMemorySelfModify ?? true;
+            aiMemorySelfModify = args.memoryLearning;
+            reasoningEffortOverride = preferences.reasoningEffort || reasoningEffortOverride;
+            const selectedModel = preferences.model || entityConfig.modelOverride;
+            if (selectedModel) {
+                pathwayResolver.swapModel(selectedModel);
+                args.model = selectedModel;
+            }
+        } else {
+            delete args.memoryContextId;
+            args.memoryLearning = aiMemorySelfModify ?? true;
+        }
+
+        delete args.modelOverride;
+
+        let colleagueInstructions = '';
+        if (entityConfig?.kind === 'colleague') {
+            // Shared definitions never bring their author's custom connections.
+            const executingPersonal = await resolvePersonalEntityConfig(userId);
+            entityConfig = { ...entityConfig, customTools: executingPersonal?.entityConfig?.customTools || {} };
+            args.aiName = entityConfig.name;
+            colleagueInstructions = `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_EXPERTISE}}\n\nYou are ${entityConfig.name}, a synthetic colleague working for this user. ${entityConfig.identity || ''}\nYou share the user's workspace and tools with their other colleagues. WorkspaceSSH starts in your own stable colleague directory. Keep your notes there and coordinate shared file edits. Use NotifyUser to report useful results or request help. Never reset the shared workspace.`;
+        }
+
+        // Ordinary calls omit agentContext and perform no context file lookup.
+        const attachedContexts = new Set(agentContext ? [agentContext] : []);
+        if (entityConfig?.kind === 'colleague' && entityConfig.assistantMaterials) attachedContexts.add(assistantMaterialContext(entityConfig.id));
+        const boundAgentContexts = await Promise.all([...attachedContexts].map(context => loadAgentContext(context)));
+        for (const boundAgentContext of boundAgentContexts) {
+            args.fileAccessPlan = appendAgentContextFileAccessPlan(
+                args.fileAccessPlan,
+                boundAgentContext,
+            );
+        }
+
         const toolsSpan = latencyTrace.start('sysEntity.getToolsForEntity', {
             ...traceBase,
             entityId,
             entityName: entityConfig?.name,
         });
         let { entityTools, entityToolsOpenAiFormat } = getToolsForEntity(entityConfig);
-        const { name: entityName, instructions: entityInstructions } = entityConfig || {};
+        const hasColleagueTools = Boolean(args.agentToolsToken && process.env.CONCIERGE_AGENT_TOOLS_URL);
+        if (!hasColleagueTools) {
+            entityTools = Object.fromEntries(Object.entries(entityTools).filter(([name]) => !CONCIERGE_AGENT_TOOL_NAMES.has(name)));
+            entityToolsOpenAiFormat = entityToolsOpenAiFormat.filter(tool => !CONCIERGE_AGENT_TOOL_NAMES.has(tool.function?.name?.toLowerCase()));
+        }
+        if (boundAgentContexts.length && !entityTools.filecollection) {
+            const fileCollection = config.get('entityTools')?.filecollection;
+            if (!fileCollection) {
+                throw new Error('FileCollection is required when agentContext is supplied');
+            }
+            entityTools.filecollection = fileCollection;
+            entityToolsOpenAiFormat.push(toOpenAiToolDefinition(fileCollection));
+        }
+        const entityInstructions = boundAgentContexts.reduce((instructions, context) => appendAgentContextInstructions(instructions, context),
+            (colleagueInstructions || entityConfig?.instructions || entityConfig?.identity || '') + (hasColleagueTools ? '\n\nFor a user-requested multi-role project, use StartAssistantTeam, ListAssistants and RecruitAssistant to build a team, then MessageAssistants to direct it. Keep one coordinator responsible for the final deliverable. Roles are ordinary reusable assistants, not predefined workflow types. The shared team brief persists across turns; use ReadAssistantTeam to see progress and decide the next stage. Specialists can communicate, delegate and review. Independent review of final artifacts is required before FinishAssistantTeam. Do not stop at a plan when the user asked for the result. For assistant progress or assignment questions, call ReadAssistantTasks. Server task receipts are authoritative even if prior tool calls are missing from chat history. Never resend work to check its status. Confirm delivery only from a successful tool receipt. A new request does not consolidate, update or cancel an existing one. Keep the user informed using names and the saved next step; waiting does not prevent chatting.' : ''),
+        ) + workspaceCheckpointReviewInstructions(entityConfig?.kind === 'colleague' ? entityConfig : await loadEntityConfig(entityId, { fresh: true }));
         latencyTrace.end(toolsSpan, {
             toolCount: Object.keys(entityTools || {}).length,
             openAiToolCount: entityToolsOpenAiFormat?.length || 0,
@@ -2046,15 +2223,18 @@ export default {
             const registeredClientToolNames = [];
             clientSideTools.forEach(tool => {
                 const toolName = tool.function?.name?.toLowerCase();
+                if (hasColleagueTools && CONCIERGE_AGENT_TOOL_NAMES.has(toolName)) return;
                 if (toolName) {
                     const {
                         allowResultCompaction,
+                        timeout,
                         ...openAiTool
                     } = tool;
                     // Mark as client-side tool and add to available tools
                     entityTools[toolName] = {
                         definition: {
                             ...tool,
+                            timeout,
                             clientSide: true,  // Mark it as client-side
                             icon: tool.icon || '📱'
                         },
@@ -2079,394 +2259,399 @@ export default {
         const localToolCatalog = lazyLocalToolSearch ? buildLocalToolCatalog(localEntityToolsDeferred) : {};
         if (lazyLocalToolSearch) {
             entityToolsOpenAiFormat = getAlwaysVisibleLocalToolDefinitions(entityTools);
+            const fileCollection = entityTools.filecollection;
+            if (boundAgentContexts.length && fileCollection) {
+                entityToolsOpenAiFormat.push(
+                    toOpenAiToolDefinition(fileCollection),
+                );
+            }
             const deferredSchemaCount = Math.max(Object.keys(localEntityToolsDeferred).length - entityToolsOpenAiFormat.length, 0);
             logger.info(`Deferred ${deferredSchemaCount} local tool schema(s) behind SearchAvailableTools for entity ${entityId || entityConfig?.name || 'unknown'}; kept ${entityToolsOpenAiFormat.length} always visible`);
         }
 
-        // Initialize MCP clients and discover tools into a catalog (two-step tool search pattern).
-        // Instead of adding all MCP tools upfront (which causes tool pollution), we store them
-        // in a catalog and expose a single "SearchAvailableTools" tool. The model searches
-        // for relevant tools first, and only matched tools are loaded into the context.
+        // Advertise configured services without network I/O. SearchAvailableTools
+        // discovers a selected server only when the model needs its tools.
         const mcpSpan = latencyTrace.start('sysEntity.mcpSetup', {
             ...traceBase,
             hasMcpConfig: Boolean(mcpConfig && typeof mcpConfig === 'string' && mcpConfig.trim()),
             hasMcpAvailableServers: Boolean(mcpAvailableServers && typeof mcpAvailableServers === 'string' && mcpAvailableServers.trim()),
         });
-        let mcpClients = new Map();
-        let mcpToolCatalog = {};
-        let mcpEntityToolsDeferred = {};
-        if (mcpConfig && typeof mcpConfig === 'string' && mcpConfig.trim()) {
-            try {
-                const { clients: connectedMcpClients, expiredServers: mcpExpiredServers = [] } = await initializeMcpClients(mcpConfig);
-                mcpClients = connectedMcpClients;
-                if (mcpClients.size > 0) {
-                    const { entityTools: mcpEntityTools, mcpToolCatalog: catalog } = await discoverMcpTools(mcpClients);
-                    // Store full tool definitions for later loading, but do NOT add to entityToolsOpenAiFormat
-                    mcpEntityToolsDeferred = mcpEntityTools;
-                    mcpToolCatalog = catalog;
+        const mcpDiscovery = createMcpToolDiscovery(mcpConfig);
+        const mcpClients = mcpDiscovery.clients;
+        const mcpLifecycle = { callbackStarted: false };
+        try {
+            let mcpToolCatalog = {};
+            let mcpEntityToolsDeferred = {};
+            if (mcpConfig && typeof mcpConfig === 'string' && mcpConfig.trim()) {
+                try {
+                    registerRequestScopedTools(entityTools, entityToolsOpenAiFormat, {
+                        mcpClients,
+                        mcpToolCatalog,
+                        mcpServerKeys: mcpDiscovery.serverKeys,
+                        mcpServerLabels: mcpDiscovery.serverLabels,
+                        localToolCatalog,
+                        mcpExpiredServers: mcpDiscovery.expiredServers,
+                        logger,
+                        fetchToolDefaultLength: TOOL_RESULT_INLINE_MAX,
+                        compactionEnabled: TOOL_RESULT_COMPACTION_ENABLED,
+                    });
+                } catch (mcpError) {
+                    logger.warn(`MCP initialization failed: ${mcpError?.message || mcpError}`);
+                }
+            }
+
+            if (mcpAvailableServers && typeof mcpAvailableServers === 'string' && mcpAvailableServers.trim()) {
+                try {
+                    const availableServers = JSON.parse(mcpAvailableServers);
+                    registerRequestScopedTools(entityTools, entityToolsOpenAiFormat, {
+                        availableServers,
+                        logger,
+                        fetchToolDefaultLength: TOOL_RESULT_INLINE_MAX,
+                        compactionEnabled: TOOL_RESULT_COMPACTION_ENABLED,
+                    });
+                } catch (parseError) {
+                    logger.warn(`Failed to parse mcpAvailableServers: ${parseError?.message || parseError}`);
+                }
+            }
+
+            registerRequestScopedTools(entityTools, entityToolsOpenAiFormat, {
+                localToolCatalog,
+                fetchToolDefaultLength: TOOL_RESULT_INLINE_MAX,
+            });
+            latencyTrace.end(mcpSpan, {
+                mcpClientCount: mcpClients?.size || 0,
+                mcpCatalogCount: Object.keys(mcpToolCatalog || {}).length,
+                localCatalogCount: Object.keys(localToolCatalog || {}).length,
+                deferredToolCount: Object.keys(mcpEntityToolsDeferred || {}).length,
+                toolCount: Object.keys(entityTools || {}).length,
+                openAiToolCount: entityToolsOpenAiFormat?.length || 0,
+            });
+
+            // Initialize chat history if needed
+            if (!args.chatHistory || args.chatHistory.length === 0) {
+                args.chatHistory = [];
+            }
+
+            const entityFilesSpan = latencyTrace.start('sysEntity.attachEntityFiles', {
+                ...traceBase,
+                entityFileCount: entityConfig?.files?.length || 0,
+            });
+            if(entityConfig?.files && entityConfig?.files.length > 0) {
+                //get last user message if not create one to add files to
+                let lastUserMessage = args.chatHistory.filter(message => message.role === "user").slice(-1)[0];
+                if(!lastUserMessage) {
+                    lastUserMessage = {
+                        role: "user",
+                        content: []
+                    };
+                    args.chatHistory.push(lastUserMessage);
                 }
 
-                registerRequestScopedTools(entityTools, entityToolsOpenAiFormat, {
-                    mcpClients,
-                    mcpToolCatalog,
-                    localToolCatalog,
-                    mcpExpiredServers,
-                    logger,
-                    fetchToolDefaultLength: TOOL_RESULT_INLINE_MAX,
-                    compactionEnabled: TOOL_RESULT_COMPACTION_ENABLED,
-                });
-            } catch (mcpError) {
-                logger.warn(`MCP initialization failed: ${mcpError?.message || mcpError}`);
+                //if last user message content is not array then convert to array
+                if(!Array.isArray(lastUserMessage.content)) {
+                    lastUserMessage.content = lastUserMessage.content ? [lastUserMessage.content] : [];
+                }
+
+                //add files to the last user message content
+                lastUserMessage.content.push(...entityConfig?.files.map(file => ({
+                        type: "image_url",
+                        gcs: file?.gcs,
+                        url: file?.url,
+                        image_url: { url: file?.url },
+                        originalFilename: file?.name
+                    })
+                ));
             }
-        }
-
-        if (mcpAvailableServers && typeof mcpAvailableServers === 'string' && mcpAvailableServers.trim()) {
-            try {
-                const availableServers = JSON.parse(mcpAvailableServers);
-                registerRequestScopedTools(entityTools, entityToolsOpenAiFormat, {
-                    availableServers,
-                    logger,
-                    fetchToolDefaultLength: TOOL_RESULT_INLINE_MAX,
-                    compactionEnabled: TOOL_RESULT_COMPACTION_ENABLED,
-                });
-            } catch (parseError) {
-                logger.warn(`Failed to parse mcpAvailableServers: ${parseError?.message || parseError}`);
-            }
-        }
-
-        registerRequestScopedTools(entityTools, entityToolsOpenAiFormat, {
-            localToolCatalog,
-            fetchToolDefaultLength: TOOL_RESULT_INLINE_MAX,
-        });
-        latencyTrace.end(mcpSpan, {
-            mcpClientCount: mcpClients?.size || 0,
-            mcpCatalogCount: Object.keys(mcpToolCatalog || {}).length,
-            localCatalogCount: Object.keys(localToolCatalog || {}).length,
-            deferredToolCount: Object.keys(mcpEntityToolsDeferred || {}).length,
-            toolCount: Object.keys(entityTools || {}).length,
-            openAiToolCount: entityToolsOpenAiFormat?.length || 0,
-        });
-
-        // Initialize chat history if needed
-        if (!args.chatHistory || args.chatHistory.length === 0) {
-            args.chatHistory = [];
-        }
-
-        const entityFilesSpan = latencyTrace.start('sysEntity.attachEntityFiles', {
-            ...traceBase,
-            entityFileCount: entityConfig?.files?.length || 0,
-        });
-        if(entityConfig?.files && entityConfig?.files.length > 0) {
-            //get last user message if not create one to add files to
-            let lastUserMessage = args.chatHistory.filter(message => message.role === "user").slice(-1)[0];
-            if(!lastUserMessage) {
-                lastUserMessage = {
-                    role: "user",
-                    content: []
-                };
-                args.chatHistory.push(lastUserMessage);
-            }
-
-            //if last user message content is not array then convert to array
-            if(!Array.isArray(lastUserMessage.content)) {
-                lastUserMessage.content = lastUserMessage.content ? [lastUserMessage.content] : [];
-            }
-
-            //add files to the last user message content
-            lastUserMessage.content.push(...entityConfig?.files.map(file => ({
-                    type: "image_url",
-                    gcs: file?.gcs,
-                    url: file?.url,
-                    image_url: { url: file?.url },
-                    originalFilename: file?.name
-                })
-            ));
-        }
-        latencyTrace.end(entityFilesSpan, {
-            chatHistoryLength: args.chatHistory.length,
-        });
-
-        args = {
-            ...args,
-            ...config.get('entityConstants'),
-            entityId,
-            entityTools,
-            entityToolsOpenAiFormat,
-            entityInstructions,
-            voiceResponse,
-            aiMemorySelfModify,
-            chatId,
-            researchMode,
-            mcpClients,
-            mcpToolCatalog,
-            mcpEntityToolsDeferred,
-            localToolCatalog,
-            localEntityToolsDeferred,
-            reasoningEffort: reasoningEffortOverride || entityConfig?.reasoningEffort || null,
-        };
-
-        pathwayResolver.args = {...args};
-
-        const promptSetupSpan = latencyTrace.start('sysEntity.promptSetup', {
-            ...traceBase,
-            useMemory: Boolean(args.useMemory),
-            openAiToolCount: entityToolsOpenAiFormat?.length || 0,
-        });
-        const promptPrefix = '';
-
-        const memoryTemplates = args.useMemory ? 
-            `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_CONTEXT}}\n\n` : '';
-
-        const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n`;
-
-        const promptMessages = [
-            {"role": "system", "content": `${promptPrefix}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_SEARCH_RULES}}\n\n{{renderTemplate AI_SEARCH_SYNTAX}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n${memoryTemplates}{{renderTemplate AI_DATETIME}}`},
-            "{{chatHistory}}",
-        ];
-
-        pathwayResolver.pathwayPrompt = [
-            new Prompt({ messages: promptMessages }),
-        ];
-        latencyTrace.end(promptSetupSpan, {
-            promptMessageCount: promptMessages.length,
-            memoryTemplates: Boolean(args.useMemory),
-        });
-
-        const reasoningEffort = reasoningEffortOverride || entityConfig?.reasoningEffort || 'low';
-        args.reasoningEffort = reasoningEffort;
-        args.entityInstructions = entityInstructions || '';
-
-        // Limit the chat history to 20 messages to speed up processing
-        const historyLimitSpan = latencyTrace.start('sysEntity.limitChatHistory', {
-            ...traceBase,
-            originalChatHistoryLength: Array.isArray(args.chatHistory) ? args.chatHistory.length : 0,
-            messagesLength: Array.isArray(args.messages) ? args.messages.length : 0,
-        });
-        if (args.messages && args.messages.length > 0) {
-            args.chatHistory = args.messages.slice(-20);
-        } else {
-            args.chatHistory = args.chatHistory.slice(-20);
-        }
-        latencyTrace.end(historyLimitSpan, {
-            chatHistoryLength: args.chatHistory.length,
-        });
-
-        // Process files in chat history:
-        // - Files in collection (all fileAccessPlan targets): stripped, accessible via tools
-        // - Files not in collection: left in message for model to see directly
-        const fileSyncSpan = latencyTrace.start('sysEntity.syncAndStripFiles', {
-            ...traceBase,
-            chatHistoryLength: args.chatHistory.length,
-            fileAccessPlanTargets: Array.isArray(args.fileAccessPlan) ? args.fileAccessPlan.length : 0,
-        });
-        const { chatHistory: strippedHistory } = await syncAndStripFilesFromChatHistory(
-            args.chatHistory, args.fileAccessPlan
-        );
-        args.chatHistory = strippedHistory;
-        latencyTrace.end(fileSyncSpan, {
-            chatHistoryLength: args.chatHistory.length,
-        });
-
-        // truncate the chat history in case there is really long content
-        const truncateSpan = latencyTrace.start('sysEntity.truncateMessages', {
-            ...traceBase,
-            chatHistoryLength: args.chatHistory.length,
-        });
-        const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
-        latencyTrace.end(truncateSpan, {
-            truncatedChatHistoryLength: Array.isArray(truncatedChatHistory) ? truncatedChatHistory.length : undefined,
-        });
-
-        // Asynchronously manage memory for this context
-        if (args.aiMemorySelfModify && args.useMemory) {
-            latencyTrace.mark('sysEntity.memoryManager.start', {
-                ...traceBase,
-                chatHistoryLength: truncatedChatHistory?.length,
+            latencyTrace.end(entityFilesSpan, {
+                chatHistoryLength: args.chatHistory.length,
             });
-            callPathway('sys_memory_manager', {  ...args, chatHistory: truncatedChatHistory, stream: false, reasoningEffort: 'none' })
-            .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
-        }
 
-        // Update pathwayResolver.args with stripped chatHistory
-        // This ensures toolCallback receives the processed history, not the original
-        pathwayResolver.args = {...args};
-        latencyTrace.end(preflightSpan, {
-            openAiToolCount: entityToolsOpenAiFormat?.length || 0,
-            chatHistoryLength: args.chatHistory.length,
-        });
-
-        try {
-            let currentMessages = JSON.parse(JSON.stringify(args.chatHistory));
-            currentMessages = compactHistoricalToolResults(currentMessages, pathwayResolver, buildPromptUsageOptions(args, entityToolsOpenAiFormat, {
-                tool_choice: 'auto',
-            }));
-
-            const firstRunSpan = latencyTrace.start('sysEntity.initialRunAllPrompts', {
-                ...traceBase,
-                chatHistoryLength: currentMessages.length,
-                openAiToolCount: entityToolsOpenAiFormat?.length || 0,
-                toolChoice: "auto",
-                reasoningEffort,
-            });
-            const beforeFirstRunUsage = usageMarker(getLatestPathwayUsage(pathwayResolver));
-            let response = await runAllPrompts({
+            args = {
                 ...args,
-                chatHistory: currentMessages,
-                reasoningEffort,
-                tools: entityToolsOpenAiFormat,
-                tool_choice: "auto"
+                ...config.get('entityConstants'),
+                AI_GROUNDING_INSTRUCTIONS: buildGroundingInstructions(args.citationFormat),
+                entityId,
+                entityTools,
+                entityToolsOpenAiFormat,
+                entityInstructions,
+                voiceResponse,
+                aiMemorySelfModify,
+                chatId,
+                researchMode,
+                mcpClients,
+                mcpToolCatalog,
+                mcpEntityToolsDeferred,
+                discoverMcpServerTools: mcpDiscovery.discover,
+                _mcpLifecycle: mcpLifecycle,
+                localToolCatalog,
+                localEntityToolsDeferred,
+                reasoningEffort: reasoningEffortOverride || entityConfig?.reasoningEffort || null,
+            };
+
+            pathwayResolver.args = {...args};
+
+            const promptSetupSpan = latencyTrace.start('sysEntity.promptSetup', {
+                ...traceBase,
+                useMemory: Boolean(args.useMemory),
+                openAiToolCount: entityToolsOpenAiFormat?.length || 0,
             });
-            rememberPromptTokenUsage(pathwayResolver, currentMessages, buildPromptUsageOptions(args, entityToolsOpenAiFormat, {
-                tool_choice: 'auto',
-            }), response, beforeFirstRunUsage);
-            latencyTrace.end(firstRunSpan, {
-                responseKind: response instanceof CortexResponse ? 'CortexResponse' : typeof response,
-                hasToolCalls: response instanceof CortexResponse ? response.hasToolCalls() : Boolean(response?.tool_calls),
+            const promptPrefix = '';
+
+            const memoryTemplates = args.useMemory ?
+                `{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n\n{{renderTemplate AI_MEMORY}}\n\n{{renderTemplate AI_MEMORY_CONTEXT}}\n\n` : '';
+
+            const instructionTemplates = entityInstructions ? (entityInstructions + '\n\n') : `{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n\n{{renderTemplate AI_EXPERTISE}}\n\n`;
+
+            const promptMessages = [
+                {"role": "system", "content": `${promptPrefix}${instructionTemplates}{{renderTemplate AI_TOOLS}}\n\n{{renderTemplate AI_SEARCH_RULES}}\n\n{{renderTemplate AI_SEARCH_SYNTAX}}\n\n{{renderTemplate AI_GROUNDING_INSTRUCTIONS}}\n\n${memoryTemplates}{{renderTemplate AI_DATETIME}}`},
+                "{{chatHistory}}",
+            ];
+
+            pathwayResolver.pathwayPrompt = [
+                new Prompt({ messages: promptMessages }),
+            ];
+            latencyTrace.end(promptSetupSpan, {
+                promptMessageCount: promptMessages.length,
+                memoryTemplates: Boolean(args.useMemory),
             });
 
-            // Handle null response (can happen when ModelExecutor catches an error)
-            if (!response) {
-                throw new Error('Model execution returned null - the model request likely failed');
+            const reasoningEffort = reasoningEffortOverride || entityConfig?.reasoningEffort || 'low';
+            args.reasoningEffort = reasoningEffort;
+            args.entityInstructions = entityInstructions || '';
+
+            // Bound conversational history without dropping current instructions.
+            // Callers prepend live task/question state and page context on every
+            // turn; their position at the front does not make them old history.
+            const historyLimitSpan = latencyTrace.start('sysEntity.limitChatHistory', {
+                ...traceBase,
+                originalChatHistoryLength: Array.isArray(args.chatHistory) ? args.chatHistory.length : 0,
+                messagesLength: Array.isArray(args.messages) ? args.messages.length : 0,
+            });
+            const history = args.messages?.length ? args.messages : args.chatHistory;
+            const recentStart = Math.max(0, history.length - 20);
+            args.chatHistory = history.filter((message, index) =>
+                index >= recentStart || message.role === 'system' || message.role === 'developer'
+            );
+            latencyTrace.end(historyLimitSpan, {
+                chatHistoryLength: args.chatHistory.length,
+            });
+
+            // Process files in chat history:
+            // - Files in collection (all fileAccessPlan targets): stripped, accessible via tools
+            // - Files not in collection: left in message for model to see directly
+            const fileSyncSpan = latencyTrace.start('sysEntity.syncAndStripFiles', {
+                ...traceBase,
+                chatHistoryLength: args.chatHistory.length,
+                fileAccessPlanTargets: Array.isArray(args.fileAccessPlan) ? args.fileAccessPlan.length : 0,
+            });
+            const { chatHistory: strippedHistory } = await syncAndStripFilesFromChatHistory(
+                args.chatHistory, args.fileAccessPlan
+            );
+            args.chatHistory = strippedHistory;
+            latencyTrace.end(fileSyncSpan, {
+                chatHistoryLength: args.chatHistory.length,
+            });
+
+            // truncate the chat history in case there is really long content
+            const truncateSpan = latencyTrace.start('sysEntity.truncateMessages', {
+                ...traceBase,
+                chatHistoryLength: args.chatHistory.length,
+            });
+            const truncatedChatHistory = resolver.modelExecutor.plugin.truncateMessagesToTargetLength(args.chatHistory, null, 1000);
+            latencyTrace.end(truncateSpan, {
+                truncatedChatHistoryLength: Array.isArray(truncatedChatHistory) ? truncatedChatHistory.length : undefined,
+            });
+
+            // Asynchronously manage memory for this context
+            if (args.aiMemorySelfModify && args.useMemory) {
+                latencyTrace.mark('sysEntity.memoryManager.start', {
+                    ...traceBase,
+                    chatHistoryLength: truncatedChatHistory?.length,
+                });
+                callPathway('sys_memory_manager', { ...memoryArgs(args), chatHistory: truncatedChatHistory, stream: false, reasoningEffort: 'none' })
+                .catch(error => logger.error(error?.message || "Error in sys_memory_manager pathway"));
             }
 
-            let toolCallback = pathwayResolver.pathway.toolCallback;
-            const postLoopRequestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+            // Update pathwayResolver.args with stripped chatHistory
+            // This ensures toolCallback receives the processed history, not the original
+            pathwayResolver.args = {...args};
+            latencyTrace.end(preflightSpan, {
+                openAiToolCount: entityToolsOpenAiFormat?.length || 0,
+                chatHistoryLength: args.chatHistory.length,
+            });
 
-            // Outer loop: handles both tool calls and injected user messages
-            let continueLoop = true;
-            while (continueLoop) {
-                continueLoop = false;
+            try {
+                let currentMessages = JSON.parse(JSON.stringify(args.chatHistory));
+                currentMessages = compactHistoricalToolResults(currentMessages, pathwayResolver, buildPromptUsageOptions(args, entityToolsOpenAiFormat, {
+                    tool_choice: 'auto',
+                }));
 
-                // Check for cancellation at the top of each outer loop iteration
-                if (isResolverCanceled(pathwayResolver)) break;
+                const firstRunSpan = latencyTrace.start('sysEntity.initialRunAllPrompts', {
+                    ...traceBase,
+                    chatHistoryLength: currentMessages.length,
+                    openAiToolCount: entityToolsOpenAiFormat?.length || 0,
+                    toolChoice: "auto",
+                    reasoningEffort,
+                });
+                const beforeFirstRunUsage = usageMarker(getLatestPathwayUsage(pathwayResolver));
+                let response = await runWithFreshImageUrls({
+                    ...args,
+                    chatHistory: currentMessages,
+                    reasoningEffort,
+                    tools: entityToolsOpenAiFormat,
+                    tool_choice: "auto"
+                }, pathwayResolver, runAllPrompts, { isCanceled: () => isResolverCanceled(pathwayResolver) });
+                rememberPromptTokenUsage(pathwayResolver, currentMessages, buildPromptUsageOptions(args, entityToolsOpenAiFormat, {
+                    tool_choice: 'auto',
+                }), response, beforeFirstRunUsage);
+                latencyTrace.end(firstRunSpan, {
+                    responseKind: response instanceof CortexResponse ? 'CortexResponse' : typeof response,
+                    hasToolCalls: response instanceof CortexResponse ? response.hasToolCalls() : Boolean(response?.tool_calls),
+                });
 
-                // Inner loop: process tool calls
-                while (response && (
-                    (response instanceof CortexResponse && response.hasToolCalls()) ||
-                    (typeof response === 'object' && response.tool_calls)
-                )) {
-                    // Check for cancellation before each tool callback iteration
+                // Handle null response (can happen when ModelExecutor catches an error)
+                if (!response) {
+                    throw new Error('Model execution returned null - the model request likely failed');
+                }
+
+                let toolCallback = pathwayResolver.pathway.toolCallback;
+                const postLoopRequestId = pathwayResolver.rootRequestId || pathwayResolver.requestId;
+
+                // Outer loop: handles both tool calls and injected user messages
+                let continueLoop = true;
+                while (continueLoop) {
+                    continueLoop = false;
+
+                    // Check for cancellation at the top of each outer loop iteration
                     if (isResolverCanceled(pathwayResolver)) break;
 
-                    try {
-                        response = await toolCallback(args, response, pathwayResolver);
+                    // Inner loop: process tool calls
+                    while (response && (
+                        (response instanceof CortexResponse && response.hasToolCalls()) ||
+                        (typeof response === 'object' && response.tool_calls)
+                    )) {
+                        // Check for cancellation before each tool callback iteration
+                        if (isResolverCanceled(pathwayResolver)) break;
 
-                        // Handle null response from tool callback
-                        if (!response) {
-                            throw new Error('Tool callback returned null - a model request likely failed');
+                        try {
+                            response = await toolCallback(args, response, pathwayResolver);
+
+                            // Handle null response from tool callback
+                            if (!response) {
+                                throw new Error('Tool callback returned null - a model request likely failed');
+                            }
+                        } catch (toolError) {
+                            // Re-throw cancellation — don't waste an API call generating an error response
+                            if (toolError.message === 'Request canceled') throw toolError;
+                            // Handle errors in tool callback
+                            logger.error(`Error in tool callback: ${toolError.message}`);
+                            // Generate error response for tool callback errors
+                            const errorResponse = await generateErrorResponse(toolError, args, pathwayResolver);
+                            // Ensure errors are cleared before returning
+                            pathwayResolver.errors = [];
+                            clearPendingMessages(postLoopRequestId);
+                            return errorResponse;
                         }
-                    } catch (toolError) {
-                        // Re-throw cancellation — don't waste an API call generating an error response
-                        if (toolError.message === 'Request canceled') throw toolError;
-                        // Handle errors in tool callback
-                        logger.error(`Error in tool callback: ${toolError.message}`);
-                        // Generate error response for tool callback errors
-                        const errorResponse = await generateErrorResponse(toolError, args, pathwayResolver);
-                        // Ensure errors are cleared before returning
-                        pathwayResolver.errors = [];
-                        clearPendingMessages(postLoopRequestId);
-                        return errorResponse;
+                    }
+
+                    // After inner loop, check if we broke out due to cancellation
+                    if (isResolverCanceled(pathwayResolver)) break;
+
+                    // Check for user messages injected while the model was generating its final response.
+                    // Skip this if a fire-and-forget tool callback was invoked during streaming —
+                    // the tool callback already handles message injection internally (drainPendingMessages
+                    // inside toolCallback), and running a second model call here would race against it,
+                    // causing two concurrent streams to interleave on the same requestId.
+                    if (!pathwayResolver.toolCallbackInvoked && hasPendingMessages(postLoopRequestId)) {
+                        const postLoopMsgs = drainPendingMessages(postLoopRequestId);
+                        if (postLoopMsgs.length > 0) {
+                            // Add the model's last response as an assistant message
+                            const assistantContent = typeof response === 'string' ? response :
+                                (response instanceof CortexResponse ? response.output_text : String(response));
+                            args.chatHistory.push({ role: "assistant", content: assistantContent });
+
+                            // Inject user message — allow model to continue with tools
+                            const combinedPostMsg = postLoopMsgs.map(m => m.message).join('\n\n');
+                            args.chatHistory = insertSystemMessage(args.chatHistory,
+                                `The user has sent a new message while you were working. Please acknowledge it and incorporate their feedback into your current task.\n\nUser's message: "${combinedPostMsg}"`,
+                                postLoopRequestId
+                            );
+
+                            logger.info(`Post-loop: injected ${postLoopMsgs.length} user message(s) for request ${postLoopRequestId}`);
+                            publishRequestProgress({
+                                requestId: postLoopRequestId,
+                                progress: 0.5,
+                                data: JSON.stringify(""),
+                                info: JSON.stringify({ userMessageInjected: true, count: postLoopMsgs.length }),
+                                error: ''
+                            });
+
+                            await say(postLoopRequestId, `\n`, 1000, false, false);
+
+                            // Re-run model with tools so it can act on the user's message
+                            const postLoopAtLimit = pathwayResolver.toolBudgetUsed >= TOOL_BUDGET;
+                            const beforePostLoopUsage = usageMarker(getLatestPathwayUsage(pathwayResolver));
+                            response = await runWithFreshImageUrls({
+                                ...args,
+                                tools: postLoopAtLimit ? undefined : entityToolsOpenAiFormat,
+                                tool_choice: postLoopAtLimit ? "none" : "auto",
+                            }, pathwayResolver, runAllPrompts, { isCanceled: () => isResolverCanceled(pathwayResolver) });
+                            rememberPromptTokenUsage(pathwayResolver, args.chatHistory, buildPromptUsageOptions(args, postLoopAtLimit ? undefined : entityToolsOpenAiFormat, {
+                                tool_choice: postLoopAtLimit ? 'none' : 'auto',
+                            }), response, beforePostLoopUsage);
+
+                            if (!response) {
+                                throw new Error('Model execution returned null after message injection');
+                            }
+
+                            // Continue the outer loop so tool calls from this
+                            // response are processed and further injections are
+                            // picked up.
+                            continueLoop = true;
+                        }
                     }
                 }
 
-                // After inner loop, check if we broke out due to cancellation
-                if (isResolverCanceled(pathwayResolver)) break;
-
-                // Check for user messages injected while the model was generating its final response.
-                // Skip this if a fire-and-forget tool callback was invoked during streaming —
-                // the tool callback already handles message injection internally (drainPendingMessages
-                // inside toolCallback), and running a second model call here would race against it,
-                // causing two concurrent streams to interleave on the same requestId.
-                if (!pathwayResolver.toolCallbackInvoked && hasPendingMessages(postLoopRequestId)) {
-                    const postLoopMsgs = drainPendingMessages(postLoopRequestId);
-                    if (postLoopMsgs.length > 0) {
-                        // Add the model's last response as an assistant message
-                        const assistantContent = typeof response === 'string' ? response :
-                            (response instanceof CortexResponse ? response.output_text : String(response));
-                        args.chatHistory.push({ role: "assistant", content: assistantContent });
-
-                        // Inject user message — allow model to continue with tools
-                        const combinedPostMsg = postLoopMsgs.map(m => m.message).join('\n\n');
-                        args.chatHistory = insertSystemMessage(args.chatHistory,
-                            `The user has sent a new message while you were working. Please acknowledge it and incorporate their feedback into your current task.\n\nUser's message: "${combinedPostMsg}"`,
-                            postLoopRequestId
-                        );
-
-                        logger.info(`Post-loop: injected ${postLoopMsgs.length} user message(s) for request ${postLoopRequestId}`);
-                        publishRequestProgress({
-                            requestId: postLoopRequestId,
-                            progress: 0.5,
-                            data: JSON.stringify(""),
-                            info: JSON.stringify({ userMessageInjected: true, count: postLoopMsgs.length }),
-                            error: ''
-                        });
-
-                        await say(postLoopRequestId, `\n`, 1000, false, false);
-
-                        // Re-run model with tools so it can act on the user's message
-                        const postLoopAtLimit = pathwayResolver.toolBudgetUsed >= TOOL_BUDGET;
-                        const beforePostLoopUsage = usageMarker(getLatestPathwayUsage(pathwayResolver));
-                        response = await runAllPrompts({
-                            ...args,
-                            tools: postLoopAtLimit ? undefined : entityToolsOpenAiFormat,
-                            tool_choice: postLoopAtLimit ? "none" : "auto",
-                        });
-                        rememberPromptTokenUsage(pathwayResolver, args.chatHistory, buildPromptUsageOptions(args, postLoopAtLimit ? undefined : entityToolsOpenAiFormat, {
-                            tool_choice: postLoopAtLimit ? 'none' : 'auto',
-                        }), response, beforePostLoopUsage);
-
-                        if (!response) {
-                            throw new Error('Model execution returned null after message injection');
-                        }
-
-                        // Continue the outer loop so tool calls from this
-                        // response are processed and further injections are
-                        // picked up.
-                        continueLoop = true;
-                    }
+                // Only clear pending messages if no fire-and-forget tool callback is active.
+                // When toolCallbackInvoked is true, the tool callback will drain/clear messages
+                // itself — clearing here would destroy messages before it gets to them.
+                if (!pathwayResolver.toolCallbackInvoked) {
+                    clearPendingMessages(postLoopRequestId);
                 }
+
+                // If we broke out of the loops due to cancellation, throw to
+                // let asyncResolve close the stream cleanly.
+                if (isResolverCanceled(pathwayResolver)) {
+                    throw new Error('Request canceled');
+                }
+
+                return response;
+
+            } catch (e) {
+                // Re-throw cancellation — don't waste an API call generating an error response.
+                // asyncResolve will publish progress:1 to close the stream.
+                if (e.message === 'Request canceled') {
+                    clearPendingMessages(pathwayResolver.rootRequestId || pathwayResolver.requestId);
+                    throw e;
+                }
+
+                logger.error(`Error in sys_entity_agent: ${e.message}`);
+
+                // Generate a smart error response instead of throwing
+                // Note: We don't call logError here because generateErrorResponse will clear errors
+                // and we want to handle the error gracefully rather than tracking it
+                const errorResponse = await generateErrorResponse(e, args, pathwayResolver);
+
+                // Ensure errors are cleared before returning (in case any were added during error response generation)
+                pathwayResolver.errors = [];
+
+                return errorResponse;
             }
-
-            // Only clear pending messages if no fire-and-forget tool callback is active.
-            // When toolCallbackInvoked is true, the tool callback will drain/clear messages
-            // itself — clearing here would destroy messages before it gets to them.
-            if (!pathwayResolver.toolCallbackInvoked) {
-                clearPendingMessages(postLoopRequestId);
-            }
-
-            // If we broke out of the loops due to cancellation, throw to
-            // let asyncResolve close the stream cleanly.
-            if (isResolverCanceled(pathwayResolver)) {
-                throw new Error('Request canceled');
-            }
-
-            // Do NOT close MCP clients here. In streaming mode, executePathway returns
-            // before the fire-and-forget tool callback runs, so any close here races against
-            // in-flight MCP tool calls. The tool callback closes MCP clients when the last
-            // callback in the chain completes. For no-tool-call paths, MCP clients are
-            // lightweight HTTP transports that will be garbage collected.
-
-            return response;
-
-        } catch (e) {
-            // Re-throw cancellation — don't waste an API call generating an error response.
-            // asyncResolve will publish progress:1 to close the stream.
-            if (e.message === 'Request canceled') {
-                clearPendingMessages(pathwayResolver.rootRequestId || pathwayResolver.requestId);
-                throw e;
-            }
-
-            logger.error(`Error in sys_entity_agent: ${e.message}`);
-
-            // Generate a smart error response instead of throwing
-            // Note: We don't call logError here because generateErrorResponse will clear errors
-            // and we want to handle the error gracefully rather than tracking it
-            const errorResponse = await generateErrorResponse(e, args, pathwayResolver);
-
-            // Ensure errors are cleared before returning (in case any were added during error response generation)
-            pathwayResolver.errors = [];
-
-            return errorResponse;
+        } finally {
+            // SSE streams keep transports alive after a turn. Close those still
+            // owned by this execution, including setup errors and cancellation.
+            // A streaming callback may still be using its clients after we return.
+            if (!mcpLifecycle.callbackStarted) await closeMcpClients(mcpClients);
         }
     }
 };

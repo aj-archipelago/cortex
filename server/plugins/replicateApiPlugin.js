@@ -4,6 +4,7 @@ import CortexResponse from "../../lib/cortexResponse.js";
 import logger from "../../lib/logger.js";
 import axios from "axios";
 import mime from "mime-types";
+import { buildPriorityMediaInput } from "./replicatePriorityMedia.js";
 
 // Helper function to collect images from various parameter sources
 const collectImages = (candidate, accumulator) => {
@@ -308,6 +309,18 @@ class ReplicateApiPlugin extends ModelPlugin {
         );
 
         let requestParameters = {};
+
+        if (this.model?.metadata?.pathwayName === "media_replicate" &&
+            combinedParameters.model && combinedParameters.model !== this.modelName) {
+            throw new Error(`Requested media model '${combinedParameters.model}' does not match resolved model '${this.modelName}'`);
+        }
+        if (this.model?.metadata?.isAvailable === false) {
+            throw new Error(this.model.metadata.unavailableReason || "Model is not available");
+        }
+        const priorityInput = buildPriorityMediaInput(
+            this.modelName || combinedParameters.model, modelPromptText, combinedParameters,
+        );
+        if (priorityInput) return { input: priorityInput };
 
         switch (combinedParameters.model) {
             case "replicate-flux-11-pro":
@@ -1869,6 +1882,7 @@ class ReplicateApiPlugin extends ModelPlugin {
     }
 
     getFallbackAudioMimeType() {
+        if (this.modelName === "replicate-elevenlabs-dubbing") return "audio/flac";
         const format = String(
             this.lastCombinedParameters?.audio_format ??
                 this.lastCombinedParameters?.audioFormat ??
@@ -1923,6 +1937,7 @@ class ReplicateApiPlugin extends ModelPlugin {
         cortexRequest.data = requestParameters;
         cortexRequest.params = requestParameters.params;
 
+        const startedAt = Date.now();
         // Make initial request to start prediction
         const response = await this.executeRequest(cortexRequest);
 
@@ -1953,16 +1968,33 @@ class ReplicateApiPlugin extends ModelPlugin {
             this.model?.metadata?.category,
         );
         const pollInterval = 5000;
-        const maxAttempts = isLongRunningMedia ? 180 : 60; // 15 minutes for audio/video, 5 minutes for images
+        const timeoutMs = (this.model?.metadata?.category === "video" ? 30 : isLongRunningMedia ? 15 : 5) * 60 * 1000;
+        const deadline = startedAt + timeoutMs;
+        const resolver = cortexRequest.pathwayResolver;
+        let lastStatus;
+        let lastStatusLoggedAt = 0;
 
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        while (Date.now() < deadline) {
             try {
+                if (resolver?.isCanceled?.()) throw new Error("Prediction canceled");
                 const pollResponse = await axios.get(pollUrl, {
                     headers: cortexRequest.headers,
+                    timeout: Math.min(30_000, deadline - Date.now()),
                 });
 
-                logger.info("Polling Replicate API - attempt " + attempt);
                 const status = pollResponse.data?.status;
+                if (status !== lastStatus || Date.now() - lastStatusLoggedAt >= 60_000) {
+                    logger.info(JSON.stringify({
+                        event: "replicate_prediction_status",
+                        requestId: resolver?.rootRequestId || resolver?.requestId,
+                        predictionId,
+                        model: this.modelName || this.model?.name,
+                        status: status || "processing",
+                        elapsedMs: Date.now() - startedAt,
+                    }));
+                    lastStatus = status;
+                    lastStatusLoggedAt = Date.now();
+                }
 
                 if (status === "succeeded") {
                     logger.info(
@@ -1982,9 +2014,14 @@ class ReplicateApiPlugin extends ModelPlugin {
                     );
                 }
 
-                // Wait before next poll
+                // Successful polls are provider liveness, not fabricated
+                // completion percentages. Forward them through the root request.
+                resolver?.publishNestedRequestProgress?.({
+                    requestId: resolver.rootRequestId || resolver.requestId,
+                    info: JSON.stringify({ provider: "replicate", status: status || "processing" }),
+                });
                 await new Promise((resolve) =>
-                    setTimeout(resolve, pollInterval),
+                    setTimeout(resolve, Math.max(0, Math.min(pollInterval, deadline - Date.now()))),
                 );
             } catch (error) {
                 logger.error(
@@ -1995,7 +2032,7 @@ class ReplicateApiPlugin extends ModelPlugin {
         }
 
         throw new Error(
-            `Prediction ${predictionId} timed out after ${(maxAttempts * pollInterval) / 1000} seconds`,
+            `Prediction ${predictionId} timed out after ${timeoutMs / 1000} seconds`,
         );
     }
 
@@ -2089,6 +2126,7 @@ class ReplicateApiPlugin extends ModelPlugin {
         // Extract path from URL (remove query params and fragments)
         const urlPath = url.split("?")[0].split("#")[0];
         const mimeType = mime.lookup(urlPath) || "application/octet-stream";
+        if (mimeType === "audio/x-flac") return "audio/flac";
         return mimeType === "audio/wave" || mimeType === "audio/x-wav"
             ? "audio/wav"
             : mimeType;

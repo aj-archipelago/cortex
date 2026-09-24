@@ -7,11 +7,28 @@
 
 import { Prompt } from '../server/prompt.js';
 
-// Fallback only. WordPress normally sends the admin-edited prompt as `userPrompt`,
-// which overrides this. Kept so the pathway is usable/testable with no caller prompt.
+// WordPress can replace the editorial prompt, but the response contract belongs
+// to this pathway and must remain present with either prompt.
 // {{count}} is Handlebars-rendered from the request args.
 const DEFAULT_SYSTEM_PROMPT =
 `You are an editorial assistant. Summarise the article the user provides into exactly {{count}} bullet points, written in the same language as the article. Respond ONLY with a JSON object of the form {"bullets":["…","…","…"]}. Each bullet must be a single self-contained fact of at most 140 characters, must not introduce facts that are not in the article, and must preserve names accurately.`;
+
+const RESPONSE_CONTRACT =
+`Response format: return only a JSON object with the single key "bullets", whose value is a non-empty array of non-empty strings. Put each summary point in one string. This format is required even if the editorial instructions request a list or another presentation format. Follow the editorial instructions above for the content and language of each bullet.`;
+
+const RESPONSE_FORMAT = {
+    type: 'json_schema',
+    json_schema: {
+        name: 'article_summary_bullets',
+        strict: true,
+        schema: {
+            type: 'object',
+            properties: { bullets: { type: 'array', items: { type: 'string' } } },
+            required: ['bullets'],
+            additionalProperties: false,
+        },
+    },
+};
 
 export default {
     // Deterministic output for a structured summary.
@@ -28,7 +45,7 @@ export default {
         text: '',            // article: headline + body (the user message)
         userPrompt: '',      // admin-edited system prompt from WordPress (overrides default)
         model: 'oai-gpt4o',  // GraphQL alias, NOT the /v1/models clean id. Overridable.
-        count: 3,            // bullet count (PRD: hard 3)
+        count: 3,            // suggested bullet count (hint to the model, not strictly enforced)
     },
 
     // Build a two-message prompt (system = caller prompt or default, user = text),
@@ -49,9 +66,16 @@ export default {
             ? args.userPrompt
             : DEFAULT_SYSTEM_PROMPT;
 
+        // Verified against the default Azure GPT-4o deployment. Apply this to the
+        // request-scoped plugin, so other caller-selected models do not receive
+        // schema options that their provider or API dialect may not support.
+        if (resolver.modelName === 'oai-gpt4o' && resolver.model?.type === 'OPENAI-VISION') {
+            resolver.modelExecutor.plugin.promptParameters.responseFormat = RESPONSE_FORMAT;
+        }
+
         resolver.pathwayPrompt = [
             new Prompt({ messages: [
-                { role: 'system', content: systemContent },
+                { role: 'system', content: `${systemContent}\n\n${RESPONSE_CONTRACT}` },
                 { role: 'user',   content: '{{{text}}}' },
             ]}),
         ];
@@ -75,11 +99,23 @@ export default {
         }
 
         const bullets = parsed?.bullets;
-        const expectedCount = args.count ?? 3;
         if (!Array.isArray(bullets)
-            || bullets.length !== expectedCount
+            || bullets.length === 0
             || !bullets.every((b) => typeof b === 'string' && b.trim() !== '')) {
-            resolver.logError(`Model output did not match the expected {"bullets":[${expectedCount} non-empty strings]} shape.`);
+            // Record structure and correlation only; article and generated text
+            // must not be copied into logs or the GraphQL errors field.
+            const valueType = (value) => value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+            const diagnostic = {
+                requestId: resolver.requestId,
+                model: resolver.modelName,
+                resultType: valueType(parsed),
+                bulletsType: valueType(bullets),
+                bulletCount: Array.isArray(bullets) ? bullets.length : null,
+                invalidBulletCount: Array.isArray(bullets)
+                    ? bullets.filter((b) => typeof b !== 'string' || !b.trim()).length
+                    : null,
+            };
+            resolver.logError(`Model output did not match the expected {"bullets":[non-empty strings]} shape. ${JSON.stringify(diagnostic)}`);
             return null;
         }
 

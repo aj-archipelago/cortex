@@ -21,7 +21,7 @@ export default {
         language: "English",
     },
     max_tokens: 8192,
-    model: 'gemini-flash-35-vision',
+    model: 'gemini-flash-37-vision',
     useInputChunking: false,
     timeout: 600,
     geminiSafetySettings: [{category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH'},
@@ -86,19 +86,19 @@ export default {
             }
         }
     }],
-    
+
     executePathway: async ({args, runAllPrompts, resolver}) => {
         try {
             // Create a clean chat history with just the file and task - don't include previous chat history
             // This prevents confusion from function results and other context
             const cleanChatHistory = [];
-            
+
             // Generate file message content if provided
             // Support both 'files' array and legacy 'file' parameter for backward compatibility
             const filesToProcess = args.files && Array.isArray(args.files) && args.files.length > 0
                 ? args.files
                 : (args.file ? [args.file] : []);
-            
+
             if (filesToProcess.length > 0) {
                 const fileAccessPlan = Array.isArray(args.fileAccessPlan)
                     ? args.fileAccessPlan
@@ -107,16 +107,16 @@ export default {
                 if (!fileAccessPlan || fileAccessPlan.length === 0) {
                     const errorMessage = `Files not found: fileAccessPlan is required to look up files in the collection.`;
                     resolver.tool = JSON.stringify({ toolUsed: "vision" });
-                    return JSON.stringify({ 
+                    return JSON.stringify({
                         error: errorMessage,
                         recoveryMessage: "The files were not found. Please verify the files exist in the collection or provide valid file references."
                     });
                 }
-                
+
                 // Process all files
                 const fileContents = [];
                 const errors = [];
-                
+
                 for (const fileParam of filesToProcess) {
                     const fileContent = await generateFileMessageContent(fileParam, fileAccessPlan);
                     if (!fileContent) {
@@ -125,74 +125,74 @@ export default {
                     }
                     fileContents.push(fileContent);
                 }
-                
+
                 // If no files were found, return error
                 if (fileContents.length === 0) {
-                    const errorMessage = errors.length > 0 
+                    const errorMessage = errors.length > 0
                         ? errors.join('; ')
                         : 'No files found. Use FileCollection to find available files.';
                     resolver.tool = JSON.stringify({ toolUsed: "vision" });
-                    return JSON.stringify({ 
+                    return JSON.stringify({
                         error: errorMessage,
                         recoveryMessage: "The files were not found. Please verify the files exist in the collection or provide valid file references."
                     });
                 }
-                
+
                 // Combine files and instructions in the same message so Gemini sees both together
                 const messageContent = [...fileContents];
                 if (args.detailedInstructions) {
                     messageContent.push({type: 'text', text: args.detailedInstructions});
                 }
-                
+
                 cleanChatHistory.push({role: "user", content: messageContent});
             } else if (args.detailedInstructions) {
                 // No files, just add instructions
                 cleanChatHistory.push({role: "user", content: args.detailedInstructions});
             }
-            
+
             // Use clean chat history instead of the full chat history
             args.chatHistory = cleanChatHistory;
-            
+
             // Explicitly disable function calling - this tool is just for vision analysis, not tool calls
             // This prevents MALFORMED_FUNCTION_CALL errors
             const result = await runAllPrompts({ ...args, tool_choice: 'none' });
-            
+
             // Check for errors in resolver (ModelExecutor logs errors here when it catches exceptions)
             if (resolver.errors && resolver.errors.length > 0) {
-                const errorMessages = Array.isArray(resolver.errors) 
+                const errorMessages = Array.isArray(resolver.errors)
                     ? resolver.errors.map(err => err.message || err)
                     : [resolver.errors.message || resolver.errors];
-                
+
                 const errorMessageStr = errorMessages.join('; ');
                 logger.error(`Analyzer tool error: ${errorMessageStr}`);
-                
+
                 resolver.tool = JSON.stringify({ toolUsed: "vision" });
-                return JSON.stringify({ 
+                return JSON.stringify({
                     error: errorMessageStr,
                     recoveryMessage: "The file analysis failed. Please verify the file is accessible and in a supported format, or try a different file."
                 });
             }
-            
+
             // Handle null response (can happen when ModelExecutor catches an error but doesn't log it)
             if (!result) {
                 const errorMessage = 'Model execution returned null - the model request likely failed';
                 logger.error(`Error in analyzer tool: ${errorMessage}`);
                 resolver.tool = JSON.stringify({ toolUsed: "vision" });
-                return JSON.stringify({ 
+                return JSON.stringify({
                     error: errorMessage,
                     recoveryMessage: "The file analysis failed. Please verify the file is accessible and in a supported format, or try a different file."
                 });
             }
-            
+
             resolver.tool = JSON.stringify({ toolUsed: "vision" });
             return result;
         } catch (e) {
             // Catch any errors from runAllPrompts or other operations
             const errorMessage = e?.message || e?.toString() || String(e);
             logger.error(`Error in analyzer tool: ${errorMessage}`);
-            
+
             resolver.tool = JSON.stringify({ toolUsed: "vision" });
-            return JSON.stringify({ 
+            return JSON.stringify({
                 error: errorMessage,
                 recoveryMessage: "The file analysis failed. Please verify the file is accessible and in a supported format, or try a different file."
             });

@@ -17,5 +17,5 @@ export default {
         last_frame_image: "",
     },
 
-    timeout: 60 * 30, // 30 minutes
+    timeout: 60 * 35, // Provider polling plus result delivery
 };

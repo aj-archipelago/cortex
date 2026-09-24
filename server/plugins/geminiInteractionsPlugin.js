@@ -101,7 +101,9 @@ class GeminiInteractionsPlugin extends ModelPlugin {
           parameters?.[`${key}_mime_type`],
         );
         if (built) media.push(built);
-        if (media.length >= maxCount) return media;
+        if (media.length > maxCount) {
+          throw new Error(`This Gemini model supports at most ${maxCount} ${mediaType} inputs`);
+        }
       }
     }
 
@@ -113,14 +115,14 @@ class GeminiInteractionsPlugin extends ModelPlugin {
       ...this.collectMedia(
         parameters,
         "image",
-        ["input_images", "inputImages", "input_image", "inputImage"],
-        this.model.maxInputImages || DEFAULT_MAX_INPUT_IMAGES,
+        ["input_images", "inputImages", "input_image", "inputImage", "input_image_2", "input_image_3", "input_image_4", "input_image_5"],
+        this.model.maxInputImages ?? DEFAULT_MAX_INPUT_IMAGES,
       ),
       ...this.collectMedia(
         parameters,
         "video",
         ["input_videos", "inputVideos", "input_video", "inputVideo"],
-        this.model.maxInputVideos || DEFAULT_MAX_INPUT_VIDEOS,
+        this.model.maxInputVideos ?? DEFAULT_MAX_INPUT_VIDEOS,
       ),
       ...this.collectMedia(
         parameters,
@@ -134,7 +136,7 @@ class GeminiInteractionsPlugin extends ModelPlugin {
           "audioUrl",
           "inputAudioUrl",
         ],
-        this.model.maxInputAudio || DEFAULT_MAX_INPUT_AUDIO,
+        this.model.maxInputAudio ?? DEFAULT_MAX_INPUT_AUDIO,
       ),
     ];
   }
@@ -172,7 +174,19 @@ class GeminiInteractionsPlugin extends ModelPlugin {
         text: textInput,
       });
     }
-    input.push(...this.buildMediaInputs(parameters));
+    const media = this.buildMediaInputs(parameters);
+    const roles = parameters.inputImageRoles || [];
+    const frames = roles.some(role => ["start_frame", "end_frame"].includes(role));
+    if (frames) {
+      const sourceImages = parameters.input_images || parameters.inputImages;
+      const images = Array.isArray(sourceImages) ? sourceImages.map(image => this.buildMediaInput("image", image)) : media.filter(part => part.type === "image");
+      if (roles.length !== images.length || roles.some(role => !["start_frame", "end_frame"].includes(role)) || roles.filter(role => role === "start_frame").length !== 1 || roles.filter(role => role === "end_frame").length > 1 || media.some(part => part.type !== "image")) throw new Error("Omni interpolation requires a start frame and optional end frame, without other references");
+      input.push(images[roles.indexOf("start_frame")]);
+      if (roles.includes("end_frame")) input.push(images[roles.indexOf("end_frame")]);
+    } else input.push(...media);
+    const mode = parameters.generationMode || "auto";
+    if (!["auto", "extend"].includes(mode)) throw new Error("Unsupported Omni generation mode");
+    if (mode === "extend" && (frames || media.filter(part => part.type === "video").length !== 1)) throw new Error("Omni extension requires exactly one video");
 
     if (!input.length) {
       throw new Error(
@@ -187,7 +201,19 @@ class GeminiInteractionsPlugin extends ModelPlugin {
         parameters?.model ||
         this.modelName,
       input,
+      ...(mode === "extend" ? { generation_config: { video_config: { task: "extend" } } } : {}),
+      ...(this.model.videoOutputSettings ? {
+        response_format: this.buildVideoOutputSettings(parameters),
+      } : {}),
     };
+  }
+
+  buildVideoOutputSettings(parameters) {
+    const aspect_ratio = parameters.aspectRatio || "16:9";
+    const resolution = parameters.resolution || "720p";
+    if (!["16:9", "9:16"].includes(aspect_ratio)) throw new Error("Unsupported Omni aspect ratio");
+    if (!["360p", "720p", "1080p", "4k"].includes(resolution)) throw new Error("Unsupported Omni resolution");
+    return { type: "video", aspect_ratio, resolution };
   }
 
   async execute(text, parameters, prompt, cortexRequest) {
@@ -223,6 +249,7 @@ class GeminiInteractionsPlugin extends ModelPlugin {
           ...cortexRequest.headers,
         },
         data: requestParameters,
+        timeout: (cortexRequest.pathway?.timeout || 900) * 1000,
       });
       return this.parseResponse(response.data);
     } catch (error) {
@@ -240,7 +267,7 @@ class GeminiInteractionsPlugin extends ModelPlugin {
     const steps = Array.isArray(data?.steps) ? data.steps : [];
 
     for (const step of steps) {
-      if (step.type === "thought") continue;
+      if (step.type !== "model_output") continue;
       const contents = Array.isArray(step.content) ? step.content : [];
       for (const content of contents) {
         if (content?.type === "text" && content.text) {

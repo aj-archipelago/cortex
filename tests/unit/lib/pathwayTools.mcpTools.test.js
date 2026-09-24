@@ -2,6 +2,40 @@
 // Tests for MCP tool search and execution logic in callTool (pathwayTools.js)
 import test from 'ava';
 import { callTool } from '../../../lib/pathwayTools.js';
+import { registerRequestScopedTools } from '../../../pathways/system/entity/tools/shared/request_scoped_tools.js';
+
+test('local tool search stays available when a configured MCP service fails', async (t) => {
+    const entityTools = {};
+    const entityToolsOpenAiFormat = [];
+    const local = {
+        definition: { type: 'function', function: {
+            name: 'WorkspaceSSH', description: 'Run workspace commands',
+            parameters: { type: 'object', properties: {} },
+        } },
+    };
+    const localToolCatalog = { workspacessh: {
+        name: 'workspacessh', originalName: 'WorkspaceSSH', source: 'local',
+        description: 'Run workspace commands', parameters: [],
+    } };
+    registerRequestScopedTools(entityTools, entityToolsOpenAiFormat, { localToolCatalog, mcpServerKeys: ['atlassian'] });
+    let discoveries = 0;
+    const resolver = { args: {
+        entityTools, entityToolsOpenAiFormat, localToolCatalog,
+        localEntityToolsDeferred: { workspacessh: local },
+        mcpToolCatalog: {}, mcpEntityToolsDeferred: {},
+        discoverMcpServerTools: async () => { discoveries++; throw new Error('MCP service unavailable'); },
+    } };
+    await callTool('SearchAvailableTools', { query: '', server: 'atlassian' }, entityTools, resolver);
+    const localResult = await callTool('SearchAvailableTools', { query: 'workspace' }, entityTools, resolver);
+    t.is(discoveries, 0);
+    t.is(JSON.parse(localResult.result).tools[0].name, 'WorkspaceSSH');
+    const remoteResult = await callTool('SearchAvailableTools', { query: 'issues', server: 'atlassian' }, entityTools, resolver);
+    t.is(remoteResult.error, 'MCP service unavailable');
+    t.is(discoveries, 1);
+    const retryLocal = await callTool('SearchAvailableTools', { query: 'workspace' }, entityTools, resolver);
+    t.is(JSON.parse(retryLocal.result).tools.length, 1);
+    t.is(discoveries, 1);
+});
 
 const searchToolDefinitions = () => ({
     searchavailabletools: {

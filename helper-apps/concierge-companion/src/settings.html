@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'"
+        />
+        <title>Concierge Companion</title>
+        <link rel="stylesheet" href="settings.css" />
+    </head>
+    <body>
+        <main>
+            <header>
+                <picture
+                    ><source
+                        srcset="brand-dark.png"
+                        media="(prefers-color-scheme: dark)" />
+                    <img src="brand-light.png" width="48" height="48" alt=""
+                /></picture>
+                <div>
+                    <h1 data-t="title">Concierge Companion</h1>
+                    <p data-t="intro">Your tools, wherever they run.</p>
+                </div>
+            </header>
+            <div class="status-line">
+                <span class="dot" id="dot"></span
+                ><span id="status" role="status"></span>
+            </div>
+            <p id="error" role="alert" hidden></p>
+            <section id="approval" hidden>
+                <span class="eyebrow" data-t="oneStep">ONE MORE STEP</span>
+                <h2 data-t="approveTitle">Connect this computer?</h2>
+                <p data-t="approveHelp">
+                    Allow this Concierge account to use the tools you enable here.
+                </p>
+                <div class="identity">
+                    <strong id="approval-account"></strong
+                    ><span id="approval-site" dir="ltr"></span>
+                </div>
+                <p id="approval-tool"></p>
+                <div class="actions">
+                    <button id="approve" data-t="approve">
+                        Approve connection</button
+                    ><button id="cancel" class="secondary" data-t="cancel">
+                        Cancel
+                    </button>
+                </div>
+            </section>
+            <section id="welcome">
+                <h2 data-t="welcome">Start in Concierge.</h2>
+                <p data-t="welcomeHelp">
+                    Open Connectors in Concierge and select “Connect this
+                    computer”. Your account will be filled in for you.
+                </p>
+                <div class="steps">
+                    <span data-t="installed">Installed</span
+                    ><span data-t="connectStep">Connect</span
+                    ><span data-t="approveStep">Approve</span>
+                </div>
+            </section>
+            <section id="connected" hidden>
+                <div class="section-top">
+                    <h2 data-t="ready">At your service.</h2>
+                    <button id="pause" class="text-button">Pause</button>
+                </div>
+                <div class="identity">
+                    <strong id="account"></strong
+                    ><span id="connected-site" dir="ltr"></span>
+                </div>
+                <p data-t="readyHelp">
+                    You can close this window. Companion will stay ready in the
+                    background.
+                </p>
+                <button id="open" class="secondary full" data-t="open">
+                    Open Concierge ↗
+                </button>
+            </section>
+            <section id="tools-panel" hidden>
+                <div class="section-top">
+                    <h2 data-t="tools">Your connectors</h2>
+                    <span class="pill" id="count">0</span>
+                </div>
+                <ul id="servers"></ul>
+                <button id="files" class="folder-button">
+                    <svg
+                        class="folder-icon"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.7"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                    >
+                        <path
+                            d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"
+                        /></svg
+                    ><span
+                        ><strong data-t="files">Choose a folder</strong
+                        ><small data-t="filesHelp"
+                            >Read and edit files you choose. No setup
+                            needed.</small
+                        ></span
+                    ><span aria-hidden="true">+</span>
+                </button>
+            </section>
+            <details id="advanced">
+                <summary data-t="advanced">Advanced settings</summary>
+                <section>
+                    <h2 data-t="custom">Custom connector</h2>
+                    <p data-t="customHelp">
+                        Connect a local, private network, or cloud MCP server.
+                    </p>
+                    <form id="server-form">
+                        <label for="name" data-t="name">Name</label
+                        ><input id="name" required maxlength="100" /><label
+                            for="url"
+                            data-t="address"
+                            >Server address</label
+                        ><input
+                            id="url"
+                            type="url"
+                            required
+                            placeholder="https://example.com/mcp"
+                            dir="ltr"
+                        /><label for="transport" data-t="transport"
+                            >Connection type</label
+                        ><select id="transport">
+                            <option value="streamable-http">HTTP</option>
+                            <option value="sse">SSE</option></select
+                        ><label for="token" data-t="token"
+                            >Access token (if required)</label
+                        ><input
+                            id="token"
+                            type="password"
+                            autocomplete="off"
+                        /><button type="submit" data-t="add">
+                            Add connector
+                        </button>
+                    </form>
+                    <button
+                        id="import"
+                        class="secondary full"
+                        type="button"
+                        data-t="import"
+                    >
+                        Import configuration…
+                    </button>
+                </section>
+                <section>
+                    <h2 data-t="manual">Connect with a code</h2>
+                    <form id="pair-form">
+                        <label for="site" data-t="site">Concierge address</label
+                        ><input
+                            id="site"
+                            type="url"
+                            placeholder="https://concierge.example.com"
+                            required
+                            dir="ltr"
+                        /><button type="submit" data-t="pair">
+                            Get pairing code
+                        </button>
+                    </form>
+                    <div id="pairing" hidden>
+                        <p data-t="codeHelp">Enter this code in Concierge:</p>
+                        <strong id="code"></strong>
+                        <p data-t="expiry">Expires in 10 minutes.</p>
+                    </div>
+                </section>
+            </details>
+            <footer>
+                <span id="update-status"></span
+                ><button
+                    id="update"
+                    class="text-button"
+                    data-t="restart"
+                    hidden
+                >
+                    Restart to update
+                </button>
+                <p data-t="footer">
+                    Manage access in Concierge. Pause any time from the menu bar or
+                    system tray.
+                </p>
+            </footer>
+        </main>
+        <script src="settings.js"></script>
+    </body>
+</html>

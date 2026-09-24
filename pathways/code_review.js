@@ -9,7 +9,7 @@ export default {
             ]
         })
     ],
-    model: 'gemini-flash-35-vision',
+    model: 'gemini-flash-37-vision',
     reasoningEffort: 'high',
     useInputChunking: false,
     geminiSafetySettings: [

@@ -373,8 +373,9 @@ test.serial("applet-user uploads use the user container and stay isolated by app
       t.is(listB.data.folderPath, `applets/${appletB}`);
       t.is(listA.data.count, 1);
       t.is(listB.data.count, 1);
-      t.is(listA.data.files[0].hash, hashA);
-      t.is(listB.data.files[0].hash, hashB);
+      // Cloud locations identify these files; hashes are legacy metadata.
+      t.is(new URL(listA.data.files[0].url).pathname, new URL(responseA.data.url).pathname);
+      t.is(new URL(listB.data.files[0].url).pathname, new URL(responseB.data.url).pathname);
     } else {
       t.is(listA.status, 500);
       t.is(listB.status, 500);

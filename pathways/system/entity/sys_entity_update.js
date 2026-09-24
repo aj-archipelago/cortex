@@ -55,6 +55,8 @@ export default {
                 return JSON.stringify({ error: 'Not authorized to update this entity' });
             }
 
+            if (entity.kind === 'colleague' && secretsJson) return JSON.stringify({ error: 'Manage shared workspace secrets from your personal entity' });
+
             const originalEntity = JSON.parse(JSON.stringify(entity));
             const result = { success: true };
             let nextWorkspaceSecrets = null;

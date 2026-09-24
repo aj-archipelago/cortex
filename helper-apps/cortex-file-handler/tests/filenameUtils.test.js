@@ -1,6 +1,15 @@
 import test from "ava";
 
-import { sanitizeFilename } from "../src/utils/filenameUtils.js";
+import { sanitizeFilename, generateChatUploadFilename } from "../src/utils/filenameUtils.js";
+
+test("chat upload names stay unique with repeated names and preserve Unicode and extensions", (t) => {
+  const names = new Set(Array.from({ length: 1000 }, () => generateChatUploadFilename("صورة.jpg")));
+  t.is(names.size, 1000);
+  for (const name of names) {
+    t.regex(name, /^صورة-[0-9a-f-]{36}\.jpg$/);
+  }
+  t.false(generateChatUploadFilename("../../image.jpg").includes("/"));
+});
 
 test("sanitizeFilename strips C1 control characters from mojibake names", (t) => {
   const result = sanitizeFilename("Ø§ÙÙ ð.mp4");

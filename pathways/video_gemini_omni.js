@@ -3,7 +3,9 @@ export default {
 
     inputParameters: {
         text: "",
-        model: "gemini-omni-flash-preview",
+        model: "gemini-omni-1.1-flash",
+        generationMode: { type: "string" },
+        inputImageRoles: { type: "array", items: { type: "string" } },
         input_image: "",
         input_image_2: "",
         input_image_3: "",
@@ -15,8 +17,10 @@ export default {
         input_audio: "",
         input_audios: { type: "array", items: { type: "string" } },
         contextId: "",
+        aspectRatio: { type: "string" },
+        resolution: { type: "string" },
     },
 
-    model: "gemini-omni-flash-preview",
+    // This pathway serves multiple Omni versions; args.model selects the endpoint.
     timeout: 60 * 15,
 };

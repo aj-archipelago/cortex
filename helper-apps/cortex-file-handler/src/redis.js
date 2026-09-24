@@ -37,22 +37,28 @@ const createMockClient = () => {
     },
     async connect() { return Promise.resolve(); },
     async publish() { return Promise.resolve(); },
-    async hgetall(hashName) { 
+    async hscan(hashName, cursor, _count, count) {
+      const entries = [...(hashMap.get(hashName) || new Map())];
+      const start = Number(cursor);
+      const end = Math.min(start + Number(count), entries.length);
+      return [end === entries.length ? '0' : String(end), entries.slice(start, end).flat()];
+    },
+    async hgetall(hashName) {
       const hash = hashMap.get(hashName);
       return hash ? Object.fromEntries(hash) : {};
     },
-    async hset(hashName, key, value) { 
+    async hset(hashName, key, value) {
       if (!hashMap.has(hashName)) {
         hashMap.set(hashName, new Map());
       }
       hashMap.get(hashName).set(key, value);
       return Promise.resolve();
     },
-    async hget(hashName, key) { 
+    async hget(hashName, key) {
       const hash = hashMap.get(hashName);
       return hash ? hash.get(key) || null : null;
     },
-    async hdel(hashName, key) { 
+    async hdel(hashName, key) {
       const hash = hashMap.get(hashName);
       if (hash && hash.has(key)) {
         hash.delete(key);
@@ -92,6 +98,13 @@ const createMockClient = () => {
       return 1;
     },
     async eval(script, numKeys, ...args) {
+      if (script.includes('catalog-compare-and-set')) {
+        const [map, key, expected, replacement] = args;
+        if (await this.hget(map, key) !== expected) return 0;
+        if (replacement) await this.hset(map, key, replacement);
+        else await this.hdel(map, key);
+        return 1;
+      }
       // Mock implementation for atomic get-and-delete operation
       if (script.includes('hget') && script.includes('hdel')) {
         const hashName = args[0];
@@ -211,13 +224,13 @@ const setFileStoreMap = async (hash, value, contextId = null) => {
       console.error("setFileStoreMap: hash is required");
       return;
     }
-    
+
     // Create a copy of value to avoid mutating the original
     const valueToStore = { ...value };
-    
+
     // Remove 'message' field - it's only for the upload response, not for persistence
     delete valueToStore.message;
-    
+
     // Remove shortLivedUrl fields - they're only for responses, not for persistence
     // Store only persisted URLs (url, gcs, converted.url, converted.gcs)
     delete valueToStore.shortLivedUrl;
@@ -226,12 +239,12 @@ const setFileStoreMap = async (hash, value, contextId = null) => {
       delete convertedCopy.shortLivedUrl;
       valueToStore.converted = convertedCopy;
     }
-    
+
     // Only set timestamp if one doesn't already exist
     if (!valueToStore.timestamp) {
       valueToStore.timestamp = new Date().toISOString();
     }
-    
+
     // Determine which map to write to
     if (contextId) {
       // Write to context-scoped map with raw hash as key
@@ -273,6 +286,39 @@ const getAllFilesForContext = async (contextId) => {
   }
 };
 
+// Deletion must fail closed: an unavailable or incomplete legacy read cannot
+// establish that there are no historical backups. HSCAN bounds transfer/parse
+// work per page; the caller retains only records for the requested locations.
+async function* scanFilesForDeletion(contextId) {
+  if (!contextId) throw new Error('A scoped context is required for deletion');
+  let cursor = '0';
+  let count = 0;
+  do {
+    const page = await client.hscan(`FileStoreMap:ctx:${contextId}`, cursor, 'COUNT', 128);
+    cursor = page[0];
+    for (let i = 0; i < page[1].length; i += 2) {
+      if (++count > 100000) throw new Error('Legacy deletion scan exceeds safety limit');
+      const raw = page[1][i + 1];
+      const record = JSON.parse(raw);
+      if (!record || typeof record !== 'object' || Array.isArray(record)) {
+        throw new Error('Invalid legacy deletion metadata');
+      }
+      yield [page[1][i], record, raw];
+      if (count % 128 === 0) await new Promise(resolve => setImmediate(resolve));
+    }
+  } while (cursor !== '0');
+}
+
+async function commitDeletedFileRecord(contextId, key, expected, replacement) {
+  const result = await client.eval(`-- catalog-compare-and-set
+    if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+    if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1])
+    else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
+    return 1`, 1, `FileStoreMap:ctx:${contextId}`, key, expected,
+    replacement ? JSON.stringify(replacement) : '');
+  if (result !== 1) throw new Error('File metadata changed during deletion; retry required');
+}
+
 const getCachedValue = async (key) => {
   try {
     if (!key) return null;
@@ -299,7 +345,7 @@ const getFileStoreMap = async (hash, skipLazyCleanup = false, contextId = null) 
     if (!hash) {
       return null;
     }
-    
+
     // Try context-scoped map first if contextId is provided
     let value = null;
     if (contextId) {
@@ -314,7 +360,7 @@ const getFileStoreMap = async (hash, skipLazyCleanup = false, contextId = null) 
       // No contextId - check unscoped map
       value = await client.hget("FileStoreMap", hash);
     }
-    
+
     // Backwards compatibility for unscoped keys only:
     // If unscoped hash doesn't exist, fall back to legacy hash+container key (if still present).
     // SECURITY: Context-scoped lookups NEVER fall back - they must match exactly.
@@ -339,7 +385,7 @@ const getFileStoreMap = async (hash, skipLazyCleanup = false, contextId = null) 
         }
       }
     }
-    
+
     if (value) {
       try {
         // parse the value back to an object before returning
@@ -422,14 +468,14 @@ const removeFromFileStoreMap = async (hash, contextId = null) => {
     if (!hash) {
       return;
     }
-    
+
     let result = 0;
-    
+
     // First, try to delete from unscoped map
     if (!contextId) {
       result = await client.hdel("FileStoreMap", hash);
     }
-    
+
     // Also try to delete from context-scoped map if contextId is provided
     if (contextId) {
       const contextMapKey = `FileStoreMap:ctx:${contextId}`;
@@ -438,7 +484,7 @@ const removeFromFileStoreMap = async (hash, contextId = null) => {
         result = contextResult;
       }
     }
-    
+
     if (result > 0) {
       console.log(`The hash ${hash} was removed successfully`);
     }
@@ -571,6 +617,8 @@ export {
   getFileStoreMap,
   removeFromFileStoreMap,
   getAllFilesForContext,
+  scanFilesForDeletion,
+  commitDeletedFileRecord,
   getCachedValue,
   setCachedValue,
   cleanupRedisFileStoreMap,

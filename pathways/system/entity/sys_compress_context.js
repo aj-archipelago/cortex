@@ -49,10 +49,10 @@ Provide a clear summary preserving all URLs, citations, and numerical data.`
         researchContent: '',
         language: "English",
     },
-    model: 'gemini-flash-35-vision',
+    model: 'gemini-flash-37-vision',
     useInputChunking: false,
     timeout: 120,
-    
+
     executePathway: async ({args, runAllPrompts}) => {
         try {
             // Extract URLs for validation
@@ -60,9 +60,9 @@ Provide a clear summary preserving all URLs, citations, and numerical data.`
             const content = args.researchContent || '';
             const urlMatches = content.match(/https?:\/\/[^\s\)\]"']+/g);
             if (urlMatches) urlMatches.forEach(url => urls.add(url));
-            
+
             const result = await runAllPrompts(args);
-            
+
             // Validate URL preservation
             if (urls.size > 0 && typeof result === 'string') {
                 const preserved = Array.from(urls).filter(url => result.includes(url));
@@ -71,7 +71,7 @@ Provide a clear summary preserving all URLs, citations, and numerical data.`
                     logger.warn(`Context compression preserved only ${(rate * 100).toFixed(0)}% of URLs (${preserved.length}/${urls.size})`);
                 }
             }
-            
+
             return result;
         } catch (error) {
             logger.error(`Error in sys_compress_context: ${error.message}`);

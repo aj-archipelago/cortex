@@ -34,8 +34,8 @@ test.serial('sys_entity_start streaming works correctly', async (t) => {
       }
     `,
     variables: {
-      text: 'Tell me about the history of Al Jazeera',
-      chatHistory: [{ role: "user", content: ["Tell me about the history of Al Jazeera"] }],
+      text: 'Tell me about the history of public libraries',
+      chatHistory: [{ role: "user", content: ["Tell me about the history of public libraries"] }],
       stream: true
     }
   });

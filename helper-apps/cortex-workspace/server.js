@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { requireAuth, setSecret } from './lib/auth.js';
 import { execSync, execBackground, getResult, listBackgroundJobs } from './lib/shell.js';
 import { readFile, writeFile, editFile, browseDir } from './lib/files.js';
+import { collectCheckpointInventory } from './lib/checkpoint_inventory.js';
 import {
     getStatus,
     resetWorkspace,
@@ -80,7 +81,7 @@ function exposeBlobFiles() {
 // --- Unauthenticated ---
 
 app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', version });
+    res.json({ status: 'ok', version, checkpointInventory: 1 });
 });
 
 // --- Authenticated routes ---
@@ -167,6 +168,10 @@ app.get('/status', wrap(async (_req, res) => {
     res.json(await getStatus());
 }));
 
+app.get('/checkpoint-inventory', wrap(async (_req, res) => {
+    res.json(await collectCheckpointInventory(WORKSPACE_DIR));
+}));
+
 // Create backup tarball of /workspace
 app.post('/backup', wrap(async (_req, res) => {
     res.json(await createBackup());
@@ -178,17 +183,17 @@ app.post('/restore', wrap(async (req, res) => {
     if (!archivePath || typeof archivePath !== 'string') {
         return res.status(400).json({ error: 'archivePath is required' });
     }
-    res.json(await restoreBackup(archivePath));
+    res.json(await restoreBackup(archivePath, req.body.inventory));
 }));
 
 // Download and restore a workspace tarball directly from Blob/SAS URL.
 app.post('/restore-url', wrap(async (req, res) => {
-    const { archiveUrl, archivePath, encryption } = req.body;
+    const { archiveUrl, archivePath, encryption, inventory } = req.body;
     if (encryption) {
-        res.json(await restoreBackupFromUrlEncrypted(archiveUrl, encryption));
+        res.json(await restoreBackupFromUrlEncrypted(archiveUrl, encryption, inventory));
         return;
     }
-    res.json(await restoreBackupFromUrl(archiveUrl, archivePath));
+    res.json(await restoreBackupFromUrl(archiveUrl, archivePath, inventory));
 }));
 
 // Upload a workspace tarball directly to Blob/SAS URL.

@@ -1,5 +1,25 @@
 import test from 'ava';
 import { MongoEntityStore } from '../../../lib/MongoEntityStore.js';
+import { isDeepStrictEqual } from 'node:util';
+
+test('workspace CAS rejects stale state and preserves unrelated entity fields', async t => {
+    const store = new MongoEntityStore();
+    store.isConfigured = () => true;
+    const old = { status: 'provisioning', provisioningAttemptId: 'old', checkpointEncryption: { tagBase64: 'old' } };
+    const latest = { status: 'running', checkpointEncryption: { tagBase64: 'new' }, containerId: 'new-runtime' };
+    let document = { id: 'entity-cas', name: 'Renamed meanwhile', workspace: latest };
+    store._getCollection = async () => ({ updateOne: async (filter, update, options) => {
+        t.is(options, undefined);
+        if (filter.id !== document.id || !isDeepStrictEqual(filter.workspace, document.workspace)) return { matchedCount: 0 };
+        document = { ...document, ...update.$set };
+        return { matchedCount: 1 };
+    } });
+    t.false(await store.compareAndSetWorkspace(document.id, old, { ...old, status: 'error' }));
+    t.deepEqual(document.workspace, latest);
+    t.true(await store.compareAndSetWorkspace(document.id, latest, { ...latest, status: 'stopped' }));
+    t.is(document.name, 'Renamed meanwhile');
+    t.is(document.workspace.checkpointEncryption.tagBase64, 'new');
+});
 
 // Test the upsertEntity partial-update logic in isolation by simulating
 // the field-merge behavior without needing a real MongoDB connection.
@@ -174,4 +194,25 @@ test('preserves identity from existing when neither provided', t => {
     const existing = { id: 'x', identity: 'Existing instructions' };
     const doc = buildDoc({ id: 'x', name: 'Rename' }, existing);
     t.is(doc.identity, 'Existing instructions');
+});
+
+test('insert-only recruitment preserves a concurrent creator and refreshes the stored identity', async t => {
+    const store = new MongoEntityStore();
+    store.isConfigured = () => true;
+    let saved = null;
+    store._getCollection = async () => ({
+        findOne: async () => saved,
+        updateOne: async ({ id }, update) => {
+            t.is(id, 'stable-specialist');
+            t.is(update.$set, undefined);
+            t.is(update.$setOnInsert.name, 'Candidate');
+            // Another creator won between the initial read and insert.
+            saved = { id, name: 'Stored identity', identity: 'Keep these instructions', tools: ['*'] };
+            return { matchedCount: 1, modifiedCount: 0 };
+        },
+    });
+    t.is(await store.upsertEntity({ id: 'stable-specialist', name: 'Candidate' }, { insertOnly: true }), 'stable-specialist');
+    const result = await store.getEntity('stable-specialist');
+    t.is(result.name, 'Stored identity');
+    t.is(result.identity, 'Keep these instructions');
 });

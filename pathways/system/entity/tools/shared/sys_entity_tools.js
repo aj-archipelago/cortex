@@ -1,11 +1,15 @@
+import { findAssistantPage } from '../../../../../lib/assistantDirectory.js';
 // sys_entity_tools.js
 // Shared tool definitions that can be used by any entity
 import { config } from '../../../../../config.js';
 import logger from '../../../../../lib/logger.js';
 import { getEntityStore } from '../../../../../lib/MongoEntityStore.js';
+import { COLLEAGUE_AGENT_TOOL_NAMES } from '../../../../../lib/colleagueAgentTools.js';
+import { CONCIERGE_AGENT_TOOL_NAMES } from '../../../../../lib/mediaAgentTools.js';
+import { canAccessEntity } from '../../../../../lib/entityPreferences.js';
 
 export const CUSTOM_TOOLS = {};
-const ALWAYS_VISIBLE_LOCAL_TOOL_KEYS = new Set(['workspacessh']);
+const ALWAYS_VISIBLE_LOCAL_TOOL_KEYS = new Set(['workspacessh', 'notifyuser', ...COLLEAGUE_AGENT_TOOL_NAMES]);
 const WORKSPACE_SSH_TOOL_KEY = 'workspacessh';
 
 export const toOpenAiToolDefinition = (tool) => {
@@ -57,6 +61,15 @@ export const getToolsForEntity = (entityConfig) => {
     // Merge system tools with custom tools (custom tools override system tools)
     const allTools = { ...normalizedSystemTools, ...normalizedCustomTools, ...normalizedCUSTOM_TOOLS };
 
+    if (entityConfig?.isSystem) {
+        delete allTools.notifyuser;
+        for (const name of CONCIERGE_AGENT_TOOL_NAMES) delete allTools[name];
+    }
+    if (entityConfig?.useMemory === false) {
+        delete allTools.searchmemory;
+        delete allTools.storememory;
+    }
+
     // If no tools property specified or array contains *, return all tools
     if (!entityConfig?.tools || entityConfig.tools.includes('*')) {
         const entityTools = removeDefaultEntityTools(allTools, entityConfig);
@@ -81,7 +94,10 @@ export const getToolsForEntity = (entityConfig) => {
     // Filter the tools to only include those specified for this entity
     const filteredTools = removeDefaultEntityTools(Object.fromEntries(
         Object.entries(allTools).filter(([toolName]) =>
-            entityToolNames.includes(toolName.toLowerCase())
+            entityToolNames.includes(toolName.toLowerCase()) ||
+            // Inbox delivery is a baseline capability, including for legacy
+            // specialists with explicit tool lists. Execution checks user access.
+            toolName === 'notifyuser' || CONCIERGE_AGENT_TOOL_NAMES.has(toolName)
         )
     ), entityConfig);
 
@@ -141,6 +157,55 @@ const buildPersonalEntityDefaults = (userId, defaultEntity = null, personalEntit
 });
 
 /**
+ * Resolve (or create) the personal entity for a user.
+ * Shared default entities intentionally omit WorkspaceSSH; interactive user
+ * sessions need the personal entity to edit workspace files.
+ *
+ * @param {string} userId
+ * @param {Object} [options]
+ * @param {string} [options.personalEntityName]
+ * @returns {Promise<{entityId: string, entityConfig: Object}|null>}
+ */
+export const resolvePersonalEntityConfig = async (userId, options = {}) => {
+    const { personalEntityName = null } = options;
+    if (!userId) {
+        return null;
+    }
+
+    try {
+        const entityStore = getEntityStore();
+        if (!entityStore.isConfigured()) {
+            return null;
+        }
+
+        const defaultEntity = await entityStore.getDefaultEntity();
+        const personalEntity = await entityStore.findOrCreatePersonalEntity(
+            userId,
+            buildPersonalEntityDefaults(userId, defaultEntity, personalEntityName),
+        );
+
+        if (!personalEntity?.id) {
+            return null;
+        }
+
+        const canonicalEntity = await entityStore.getEntity(personalEntity.id, {
+            fresh: true,
+        });
+        if (!canonicalEntity || !hasRequiredEnvVars(canonicalEntity)) {
+            return null;
+        }
+
+        return {
+            entityId: personalEntity.id,
+            entityConfig: canonicalEntity,
+        };
+    } catch (error) {
+        logger.error(`Error resolving personal entity config: ${error.message}`);
+        return null;
+    }
+};
+
+/**
  * Resolve a stale explicit entityId to a canonical entity for the current user.
  * Used by sys_entity_agent to repair replayed entity ids before tools/workspaces run.
  *
@@ -160,37 +225,52 @@ export const resolveExplicitEntityConfig = async (entityId, options = {}) => {
         }
 
         const explicitEntity = await entityStore.getEntity(entityId, { fresh: true });
+        if (!explicitEntity && entityId.startsWith('colleague-')) return { entityId, entityConfig: null, repaired: false, disabled: true, colleagueUnavailable: true };
         if (explicitEntity) {
+            if (explicitEntity.kind === 'colleague' && (!canAccessEntity(explicitEntity, userId) || explicitEntity.colleagueStatus === 'archived')) {
+                return { entityId, entityConfig: null, repaired: false, disabled: true, colleagueUnavailable: true };
+            }
             if (!hasRequiredEnvVars(explicitEntity)) {
                 logger.warn(
                     `Explicit entityId ${entityId} is disabled - preserving disabled entity failure`,
                 );
                 return { entityId, entityConfig: null, repaired: false, disabled: true };
             }
+
+            // Shared default entities strip WorkspaceSSH. When we have a user
+            // context, prefer their personal entity so applet/article edits work.
+            if (explicitEntity.isDefault && userId) {
+                const personal = await resolvePersonalEntityConfig(userId, {
+                    personalEntityName,
+                });
+                if (personal) {
+                    logger.warn(
+                        `Redirecting default entity ${entityId} to personal entity ${personal.entityId} for user ${userId}`,
+                    );
+                    return {
+                        entityId: personal.entityId,
+                        entityConfig: personal.entityConfig,
+                        repaired: true,
+                    };
+                }
+            }
+
             return { entityId, entityConfig: explicitEntity, repaired: false };
         }
 
         if (userId) {
-            const defaultEntity = await entityStore.getDefaultEntity();
-            const personalEntity = await entityStore.findOrCreatePersonalEntity(
-                userId,
-                buildPersonalEntityDefaults(userId, defaultEntity, personalEntityName),
-            );
-
-            if (personalEntity?.id) {
-                const canonicalEntity = await entityStore.getEntity(personalEntity.id, {
-                    fresh: true,
-                });
-                if (canonicalEntity && hasRequiredEnvVars(canonicalEntity)) {
-                    logger.warn(
-                        `Repairing stale entityId ${entityId} to canonical personal entity ${personalEntity.id} for user ${userId}`,
-                    );
-                    return {
-                        entityId: personalEntity.id,
-                        entityConfig: canonicalEntity,
-                        repaired: personalEntity.id !== entityId,
-                    };
-                }
+            const personal = await resolvePersonalEntityConfig(userId, {
+                personalEntityName,
+            });
+            if (personal) {
+                logger.warn(
+                    `Repairing stale entityId ${entityId} to canonical personal entity ${personal.entityId} for user ${userId}`,
+                );
+                return {
+                    entityId: personal.entityId,
+                    entityConfig: personal.entityConfig,
+                    repaired: personal.entityId !== entityId,
+                };
             }
         }
 
@@ -266,16 +346,21 @@ export const getAvailableEntities = async (options = {}) => {
             return [];
         }
 
-        const mongoEntities = await entityStore.getAllEntities(options);
+        const mongoEntities = options.entityId
+            ? [await entityStore.getEntity(options.entityId, { fresh: true, throwOnError: true })].filter(entity => canAccessEntity(entity, options.userId))
+            : (await findAssistantPage(entityStore, options.userId, { query: options.query, offset: options.offset, limit: 50, includeDefault: true })).entities;
         return mongoEntities
             .filter(entity => hasRequiredEnvVars(entity))
             .map(entity => {
-                const { entityTools } = getToolsForEntity(entity);
+                const { entityTools } = options.entityId ? getToolsForEntity(entity) : { entityTools: {} };
                 return {
                     id: entity.id,
                     name: entity.name || entity.id,
                     description: entity.description || '',
                     isDefault: entity.isDefault || false,
+                    kind: entity.kind || null,
+                    avatar: entity.avatar || null,
+                    colleagueStatus: entity.colleagueStatus || null,
                     activeTools: Object.keys(entityTools).map(toolName => ({
                         name: toolName,
                         description: entityTools[toolName].definition?.function?.description || ''

@@ -63,6 +63,19 @@ var config = convict({
         default: "oai-gpt4o",
         env: "DEFAULT_MODEL_NAME",
     },
+    cognitiveSearchIndexes: {
+        doc: "Logical search source names mapped to operator-owned Azure Search indexes.",
+        format: Object,
+        default: { wires: "idx-wires" },
+    },
+    cognitiveSearchFieldAliases: {
+        doc: "OData date-field aliases keyed by physical search index name.",
+        format: Object,
+        default: {
+            "idx-wires": { date_published: "date", date_modified: "date" },
+            indexcortex: { date_published: "date", date_modified: "updatedAt" },
+        },
+    },
     modelRedirects: {
         format: Object,
         default: {
@@ -89,6 +102,18 @@ var config = convict({
         default: "Jarvis",
         env: "DEFAULT_ENTITY_NAME",
     },
+    agentPermissionReview: {
+        enabled: { format: Boolean, default: false, env: "CORTEX_PERMISSION_REVIEW_ENABLED" },
+        model: { format: String, default: "oai-gpt56-luna", env: "CORTEX_PERMISSION_REVIEW_MODEL" },
+        policy: { format: String, default: "", env: "CORTEX_PERMISSION_REVIEW_POLICY" },
+        timeoutMs: { format: "nat", default: 8000, env: "CORTEX_PERMISSION_REVIEW_TIMEOUT_MS" },
+        maxReviews: { format: "nat", default: 32, env: "CORTEX_PERMISSION_REVIEW_MAX_REVIEWS" },
+    },
+    searchCacheEnabled: { format: Boolean, default: false, env: "CORTEX_SEARCH_CACHE_ENABLED" },
+    searchCacheRedisUrl: { format: String, default: "", env: "CORTEX_SEARCH_CACHE_REDIS_URL", sensitive: true },
+    searchCacheNamespace: { format: String, default: "", env: "CORTEX_SEARCH_CACHE_NAMESPACE" },
+    searchCacheTtlSeconds: { format: "nat", default: 300, env: "CORTEX_SEARCH_CACHE_TTL_SECONDS" },
+    searchCacheBraveStorageAllowed: { format: Boolean, default: false, env: "CORTEX_SEARCH_CACHE_BRAVE_STORAGE_ALLOWED" },
     enableCache: {
         format: Boolean,
         default: true,
@@ -159,11 +184,10 @@ var config = convict({
         default: null,
         sensitive: true,
     },
-    azureServicePrincipalCredentials: {
+    azureFoundryScope: {
         format: String,
-        default: null,
-        env: "AZURE_SERVICE_PRINCIPAL_CREDENTIALS",
-        sensitive: true,
+        default: "https://ai.azure.com/.default",
+        env: "AZURE_FOUNDRY_SCOPE",
     },
     azureAuthTokenHelper: {
         format: "*",
@@ -1342,12 +1366,12 @@ if (config.get("gcpServiceAccountKey")) {
     config.set("gcpAuthTokenHelper", gcpAuthTokenHelper);
 }
 
-if (config.get("azureServicePrincipalCredentials")) {
-    const azureAuthTokenHelper = new AzureAuthTokenHelper(
-        config.getProperties(),
-    );
-    config.set("azureAuthTokenHelper", azureAuthTokenHelper);
-}
+// One Azure credential is shared by Foundry and ARM/ACI. App Service is pinned
+// to managed identity; local development can resolve Azure CLI authentication.
+const azureAuthTokenHelper = new AzureAuthTokenHelper(
+    config.getProperties(),
+);
+config.set("azureAuthTokenHelper", azureAuthTokenHelper);
 
 // Load dynamic pathways from JSON file or cloud storage
 const createDynamicPathwayManager = async (config, basePathway) => {

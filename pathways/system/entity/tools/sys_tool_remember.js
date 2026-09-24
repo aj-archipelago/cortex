@@ -1,3 +1,4 @@
+import { memoryArgs } from '../../../../lib/entityPreferences.js';
 // sys_tool_remember.js
 // Entity tool that looks for relevant information in the entity's memory
 import { callPathway } from '../../../../lib/pathwayTools.js';
@@ -35,6 +36,6 @@ export default {
             args.chatHistory.push({role: "user", content: args.detailedInstructions});
         }
         resolver.tool = JSON.stringify({ toolUsed: "memory" });
-        return await callPathway('sys_search_memory', { ...args, stream: false, section: 'memoryAll', updateContext: true, reasoningEffort: 'none' });
+        return await callPathway('sys_search_memory', { ...memoryArgs(args), stream: false, section: 'memoryAll', updateContext: true, reasoningEffort: 'none' });
     }
 }

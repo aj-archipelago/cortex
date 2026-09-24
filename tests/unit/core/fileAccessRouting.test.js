@@ -162,6 +162,135 @@ test.serial('app-private file access target reads applet-user and legacy workspa
     }
 });
 
+test.serial('agent context target exposes its complete generic folder', async t => {
+    const { axios } = await loadRequestExecutor();
+    const {
+        findFileInFileAccessPlanDirect,
+        listFilesForFileAccessPlan,
+    } = await loadFileUtils();
+    const originalGet = axios.get;
+    axios.get = async () => ({
+        data: {
+            files: [
+                { name: 'applet-shared/projects/acme/brief.md', url: 'https://files.test/brief' },
+                { name: 'applet-shared/designs/widget/spec.txt', url: 'https://files.test/spec' },
+                { name: 'applet-shared/AGENTS.md', url: 'https://files.test/agents' },
+            ],
+        },
+    });
+    const plan = [{
+        kind: 'app-shared',
+        appletId: 'applet-123',
+    }];
+
+    try {
+        const files = await listFilesForFileAccessPlan(plan);
+        t.deepEqual(
+            files.map((file) => file.name).sort(),
+            [
+                'applet-shared/AGENTS.md',
+                'applet-shared/designs/widget/spec.txt',
+                'applet-shared/projects/acme/brief.md',
+            ],
+        );
+        t.is(
+            await findFileInFileAccessPlanDirect(
+                'https://attacker.test/file',
+                plan,
+                { allowDirectUrl: false },
+            ),
+            null,
+        );
+    } finally {
+        axios.get = originalGet;
+    }
+});
+
+test.serial('root files resolve by preserved display filename', async t => {
+    const { axios } = await loadRequestExecutor();
+    const { findFileInFileAccessPlanDirect } = await loadFileUtils();
+    const originalGet = axios.get;
+    axios.get = async (url) => {
+        const parsed = new URL(url);
+        if (parsed.searchParams.get('operation') === 'listNames') {
+            return {
+                data: {
+                    items: [['mrx2j47g-759.txt', 49, null]],
+                    truncated: false,
+                },
+            };
+        }
+        return {
+            data: {
+                files: [{
+                    name: 'mrx2j47g-759.txt',
+                    displayFilename: 'signals.txt',
+                    url: 'https://files.test/signals',
+                }],
+            },
+        };
+    };
+
+    try {
+        const found = await findFileInFileAccessPlanDirect(
+            'signals.txt',
+            [{ kind: 'app-shared', appletId: 'applet-123' }],
+        );
+        t.is(found.displayFilename, 'signals.txt');
+        t.is(found.url, 'https://files.test/signals');
+    } finally {
+        axios.get = originalGet;
+    }
+});
+
+test.serial('context-qualified file refs disambiguate identical paths across applets', async t => {
+    const { axios } = await loadRequestExecutor();
+    const {
+        createContextFileRef,
+        findFileInFileAccessPlanDirect,
+        listFileNamesForFileAccessPlan,
+    } = await loadFileUtils();
+    const originalGet = axios.get;
+    axios.get = async (url) => {
+        const parsed = new URL(url);
+        if (parsed.searchParams.get('operation') === 'listNames') {
+            return {
+                data: {
+                    items: [['applet-shared/data/fact.md', 10, null]],
+                    truncated: false,
+                },
+            };
+        }
+        const appletId = parsed.searchParams.get('appletId');
+        return {
+            status: 200,
+            data: {
+                blobPath: 'applet-shared/data/fact.md',
+                url: `https://files.test/${appletId}/fact.md`,
+            },
+        };
+    };
+
+    const plan = [
+        { kind: 'app-shared', appletId: 'applet-one' },
+        { kind: 'app-shared', appletId: 'applet-two' },
+    ];
+    try {
+        const listed = await listFileNamesForFileAccessPlan(plan);
+        t.is(listed.files.length, 2);
+
+        const secondRef = createContextFileRef(
+            'applet-shared:applet-two',
+            'applet-shared/data/fact.md',
+        );
+        const found = await findFileInFileAccessPlanDirect(secondRef, plan);
+        t.is(found._contextId, 'applet-shared:applet-two');
+        t.is(found.url, 'https://files.test/applet-two/fact.md');
+    } finally {
+        axios.get = originalGet;
+    }
+});
+
 test.serial('scoped name listing makes documented global prefixes relative to user-global scope', async t => {
     const { axios } = await loadRequestExecutor();
     const { listFileNamesForFileAccessPlan } = await loadFileUtils();

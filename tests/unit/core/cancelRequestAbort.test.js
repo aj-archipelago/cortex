@@ -6,7 +6,7 @@ import { PathwayResolver } from '../../../server/pathwayResolver.js';
 import { requestState } from '../../../server/requestState.js';
 import { cancelRequestResolver } from '../../../server/resolver.js';
 
-test.serial('cancelRequest marks request canceled and invokes abort hook', (t) => {
+test.serial('cancelRequest marks request canceled and invokes abort hook', async (t) => {
     const requestId = 'cancel-abort-hook';
     let abortCalled = false;
     requestState[requestId] = {
@@ -16,7 +16,7 @@ test.serial('cancelRequest marks request canceled and invokes abort hook', (t) =
     };
 
     try {
-        const result = cancelRequestResolver(null, { requestId }, { requestState });
+        const result = await cancelRequestResolver(null, { requestId }, { requestState });
 
         t.true(result);
         t.true(requestState[requestId].canceled);
@@ -364,4 +364,44 @@ test.serial('handleStream resolves and destroys stream after terminal progress e
     } finally {
         delete requestState[requestId];
     }
+});
+
+test.serial('non-streaming background provider calls abort with the parent and never retry', async t => {
+    const rootId = 'nonstream-parent';
+    const childId = 'nonstream-child';
+    const originalPost = axios.post;
+    let signal, calls = 0;
+    axios.post = async (_url, _data, options) => {
+        calls++;
+        signal = options.signal;
+        return new Promise((_resolve, reject) => signal.addEventListener('abort', () => {
+            reject(Object.assign(new Error('cancelled'), { name: 'CanceledError', code: 'ERR_CANCELED' }));
+        }, { once: true }));
+    };
+    const endpoint = { name: 'endpoint', url: 'https://example.test/chat', data: {}, params: {}, headers: {},
+        limiter: { schedule(_options, task) { return task(); } } };
+    const model = { name: 'nonstream-model', endpoints: [endpoint] };
+    const request = new CortexRequest({ data: { stream: false }, model, pathwayResolver: {
+        requestId: childId, rootRequestId: rootId, model, pathway: { timeout: 120, enableDuplicateRequests: false },
+    } });
+    try {
+        const pending = executeRequest(request).catch(error => error);
+        for (let i = 0; i < 50 && !signal; i++) await new Promise(resolve => setTimeout(resolve, 2));
+        t.truthy(signal);
+        await cancelRequestResolver(null, { requestId: rootId }, { requestState });
+        t.is((await pending).name, 'CanceledError');
+        t.true(signal.aborted);
+        t.is(calls, 1);
+    } finally {
+        axios.post = originalPost;
+        delete requestState[rootId]; delete requestState[childId];
+    }
+});
+
+test.serial('a canceled parent cannot start another nested pathway', async t => {
+    requestState['cancelled-parent'] = { canceled: true };
+    const resolver = Object.create(PathwayResolver.prototype);
+    Object.assign(resolver, { requestId: 'not-started-child', rootRequestId: 'cancelled-parent' });
+    try { await t.throwsAsync(() => resolver.executeAuthorizedPathway({}), { message: 'Request canceled' }); }
+    finally { delete requestState['cancelled-parent']; }
 });
