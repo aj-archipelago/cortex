@@ -127,6 +127,8 @@ function registerSearchAvailableTools(entityTools, entityToolsOpenAiFormat, opti
     const {
         mcpClients = new Map(),
         mcpToolCatalog = {},
+        mcpServerKeys = [],
+        mcpServerLabels = {},
         localToolCatalog = {},
         mcpExpiredServers = [],
         logger = null,
@@ -134,7 +136,7 @@ function registerSearchAvailableTools(entityTools, entityToolsOpenAiFormat, opti
 
     const hasMcpTools = mcpClients && mcpClients.size > 0;
     const hasLocalTools = Object.keys(localToolCatalog || {}).length > 0;
-    if (!hasMcpTools && !hasLocalTools) {
+    if (!hasMcpTools && !hasLocalTools && !mcpServerKeys.length) {
         return false;
     }
 
@@ -152,7 +154,8 @@ function registerSearchAvailableTools(entityTools, entityToolsOpenAiFormat, opti
             defaultUserMessage: 'Searching available tools',
             function: {
                 name: 'SearchAvailableTools',
-                description: buildSearchToolsDescription(localToolCatalog, mcpToolCatalog),
+                description: buildSearchToolsDescription(localToolCatalog, mcpToolCatalog)
+                    + (mcpServerKeys.length ? `\n\nConnected external services: ${mcpServerKeys.map(key => mcpServerLabels[key] ? `${key} (${mcpServerLabels[key]})` : key).join(', ')}. To find tools from one of these services, including tools on a paired computer, set server to its exact key and query to the capability you need. MCP tools are discovered on demand. Omit server for built-in tools.` : ''),
                 parameters: {
                     type: 'object',
                     properties: {
@@ -160,6 +163,13 @@ function registerSearchAvailableTools(entityTools, entityToolsOpenAiFormat, opti
                             type: 'string',
                             description: 'Keywords describing the capability you need (e.g. "applet", "image", "search issues") or an exact tool name copied from the catalog in this tool\'s description.',
                         },
+                        ...(mcpServerKeys.length ? {
+                            server: {
+                                type: 'string',
+                                enum: mcpServerKeys,
+                                description: 'External service to discover and search. Omit for local tools.',
+                            },
+                        } : {}),
                     },
                     required: ['query'],
                 },

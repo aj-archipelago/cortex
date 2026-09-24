@@ -46,10 +46,6 @@ jobs:
     - name: Setup GCS test environment
       run: cp .env.test.gcs.ci .env.test.gcs
     
-    - name: Run GCS tests (includes Azure tests)
+    # test:gcs runs the complete AVA suite and owns emulator setup/cleanup.
+    - name: Run full test suite with storage emulators
       run: npm run test:gcs
-    
-    - name: Run tests
-      run: npm test
-      env:
-        NODE_ENV: test

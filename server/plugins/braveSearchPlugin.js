@@ -87,6 +87,8 @@ class BraveSearchPlugin extends ModelPlugin {
         cortexRequest.headers = requestParameters.headers;
         cortexRequest.params = requestParameters.params;
         cortexRequest.method = 'GET';
+        cortexRequest.searchCache = { provider: 'brave', refresh: parameters?.searchRefresh === true,
+            maxAgeMs: parameters?.searchMaxAgeSeconds === undefined ? undefined : Number(parameters.searchMaxAgeSeconds) * 1000 };
 
         return this.executeRequest(cortexRequest);
     }

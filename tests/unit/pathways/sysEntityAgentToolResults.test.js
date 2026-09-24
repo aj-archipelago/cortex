@@ -3,6 +3,37 @@ import {
     buildToolResultContent,
     compactHistoricalToolResults,
 } from '../../../pathways/system/entity/sys_entity_agent.js';
+import { callTool } from '../../../lib/pathwayTools.js';
+
+for (const jobCount of [20, 400]) {
+    test(`job lists remain inspectable after formatting and history compaction (${jobCount} jobs)`, async (t) => {
+        const resolver = {};
+        const jobs = Array.from({ length: jobCount }, (_, i) => ({
+            processId: `job-${i}`,
+            command: `node /workspace/project-${i}/server.mjs ${'x'.repeat(160)}`,
+            status: i === jobCount - 1 ? 'running' : 'completed',
+            exitCode: i === jobCount - 1 ? null : 0,
+        }));
+        const content = buildToolResultContent({ result: { success: true, jobs } }, resolver, 'workspacessh', { toolArgs: { command: 'jobs' } });
+        const original = JSON.parse(content);
+        t.true(content.length <= 50000);
+        t.is(original.summary, `Workspace jobs: 1 running, ${jobCount} total`);
+        const history = [{ role: 'tool', content }];
+        for (let i = 0; i < 10; i++) history.push({ role: 'tool', content: JSON.stringify({ success: true, value: 'x'.repeat(1000) }) });
+        const compacted = JSON.parse(compactHistoricalToolResults(history, resolver, { maxPromptTokens: 100 })[0].content);
+        t.true(compacted.compacted);
+        t.is(compacted.summary, original.summary);
+        t.is(compacted.resultRef, original.resultRef);
+        const result = await callTool('inspecttoolresult', {
+            resultRef: compacted.resultRef, mode: 'search', query: `job-${jobCount - 1}`, limit: 4000,
+        }, { inspecttoolresult: { pathwayName: '_builtin_inspect_tool_result', definition: { function: { parameters: { properties: {} } } } } }, resolver);
+        const inspected = JSON.parse(result.result);
+        t.true(inspected.matchCount > 0);
+        t.true(inspected.matches.some(match => match.path === `$.jobs[${jobCount - 1}].processId`));
+        const snapshot = JSON.parse(resolver._toolResultSnapshots.get(original.resultRef).content);
+        t.deepEqual(JSON.parse(snapshot.contentPreview).jobs, jobs);
+    });
+}
 
 const messageFootprint = (messages) => messages.reduce((sum, msg) => {
     let total = sum + (msg.role?.length || 0) + (msg.name?.length || 0) + (msg.tool_call_id?.length || 0);

@@ -32,7 +32,7 @@ export default {
             "{{messages}}",
         ]}),
     ],
-    model: 'gemini-pro-25-vision',
+    model: 'gemini-flash-37-vision',
     inputParameters: {
         file: ``,
         language: ``,
@@ -140,7 +140,7 @@ export default {
         }
 
         function getMessages(file) {
-            
+
             // Base system content that's always included
             let systemContent = `Instructions:
 You are a transcription assistant. Your job is to transcribe the audio/video content accurately.
@@ -246,7 +246,7 @@ REMEMBER:
             try {
                 const chunkPromises = chunks.map(async (chunk, index) => {
                     const result = await runAllPrompts({
-                        ...args, 
+                        ...args,
                         messages: getMessages(chunk.gcs || chunk.uri, responseFormat),
                         requestId: `${requestId}-${index}`
                     });
@@ -269,9 +269,9 @@ REMEMBER:
                     }
                     return { index, result };
                 });
-        
+
                 const results = await Promise.all(
-                chunkPromises.map(promise => 
+                chunkPromises.map(promise =>
                     promise.then(result => {
                         sendProgress();
                         return result;
@@ -286,17 +286,17 @@ REMEMBER:
                 throw error;
             }
         };
-       
+
         // serial processing of chunks
         // const result = [];
         // for(const chunk of chunks) {
         //     const chunkResult = await runAllPrompts({ ...args, messages: getMessages(chunk.gcs || chunk.uri) });
         //     result.push(chunkResult);
         // }
-        
+
         const result = await processChunksParallel(chunks, args);
         const transcriptArray = result.map(item => item?.output_text || item);
-        
+
         if (['srt','vtt'].includes(responseFormat.toLowerCase()) || wordTimestamped) { // align subtitles for formats
             const offsets = chunks.map((chunk, index) => chunk?.offset || index * OFFSET_CHUNK);
             return alignSubtitles(transcriptArray, responseFormat, offsets);

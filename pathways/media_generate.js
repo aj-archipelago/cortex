@@ -1,11 +1,61 @@
 // media_generate.js
 // Router pathway that accepts standardized parameters and delegates to
 // the correct sub-pathway based on model metadata. Normalizes responses
-// so callers always get URLs (direct or data: URIs), never raw API JSON.
+// so callers always get HTTPS URLs (or provider URLs), never raw API JSON
+// and never large data: URIs on Redis requestProgress.
 
 import { callPathway } from "../lib/pathwayTools.js";
 import { config } from "../config.js";
 import logger from "../lib/logger.js";
+import { priorityMediaParameters } from "../lib/priorityMediaParameters.js";
+import {
+    uploadImageToCloud,
+    promptToFilename,
+    buildFileLocation,
+} from "../lib/fileUtils.js";
+
+/**
+ * Remove base64 payloads from artifacts so Redis progress `info` stays small.
+ * Mutates resolver.pathwayResultData.artifacts in place.
+ */
+export function stripArtifactBinaryData(resolver) {
+    const artifacts = resolver?.pathwayResultData?.artifacts;
+    if (!Array.isArray(artifacts)) return;
+    for (const artifact of artifacts) {
+        if (artifact && typeof artifact === "object" && "data" in artifact) {
+            delete artifact.data;
+        }
+    }
+}
+
+async function uploadBase64ImageToCloud(
+    base64Data,
+    mimeType,
+    resolver,
+    args = {},
+    uploadFn = uploadImageToCloud,
+) {
+    const extension = (mimeType || "image/png").split("/")[1] || "png";
+    const uploadFilename = promptToFilename(
+        args.text || "generated-image",
+        extension,
+    );
+    const fileLocation = args.contextId
+        ? buildFileLocation(args.contextId)
+        : null;
+    const uploadResult = await uploadFn(
+        base64Data,
+        mimeType || "image/png",
+        resolver,
+        fileLocation,
+        uploadFilename,
+    );
+    const url = uploadResult?.url || uploadResult;
+    if (!url || typeof url !== "string") {
+        throw new Error("media_generate: image upload returned no URL");
+    }
+    return { url, uploadResult };
+}
 
 const omitUndefined = (obj) =>
     Object.fromEntries(
@@ -306,6 +356,26 @@ const GPT_IMAGE_2_SIZES = {
 
 // Map standardized inputImages / inputVideos arrays → pathway-specific parameters
 export const PARAM_MAPPERS = {
+    media_replicate(args, images, videos, audios = []) {
+        return omitUndefined({
+            text: args.text, model: args.model,
+            inputImages: images, inputImageRoles: args.inputImageRoles?.map(normalizeReferenceRole),
+            inputVideos: videos,
+            inputAudio: audios.length ? audios : args.inputAudioUrl ? [args.inputAudioUrl] : [],
+            aspectRatio: args.aspectRatio, duration: args.duration || undefined,
+            resolution: args.resolution, size: args.imageSize || args.size,
+            outputFormat: args.outputFormat, negativePrompt: args.negativePrompt,
+            generateAudio: args.generateAudio, seed: args.seed,
+            quality: args.quality, numberResults: args.numberResults,
+            ...Object.fromEntries(Object.keys(priorityMediaParameters).map(key => [key, args[key]])),
+        });
+    },
+    image_mai(args, images, videos = [], audios = []) {
+        if (images.length > 1 || videos.length || audios.length) throw new Error("MAI accepts at most one image reference and no video or audio input");
+        return omitUndefined({ text: args.text, model: args.model,
+            input_image: images[0], size: args.imageSize || args.size,
+            autoAspectRatio: args.autoAspectRatio, webGrounding: args.webGrounding });
+    },
     image_gemini_25(args, images) {
         const mapped = {
             text: args.text,
@@ -344,14 +414,18 @@ export const PARAM_MAPPERS = {
     },
 
     video_gemini_omni(args, images, videos, audios = []) {
-        return {
+        return omitUndefined({
+            generationMode: args.generationMode,
+            inputImageRoles: args.inputImageRoles?.map(normalizeReferenceRole),
             text: args.text,
             model: args.model,
-            input_images: images.slice(0, 5),
-            input_videos: videos.slice(0, 1),
-            input_audios: audios.slice(0, 1),
+            input_images: images,
+            input_videos: videos,
+            input_audios: audios,
+            aspectRatio: args.aspectRatio,
+            resolution: args.resolution,
             contextId: args.contextId,
-        };
+        });
     },
 
     image_flux(args, images) {
@@ -688,6 +762,11 @@ export const PARAM_MAPPERS = {
         return PARAM_MAPPERS.music_lyria(args, images);
     },
 
+    music_lyria35(args, images = []) {
+        if (images.length > 10) throw new Error("Lyria 3.5 supports at most 10 image inputs");
+        return { ...PARAM_MAPPERS.music_lyria(args, images), audioFormat: args.audioFormat };
+    },
+
     music_replicate(args) {
         const isElevenLabsMusic =
             !args.model || args.model === "replicate-elevenlabs-music";
@@ -809,34 +888,73 @@ function normalizeVeoResponse(rawResult) {
     return rawResult; // Can't normalize — pass through
 }
 
-// Normalize Gemini image response → data: URI from artifacts
-function normalizeGeminiResponse(rawResult, resolver) {
+// Normalize Gemini image response → cloud URL (never a data: URI).
+// Publishing multi-MB data URIs on Redis requestProgress correlates with
+// fleet-wide pub/sub reconnects and Media-page idle timeouts (ARC-2892).
+export async function normalizeGeminiResponse(
+    rawResult,
+    resolver,
+    args = {},
+    uploadFn = uploadImageToCloud,
+) {
     const artifacts = resolver?.pathwayResultData?.artifacts;
-    if (artifacts && Array.isArray(artifacts)) {
-        const imageArtifact = artifacts.find((a) => a.type === "image");
-        if (imageArtifact?.data) {
-            return `data:${imageArtifact.mimeType || "image/png"};base64,${imageArtifact.data}`;
-        }
+    if (!Array.isArray(artifacts)) {
+        return rawResult;
     }
-    return rawResult;
+    const imageArtifact = artifacts.find((a) => a.type === "image");
+    if (!imageArtifact?.data) {
+        return rawResult;
+    }
+
+    const mimeType = imageArtifact.mimeType || "image/png";
+    const { url, uploadResult } = await uploadBase64ImageToCloud(
+        imageArtifact.data,
+        mimeType,
+        resolver,
+        args,
+        uploadFn,
+    );
+
+    imageArtifact.url = url;
+    if (uploadResult?.gcs) imageArtifact.gcs = uploadResult.gcs;
+    if (uploadResult?.hash) imageArtifact.hash = uploadResult.hash;
+    delete imageArtifact.data;
+    stripArtifactBinaryData(resolver);
+
+    return url;
 }
 
-function normalizeMediaArtifactResponse(rawResult, resolver, type, fallbackMimeType) {
+export async function normalizeMediaArtifactResponse(rawResult, resolver, type, fallbackMimeType, args = {}, uploadFn = uploadImageToCloud) {
     const artifacts = resolver?.pathwayResultData?.artifacts;
     if (Array.isArray(artifacts)) {
-        const artifact = artifacts.find((a) => a.type === type);
-        if (artifact?.url) return artifact.url;
-        if (artifact?.data) {
-            return `data:${artifact.mimeType || fallbackMimeType};base64,${artifact.data}`;
+        const output = [];
+        for (const [index, artifact] of artifacts.filter(a => a.type === type).entries()) {
+            if (artifact.data) {
+                const mimeType = artifact.mimeType || fallbackMimeType;
+                const filename = promptToFilename(args.text || "generated-media", mimeType.split("/")[1], { index });
+                const uploaded = await uploadFn(artifact.data, mimeType, resolver,
+                    args.contextId ? buildFileLocation(args.contextId) : null, filename);
+                artifact.url = uploaded?.url || uploaded;
+                if (typeof artifact.url !== "string" || !artifact.url) throw new Error("Generated media upload returned no URL");
+                delete artifact.data;
+            }
+            if (artifact.url) output.push({ url: artifact.url, type, mimeType: artifact.mimeType || fallbackMimeType });
         }
+        stripArtifactBinaryData(resolver);
+        if (output.length === 1) return output[0].url;
+        if (output.length > 1) return JSON.stringify({ output });
     }
     return rawResult;
 }
 
-// Normalize Azure OpenAI image responses ({data:[{url|b64_json}]}) → URL or
-// data: URI. The mime type for b64 payloads is derived from the response's
-// `output_format` field (Azure echoes the format used: png|jpeg|webp).
-function normalizeOpenAIImageResponse(rawResult) {
+// Normalize Azure OpenAI image responses ({data:[{url|b64_json}]}) → URL.
+// Upload b64 payloads so Redis progress never carries multi-MB data URIs.
+export async function normalizeOpenAIImageResponse(
+    rawResult,
+    resolver = null,
+    args = {},
+    uploadFn = uploadImageToCloud,
+) {
     let parsed;
     try {
         parsed =
@@ -851,7 +969,15 @@ function normalizeOpenAIImageResponse(rawResult) {
     if (first.url) return first.url;
     if (first.b64_json) {
         const mime = `image/${parsed.output_format || "png"}`;
-        return `data:${mime};base64,${first.b64_json}`;
+        const { url } = await uploadBase64ImageToCloud(
+            first.b64_json,
+            mime,
+            resolver,
+            args,
+            uploadFn,
+        );
+        stripArtifactBinaryData(resolver);
+        return url;
     }
     return rawResult;
 }
@@ -871,9 +997,31 @@ function normalizeAudioResponse(rawResult, resolver) {
     return rawResult;
 }
 
+// Lyria 3.5 may interleave several audio and lyric blocks. Keep every audio
+// block, upload binary data before publishing progress, and retain the lyrics.
+export async function normalizeLyria35Response(rawResult, resolver, args = {}, uploadFn = uploadImageToCloud) {
+    const artifacts = resolver?.pathwayResultData?.artifacts || [];
+    const output = [];
+    for (const [index, artifact] of artifacts.filter(item => item.type === "audio").entries()) {
+        if (artifact.data) {
+            const filename = promptToFilename(args.text || "generated-music", artifact.mimeType === "audio/wav" ? "wav" : "mp3", { index });
+            const uploaded = await uploadFn(artifact.data, artifact.mimeType || "audio/mpeg", resolver,
+                args.contextId ? buildFileLocation(args.contextId) : null, filename);
+            artifact.url = uploaded?.url || uploaded;
+            if (typeof artifact.url !== "string" || !artifact.url) throw new Error("Lyria audio upload returned no URL");
+            delete artifact.data;
+        }
+        if (artifact.url) output.push({ url: artifact.url, type: "audio", mimeType: artifact.mimeType });
+    }
+    if (!output.length) throw new Error("Lyria 3.5 returned no audio");
+    stripArtifactBinaryData(resolver);
+    return JSON.stringify({ output, lyrics: typeof rawResult === "string" ? rawResult : "" });
+}
+
 export default {
     prompt: [],
     inputParameters: {
+        ...priorityMediaParameters,
         model: "",
         text: "",
         inputImages: { type: "array", items: { type: "string" } },
@@ -944,7 +1092,7 @@ export default {
         seed: -1,
         disableSafetyChecker: false,
         optimizePrompt: false,
-        generateAudio: false,
+        generateAudio: { type: "boolean" },
         cutFirstSecond: true,
         noOp: false,
         strengthNegativePrompt: 0.5,
@@ -961,7 +1109,7 @@ export default {
         async: false,
     },
     model: "oai-gpt4o", // placeholder — executePathway delegates to sub-pathways
-    timeout: 60 * 30,
+    timeout: 60 * 35,
 
     executePathway: async ({ args, resolver }) => {
         const modelId = args.model;
@@ -979,6 +1127,9 @@ export default {
         }
 
         const pathwayName = modelConfig.metadata.pathwayName;
+        if (modelConfig.metadata.isAvailable === false) {
+            throw new Error(modelConfig.metadata.unavailableReason || `Model '${modelId}' is not available`);
+        }
         const mapper = PARAM_MAPPERS[pathwayName];
         if (!mapper) {
             throw new Error(`No parameter mapper for pathway '${pathwayName}'`);
@@ -993,6 +1144,15 @@ export default {
         );
         const mappedArgs = mapper(args, inputImages, inputVideos, inputAudio);
 
+        const uploadsGeneratedArtifact = pathwayName.startsWith("image_gemini") ||
+            ["image_gpt_image_2", "video_gemini_omni", "music_lyria35"].includes(pathwayName);
+        if (uploadsGeneratedArtifact && !args.contextId) {
+            const error = new Error("media_generate requires a storage contextId for this model");
+            error.code = "MEDIA_STORAGE_CONTEXT_REQUIRED";
+            error.status = 400;
+            throw error;
+        }
+
         // Note: do NOT propagate async to sub-pathways. The parent
         // media_generate is already async (callers subscribe to its requestId).
         // Sub-pathways must run synchronously here so their results can be
@@ -1003,17 +1163,20 @@ export default {
         let result = null;
 
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            let generationCompleted = false;
             try {
                 result = await callPathway(pathwayName, mappedArgs, resolver);
+                generationCompleted = true;
 
-                // For Gemini pathways: check if we got artifacts
+                // For Gemini pathways: upload artifacts and return a cloud URL
                 if (pathwayName.startsWith("image_gemini")) {
-                    const normalized = normalizeGeminiResponse(
+                    const normalized = await normalizeGeminiResponse(
                         result,
                         resolver,
+                        args,
                     );
                     if (normalized !== result) {
-                        return normalized; // Got a valid data: URI
+                        return normalized; // Got a cloud URL
                     }
                     // No artifacts — retry if we have attempts left
                     if (attempt < maxRetries) {
@@ -1038,17 +1201,27 @@ export default {
                         resolver,
                         "video",
                         "video/mp4",
+                        args,
                     );
                 }
 
                 // Normalize Azure OpenAI image responses (gpt-image-2, DALL-E 3, …)
-                if (pathwayName === "image_gpt_image_2") {
-                    return normalizeOpenAIImageResponse(result);
+                if (["image_gpt_image_2", "image_mai"].includes(pathwayName)) {
+                    return await normalizeOpenAIImageResponse(
+                        result,
+                        resolver,
+                        args,
+                    );
+                }
+
+                if (pathwayName === "music_lyria35") {
+                    return normalizeLyria35Response(result, resolver, args);
                 }
 
                 if (
                     pathwayName.startsWith("music_") ||
-                    pathwayName.startsWith("tts_")
+                    pathwayName.startsWith("tts_") ||
+                    (pathwayName === "media_replicate" && modelConfig.metadata.category === "audio")
                 ) {
                     return normalizeAudioResponse(result, resolver);
                 }
@@ -1056,6 +1229,9 @@ export default {
                 // Standard pathways (Flux, Qwen, Seedream4, Seedance) return URLs directly
                 return result;
             } catch (error) {
+                // Generation already succeeded. Retrying an upload failure by
+                // regenerating the artifact wastes provider calls and charges.
+                if (generationCompleted) throw error;
                 if (attempt < maxRetries) {
                     const delay = Math.pow(2, attempt) * 1000;
                     logger.warn(

@@ -1,4 +1,9 @@
+import { authorizeHandlerOperation, handleWithStorageGrant, scopedProcessingId } from './security/grantRequest.js';
+import { getStorageGrant } from './security/storageGrant.js';
 import fs from "fs";
+import { decodeDisplayMetadata } from "./utils/blobDisplayMetadata.js";
+import { deleteCatalogFiles } from "./utils/deleteCatalogFile.js";
+import { buildFileMetadataIndex, enrichFileCatalog } from "./utils/fileCatalogMetadata.js";
 import os from "os";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
@@ -19,6 +24,8 @@ import {
   getCachedValue,
   getFileStoreMap,
   getAllFilesForContext,
+  scanFilesForDeletion,
+  commitDeletedFileRecord,
   publishRequestProgress,
   removeFromFileStoreMap,
   setFileStoreMap,
@@ -36,7 +43,7 @@ import {
   getScopedLogicalContextId,
 } from "./blobHandler.js";
 import { StorageFactory } from "./services/storage/StorageFactory.js";
-import { generateShortId, sanitizeFilename } from "./utils/filenameUtils.js";
+import { generateShortId, sanitizeFilename, generateChatUploadFilename } from "./utils/filenameUtils.js";
 import { sanitizeTargetBlobPath } from "./utils/targetBlobPathUtils.js";
 import { redactContextId, redactSasToken, sanitizeForLogging } from "./utils/logSecurity.js";
 import {
@@ -229,7 +236,7 @@ function listNamesCacheKey({
   const normalizedProvider = providerType || 'unknown';
   const normalizedContainer = containerName || 'default';
   const normalizedFolder = folderPath || '';
-  return `CFH:listNames:v2:${normalizedProvider}:${normalizedContainer}:${normalizedFolder}:${maxResults}`;
+  return `CFH:listNames:v3:${normalizedProvider}:${normalizedContainer}:${normalizedFolder}:${maxResults}`;
 }
 
 async function listNamesWithCache(provider, folderPath, options = {}) {
@@ -245,7 +252,7 @@ async function listNamesWithCache(provider, folderPath, options = {}) {
     folderPath,
     maxResults,
   });
-  const cached = await getCachedValue(cacheKey);
+  const cached = options.fresh ? null : await getCachedValue(cacheKey);
   if (cached?.items && Array.isArray(cached.items)) {
     return { ...cached, cacheHit: true };
   }
@@ -285,7 +292,7 @@ async function listAzureFolderIfContainerExists(provider, folderPath) {
     const prefix = folderPath === '' ? undefined : (folderPath.endsWith('/') ? folderPath : `${folderPath}/`);
     const results = [];
 
-    for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+    for await (const blob of containerClient.listBlobsFlat({ prefix, includeMetadata: true })) {
       const rawFilename = blob.name.split('/').pop();
       let filename;
       try {
@@ -299,6 +306,7 @@ async function listAzureFolderIfContainerExists(provider, folderPath) {
       const sasToken = provider.generateShortLivedSASToken(blob.name, 60);
 
       results.push({
+        ...decodeDisplayMetadata(blob.metadata),
         name: blob.name,
         filename: hashMatch ? filename.replace(/^[a-f0-9]+_/i, '') : filename,
         hash: hashMatch ? hashMatch[1] : null,
@@ -538,6 +546,9 @@ async function CortexFileHandler(context, req) {
     // Folder-based storage parameters
     listFolder,
     listNames,
+    includeMetadata,
+    ensureBackup,
+    fresh,
     maxResults,
     userId,
     chatId,
@@ -609,6 +620,25 @@ async function CortexFileHandler(context, req) {
   } else {
     operation = "upload";
   }
+
+  try {
+    authorizeHandlerOperation({ ...source, contextId: logicalContextId }, operation);
+  } catch (error) {
+    // Historical files predate chat/applet folders. On a scoped read mismatch,
+    // try only the old shared root, never another folder in an owner container.
+    if (error.status === 403 && operation === 'blobLookup' && getStorageGrant()) {
+      const legacy = await resolveBlobPathWithLegacyFallback({
+        context, blobPath, resolvedContextId: logicalContextId, userId,
+        workspaceId, fileScope, rootOnly: true,
+      });
+      if (legacy) {
+        context.res = { status: 200, body: legacy };
+        return;
+      }
+    }
+    throw error;
+  }
+  const storageRequestId = requestId && uri ? scopedProcessingId(requestId) : requestId;
 
   context.log(
     `Processing ${req.method} request - ${requestId ? `requestId: ${requestId}, ` : ""}${uri ? `uri: ${redactSasToken(uri)}, ` : ""}${hash ? `hash: ${hash}, ` : ""}${blobPath ? `blobPath: ${blobPath}, ` : ""}${logicalContextId ? `contextId: ${redactContextId(logicalContextId)}, ` : ""}operation: ${operation}`,
@@ -692,63 +722,50 @@ async function CortexFileHandler(context, req) {
       }
     }
 
-    // Delete by blobPath: directly delete the blob from storage without Redis lookup
+    // One scoped batch shares a paged legacy scan. Validate every path before
+    // doing any storage work; callers receive a status for each exact location.
     const deleteBlobPath = req.query.blobPath || parsedBody?.params?.blobPath || parsedBody?.blobPath || blobPath;
-    if (deleteBlobPath && !deleteRequestId) {
-      try {
-        const { provider } = await getScopedProvider({
-          storageService,
-          resolvedContextId: logicalContextId,
-          userId,
-          workspaceId,
-          appletId,
-          fileScope,
-        });
-        const { containerClient } = await provider.getBlobClient();
-        const blockBlobClient = containerClient.getBlockBlobClient(deleteBlobPath);
-        await blockBlobClient.delete();
-        context.log(`Deleted blob by blobPath: ${deleteBlobPath}`);
-        context.res = {
-          status: 200,
-          body: {
-            message: `File deleted successfully`,
-            blobPath: deleteBlobPath,
-          },
-        };
-        return;
-      } catch (error) {
-        if (isNotFoundError(error)) {
-          try {
-            const legacyBlob = await resolveLegacyScopedBlobClient(
-              logicalContextId || storageOwnerId,
-              deleteBlobPath,
-            );
-            if (legacyBlob) {
-              await legacyBlob.blockBlobClient.delete();
-              context.log(`Deleted legacy blob by blobPath: ${deleteBlobPath} (${legacyBlob.containerName})`);
-              context.res = {
-                status: 200,
-                body: {
-                  message: `File deleted successfully`,
-                  blobPath: deleteBlobPath,
-                },
-              };
-              return;
-            }
-          } catch (legacyError) {
-            context.res = {
-              status: legacyError.statusCode === 404 ? 404 : 500,
-              body: `Error deleting blob ${deleteBlobPath}: ${legacyError.message}`,
-            };
-            return;
-          }
-        }
-        context.res = {
-          status: error.statusCode === 404 ? 404 : 500,
-          body: `Error deleting blob ${deleteBlobPath}: ${error.message}`,
-        };
+    const batchPaths = parsedBody?.params?.blobPaths || parsedBody?.blobPaths;
+    if ((deleteBlobPath || batchPaths) && !deleteRequestId) {
+      const paths = batchPaths || [deleteBlobPath];
+      if (!Array.isArray(paths) || !paths.length || paths.length > 500 || paths.some(p => typeof p !== 'string' || !p || p.length > 1024)) {
+        context.res = { status: 400, body: batchPaths ? "Provide 1 to 500 blob paths" : "Blob path must be a string" };
         return;
       }
+      try {
+        const folder = constructFolderPath({ contextId: logicalContextId, userId, chatId, workspaceId, appletId, fileScope });
+        if (folder === null || paths.some(p => p.includes('\\')
+          || p.split('/').some(part => part === '.' || part === '..')
+          || (folder && !p.startsWith(`${folder}/`)))) {
+          context.res = { status: 403, body: "Blob path is outside the requested file scope" };
+          return;
+        }
+        const { provider, containerOwnerId } = await getScopedProvider({
+          storageService, resolvedContextId: logicalContextId, userId, workspaceId, appletId, fileScope,
+        });
+        const providers = [provider];
+        for (const containerName of getLegacyScopedContainerNames(containerOwnerId)) {
+          providers.push(await StorageFactory.getInstance().getAzureProvider(containerName));
+        }
+        const containers = [];
+        for (const candidate of providers) {
+          containers.push((await candidate.getBlobClient({ createContainer: false })).containerClient);
+        }
+        const results = await deleteCatalogFiles({
+          items: [...new Set(paths)].map(blobPath => ({ blobPath,
+            clients: containers.map(container => container.getBlockBlobClient(blobPath)) })),
+          containerOwnerId, storageService,
+          scanRecords: () => scanFilesForDeletion(logicalContextId),
+          commitRecord: (key, raw, replacement) => commitDeletedFileRecord(logicalContextId, key, raw, replacement),
+        });
+        context.res = batchPaths
+          ? { status: 200, body: { results } }
+          : { status: results[0].status, body: results[0] };
+      } catch (error) {
+        context.res = { status: 500, body: "File deletion incomplete; retry is safe" };
+        context.log(`Path deletion incomplete: ${error.message}`);
+      }
+      return;
     }
 
     // If requestId is provided, use the existing multi-file delete flow
@@ -769,7 +786,7 @@ async function CortexFileHandler(context, req) {
       }
     }
 
-    const deleted = await storageService.deleteFiles(deleteRequestId);
+    const deleted = await storageService.deleteFiles(scopedProcessingId(deleteRequestId));
     context.res = {
       status: 200,
       body: { body: deleted },
@@ -1011,6 +1028,7 @@ async function CortexFileHandler(context, req) {
       const requestedMaxResults = parseBoundedPositiveInt(maxResults, 10000, 50000);
       const primaryResult = await listNamesWithCache(provider, folderPath, {
         maxResults: requestedMaxResults,
+        fresh: fresh === true || fresh === "true",
       });
       let items = primaryResult.items || [];
       let truncated = primaryResult.truncated === true;
@@ -1020,6 +1038,7 @@ async function CortexFileHandler(context, req) {
       if (containerOwnerId && items.length < requestedMaxResults) {
         const legacyResult = await listLegacyScopedFolderNames(containerOwnerId, folderPath, {
           maxResults: requestedMaxResults - items.length,
+          fresh: fresh === true || fresh === "true",
         });
         items = mergeListedNameItems(
           items,
@@ -1031,10 +1050,24 @@ async function CortexFileHandler(context, req) {
         inFlightHit = inFlightHit || legacyResult.inFlightHit === true;
       }
 
+      const metadataIncluded = includeMetadata === true || includeMetadata === "true";
+      if (metadataIncluded) {
+        const index = await buildFileMetadataIndex(items.some(item => !item[3]?.displayFilename)
+          ? await getAllFilesForContext(logicalContextId || containerOwnerId || storageOwnerId) : {});
+        const enriched = await enrichFileCatalog(items.map(item => ({ ...item[3], url: item[3]?.storageUrl, name: item[0] })), index);
+        items = items.map((item, i) => {
+          const { name, url, storageUrl, ...metadata } = enriched[i];
+          return [item[0], item[1], item[2], metadata];
+        });
+      } else {
+        items = items.map(item => item.slice(0, 3));
+      }
+
       context.res = {
         status: 200,
         body: {
           folderPath,
+          metadataIncluded,
           items,
           count: items.length,
           truncated,
@@ -1109,47 +1142,12 @@ async function CortexFileHandler(context, req) {
         );
       }
 
-      // Enrich listing with hash, gcs, and displayFilename from Redis
+      // The cloud list establishes existence. Compatibility records only add
+      // metadata through exact storage identity, once at this service boundary.
       const enrichContextId = logicalContextId || containerOwnerId || storageOwnerId;
-      if (enrichContextId) {
-        // Load all Redis records for this context to match files without hashes
-        const allRedisRecords = await getAllFilesForContext(enrichContextId);
-
-        // Build a filename→{hash, record} lookup from Redis for matching hashless files
-        const redisFilenameMap = new Map();
-        for (const [hash, record] of Object.entries(allRedisRecords)) {
-          if (record && record.filename) {
-            redisFilenameMap.set(record.filename.toLowerCase(), { hash, record });
-          }
-        }
-
-        for (const file of files) {
-          // If file has no hash from blob name, try to find it in Redis by filename
-          if (!file.hash && file.filename) {
-            const match = redisFilenameMap.get(file.filename.toLowerCase());
-            if (match) {
-              file.hash = match.hash;
-              if (match.record.gcs) {
-                file.gcs = match.record.gcs;
-              }
-            }
-          }
-
-          // Enrich files that have a hash (either from blob name or Redis match above)
-          if (file.hash) {
-            try {
-              const stored = allRedisRecords[file.hash] || await getFileStoreMap(file.hash, true, enrichContextId);
-              if (stored) {
-                if (stored.displayFilename) {
-                  file.displayFilename = stored.displayFilename;
-                }
-                if (stored.gcs && !file.gcs) {
-                  file.gcs = stored.gcs;
-                }
-              }
-            } catch { /* skip enrichment for this file */ }
-          }
-        }
+      if (enrichContextId && files.some(file => !file.displayFilename)) {
+        const index = await buildFileMetadataIndex(await getAllFilesForContext(enrichContextId));
+        files = await enrichFileCatalog(files, index);
       }
 
       context.res = {
@@ -1173,6 +1171,7 @@ async function CortexFileHandler(context, req) {
 
   const remoteUrl = shouldFetchRemote;
   if (req.method.toLowerCase() === "get" && remoteUrl) {
+    authorizeHandlerOperation({ ...source, contextId: logicalContextId }, "remoteFile");
     context.log(`Remote file: ${redactSasToken(remoteUrl)}`);
     let filename;
     try {
@@ -1188,9 +1187,9 @@ async function CortexFileHandler(context, req) {
 
       // Check if file already exists (using hash or URL as the key)
       // Always respect contextId if provided, even for URL-based lookups
-      const exists = hash
+      const exists = logicalContextId || storageOwnerId ? null : (hash
         ? await getFileStoreMap(hash, false, logicalContextId)
-        : await getFileStoreMap(remoteUrl, false, logicalContextId);
+        : await getFileStoreMap(remoteUrl, false, logicalContextId));
       if (exists) {
         context.res = {
           status: 200,
@@ -1219,7 +1218,7 @@ async function CortexFileHandler(context, req) {
         fileScope,
       });
       const tempFileName = (folderPath && clientFilename)
-        ? sanitizeFilename(clientFilename)
+        ? (folderPath.startsWith("chats/") ? generateChatUploadFilename(clientFilename) : sanitizeFilename(clientFilename))
         : `${generateShortId()}${fileExtension}`;
       filename = path.join(os.tmpdir(), tempFileName);
       await downloadFile(remoteUrl, filename);
@@ -1243,6 +1242,7 @@ async function CortexFileHandler(context, req) {
         fileStream,
         remoteContentType,
         folderPath,
+        clientFilename || path.basename(new URL(remoteUrl).pathname),
       );
 
       let backupUploadUrl = null;
@@ -1280,7 +1280,7 @@ async function CortexFileHandler(context, req) {
       // Always respect contextId if provided, even for URL-based lookups
       if (hash) {
         await setFileStoreMap(hash, res, logicalContextId);
-      } else {
+      } else if (!logicalContextId && !storageOwnerId) {
         await setFileStoreMap(remoteUrl, res, logicalContextId);
       }
 
@@ -1876,6 +1876,7 @@ async function CortexFileHandler(context, req) {
   // Handle blobPath-based lookups: generate a short-lived SAS URL directly
   // from the blob path, without needing a hash in Redis.
   if (blobPath) {
+    authorizeHandlerOperation({ ...source, contextId: logicalContextId }, "blobLookup");
     try {
       const { provider, containerOwnerId } = await getScopedProvider({
         storageService,
@@ -1891,14 +1892,17 @@ async function CortexFileHandler(context, req) {
         const { containerClient } = await provider.getBlobClient();
         const blockBlobClient = containerClient.getBlockBlobClient(blobPath);
 
-        const exists = await blockBlobClient.exists();
-        if (exists) {
+        const properties = await blockBlobClient.getProperties().catch(error => {
+          if (isNotFoundError(error)) return null;
+          throw error;
+        });
+        if (properties) {
           const sasToken = provider.generateShortLivedSASToken(blobPath, shortLivedDuration);
           const shortLivedUrl = `${blockBlobClient.url}?${sasToken}`;
           let gcsUrl = null;
 
           try {
-            const ensuredFile = await storageService.ensureGCSUpload(context, {
+            const ensuredFile = ensureBackup === false || ensureBackup === "false" ? null : await storageService.ensureGCSUpload(context, {
               url: shortLivedUrl,
               blobName: blobPath,
               blobPath,
@@ -1913,10 +1917,24 @@ async function CortexFileHandler(context, req) {
             );
           }
 
+          let displayMetadata = decodeDisplayMetadata(properties.metadata);
+          if (!displayMetadata.displayFilename && includeMetadata !== false && includeMetadata !== "false") {
+            // Old uploads can have opaque backing names. Only this selected
+            // object's exact identity is eligible for legacy display metadata.
+            const index = await buildFileMetadataIndex(await getAllFilesForContext(logicalContextId));
+            const [legacy] = await enrichFileCatalog([{ url: blockBlobClient.url }], index);
+            const { url, ...fields } = legacy;
+            displayMetadata = fields;
+          }
+
           context.log(`Generated short-lived URL for blobPath: ${blobPath} (expires in ${shortLivedDuration} minutes)`);
           context.res = {
             status: 200,
             body: {
+              ...displayMetadata,
+              contentType: properties.contentType || null,
+              size: properties.contentLength ?? null,
+              lastModified: properties.lastModified || null,
               url: shortLivedUrl,
               shortLivedUrl: shortLivedUrl,
               ...(gcsUrl ? { gcs: gcsUrl } : {}),
@@ -2085,7 +2103,7 @@ async function CortexFileHandler(context, req) {
             const convertedSaveResult =
               await conversionService._saveConvertedFile(
                 conversion.convertedPath,
-                requestId,
+                storageRequestId,
                 null,
               );
 
@@ -2101,7 +2119,7 @@ async function CortexFileHandler(context, req) {
             // File doesn't need conversion, save the original file
             const saveResult = await conversionService._saveConvertedFile(
               downloadedFile,
-              requestId,
+              storageRequestId,
               null,
             );
 
@@ -2150,7 +2168,7 @@ async function CortexFileHandler(context, req) {
         // When save=true we need to keep the converted file (which is stored under the same requestId prefix),
         // so skip the cleanup in that case.
         if (!shouldSave) {
-          await storageService.deleteFiles(requestId);
+          await storageService.deleteFiles(storageRequestId);
           console.log(`Cleaned temp files for request id ${requestId}`);
         } else {
           console.log(
@@ -2181,7 +2199,7 @@ async function CortexFileHandler(context, req) {
         const chunkResult = await storageService.uploadFile(
           context,
           chunkPath,
-          requestId,
+          storageRequestId,
           null,
           chunkFilename,
         );
@@ -2237,4 +2255,6 @@ async function CortexFileHandler(context, req) {
   };
 }
 
-export default CortexFileHandler;
+export default function authorizedCortexFileHandler(context, req) {
+  return handleWithStorageGrant(context, req, CortexFileHandler);
+}

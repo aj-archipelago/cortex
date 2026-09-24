@@ -75,7 +75,7 @@ export class Tools {
       {
         type: 'function',
         name: 'Search',
-        description: 'Use for current events, news, fact-checking, and information requiring citation. This tool allows you to search the internet, all Al Jazeera news articles and the latest news wires from multiple sources. You pass in detailed instructions about what you need the tool to do in detailedInstructions.',
+        description: 'Use for current events, news, fact-checking, and information requiring citation. This tool allows you to search the internet, configured news archives and current news sources. You pass in detailed instructions about what you need the tool to do in detailedInstructions.',
         parameters: {
           type: "object",
           properties: {
@@ -298,7 +298,7 @@ export class Tools {
             contextId,
             aiName,
             cortexHistory,
-            name === 'Search' ? ['aje', 'aja', 'bing', 'wires', 'mydata'] : ['mydata'],
+            name === 'Search' ? ['news_en', 'news_ar', 'bing', 'wires', 'mydata'] : ['mydata'],
             JSON.stringify({query: args})
           );
           finishPrompt += ' by reading the output of the tool to the user verbatim - make sure to read it in your signature voice and style and ensure the emotion in your voice is appropriate for the content'
@@ -342,24 +342,24 @@ export class Tools {
             cortexHistory,
             JSON.stringify({query: args})
           );
-          
+
           // Extract image URLs from markdown ![...](url), HTML <img src="url">, and standard markdown links [text](url)
           const markdownImagePattern = /!\[.*?\]\((.*?)\)/g;
           const htmlPattern = /<img.*?src=["'](.*?)["']/g;
           const markdownLinkPattern = /\[.*?\]\((.*?)\)/g;
-          
+
           let match;
-          
+
           // Find markdown image URLs
           while ((match = markdownImagePattern.exec(response.result)) !== null) {
             imageUrls.add(match[1]);
           }
-          
+
           // Find HTML image URLs
           while ((match = htmlPattern.exec(response.result)) !== null) {
             imageUrls.add(match[1]);
           }
-          
+
           // Find standard markdown link URLs
           while ((match = markdownLinkPattern.exec(response.result)) !== null) {
             const url = match[1];
@@ -393,7 +393,7 @@ export class Tools {
 
         case 'screenshot':
           const parsedScreenshotArgs = JSON.parse(args) as ScreenshotArgs;
-          
+
           // Create a Promise that will resolve when we get the screenshot
           const screenshotPromise = new Promise((resolve, reject) => {
             let imageChunks: string[] = [];
@@ -427,7 +427,7 @@ export class Tools {
                   throw new Error(`Missing chunks: expected ${totalChunks}, got ${imageChunks.length}`);
                 }
                 const completeImage = imageChunks.join('');
-                
+
                 // Add the screenshot to the cortex history as a user message with image
                 const imageMessage: MultiMessage = {
                   role: 'user',
@@ -444,11 +444,11 @@ export class Tools {
                     })
                   ]
                 };
-                
+
                 // Get current history and append the image message
                 const baseHistory = this.getCortexHistory();
                 const updatedHistory = [...baseHistory, imageMessage];
-                
+
                 // Send to vision for analysis
                 const visionResponse = await vision(
                   contextId,
@@ -456,7 +456,7 @@ export class Tools {
                   updatedHistory,
                   JSON.stringify({query: parsedScreenshotArgs.lastUserMessage})
                 );
-                
+
                 cleanup();
                 resolve(visionResponse);
               } catch (error) {
@@ -482,7 +482,7 @@ export class Tools {
             logger.log('Requesting screenshot');
             this.socket.emit('requestScreenshot');
           });
-          
+
           // Wait for the screenshot and analysis
           response = await screenshotPromise;
           break;
@@ -498,7 +498,7 @@ export class Tools {
         // This is to avoid voice run-on if we were using please wait...
         await new Promise(resolve => setTimeout(resolve, 3000));
       }
-      
+
       this.realtimeClient.createConversationItem({
         id: createId(),
         type: 'function_call_output',

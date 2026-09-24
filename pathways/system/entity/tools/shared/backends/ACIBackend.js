@@ -53,24 +53,9 @@ export default class ACIBackend extends ContainerBackend {
                 const subscriptionId = config.get('azureSubscriptionId');
                 if (!subscriptionId) throw new Error('AZURE_SUBSCRIPTION_ID is required for ACI backend');
 
-                // Prefer explicit service principal from AZURE_SERVICE_PRINCIPAL_CREDENTIALS,
-                // fall back to DefaultAzureCredential (managed identity, CLI, etc.)
-                let credential;
-                const spCredentials = config.get('azureServicePrincipalCredentials');
-                if (spCredentials) {
-                    const parsed = typeof spCredentials === 'string' ? JSON.parse(spCredentials) : spCredentials;
-                    const tenantId = parsed.tenant_id || parsed.tenantId;
-                    const clientId = parsed.client_id || parsed.clientId;
-                    const clientSecret = parsed.client_secret || parsed.clientSecret;
-                    if (tenantId && clientId && clientSecret) {
-                        const { ClientSecretCredential } = await import('@azure/identity');
-                        credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-                    }
-                }
-                if (!credential) {
-                    const { DefaultAzureCredential } = await import('@azure/identity');
-                    credential = new DefaultAzureCredential();
-                }
+                const azureAuthTokenHelper = config.get('azureAuthTokenHelper');
+                const credential = azureAuthTokenHelper?.getTokenCredential?.();
+                if (!credential) throw new Error('Azure credential provider is not configured');
 
                 return new ContainerInstanceManagementClient(credential, subscriptionId);
             })();

@@ -6,9 +6,9 @@ import {
 
 test("resolveCanonicalPersonalEntity prefers the owned aiName match over a stale referenced default", (t) => {
     const user = {
-        username: "lana@example.com",
+        username: "assistant@example.com",
         contextId: "ctx-1",
-        aiName: "Lana",
+        aiName: "Assistant",
         personalEntityId: "stale-jarvis",
     };
     const entities = [
@@ -19,8 +19,8 @@ test("resolveCanonicalPersonalEntity prefers the owned aiName match over a stale
             assocUserIds: [],
         },
         {
-            id: "real-lana",
-            name: "Lana",
+            id: "real-assistant",
+            name: "Assistant",
             createdBy: "ctx-1",
             assocUserIds: ["ctx-1"],
         },
@@ -29,7 +29,7 @@ test("resolveCanonicalPersonalEntity prefers the owned aiName match over a stale
     const result = resolveCanonicalPersonalEntity(user, entities);
 
     t.is(result.status, "resolved");
-    t.is(result.canonical.id, "real-lana");
+    t.is(result.canonical.id, "real-assistant");
     t.deepEqual(
         result.orphanableDuplicates.map((entity) => entity.id),
         ["stale-jarvis"],
@@ -38,9 +38,9 @@ test("resolveCanonicalPersonalEntity prefers the owned aiName match over a stale
 
 test("resolveCanonicalPersonalEntity leaves conflicting stateful candidates unresolved", (t) => {
     const user = {
-        username: "lana@example.com",
+        username: "assistant@example.com",
         contextId: "ctx-1",
-        aiName: "Lana",
+        aiName: "Assistant",
         personalEntityId: "stale-jarvis",
     };
     const entities = [
@@ -52,8 +52,8 @@ test("resolveCanonicalPersonalEntity leaves conflicting stateful candidates unre
             workspace: { shareName: "workspace-old" },
         },
         {
-            id: "real-lana",
-            name: "Lana",
+            id: "real-assistant",
+            name: "Assistant",
             createdBy: "ctx-1",
             assocUserIds: ["ctx-1"],
         },
@@ -69,8 +69,8 @@ test("classifyBlankOrphanEntities only returns blank unowned default-name orphan
     const entities = [
         { id: "jarvis-1", name: "Jarvis", assocUserIds: [], createdBy: null },
         {
-            id: "lana-1",
-            name: "Lana",
+            id: "assistant-1",
+            name: "Assistant",
             assocUserIds: [],
             createdBy: null,
         },

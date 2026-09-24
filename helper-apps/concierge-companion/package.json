@@ -1,0 +1,81 @@
+{
+  "name": "concierge-companion",
+  "version": "0.2.0",
+  "description": "Use tools on this computer with Concierge",
+  "author": "Archipelago contributors",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "node scripts/build.mjs --dir",
+    "dist": "node scripts/build.mjs",
+    "dist:signed": "node scripts/build.mjs --signed"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/server-filesystem": "2026.8.31",
+    "electron-updater": "6.8.9",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "electron": "^41.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "org.ajarchipelago.concierge.companion",
+    "productName": "Concierge Companion",
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!src/**/*.test.js"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    },
+    "icon": "src/icon.png",
+    "protocols": [
+      {
+        "name": "Concierge Companion",
+        "schemes": [
+          "concierge-companion"
+        ]
+      }
+    ]
+  },
+  "license": "MIT"
+}

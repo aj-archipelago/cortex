@@ -89,6 +89,9 @@ class GeminiMusicPlugin extends ModelPlugin {
       images.push(image);
     }
 
+    if (this.model.lyriaModel === "lyria-3.5" && images.length > MAX_LYRIA_INPUT_IMAGES) {
+      throw new Error("Lyria 3.5 supports at most 10 image inputs");
+    }
     return images
       .slice(0, MAX_LYRIA_INPUT_IMAGES)
       .map((image) =>
@@ -141,19 +144,35 @@ class GeminiMusicPlugin extends ModelPlugin {
       );
     }
 
+    if (this.model.lyriaModel === "lyria-3.5" && parameters.audioFormat && !["mp3", "wav"].includes(parameters.audioFormat)) {
+      throw new Error("Lyria 3.5 supports MP3 or WAV output");
+    }
     return {
       model: this.model.lyriaModel || "lyria-3-clip-preview",
       input,
+      ...(this.model.lyriaModel === "lyria-3.5" && parameters.audioFormat === "wav"
+        ? { response_format: { type: "audio" } } : {}),
     };
   }
 
-  async execute(text, parameters, prompt, cortexRequest) {
+  async getAuthHeaders() {
     const gcpAuthTokenHelper = this.config.get("gcpAuthTokenHelper");
-    if (!gcpAuthTokenHelper) {
+    const usesApiKey = this.model.authType === "gemini-api-key";
+    const apiKey = usesApiKey ? this.config.get("geminiApiKey") : null;
+    if (usesApiKey && !apiKey) throw new Error("GEMINI_API_KEY is required for Lyria 3.5");
+    if (!usesApiKey && !gcpAuthTokenHelper) {
       throw new Error(
         "GCP_SERVICE_ACCOUNT_KEY is required for Vertex AI Lyria music generation",
       );
     }
+
+    return usesApiKey
+      ? { "x-goog-api-key": apiKey }
+      : { Authorization: `Bearer ${await gcpAuthTokenHelper.getAccessToken()}` };
+  }
+
+  async execute(text, parameters, prompt, cortexRequest) {
+    const authHeaders = await this.getAuthHeaders();
 
     const requestParameters = this.getRequestParameters(
       text,
@@ -167,7 +186,6 @@ class GeminiMusicPlugin extends ModelPlugin {
         input: this.summarizeRequestInput(requestParameters.input),
       })}`,
     );
-    const authToken = await gcpAuthTokenHelper.getAccessToken();
 
     try {
       const response = await axios({
@@ -175,8 +193,8 @@ class GeminiMusicPlugin extends ModelPlugin {
         url: cortexRequest.url,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
           ...cortexRequest.headers,
+          ...authHeaders,
         },
         data: requestParameters,
       });
@@ -196,7 +214,12 @@ class GeminiMusicPlugin extends ModelPlugin {
     const predictions = Array.isArray(data?.predictions)
       ? data.predictions
       : [];
-    const outputs = Array.isArray(data?.outputs) ? data.outputs : [];
+    const outputs = [
+      ...(Array.isArray(data?.outputs) ? data.outputs : []),
+      ...(Array.isArray(data?.steps) ? data.steps : [])
+        .filter(step => step.type === "model_output")
+        .flatMap(step => Array.isArray(step.content) ? step.content : []),
+    ];
     const artifacts = [];
     let textContent = "";
 
@@ -252,6 +275,7 @@ class GeminiMusicPlugin extends ModelPlugin {
         textContent += textContent ? `\n${output.text}` : output.text;
         continue;
       }
+      if (output?.type && output.type !== "audio") continue;
 
       const audioData = [
         output?.databytes,

@@ -51,36 +51,36 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
         // Get original messages from getCompiledPrompt before they're converted to Gemini format
         const { modelPromptMessages } = this.getCompiledPrompt(text, parameters, prompt);
         const messages = modelPromptMessages || [];
-        
+
         const baseParameters = super.getRequestParameters(text, parameters, prompt, cortexRequest);
-        
+
         // Transform contents for Gemini 3 format:
         // 1. Function responses: role 'function' -> 'user', response.content -> response.output
         // 2. Add functionCall messages for assistant tool_calls (with thoughtSignature)
         if (baseParameters.contents && Array.isArray(baseParameters.contents)) {
             const newContents = [];
-            
+
             // Build a map of tool response indices to find where to insert functionCall messages
             // The pattern is: assistant+tool_calls message followed by tool response messages
             let lastFunctionResponseIndex = -1;
-            
+
             for (let i = 0; i < baseParameters.contents.length; i++) {
                 const content = baseParameters.contents[i];
-                
+
                 // Check if we need to insert a functionCall message before this function response
                 if (content.role === 'function' && content.parts?.[0]?.functionResponse) {
                     // Look for the preceding assistant message with tool_calls in the original messages
                     // that corresponds to this function response
                     const functionName = content.parts[0].functionResponse.name;
-                    
+
                     // Find matching assistant message with this tool call
                     for (const message of messages) {
                         if (message.role === 'assistant' && message.tool_calls?.length > 0) {
-                            const hasMatchingToolCall = message.tool_calls.some(tc => 
-                                tc.function?.name === functionName || 
+                            const hasMatchingToolCall = message.tool_calls.some(tc =>
+                                tc.function?.name === functionName ||
                                 tc.id?.startsWith(functionName + '_')
                             );
-                            
+
                             if (hasMatchingToolCall && lastFunctionResponseIndex < i) {
                                 // Build functionCall message with thoughtSignature
                                 const parts = [];
@@ -91,8 +91,8 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
                                     if (toolCall.function?.name) {
                                         let args = {};
                                         try {
-                                            args = typeof toolCall.function.arguments === 'string' 
-                                                ? JSON.parse(toolCall.function.arguments) 
+                                            args = typeof toolCall.function.arguments === 'string'
+                                                ? JSON.parse(toolCall.function.arguments)
                                                 : (toolCall.function.arguments || {});
                                         } catch (e) { args = {}; }
                                         parts.push(this.buildFunctionCallPart(toolCall, args));
@@ -106,7 +106,7 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
                             }
                         }
                     }
-                    
+
                     // Transform function response: role 'function' -> 'user', content -> output
                     const fr = content.parts[0].functionResponse;
                     let responseData = fr.response;
@@ -135,10 +135,10 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
                     newContents.push(content);
                 }
             }
-            
+
             baseParameters.contents = newContents;
         }
-        
+
         // Add Gemini 3 thinking support
         // Gemini 3 uses thinkingLevel: 'low' or 'high' (instead of thinkingBudget)
         // includeThoughts: true to get thought summaries in response
@@ -180,7 +180,7 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
                 thinkingLevel = 'low';
             }
         }
-        
+
         if (includeThoughts === false && cortexRequest?.pathway?.includeThoughts !== undefined) {
             includeThoughts = cortexRequest.pathway.includeThoughts;
         } else if (includeThoughts === false && cortexRequest?.pathway?.include_thoughts !== undefined) {
@@ -192,14 +192,14 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
             if (!baseParameters.generationConfig.thinkingConfig) {
                 baseParameters.generationConfig.thinkingConfig = {};
             }
-            
+
             // Set thinkingLevel — valid values depend on model (configured via reasoningEffortMap)
             if (thinkingLevel !== undefined) {
                 const level = typeof thinkingLevel === 'string' ? thinkingLevel.toLowerCase() : String(thinkingLevel).toLowerCase();
-                const validLevels = ['minimal', 'low', 'medium', 'high'];
+                const validLevels = this.model.supportedThinkingLevels || ['minimal', 'low', 'medium', 'high'];
                 baseParameters.generationConfig.thinkingConfig.thinkingLevel = validLevels.includes(level) ? level : 'low';
             }
-            
+
             // includeThoughts: true to get thought summaries
             if (includeThoughts !== undefined) {
                 baseParameters.generationConfig.thinkingConfig.includeThoughts = Boolean(includeThoughts);
@@ -213,7 +213,7 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
     parseResponse(data) {
         // First, let the parent handle the response
         const baseResponse = super.parseResponse(data);
-        
+
         // Check if we have thought summaries in the response
         if (data?.candidates?.[0]?.content?.parts) {
             const parts = data.candidates[0].content.parts;
@@ -256,18 +256,18 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
     // Override processStreamEvent to handle thought summaries in streaming
     processStreamEvent(event, requestProgress) {
         const baseProgress = super.processStreamEvent(event, requestProgress);
-        
+
         const eventData = JSON.parse(event.data);
-        
+
         // Initialize thought summaries array if needed
         if (!requestProgress.thoughts) {
             requestProgress.thoughts = [];
         }
-        
+
         // Handle thought summaries in streaming
         if (eventData.candidates?.[0]?.content?.parts) {
             const parts = eventData.candidates[0].content.parts;
-            
+
             for (const part of parts) {
                 if (part.thought && part.text) {
                     // This is a thought summary chunk
@@ -275,7 +275,7 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
                     if (!requestProgress.thoughts.includes(part.text)) {
                         requestProgress.thoughts.push(part.text);
                     }
-                    
+
                     // Optionally, you could emit thought chunks separately
                     // For now, we'll accumulate them and they'll be available in the final response
                 }
@@ -291,15 +291,15 @@ class Gemini3ReasoningVisionPlugin extends Gemini3ImagePlugin {
         if (responseData && typeof responseData === 'object' && responseData.constructor && responseData.constructor.name === 'CortexResponse') {
             const { length, units } = this.getLength(responseData.output_text || '');
             logger.info(`[response received containing ${length} ${units}]`);
-            
+
             if (responseData.thoughts && responseData.thoughts.length > 0) {
                 logger.info(`[response contains ${responseData.thoughts.length} thought summary(ies)]`);
             }
-            
+
             if (responseData.artifacts && responseData.artifacts.length > 0) {
                 logger.info(`[response contains ${responseData.artifacts.length} image artifact(s)]`);
             }
-            
+
             return;
         }
 

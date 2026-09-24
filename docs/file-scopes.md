@@ -36,6 +36,12 @@
 | `skills` | Direct named folder scope in CFH only. | Caller-selected context. | `contextId \|\| userId` | `skills/<filename>` |
 | `workspace-shared-legacy` | Legacy shared workspace artifact scope. | `workspaceId` | `workspaceId` | `/` in the workspace-owned container |
 
+## Chat upload filenames
+
+New chat uploads use `<original-stem>-<UUID><extension>` as their backing filename. Two camera uploads named `image.jpg` therefore keep distinct blob/workspace paths. Multipart responses retain the original name in `displayFilename`; consumers should use the returned `blobPath` or URL for access rather than reconstructing a path from the display name. Named remote-file imports into a chat also receive a unique filename. Existing stored paths remain readable.
+
+Other scopes retain their named-file replacement behavior, including applet assets and workspace files. This change requires deploying the separate cortex-file-handler service; the Cortex web app release alone does not ship it.
+
 ## Generic Compatibility
 
 - Legacy owner-container naming:

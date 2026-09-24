@@ -25,7 +25,8 @@ let _hostId = null;
 
 // Redis key helpers
 function keyPrefix() {
-    return `${config.get('cortexId')}-warmpool`;
+    // Slots can share Cortex identity and Redis while owning different ACI inventories.
+    return `${config.get('cortexId')}-warmpool:${workspaceContainerPrefix()}`;
 }
 function containersKey() { return `${keyPrefix()}:containers`; }
 function readyKey() { return `${keyPrefix()}:ready`; }

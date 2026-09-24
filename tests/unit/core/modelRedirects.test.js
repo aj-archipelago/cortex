@@ -18,9 +18,9 @@ test.afterEach.always(() => {
 
 test.serial('default Sonnet Vertex endpoint routes to Sonnet deployment', (t) => {
     const models = config.get('models');
-    const sonnetUrl = models['claude-46-sonnet-vertex'].endpoints[0].url;
+    const sonnetUrl = models['claude-5-sonnet-vertex'].endpoints[0].url;
 
-    t.true(sonnetUrl.endsWith('/claude-sonnet-4-6'));
+    t.true(sonnetUrl.endsWith('/claude-sonnet-5@default'));
     t.false(sonnetUrl.includes('claude-opus-4-7'));
 });
 

@@ -228,11 +228,11 @@ test('public example config exposes only current model definitions', (t) => {
     const modelIds = Object.keys(publicExampleConfig.models);
     const requiredCurrentModels = [
         'oai-gpt55',
-        'oai-gpt54',
+        'oai-gpt56-terra',
         'oai-gpt54-mini',
         'oai-gpt54-nano',
-        'claude-47-opus-vertex',
-        'claude-46-sonnet-vertex',
+        'claude-48-opus-vertex',
+        'claude-5-sonnet-vertex',
         'claude-45-haiku-vertex',
         'gemini-flash-35-vision',
         'gemini-pro-31-vision',
@@ -261,7 +261,7 @@ test('public example config exposes only current model definitions', (t) => {
         'claude-35-sonnet-vertex',
     ];
 
-    t.is(publicExampleConfig.defaultModelName, 'oai-gpt54-mini');
+    t.is(publicExampleConfig.defaultModelName, 'oai-gpt56-terra');
     for (const modelId of requiredCurrentModels) {
         t.true(modelIds.includes(modelId), `${modelId} should be defined`);
         t.truthy(publicExampleConfig.models[modelId].metadata?.displayName, `${modelId} should be visible`);
@@ -270,7 +270,7 @@ test('public example config exposes only current model definitions', (t) => {
         t.false(modelIds.includes(modelId), `${modelId} should not be a model definition`);
         t.truthy(publicExampleConfig.modelRedirects[modelId], `${modelId} should redirect`);
     }
-    t.true(publicExampleConfig.models['oai-gpt54-mini'].metadata.isDefault);
+    t.true(publicExampleConfig.models['oai-gpt56-terra'].metadata.isDefault);
 });
 
 test('sys_model_metadata pathway keeps JSON response configuration', (t) => {

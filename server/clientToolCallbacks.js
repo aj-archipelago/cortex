@@ -29,13 +29,13 @@ let publisherClient;
 
 if (connectionString) {
     logger.info(`Setting up Redis pub/sub for client tool callbacks on channel: ${clientToolCallbackChannel}`);
-    
+
     try {
         subscriptionClient = new Redis(connectionString);
         subscriptionClient.on('error', (error) => {
             logger.error(`Redis subscriptionClient error (clientToolCallbacks): ${error}`);
         });
-        
+
         subscriptionClient.on('connect', () => {
             subscriptionClient.subscribe(clientToolCallbackChannel, clientToolHeartbeatChannel, (error) => {
                 if (error) {
@@ -45,13 +45,13 @@ if (connectionString) {
                 }
             });
         });
-        
+
         subscriptionClient.on('message', (channel, message) => {
             try {
                 if (channel === clientToolCallbackChannel) {
                     const { toolCallbackId, result } = JSON.parse(message);
                     logger.debug(`Received client tool callback via Redis: ${toolCallbackId}`);
-                    
+
                     // Try to resolve it locally (will only work if this instance has the pending callback)
                     resolveClientToolCallbackLocal(toolCallbackId, result);
                 } else if (channel === clientToolHeartbeatChannel) {
@@ -66,7 +66,7 @@ if (connectionString) {
     } catch (error) {
         logger.error(`Redis connection error (clientToolCallbacks): ${error}`);
     }
-    
+
     try {
         publisherClient = new Redis(connectionString);
         publisherClient.on('error', (error) => {
@@ -139,7 +139,11 @@ export function waitForClientToolResult(toolCallbackId, requestId, timeoutOrOpti
                     !callback.lastHeartbeatAt &&
                     now - callback.createdAt > options.initialHeartbeatTimeoutMs
                 ) {
-                    logger.warn(`No active client heartbeat for ${toolCallbackId} (requestId: ${requestId})`);
+                    logger.warn(JSON.stringify({
+                        event: 'client_tool_heartbeat_timeout', reason: 'not_acknowledged',
+                        toolCallbackId, requestId, heartbeatCount: callback.heartbeatCount,
+                        elapsedMs: now - callback.createdAt,
+                    }));
                     callback.reject(
                         new Error(
                             `CLIENT_TOOL_HEARTBEAT_TIMEOUT: no client heartbeat within ${options.initialHeartbeatTimeoutMs}ms. ${CLIENT_TOOL_HEARTBEAT_TIMEOUT_GUIDANCE}`
@@ -152,7 +156,12 @@ export function waitForClientToolResult(toolCallbackId, requestId, timeoutOrOpti
                     callback.lastHeartbeatAt &&
                     now - callback.lastHeartbeatAt > options.heartbeatStaleMs
                 ) {
-                    logger.warn(`Client tool heartbeat stopped for ${toolCallbackId} (requestId: ${requestId})`);
+                    logger.warn(JSON.stringify({
+                        event: 'client_tool_heartbeat_timeout', reason: 'stale',
+                        toolCallbackId, requestId, heartbeatCount: callback.heartbeatCount,
+                        elapsedMs: now - callback.createdAt,
+                        lastHeartbeatAgeMs: now - callback.lastHeartbeatAt,
+                    }));
                     callback.reject(
                         new Error(
                             `CLIENT_TOOL_HEARTBEAT_TIMEOUT: no client heartbeat for ${options.heartbeatStaleMs}ms. ${CLIENT_TOOL_HEARTBEAT_TIMEOUT_GUIDANCE}`
@@ -194,7 +203,7 @@ export function waitForClientToolResult(toolCallbackId, requestId, timeoutOrOpti
  */
 function resolveClientToolCallbackLocal(toolCallbackId, result) {
     const callback = pendingCallbacks.get(toolCallbackId);
-    
+
     if (!callback) {
         // This is normal in a multi-instance setup - the callback might be on another instance
         logger.debug(`No pending callback found for toolCallbackId: ${toolCallbackId} (may be on another instance)`);
@@ -202,10 +211,10 @@ function resolveClientToolCallbackLocal(toolCallbackId, result) {
     }
 
     logger.info(`Resolved client tool callback: ${toolCallbackId} (requestId: ${callback.requestId})`);
-    
+
     // Resolve the promise
     callback.resolve(result);
-    
+
     return true;
 }
 
@@ -243,17 +252,17 @@ export async function resolveClientToolCallback(toolCallbackId, result) {
  */
 function rejectClientToolCallbackLocal(toolCallbackId, error) {
     const callback = pendingCallbacks.get(toolCallbackId);
-    
+
     if (!callback) {
         logger.debug(`No pending callback found for toolCallbackId: ${toolCallbackId} (may be on another instance)`);
         return false;
     }
 
     logger.info(`Rejected client tool callback: ${toolCallbackId} (requestId: ${callback.requestId})`);
-    
+
     // Reject the promise
     callback.reject(error);
-    
+
     return true;
 }
 
@@ -296,9 +305,9 @@ export async function rejectClientToolCallback(toolCallbackId, error) {
     if (publisherClient) {
         // Publish to Redis so all instances can try to reject
         try {
-            const message = JSON.stringify({ 
-                toolCallbackId, 
-                result: { success: false, error: error.message || error.toString() } 
+            const message = JSON.stringify({
+                toolCallbackId,
+                result: { success: false, error: error.message || error.toString() }
             });
             logger.debug(`Publishing client tool callback rejection to Redis: ${toolCallbackId}`);
             await publisherClient.publish(clientToolCallbackChannel, message);
@@ -327,7 +336,7 @@ export function getPendingCallbackCount() {
 export function cleanupOldCallbacks(maxAgeMs = 120000) {
     const now = Date.now();
     let cleaned = 0;
-    
+
     for (const [id, callback] of pendingCallbacks.entries()) {
         if (now - callback.createdAt > maxAgeMs) {
             cleanupCallback(id, callback);
@@ -335,10 +344,10 @@ export function cleanupOldCallbacks(maxAgeMs = 120000) {
             cleaned++;
         }
     }
-    
+
     if (cleaned > 0) {
         logger.info(`Cleaned up ${cleaned} old client tool callbacks`);
     }
-    
+
     return cleaned;
 }

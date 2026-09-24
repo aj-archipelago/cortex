@@ -48,6 +48,7 @@ import GoogleCsePlugin from './plugins/googleCsePlugin.js';
 import BraveSearchPlugin from './plugins/braveSearchPlugin.js';
 import GeminiMusicPlugin from './plugins/geminiMusicPlugin.js';
 import GeminiInteractionsPlugin from './plugins/geminiInteractionsPlugin.js';
+import AzureMaiImagePlugin from './plugins/azureMaiImagePlugin.js';
 import GeminiTtsPlugin from './plugins/geminiTtsPlugin.js';
 
 class ModelExecutor {
@@ -61,6 +62,9 @@ class ModelExecutor {
                 break;
             case 'OPENAI-DALLE2':
                 plugin = new OpenAIImagePlugin(pathway, model);
+                break;
+            case 'AZURE-MAI-IMAGE':
+                plugin = new AzureMaiImagePlugin(pathway, model);
                 break;
             case 'OPENAI-DALLE3':
                 plugin = new OpenAIDallE3Plugin(pathway, model);

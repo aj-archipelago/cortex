@@ -103,3 +103,4 @@ __azurite_db*__.json
 # Python virtual environments and caches
 .venv
 __pycache__
+.azurite/

@@ -1,0 +1,347 @@
+:root {
+    font:
+        14px/1.55 -apple-system,
+        BlinkMacSystemFont,
+        'Segoe UI',
+        sans-serif;
+    color: #182332;
+    background: #f7f8fa;
+    color-scheme: light dark;
+    --card: #fff;
+    --border: #e3e6eb;
+    --muted: #667182;
+    --accent: #172b43;
+    --field: #fafbfd;
+    --soft: #f1f5f8;
+    --gold: #9a721f;
+    --green: #16866a;
+}
+html[lang='ar'] {
+    font-family: Tahoma, Arial, sans-serif;
+}
+* {
+    box-sizing: border-box;
+}
+body {
+    margin: 0;
+}
+[hidden] {
+    display: none !important;
+}
+main {
+    max-width: 600px;
+    margin: auto;
+    padding: 28px;
+}
+header {
+    display: flex;
+    gap: 13px;
+    align-items: center;
+    margin-bottom: 22px;
+}
+header img {
+    display: block;
+    border-radius: 50%;
+    box-shadow: 0 2px 8px #15233312;
+}
+h1 {
+    font-size: 19px;
+    letter-spacing: -0.4px;
+    margin: 0;
+}
+header p {
+    font-size: 12px;
+    margin: 1px 0 0;
+}
+h2 {
+    font-size: 19px;
+    letter-spacing: -0.4px;
+    font-weight: 600;
+    margin: 0 0 10px;
+}
+p {
+    margin: 8px 0 14px;
+    color: var(--muted);
+}
+section {
+    padding: 20px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    border-radius: 16px;
+    margin: 16px 0;
+}
+.status-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 0 4px;
+}
+.dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+}
+.dot.online {
+    background: var(--green);
+    box-shadow: 0 0 0 4px #16866a12;
+}
+.eyebrow {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 1.6px;
+    font-weight: 700;
+    color: var(--gold);
+    margin-bottom: 8px;
+}
+.identity {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    overflow-wrap: anywhere;
+    background: var(--soft);
+    border-radius: 10px;
+    padding: 13px;
+    margin: 14px 0;
+}
+.identity span {
+    font-size: 12px;
+    color: var(--muted);
+    text-align: start;
+}
+.identity strong {
+    font-size: 13px;
+}
+.actions {
+    display: flex;
+    gap: 8px;
+}
+.actions button:first-child {
+    flex: 1;
+}
+.section-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.section-top h2 {
+    font-size: 15px;
+    margin: 0;
+}
+.pill {
+    background: var(--soft);
+    font-size: 11px;
+    border-radius: 20px;
+    min-width: 23px;
+    text-align: center;
+    padding: 2px 7px;
+}
+.steps {
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    font-size: 11px;
+    padding-top: 8px;
+}
+.steps span {
+    padding-top: 10px;
+    border-top: 2px solid var(--border);
+    flex: 1;
+}
+.steps span:first-child {
+    color: var(--green);
+    border-color: var(--green);
+}
+form {
+    display: grid;
+    gap: 8px;
+}
+label {
+    font-size: 12px;
+    font-weight: 600;
+}
+input,
+select {
+    min-width: 0;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--field);
+    color: inherit;
+    font: inherit;
+}
+button {
+    min-height: 42px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: var(--accent);
+    color: #fff;
+    padding: 9px 13px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+button:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+.secondary {
+    background: transparent;
+    color: inherit;
+    border-color: var(--border);
+}
+.full {
+    width: 100%;
+    margin-top: 10px;
+}
+.text-button {
+    background: transparent;
+    color: var(--muted);
+    padding: 8px;
+}
+.folder-button {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    text-align: start;
+    background: var(--soft);
+    color: inherit;
+    padding: 14px;
+    margin-top: 14px;
+}
+.folder-button > span:nth-child(2) {
+    flex: 1;
+}
+.folder-button small {
+    display: block;
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 11px;
+    line-height: 1.6;
+    margin-top: 3px;
+}
+.folder-icon {
+    font-size: 26px;
+    color: var(--gold);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+    outline: 3px solid #5eaabb;
+    outline-offset: 3px;
+}
+#error {
+    font-size: 12px;
+    color: #b42318;
+    margin-top: 14px;
+}
+#approval {
+    border-color: #b693484d;
+}
+#approval-tool {
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+#code {
+    font-size: 24px;
+    letter-spacing: 3px;
+    direction: ltr;
+    display: block;
+    user-select: all;
+}
+#pairing {
+    margin-top: 15px;
+}
+ul {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+}
+li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+li small {
+    display: block;
+    color: var(--muted);
+    font-size: 11px;
+}
+li button {
+    flex-shrink: 0;
+}
+details {
+    margin-top: 16px;
+}
+summary {
+    min-height: 42px;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 10px 4px;
+    font-size: 12px;
+}
+footer {
+    color: var(--muted);
+    font-size: 10px;
+    padding: 14px 4px;
+}
+footer p {
+    margin: 5px 0;
+}
+footer button {
+    display: block;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        color: #e5eaf1;
+        background: #101827;
+        --card: #182333;
+        --border: #29384b;
+        --muted: #9aaac0;
+        --accent: #e4eaf3;
+        --field: #121d2b;
+        --soft: #1e2d40;
+        --gold: #d7b86e;
+        --green: #59c2a2;
+    }
+    button {
+        color: #142336;
+    }
+    .secondary,
+    .text-button,
+    .folder-button {
+        color: inherit;
+    }
+    #error {
+        color: #ffb4a8;
+    }
+    header img {
+        box-shadow: 0 0 0 1px #ffffff10;
+    }
+}
+@media (max-width: 390px) {
+    main {
+        padding: 18px;
+    }
+    section {
+        padding: 16px;
+    }
+    h1 {
+        font-size: 18px;
+    }
+    .actions {
+        flex-wrap: wrap;
+    }
+}

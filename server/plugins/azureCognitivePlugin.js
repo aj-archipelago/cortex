@@ -32,9 +32,10 @@ class AzureCognitivePlugin extends ModelPlugin {
     normalizeFilter(filter, indexName) {
         if (!filter || typeof filter !== 'string') return filter;
         if (typeof indexName !== 'string') return filter;
-        if (!indexName.startsWith('idx-ucms-')) return filter;
-        // New UCMS indexes use date_published instead of date.
-        return filter.replace(/\bdate\b/g, 'date_published');
+        const aliases = config.get('cognitiveSearchFieldAliases')[indexName] || {};
+        // Rewrite field identifiers only, never words inside OData literals.
+        return filter.replace(/'(?:[^']|'')*'|\b(?:date|date_published|date_modified)\b/g,
+            token => aliases[token] || token);
     }
 
     getOrderByField(filter) {
@@ -76,7 +77,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             let searchUrl = this.ensureMode(this.requestUrl(text), 'search', indexName);
             searchUrl = this.ensureIndex(searchUrl, indexName);
             let searchQuery = `owner:${savedContextId}`;
-            
+
             if (docId) {
                 searchQuery += ` AND docId:'${docId}'`;
             }
@@ -87,19 +88,19 @@ class AzureCognitivePlugin extends ModelPlugin {
 
             cortexRequest.url = searchUrl;
             cortexRequest.data =
-            { search: searchQuery,  
+            { search: searchQuery,
                 "searchMode": "all",
                 "queryType": "full",
                 select: 'id', top: TOP, skip: 0
             };
 
             const docsToDelete = JSON.parse(await this.executeRequest(cortexRequest));
-        
+
             const value = docsToDelete.value.map(({id}) => ({
                 id,
                 "@search.action": "delete"
             }));
-        
+
             return {
                 data: {
                     value
@@ -134,7 +135,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             if(!privateData){ //if public, remove owner
                 delete doc.owner;
             }
-            
+
             data.value = [doc];
             return { data };
         }
@@ -193,7 +194,7 @@ class AzureCognitivePlugin extends ModelPlugin {
 
         // Apply filters (common to both semantic and non-semantic)
         normalizedFilter && (data.filter = normalizedFilter);
-        if (indexName == 'indexcortex') { //if private, filter by owner via contextId //privateData && 
+        if (indexName == 'indexcortex') { //if private, filter by owner via contextId //privateData &&
             data.filter && (data.filter = data.filter + ' and ');
             data.filter = `owner eq '${savedContextId}'`;
 
@@ -252,7 +253,7 @@ class AzureCognitivePlugin extends ModelPlugin {
 
         const { file } = parameters;
         const fileData = { value: [] };
-        if(file){ 
+        if(file){
             let url = file;
             //if not txt file, use helper app to convert to txt
             const extension = path.extname(file).toLowerCase();
@@ -270,7 +271,7 @@ class AzureCognitivePlugin extends ModelPlugin {
                     throw Error(error?.response?.data || error?.message || error);
                 }
             }
- 
+
             const { data } = await axios.get(url);
             await this.markCompletedForCleanUp(requestId);
 
@@ -288,7 +289,7 @@ class AzureCognitivePlugin extends ModelPlugin {
                 let filename = file.split("/").pop();
                 // Remove everything before and including first underscore
                 let title = filename.replace(/^.*?_/, "");
-            
+
                 parameters.title = title;
             } catch (error) {
                 logger.error(`Error extracting title from file ${file}: ${error}`);
@@ -297,7 +298,7 @@ class AzureCognitivePlugin extends ModelPlugin {
             for (let i = 0; i < chunks.length; i++) {
                 const text = chunks[i];
                 parameters.chunkNo = i;
-                const { data: singleData } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest) 
+                const { data: singleData } = await this.getRequestParameters(text, parameters, prompt, mode, indexName, savedContextId, cortexRequest)
                 fileData.value.push(singleData.value[0]);
             }
         }
@@ -319,10 +320,10 @@ class AzureCognitivePlugin extends ModelPlugin {
         const result = await this.executeRequest(cortexRequest);
 
         // if still has more to delete
-        if (mode === 'delete' && data?.value?.length == TOP) { 
+        if (mode === 'delete' && data?.value?.length == TOP) {
             return await this.execute(text, parameters, prompt, cortexRequest);
         }
-        
+
         return result;
     }
 

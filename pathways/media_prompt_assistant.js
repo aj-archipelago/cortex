@@ -22,6 +22,46 @@ const MEDIA_TYPE_GUIDANCE = {
 
 const MODEL_RULES = [
   {
+    match: /seedance-2\.5/i,
+    guidance: `Seedance 2.5 guidance:
+- Write a structured production brief with subject, action, camera, lighting, pacing, and intended sound.
+- Refer to selected references as [Image1], [Video1], and [Audio1] in their input order. Audio references need visual references.
+- First/last-frame input cannot be combined with reference arrays. Video and audio references each have a combined 30-second limit.
+- Editing and extension use reference videos; describe the requested change or continuation. Keep resolution and duration settings out of the prompt.`,
+  },
+  {
+    match: /gemini-omni-1\.1/i,
+    guidance: `Omni 1.1 guidance:
+- Write video and audio direction together. Describe dialogue, ambient sound, and timing naturally.
+- Use up to 10 image and 3 video references (each video at most 10 seconds). Standalone audio references are not supported.
+- Describe first/last-frame intent through ordered images and the prompt, not invented API fields.`,
+  },
+  {
+    match: /ltx-2\.5/i,
+    guidance: `LTX 2.5 Fast guidance:
+- Describe scene, action, camera motion, and synchronized audio. Optional images are start and end frames.
+- Clips above 10 seconds require 720p/1080p at 24/25 FPS; 2K/4K and 48/50 FPS are limited to 10 seconds.`,
+  },
+  {
+    match: /recraft-v4-styles/i,
+    guidance: `Recraft Styles guidance:
+- Describe the composition and content, using the attached images as style references, not literal objects to paste.
+- Use either style reference images or a reusable style ID, never both. For SVG, describe clear vector shapes and editable graphic structure.`,
+  },
+  {
+    match: /seedream-5-pro/i,
+    guidance: `Seedream 5 Pro guidance:
+- For standard generation or editing, describe the desired image and the role of each visual reference.
+- In layer decomposition mode, preserve the single source image; optionally specify which elements to split into separate layers. Do not turn decomposition into a new scene prompt.`,
+  },
+  {
+    match: /elevenlabs-dubbing/i,
+    guidance: `Dubbing guidance:
+- This model translates speech from one source audio, video, or URL into a target language and returns FLAC audio.
+- No generation prompt is required or sent. Do not rewrite the request as music, invent dialogue, or claim to change settings through prompt text.
+- Source language, target language, and voice-cloning strength are separate controls. Use authorized source voices and content.`,
+  },
+  {
     match: /gemini.*image|image_gemini|gemini-flash-25-image|gemini-flash-31-image|gemini-pro-3-image/i,
     guidance: `Gemini image guidance:
 - Expand vague requests into highly specific professional image prompts.

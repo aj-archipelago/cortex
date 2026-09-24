@@ -7,6 +7,20 @@ import {
     registerSearchAvailableTools,
 } from '../../../pathways/system/entity/tools/shared/request_scoped_tools.js';
 
+test('configured MCP services are searchable before any connection exists', (t) => {
+    const tools = {};
+    const schemas = [];
+    registerRequestScopedTools(tools, schemas, {
+        mcpServerKeys: ['atlassian', 'github'],
+        mcpExpiredServers: ['slack'],
+    });
+    const search = schemas.find(tool => tool.function.name === 'SearchAvailableTools').function;
+    t.deepEqual(search.parameters.properties.server.enum, ['atlassian', 'github']);
+    t.deepEqual(search.parameters.required, ['query']);
+    t.true(search.description.includes('Connected external services: atlassian, github'));
+    t.truthy(tools.reauthenticatemcpserver);
+});
+
 test('registerInspectToolResult adds bounded tool-result inspection tool', (t) => {
     const entityTools = {};
     const entityToolsOpenAiFormat = [];

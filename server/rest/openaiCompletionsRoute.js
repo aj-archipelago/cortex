@@ -5,6 +5,7 @@ import pubsub from '../pubsub.js';
 import { v4 as uuidv4 } from 'uuid';
 import { createParser } from 'eventsource-parser';
 import logger from '../../lib/logger.js';
+import { markWeeklyCostUpstreamRejected } from './weeklyCostMiddleware.js';
 import { processRestRequest } from './processRestRequest.js';
 import {
     startSSEStream,
@@ -49,6 +50,7 @@ const sendOpenAIError = (res, message, status = 502, type = 'server_error') => {
  */
 const handleChatCompletionsPassthrough = async (req, res, pathwayModelName) => {
     const requestId = uuidv4();
+    req.cortexUsageRequestId = requestId;
     const model = modelEndpoints[pathwayModelName];
     const endpoint = selectEndpoint(model);
 
@@ -61,6 +63,9 @@ const handleChatCompletionsPassthrough = async (req, res, pathwayModelName) => {
 
     const isStreaming = Boolean(req.body.stream);
     const requestBody = { ...req.body };
+    if (isStreaming && req.weeklyCostBudget) {
+        requestBody.stream_options = { ...requestBody.stream_options, include_usage: true };
+    }
 
     const upstreamModelName = getChatPassthroughModelName(model, endpoint);
     if (upstreamModelName) {
@@ -79,6 +84,7 @@ const handleChatCompletionsPassthrough = async (req, res, pathwayModelName) => {
 
     try {
         const response = await endpoint.limiter.schedule(buildLimiterScheduleOptions(requestId), async () => {
+            req.weeklyCostUpstreamStarted = true;
             return axios({
                 method: 'POST',
                 url,
@@ -152,6 +158,7 @@ const handleChatCompletionsPassthrough = async (req, res, pathwayModelName) => {
         });
 
     } catch (error) {
+        markWeeklyCostUpstreamRejected(req, error);
         const status = error.response?.status || 500;
         let errorData;
         if (error.response?.data && typeof error.response.data === 'object') {
@@ -450,6 +457,7 @@ function registerOpenAICompletionsRoute(app, pathways, openAIChatModels, openAIC
 
         const pathway = pathways[pathwayName];
         const parameterMap = { text: 'prompt' };
+        req.weeklyCostUpstreamStarted = true;
         const pathwayResponse = await processRestRequest(server, req, pathway, pathwayName, parameterMap);
         const pathwayError = extractPathwayErrorMessage(pathwayResponse);
         if (pathwayError) {
@@ -517,6 +525,7 @@ function registerOpenAICompletionsRoute(app, pathways, openAIChatModels, openAIC
             return;
         }
 
+        req.weeklyCostUpstreamStarted = true;
         const pathwayResponse = await processRestRequest(server, req, pathway, pathwayName);
         const pathwayError = extractPathwayErrorMessage(pathwayResponse);
         if (pathwayError) {

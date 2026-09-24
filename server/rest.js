@@ -3,6 +3,7 @@
 // and re-exports the public API
 
 import { normalizeResponseOutputText, isLikelyRequestId, extractPathwayErrorMessage } from './rest/restUtils.js';
+import { createWeeklyCostMiddleware } from './rest/weeklyCostMiddleware.js';
 import { registerModelsRoute } from './rest/modelsRoute.js';
 import { registerGenericPathwayRoutes } from './rest/genericPathwayRoute.js';
 import { registerOpenAICompletionsRoute } from './rest/openaiCompletionsRoute.js';
@@ -25,6 +26,9 @@ function buildRestEndpoints(pathways, app, server, config) {
                 openAICompletionModels[pathway.emulateOpenAICompletionModel] = name;
             }
         }
+
+        // Applies to every public metered generation route, before streaming starts.
+        app.post(['/v1/chat/completions', '/v1/completions', '/v1/messages', '/v1/responses'], createWeeklyCostMiddleware());
 
         // Register all route groups
         registerGenericPathwayRoutes(app, pathways, server);

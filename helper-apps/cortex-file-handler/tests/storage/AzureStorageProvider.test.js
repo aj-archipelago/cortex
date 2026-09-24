@@ -143,6 +143,7 @@ test("getBlobClient should return cached clients", async (t) => {
   const fakeContainerClient = {
     fake: "container",
     containerName: "test-container",
+    getBlockBlobClient: name => ({ url: `https://storage.test/test-container/${name}` }),
     createIfNotExists: async () => {},
   };
 
@@ -174,6 +175,7 @@ test("getBlobClient retries createIfNotExists after a transient failure", async 
   let createCalls = 0;
   const fakeContainerClient = {
     containerName: "test-container",
+    getBlockBlobClient: name => ({ url: `https://storage.test/test-container/${name}` }),
     createIfNotExists: async () => {
       createCalls++;
       if (createCalls === 1) {
@@ -218,6 +220,7 @@ test("getBlobClient caches success when create returns 409 (already exists)", as
   let createCalls = 0;
   const fakeContainerClient = {
     containerName: "test-container",
+    getBlockBlobClient: name => ({ url: `https://storage.test/test-container/${name}` }),
     createIfNotExists: async () => {
       createCalls++;
       const err = new Error("already exists");
@@ -251,6 +254,7 @@ test("listFolder returns empty array when container does not exist", async (t) =
 
   const fakeContainerClient = {
     containerName: "test-container",
+    getBlockBlobClient: name => ({ url: `https://storage.test/test-container/${name}` }),
     createIfNotExists: async () => {},
     listBlobsFlat: () => ({
       [Symbol.asyncIterator]: () => ({
@@ -285,6 +289,7 @@ test("listFolder propagates non-404 errors", async (t) => {
 
   const fakeContainerClient = {
     containerName: "test-container",
+    getBlockBlobClient: name => ({ url: `https://storage.test/test-container/${name}` }),
     createIfNotExists: async () => {},
     listBlobsFlat: () => ({
       [Symbol.asyncIterator]: () => ({
@@ -318,6 +323,7 @@ test("listNames returns compact blob tuples without requiring SAS generation", a
   let receivedPrefix;
   const fakeContainerClient = {
     containerName: "test-container",
+    getBlockBlobClient: name => ({ url: `https://storage.test/test-container/${name}` }),
     createIfNotExists: async () => {},
     listBlobsFlat: (options) => {
       receivedPrefix = options.prefix;
@@ -359,7 +365,8 @@ test("listNames returns compact blob tuples without requiring SAS generation", a
   t.is(receivedPrefix, "global/reports/");
   t.true(result.truncated);
   t.deepEqual(result.items, [
-    ["global/reports/first.pdf", 123, "2026-01-02T03:04:05.000Z"],
+    ["global/reports/first.pdf", 123, "2026-01-02T03:04:05.000Z",
+      { contentType: null, storageUrl: "https://storage.test/test-container/global/reports/first.pdf" }],
   ]);
 });
 
@@ -381,6 +388,7 @@ test("uploadStream recreates missing container and retries once", async (t) => {
   let uploadCalls = 0;
   const fakeContainerClient = {
     containerName: "test-container",
+    getBlockBlobClient: name => ({ url: `https://storage.test/test-container/${name}` }),
     createIfNotExists: async () => {
       createCalls++;
     },

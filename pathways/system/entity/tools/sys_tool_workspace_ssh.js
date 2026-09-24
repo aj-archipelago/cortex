@@ -4,7 +4,7 @@
 import path from 'node:path';
 import logger from '../../../../lib/logger.js';
 import { sendToolStart, sendToolFinish } from '../../../../lib/pathwayTools.js';
-import { workspaceRequest, destroyWorkspace } from './shared/workspace_client.js';
+import { workspaceRequest, destroyWorkspace, manageWorkspaceCheckpoint, resetWorkspaceContents } from './shared/workspace_client.js';
 import { loadEntityConfig } from './shared/sys_entity_tools.js';
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 300000;
@@ -563,6 +563,7 @@ async function handleReset(tokens, args, resolver) {
 
     // Full container destruction
     if (destroy) {
+        if (destroyVolume) return JSON.stringify({ success: false, error: 'Use reset to clear workspace contents while preserving recovery history. WorkspaceSSH no longer deletes checkpoint history with --destroy-volume.' });
         const timeoutMs = resetDestroyTimeoutMs(timeoutSeconds);
         const entityConfig = await loadEntityConfig(entityId);
         if (!entityConfig) {
@@ -592,15 +593,16 @@ async function handleReset(tokens, args, resolver) {
     }
 
     // Soft reset: wipe /workspace contents
-    const timeoutMs = timeoutSecondsToMs(timeoutSeconds);
-    const body = {};
-    if (preservePaths.length > 0) {
-        body.preservePaths = preservePaths;
-    }
-
-    const result = await workspaceRequest(entityId, '/reset', body, workspaceRequestOptions(args, { timeoutMs: 60000 }));
+    const result = await resetWorkspaceContents(entityId, preservePaths.length ? preservePaths : undefined, workspaceRequestOptions(args, { timeoutMs: resetDestroyTimeoutMs(timeoutSeconds) }));
 
     return JSON.stringify(result);
+}
+
+async function handleCheckpoint(tokens, args) {
+    if (tokens.length > 3 || (tokens.length > 1 && !['status', 'approve', 'reject'].includes(tokens[1]))) {
+        return JSON.stringify({ success: false, error: 'Use checkpoint [status|approve <id>|reject <id>]' });
+    }
+    return JSON.stringify(await manageWorkspaceCheckpoint(args.entityId, tokens[1] || 'create', tokens[2], workspaceRequestOptions(args)));
 }
 
 // --- Command routing ---
@@ -634,6 +636,8 @@ function routeCommand(command) {
     if (first === 'reset') {
         return { handler: handleReset, tokens };
     }
+
+    if (first === 'checkpoint') return { handler: handleCheckpoint, tokens };
 
     return null; // plain shell command
 }
@@ -689,9 +693,11 @@ BUILT-IN COMMANDS — IMPORTANT: The commands below are special commands handled
 • jobs — list all background processes with their processId, status, command, and duration. Use this to find processIds you may have lost, or to check what's still running.
   Example: command: "jobs"
 
-• reset [--preserve .env] — wipe workspace contents
+• checkpoint — save a backup now; a significant reduction requires your explicit decision as the workspace-owning agent
+• checkpoint status — inspect the pending backup review
+• checkpoint approve <id> / checkpoint reject <id> — decide the exact candidate after checking whether the reduction was intended. Ask the user if uncertain. Your earlier cleanup command is not approval. Existing recovery backups are preserved.
+• reset [--preserve .env] — save a recovery checkpoint, then wipe workspace contents; review the resulting reduction before it becomes the new backup baseline
 • reset --destroy — destroy and re-provision the workspace container while preserving files. This can take up to 15 minutes because it checkpoints first.
-• reset --destroy-volume — destroy the container and persisted workspace data
 
 Everything else runs as a bash command. Relative and absolute paths both work.`,
             parameters: {

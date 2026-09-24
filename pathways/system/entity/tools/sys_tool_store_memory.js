@@ -1,3 +1,4 @@
+import { memoryArgs } from '../../../../lib/entityPreferences.js';
 // sys_tool_store_memory.js
 // Entity tool that allows the agent to store information to memory
 import { callPathway } from '../../../../lib/pathwayTools.js';
@@ -54,15 +55,16 @@ export default {
     executePathway: async ({args, runAllPrompts, resolver}) => {
         // Check if memory is enabled for this entity
         if (args.useMemory === false) {
-            return JSON.stringify({ 
-                error: 'Memory storage is disabled for this entity. Cannot store memories when useMemory is false.' 
+            return JSON.stringify({
+                error: 'Memory storage is disabled for this entity. Cannot store memories when useMemory is false.'
             });
         }
 
-        const { contextId, contextKey } = args;
+        if (args.memoryLearning === false) return JSON.stringify({ error: 'Memory learning is disabled for this entity.' });
+        const { contextId, contextKey } = memoryArgs(args);
         if (!contextId) {
-            return JSON.stringify({ 
-                error: 'contextId is required. It should be provided via agentContext or contextId parameter.' 
+            return JSON.stringify({
+                error: 'contextId is required. It should be provided via agentContext or contextId parameter.'
             });
         }
 
@@ -74,30 +76,30 @@ export default {
         const validSections = ['memoryUser', 'memorySelf', 'memoryDirectives', 'memoryTopics'];
         const defaultPriority = 3;
         const timestamp = new Date().toISOString();
-        
+
         // Group memories by section
         const memoriesBySection = {};
-        
+
         // Validate and group memories
         for (const memory of args.memories) {
             if (!memory.content || typeof memory.content !== 'string') {
                 return JSON.stringify({ error: 'Each memory must have a content field that is a string' });
             }
-            
+
             const section = memory.section || 'memoryUser';
             if (!validSections.includes(section)) {
                 return JSON.stringify({ error: `Invalid section: ${section}. Must be one of: ${validSections.join(', ')}` });
             }
-            
+
             // Use memory-specific priority if it's valid (1, 2, or 3), otherwise use default.
             const parsedPriority = Number.parseInt(memory.priority, 10);
             const priority = [1, 2, 3].includes(parsedPriority)
                 ? parsedPriority
                 : defaultPriority;
-            
+
             // Format as: priority|timestamp|content
             const memoryLine = `${priority}|${timestamp}|${memory.content}`;
-            
+
             if (!memoriesBySection[section]) {
                 memoriesBySection[section] = [];
             }
@@ -107,7 +109,7 @@ export default {
         // Store memories in each section
         const results = {};
         const sectionCounts = {};
-        
+
         for (const [section, memoryLines] of Object.entries(memoriesBySection)) {
             // Read current memory for the section
             let currentMemory = await callPathway('sys_read_memory', {
@@ -117,7 +119,7 @@ export default {
             });
 
             // Combine existing memory with new memories
-            const updatedMemory = currentMemory 
+            const updatedMemory = currentMemory
                 ? (currentMemory.trim() ? currentMemory + '\n' : '') + memoryLines.join('\n')
                 : memoryLines.join('\n');
 
@@ -128,23 +130,23 @@ export default {
                 aiMemory: updatedMemory,
                 contextKey: contextKey
             });
-            
+
             results[section] = result;
             sectionCounts[section] = memoryLines.length;
         }
 
         const totalCount = args.memories.length;
         const sectionsList = Object.keys(sectionCounts).join(', ');
-        
-        resolver.tool = JSON.stringify({ 
-            toolUsed: "memory", 
-            action: "store", 
+
+        resolver.tool = JSON.stringify({
+            toolUsed: "memory",
+            action: "store",
             sections: Object.keys(sectionCounts),
-            count: totalCount 
+            count: totalCount
         });
 
-        return JSON.stringify({ 
-            success: true, 
+        return JSON.stringify({
+            success: true,
             message: `Successfully stored ${totalCount} memory item(s) across ${Object.keys(sectionCounts).length} section(s): ${sectionsList}`,
             count: totalCount,
             sections: sectionCounts,

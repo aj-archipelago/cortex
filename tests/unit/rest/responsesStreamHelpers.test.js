@@ -1,10 +1,11 @@
 import test from 'ava';
+import { Readable } from 'node:stream';
 import {
   extractPathwayErrorMessage,
   isLikelyRequestId,
   normalizeResponseOutputText,
 } from '../../../server/rest.js';
-import { normalizeUsage } from '../../../server/rest/restUtils.js';
+import { normalizeUsage, readErrorResponseData } from '../../../server/rest/restUtils.js';
 import { PathwayResolver } from '../../../server/pathwayResolver.js';
 
 test('normalizeResponseOutputText extracts text from output_text and content variants', (t) => {
@@ -110,6 +111,30 @@ test('normalizeResponseOutputText falls back to empty string for non-text payloa
   t.is(normalizeResponseOutputText({ something: 'else' }), '');
   t.is(normalizeResponseOutputText('not-an-object'), '');
   t.is(normalizeResponseOutputText(null), '');
+});
+
+test('readErrorResponseData parses JSON from an Axios error response stream', async (t) => {
+  const responseStream = Readable.from([
+    '{"error":{"message":"Unsupported parameter: service_tier",',
+    '"type":"invalid_request_error","param":"service_tier","code":"unsupported_parameter"}}'
+  ]);
+
+  t.deepEqual(await readErrorResponseData(responseStream), {
+    error: {
+      message: 'Unsupported parameter: service_tier',
+      type: 'invalid_request_error',
+      param: 'service_tier',
+      code: 'unsupported_parameter',
+    },
+  });
+});
+
+test('readErrorResponseData preserves non-JSON streamed error text', async (t) => {
+  const responseStream = Readable.from(['upstream validation failed']);
+
+  t.deepEqual(await readErrorResponseData(responseStream), {
+    rawContent: 'upstream validation failed',
+  });
 });
 
 test('isLikelyRequestId detects UUID request IDs and ignores non-request text', (t) => {

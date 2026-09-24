@@ -12,9 +12,10 @@ import { moveFileToPublicFolder } from "../localFileHandler.js";
 import { v4 as uuidv4 } from "uuid";
 
 export class FileConversionService extends ConversionService {
-  constructor(context, useAzure = true) {
+  constructor(context, useAzure = true, storage = {}) {
     super(context);
     this.useAzure = useAzure;
+    this.storage = storage || {};
     this.storageFactory = StorageFactory.getInstance();
   }
 
@@ -44,19 +45,19 @@ export class FileConversionService extends ConversionService {
 
     let fileUrl;
     if (this.useAzure) {
-      const provider = await this.storageFactory.getAzureProvider();
-      if (folderPath) {
+      const provider = await this.storageFactory.getAzureProvider(this.storage.containerName);
+      if (folderPath !== null) {
         // Use uploadStream which supports folderPath to store converted file
         // next to the original in the user's folder
         const uploadName = filename || path.basename(filePath);
         const stream = createReadStream(filePath);
         const contentType = mime.lookup(uploadName) || null;
-        const result = await provider.uploadStream({}, uploadName, stream, contentType, folderPath);
-        fileUrl = result.url;
+        const result = await provider.uploadStream({}, uploadName, stream, contentType, folderPath, this.storage.displayFilename || uploadName);
+        return { ...result, blobPath: result.blobName };
       } else {
         // Container parameter is ignored - always uses default container from env var
         const result = await provider.uploadFile({}, filePath, reqId, null, filename);
-        fileUrl = result.url;
+        return { ...result, blobPath: result.blobName };
       }
     } else {
       fileUrl = await moveFileToPublicFolder(filePath, reqId);

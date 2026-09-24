@@ -90,15 +90,17 @@ function validateParameters(args) {
 export default {
     prompt: [],
     timeout: 300,
-    toolDefinition: { 
+    toolDefinition: {
         type: "function",
         icon: "🌐",
         function: {
             name: "SearchInternet",
-            description: "Search the internet for current knowledge and events. This is a simple pass-through tool: it calls Google CSE with your parameters and returns normalized results with unique IDs for citation. Prefer strict time filters and reputable sources via CSE parameters.",
+            description: "Search the internet for current knowledge and events using Google CSE. Returns up to 10 results with unique IDs for citation. Prefer reputable sources and apply time filters when the question requires recency. Inspect available results before issuing overlapping follow-up queries; use further searches to fill gaps, corroborate claims, or explore new leads.",
             parameters: {
                 type: "object",
                 properties: {
+                    searchRefresh: { type: 'boolean', description: 'Fetch fresh results, bypassing previously cached search results.' },
+                    searchMaxAgeSeconds: { type: 'integer', minimum: 0, description: 'Maximum acceptable age of cached results in seconds. Use 60 for rapidly developing news, or 0 for a fresh search.' },
                     q: {
                         type: "string",
                         description: "The complete query to pass to Google CSE using Google's search syntax."
@@ -191,9 +193,9 @@ export default {
         const validationError = validateParameters(normalizedArgs);
         if (validationError) {
             logger.error(`Google CSE parameter validation failed: ${validationError}`);
-            return JSON.stringify({ 
-                error: validationError, 
-                recoveryMessage: "Please correct the parameter format and try again." 
+            return JSON.stringify({
+                error: validationError,
+                recoveryMessage: "Please correct the parameter format and try again."
             });
         }
 
@@ -203,21 +205,21 @@ export default {
         const googleCx = env["GOOGLE_CSE_CX"];
         if (!googleKey || !googleCx) {
             logger.error('Google Custom Search is not available - missing credentials');
-            return JSON.stringify({ 
-                error: "Google Custom Search is not available - missing GOOGLE_CSE_KEY and/or GOOGLE_CSE_CX", 
-                recoveryMessage: "This tool is not configured. You should try a different search tool." 
+            return JSON.stringify({
+                error: "Google Custom Search is not available - missing GOOGLE_CSE_KEY and/or GOOGLE_CSE_CX",
+                recoveryMessage: "This tool is not configured. You should try a different search tool."
             });
         }
 
         try {
             // Pass-through: call Google CSE with provided args
-            const response = await callPathway('google_cse', { 
+            const response = await callPathway('google_cse', {
                 ...normalizedArgs,
                 text: normalizedArgs.q
             }, resolver);
 
             if (resolver.errors && resolver.errors.length > 0) {
-                const errorMessages = Array.isArray(resolver.errors) 
+                const errorMessages = Array.isArray(resolver.errors)
                     ? resolver.errors.map(err => err.message || err)
                     : [resolver.errors.message || resolver.errors];
                 const errorMessageStr = errorMessages.join('; ');
@@ -257,7 +259,7 @@ export default {
                     errorMsg = 'Unknown error from Google CSE';
                 }
                 logger.error(`Google CSE API error: ${errorMsg}`);
-                
+
                 // Provide helpful recovery message based on error type
                 let recoveryMessage = "This tool failed. You should try the backup tool for this function.";
                 if (typeof errorMsg === 'string') {
@@ -267,10 +269,10 @@ export default {
                         recoveryMessage = "The search query or parameters are invalid. Please adjust your search parameters and try again.";
                     }
                 }
-                
-                return JSON.stringify({ 
-                    error: errorMsg, 
-                    recoveryMessage: recoveryMessage 
+
+                return JSON.stringify({
+                    error: errorMsg,
+                    recoveryMessage: recoveryMessage
                 });
             }
 
@@ -287,16 +289,17 @@ export default {
             }
 
             resolver.tool = JSON.stringify({ toolUsed: "GoogleSearch" });
-            return JSON.stringify({ _type: "SearchResponse", value: results });
+            return JSON.stringify({ _type: "SearchResponse", value: results,
+                ...(parsedResponse._searchCache ? { searchCache: parsedResponse._searchCache } : {}) });
         } catch (e) {
             const errorMessage = e?.message || e?.toString() || String(e);
             logger.error(`Error in Google CSE search: ${errorMessage}`);
-            
+
             // Return error response instead of throwing so agent can see and adjust
-            return JSON.stringify({ 
-                error: errorMessage, 
-                recoveryMessage: "This tool failed. You should try the backup tool for this function." 
+            return JSON.stringify({
+                error: errorMessage,
+                recoveryMessage: "This tool failed. You should try the backup tool for this function."
             });
         }
     }
-}; 
+};

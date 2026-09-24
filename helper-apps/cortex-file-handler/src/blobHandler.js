@@ -1,3 +1,4 @@
+import { assertGrantedPath, getStorageGrant, grantError, withStorageGrant } from './security/storageGrant.js';
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -14,6 +15,7 @@ import {
   sanitizeFilename,
   generateShortId,
   generateBlobName,
+  generateChatUploadFilename,
 } from "./utils/filenameUtils.js";
 import { publicFolder, port, ipAddress } from "./start.js";
 import {
@@ -513,13 +515,14 @@ function uploadBlob(
   filePath = null,
   hash = null,
 ) {
+  const storageGrant = getStorageGrant();
   return new Promise((resolve, reject) => {
     (async () => {
       try {
         let requestId = uuidv4();
         // Container parameter is ignored - always uses default container from env var
         const body = {};
-        const fields = {}; // Buffer for all fields
+        const fields = { ...req?.query }; // Query routing also supports streaming proxies.
 
         // If filePath is given, we are dealing with local file and not form-data
         if (filePath) {
@@ -552,7 +555,7 @@ function uploadBlob(
             throw err;
           }
         } else {
-          const busboy = Busboy({ headers: req.headers });
+          const busboy = Busboy({ headers: req.headers, defParamCharset: 'utf8' });
           let hasFile = false;
           let errorOccurred = false;
 
@@ -576,7 +579,7 @@ function uploadBlob(
           let resolveBusboyFinished;
           const busboyFinished = new Promise((r) => { resolveBusboyFinished = r; });
 
-          busboy.on("file", async (fieldname, file, info) => {
+          busboy.on("file", (fieldname, file, info) => withStorageGrant(storageGrant, async () => {
             if (errorOccurred) return;
 
             hasFile = true;
@@ -594,8 +597,14 @@ function uploadBlob(
             // Fields after the file part (e.g. hash) will arrive once
             // the file data is consumed — processFile handles this by
             // awaiting busboyFinished after the upload completes.
-            await processFile(fieldname, file, info);
-          });
+            try {
+              await processFile(fieldname, file, info);
+            } catch (error) {
+              errorOccurred = true;
+              file.resume();
+              reject(error);
+            }
+          }));
 
           const processFile = async (fieldname, file, info) => {
             if (errorOccurred) return;
@@ -643,12 +652,23 @@ function uploadBlob(
               }
             }
 
+            if (getStorageGrant()) {
+              if (folderPath === null || (subPath && !sanitizeSubPath(subPath))) throw grantError('Valid upload destination required');
+
+            }
+
             // Prepare for streaming to cloud destinations
             const displayFilename = info.filename; // Preserve original filename for metadata
             const fileExtension = path.extname(displayFilename);
             const shortId = generateShortId();
-            const uploadName = folderPath ? sanitizeFilename(displayFilename) : `${shortId}${fileExtension}`;
+            const uploadName = folderPath?.startsWith("chats/")
+              ? generateChatUploadFilename(displayFilename)
+              : folderPath ? sanitizeFilename(displayFilename) : `${shortId}${fileExtension}`;
             // Extract content-type from busboy info (preserves charset if provided)
+            if (getStorageGrant()) {
+              const owner = getScopedContainerOwnerId({ contextId: logicalContextId, userId, workspaceId, appletId, fileScope });
+              assertGrantedPath(owner, folderPath ? `${folderPath}/${uploadName}` : uploadName, 'upload');
+            }
             const contentType = info.mimeType || null;
             const azureStream = !saveToLocal ? new PassThrough() : null;
             let diskWriteStream, tempDir, tempFilePath;
@@ -740,6 +760,7 @@ function uploadBlob(
                 userContainerName,
                 contentType,
                 folderPath, // Pass folder path for folder-based storage
+                displayFilename,
               ).catch(async (err) => {
                 cloudUploadError = err;
                 // Fallback: try from disk if available
@@ -749,7 +770,7 @@ function uploadBlob(
                     highWaterMark: 1024 * 1024,
                     autoClose: true,
                   });
-                  return saveToAzureStorage(context, uploadName, diskStream, userContainerName, contentType, folderPath);
+                  return saveToAzureStorage(context, uploadName, diskStream, userContainerName, contentType, folderPath, displayFilename);
                 }
                 throw err;
               });
@@ -814,7 +835,7 @@ function uploadBlob(
               if (contentType) {
                 result.mimeType = contentType;
               }
-              
+
               // Persist metadata in the same scoped Redis namespace that owns
               // the uploaded blob, even when callers only send userId/workspaceId.
               const uploadContextId = getScopedContainerOwnerId({
@@ -839,7 +860,7 @@ function uploadBlob(
               if (fileScope) result.fileScope = fileScope;
 
               // Container parameter is ignored - always uses default container from env var
-              
+
               // Ensure shortLivedUrl is always present
               if (!result.shortLivedUrl && result.url) {
                 result.shortLivedUrl = result.url;
@@ -873,6 +894,7 @@ function uploadBlob(
               const conversionService = new FileConversionService(
                 context,
                 !saveToLocal,
+                { containerName: userContainerName, displayFilename },
               );
 
               if (conversionService.needsConversion(fileExtension)) {
@@ -923,14 +945,12 @@ function uploadBlob(
 
                     // Optionally save to GCS
                     let convertedGcsUrl;
-                    if (conversionService._isGCSConfigured()) {
-                      convertedGcsUrl =
-                        await conversionService._uploadChunkToGCS(
-                          conversion.convertedPath,
-                          requestId,
-                          null,
-                          folderPath,
-                        );
+                    if (conversionService._isGCSConfigured() && convertedSaveResult.blobPath) {
+                      const storageService = new StorageService();
+                      const backedUp = await storageService.ensureGCSUpload(context, {
+                        ...convertedSaveResult, containerOwnerId,
+                      });
+                      convertedGcsUrl = backedUp?.gcs;
                     }
 
                     // Generate shortLivedUrl for converted file
@@ -945,16 +965,18 @@ function uploadBlob(
 
                     // Attach to response body
                     result.converted = {
+                      blobPath: convertedSaveResult.blobPath || null,
+                      displayFilename,
                       url: convertedSaveResult.url,
                       shortLivedUrl: convertedShortLivedUrl,
                       gcs: convertedGcsUrl,
                       mimeType: convertedMimeType,
                     };
-                    
+
                     // Note: result.shortLivedUrl remains pointing to the original file
                     // result.converted.shortLivedUrl points to the converted file
                     // Both are available for different use cases
-                    
+
                     context.log(
                       "Conversion process (busboy) completed successfully",
                     );
@@ -1053,10 +1075,10 @@ async function saveToLocalStorage(context, requestId, encodedFilename, file) {
 }
 
 // Helper function to handle Azure blob storage
-async function saveToAzureStorage(context, encodedFilename, file, containerName = null, contentType = null, folderPath = null) {
+async function saveToAzureStorage(context, encodedFilename, file, containerName = null, contentType = null, folderPath = null, displayFilename = encodedFilename) {
   const storageFactory = StorageFactory.getInstance();
   const provider = await storageFactory.getAzureProvider(containerName);
-  return await provider.uploadStream(context, encodedFilename, file, contentType, folderPath);
+  return await provider.uploadStream(context, encodedFilename, file, contentType, folderPath, displayFilename);
 }
 
 // Wrapper that checks if GCS is configured
@@ -1192,18 +1214,18 @@ async function uploadFile(
     if (hash) {
       result.hash = hash;
     }
-    
+
     // Store MIME type determined from filename (used by Cortex for file type detection)
     const mimeType = mime.lookup(uploadName) || 'application/octet-stream';
     result.mimeType = mimeType;
-    
+
     // Extract contextId from form fields if present (only available for multipart uploads)
     if (fields && fields.contextId) {
       result.contextId = fields.contextId;
     }
-    
+
     // Container parameter is ignored - always uses default container from env var
-    
+
     // Ensure shortLivedUrl is always present
     if (!result.shortLivedUrl && result.url) {
       result.shortLivedUrl = result.url;
@@ -1262,11 +1284,11 @@ async function uploadFile(
             gcs: convertedGcsUrl,
             mimeType: convertedMimeType,
           };
-          
+
           // Note: result.shortLivedUrl remains pointing to the original file
           // result.converted.shortLivedUrl points to the converted file
           // Both are available for different use cases
-          
+
           context.log("Conversion process completed successfully");
         }
       } catch (error) {

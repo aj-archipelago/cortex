@@ -1,8 +1,10 @@
 import test from 'ava';
+import { isDeepStrictEqual } from 'node:util';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import logger from '../../../lib/logger.js';
+import { encodeCheckpointInventory } from '../../../helper-apps/cortex-workspace/lib/checkpoint_inventory.js';
 import { config } from '../../../config.js';
 import { getEntityStore } from '../../../lib/MongoEntityStore.js';
 
@@ -33,6 +35,61 @@ test('workspaceRequest rejects blank entity ids before provisioning', async (t) 
     t.is(result.error, 'Workspace entityId is required');
     t.true(loggerStub.calls.some(call => call.message === 'Workspace request skipped: missing entityId'));
 });
+
+const jobResultCases = [
+    { name: 'empty', response: [], expected: [] },
+    { name: 'running and completed', response: [
+        { processId: 'running-job', status: 'running', command: 'node src/index.mjs', startedAt: '2026-09-16T06:21:09Z', durationMs: 100, exitCode: null },
+        { processId: 'completed-job', status: 'completed', command: 'echo done', durationMs: 5, exitCode: 0 },
+    ] },
+    { name: 'wrapped list', response: { jobs: [{ processId: 'failed-job', status: 'failed', exitCode: 1 }] } },
+    { name: 'request error', response: { error: 'Job registry unavailable' }, error: 'Job registry unavailable' },
+    { name: 'HTTP failure', response: [], httpStatus: 503, error: 'HTTP 503' },
+    { name: 'malformed list', response: { message: 'unexpected response' }, error: 'invalid background job list' },
+];
+
+for (const scenario of jobResultCases) {
+    test.serial(`WorkspaceSSH jobs preserves ${scenario.name} through the client, formatter and inspector`, async (t) => {
+        const restoreConfig = stubConfig({ storageConnectionString: '', workspaceImageVersion: '1.0.14' });
+        const restoreStore = stubEntityStore({
+            id: 'jobs-result-test',
+            workspace: { status: 'running', url: 'http://workspace.test:3100', secret: 'test-secret', imageVersion: '1.0.14' },
+        });
+        const originalFetch = global.fetch;
+        global.fetch = async (url) => {
+            t.is(String(url), 'http://workspace.test:3100/shell/jobs');
+            return { ok: !scenario.httpStatus, status: scenario.httpStatus || 200, json: async () => scenario.response };
+        };
+        try {
+            const { default: ssh } = await import('../../../pathways/system/entity/tools/sys_tool_workspace_ssh.js');
+            const { buildToolResultContent } = await import('../../../pathways/system/entity/sys_entity_agent.js');
+            const { callTool } = await import('../../../lib/pathwayTools.js');
+            const raw = await ssh.executePathway({ args: { entityId: 'jobs-result-test', command: 'jobs' }, resolver: {} });
+            const resolver = {};
+            const model = JSON.parse(buildToolResultContent(raw, resolver, 'workspacessh', { toolArgs: { command: 'jobs' } }));
+            if (scenario.error) {
+                t.false(model.success);
+                t.true(model.error.includes(scenario.error));
+                t.false(model.summary.includes('0 total'));
+                return;
+            }
+            const expected = scenario.expected || scenario.response.jobs || scenario.response;
+            t.true(model.success);
+            t.is(model.kind, 'workspace-jobs');
+            t.deepEqual(JSON.parse(model.contentPreview).jobs, expected);
+            t.is(model.summary, `Workspace jobs: ${expected.filter(job => job.status === 'running').length} running, ${expected.length} total`);
+            const inspected = await callTool('inspecttoolresult', { resultRef: model.resultRef, mode: 'head', limit: 12000 }, {
+                inspecttoolresult: { pathwayName: '_builtin_inspect_tool_result', definition: { function: { parameters: { properties: {} } } } },
+            }, resolver);
+            t.deepEqual(JSON.parse(JSON.parse(inspected.result).content).jobs, expected);
+        } finally {
+            global.fetch = originalFetch;
+            restoreStore();
+            restoreConfig();
+            workspaceClientModule.__testables.resetActivityStateForTest();
+        }
+    });
+}
 
 test('workspace checkpoints prefer workspace Azure Files storage account', (t) => {
     const restoreConfig = stubConfig({
@@ -210,6 +267,47 @@ test('encrypted streaming checkpoint requires workspace helper 1.0.10 or newer',
     t.true(workspaceClientModule.__testables.isEncryptedStreamingCheckpointWorkspace('2.0.0'));
 });
 
+
+function stubCheckpointPublication(t, entityId, sizeBytes, { baseline = false } = {}) {
+    const restoreConfig = stubConfig({ workspaceAzureFilesStorageAccountName: 'teststorage',
+        workspaceAzureFilesStorageAccountKey: 'dGVzdA==', azureBlobContainerName: 'checkpoints', storageConnectionString: '' });
+    const metadata = () => workspaceClientModule.__testables.workspaceCheckpointBlobMetadata(entityId);
+    const client = { getBlockBlobClient: blobPath => ({
+        exists: async () => baseline,
+        getProperties: async () => {
+            if (blobPath.includes('/candidates/') || (baseline && blobPath.endsWith('/workspace.tar.gz'))) {
+                return { contentLength: sizeBytes, etag: 'fixture-etag', metadata: metadata(), lastModified: new Date() };
+            }
+            throw Object.assign(new Error('missing'), { statusCode: 404 });
+        },
+        createSnapshot: async () => ({ snapshot: 'fixture-snapshot' }),
+        syncUploadFromURL: async () => ({ etag: 'published-etag' }),
+        deleteIfExists: async () => ({ succeeded: true }),
+    }) };
+    workspaceClientModule.__testables.setWorkspaceCheckpointContainerClientForTest(client);
+    return () => { workspaceClientModule.__testables.setWorkspaceCheckpointContainerClientForTest(undefined); restoreConfig(); };
+}
+
+function stubRestartRecoveryRoutes(t, { initiallyReset = false } = {}) {
+    const handler = global.fetch;
+    let reset = initiallyReset;
+    let restored = false;
+    global.fetch = async (url, options = {}) => {
+        const pathname = new URL(url).pathname;
+        if (pathname === '/status' && reset) return { ok: false, status: 401, json: async () => ({ error: 'Invalid secret' }) };
+        if (pathname === '/restore-url') {
+            t.is(options.headers['x-workspace-secret'], 'bootstrap-secret');
+            t.truthy(JSON.parse(options.body).archiveUrl);
+            restored = true;
+            return { ok: true, status: 200, json: async () => ({ success: true }) };
+        }
+        if (pathname === '/reconfigure') { t.true(restored, 'saved workspace must be restored before secret rotation'); reset = false; }
+        const response = await handler(url, options);
+        if (response.status === 401) reset = true;
+        return response;
+    };
+}
+
 function stubConfig(stubs) {
     const originalGet = config.get.bind(config);
     config.get = (key) => {
@@ -257,6 +355,7 @@ function stubMutableEntityStore(entity) {
         getDefaultEntity: entityStore.getDefaultEntity,
         getAllEntities: entityStore.getAllEntities,
         upsertEntity: entityStore.upsertEntity,
+        compareAndSetWorkspace: entityStore.compareAndSetWorkspace,
     };
     let currentEntity = entity;
 
@@ -266,6 +365,11 @@ function stubMutableEntityStore(entity) {
         currentEntity?.workspace?.containerId === containerId ? currentEntity : null;
     entityStore.getDefaultEntity = async () => null;
     entityStore.getAllEntities = async () => currentEntity ? [currentEntity] : [];
+    entityStore.compareAndSetWorkspace = async (id, expected, next) => {
+        if (id !== currentEntity?.id || !isDeepStrictEqual(expected ?? null, currentEntity.workspace ?? null)) return false;
+        currentEntity = { ...currentEntity, workspace: next };
+        return true;
+    };
     entityStore.upsertEntity = async (nextEntity) => {
         currentEntity = nextEntity;
         return nextEntity;
@@ -285,6 +389,7 @@ function stubMutableEntityStore(entity) {
             entityStore.getDefaultEntity = original.getDefaultEntity;
             entityStore.getAllEntities = original.getAllEntities;
             entityStore.upsertEntity = original.upsertEntity;
+        entityStore.compareAndSetWorkspace = original.compareAndSetWorkspace;
         },
     };
 }
@@ -306,6 +411,12 @@ function createFakeRedis(options = {}) {
 
     return {
         calls,
+        async eval(script, _keyCount, key, token) {
+            calls.push({ op: 'eval', key });
+            if (values.get(key) !== token) return 0;
+            if (script.includes("redis.call('del'")) values.delete(key);
+            return 1;
+        },
         async get(key) {
             calls.push({ op: 'get', key });
             if (key.includes(':activity:') && activityTimestamp !== undefined) {
@@ -363,6 +474,73 @@ function createFakeRedis(options = {}) {
             return 1;
         },
     };
+}
+
+for (const scenario of ['restore fails', 'concurrent checkpoint and deletion', 'lease lost']) {
+    test.serial(`runtime reset safety: ${scenario}`, async t => {
+        const id = 'reset-safety-test';
+        const store = stubMutableEntityStore({ id, workspace: {
+            containerId: 'reset-test-container', url: 'http://workspace.test:3100',
+            secret: 'old-secret', bootstrapSecret: 'bootstrap-secret', status: 'running',
+        } });
+        const restorePublication = stubCheckpointPublication(t, id, 1000000, { baseline: true });
+        const originalFetch = global.fetch;
+        let releaseRestore, restoreStarted;
+        const started = new Promise(resolve => { restoreStarted = resolve; });
+        const gate = new Promise(resolve => { releaseRestore = resolve; });
+        let reconfigured = false;
+        const endpoints = [];
+        const backend = { backendName: 'docker', remove: async () => t.fail('recovery must not delete the container') };
+        const lease = { renew: async () => {}, assertOwned: () => { if (reconfigured === 'lose-lease') throw new Error('lease lost'); } };
+        global.fetch = async (url) => {
+            const endpoint = new URL(url).pathname;
+            endpoints.push(endpoint);
+            if (endpoint === '/status') return { ok: false, status: 401, json: async () => ({ error: 'Invalid secret' }) };
+            if (endpoint === '/restore-url') {
+                restoreStarted();
+                if (scenario === 'concurrent checkpoint and deletion') await gate;
+                if (scenario === 'lease lost') reconfigured = 'lose-lease';
+                return { ok: scenario !== 'restore fails', status: scenario === 'restore fails' ? 500 : 200,
+                    json: async () => scenario === 'restore fails' ? { error: 'invalid archive' } : { success: true } };
+            }
+            if (endpoint === '/reconfigure') {
+                reconfigured = true;
+                return { ok: true, status: 200, json: async () => ({ success: true }) };
+            }
+            t.fail(`unexpected endpoint ${endpoint}`);
+        };
+        try {
+            const operation = workspaceClientModule.__testables.reconfigureForEntity(id, store.getEntity(), {
+                containerId: 'reset-test-container', containerName: 'reset-test-container', url: 'http://workspace.test:3100', bootstrapSecret: 'bootstrap-secret',
+            }, backend, { recoverRuntime: true, ...(scenario === 'lease lost' ? { lifecycleLease: lease } : {}) });
+            if (scenario === 'concurrent checkpoint and deletion') {
+                await started;
+                const checkpoint = await workspaceClientModule.__testables.checkpointWorkspace(id, store.getEntity());
+                const deletion = await workspaceClientModule.destroyWorkspace(id, store.getEntity());
+                t.false(checkpoint.success);
+                t.false(deletion.success);
+                t.regex(checkpoint.error, /in progress/);
+                t.regex(deletion.error, /in progress/);
+                t.deepEqual(endpoints, ['/status', '/restore-url']);
+                releaseRestore();
+                await operation;
+                t.true(reconfigured);
+                t.is(store.getEntity().workspace.status, 'running');
+            } else {
+                await t.throwsAsync(operation, { message: scenario === 'restore fails' ? /invalid archive/ : /lease lost/ });
+                t.false(endpoints.includes('/reconfigure'));
+                t.is(store.getEntity().workspace.status, 'error');
+                t.truthy(store.getEntity().workspace.checkpointBlobPath);
+            }
+            t.false(endpoints.some(path => path.includes('backup')));
+        } finally {
+            releaseRestore();
+            global.fetch = originalFetch;
+            restorePublication();
+            store.restore();
+            workspaceClientModule.__testables.resetActivityStateForTest();
+        }
+    });
 }
 
 test.serial('warmPool init uses WARM_POOL_ENABLED instead of bootstrap secret presence', async (t) => {
@@ -909,7 +1087,7 @@ test.serial('createGenericContainer retries with unique runtime name on Azure cr
             attempts.push(args);
             if (attempts.length === 1) {
                 throw new Error(
-                    "The resource 'workspace-entity-123' already exists in location 'qatarcentral' in resource group 'Archipelago-ML-Experimentation'. A resource with the same name cannot be created in location 'eastus'. Please select a new resource name."
+                    "The resource 'workspace-entity-123' already exists in location 'qatarcentral' in resource group 'example-workspaces'. A resource with the same name cannot be created in location 'eastus'. Please select a new resource name."
                 );
             }
             return {
@@ -976,6 +1154,53 @@ test.serial('reapIdleWorkspaces destroys old orphan ACI inventory containers', a
         await workspaceClientModule.__testables.reapIdleWorkspaces();
 
         t.deepEqual(removed, ['workspace-dev-orphan-123']);
+    } finally {
+        workspaceClientModule.__testables.resetActivityStateForTest();
+        Date.now = originalNow;
+        ACIBackend.prototype.listWorkspaceContainers = originalList;
+        ACIBackend.prototype.remove = originalRemove;
+        restoreEntityStore();
+        restoreConfig();
+    }
+});
+
+test.serial('reapIdleWorkspaces preserves in-flight Azure operations beyond the orphan grace period', async (t) => {
+    const now = 10_000_000;
+    const fakeRedis = createFakeRedis();
+    const restoreConfig = stubConfig({
+        azureAcrServer: '',
+        cortexId: 'test-cortex',
+        storageConnectionString: 'redis://test',
+        workspaceBackend: 'aci',
+        workspaceImage: 'cortex-workspace',
+        workspaceImageVersion: '1.0.7',
+        workspaceIdleTimeoutMs: 30 * 60 * 1000,
+        workspaceContainerPrefix: 'workspace-dev',
+    });
+    const restoreEntityStore = stubEntityStore(null);
+    const originalList = ACIBackend.prototype.listWorkspaceContainers;
+    const originalRemove = ACIBackend.prototype.remove;
+    const originalNow = Date.now;
+    const removed = [];
+
+    workspaceClientModule.__testables.resetActivityStateForTest();
+    workspaceClientModule.__testables.setActivityRedisClientForTest(fakeRedis);
+
+    Date.now = () => now;
+    ACIBackend.prototype.listWorkspaceContainers = async () => ['Creating', 'Updating', 'Deleting', 'Pending', 'Succeeded', 'Failed'].map(provisioningState => ({
+        name: `workspace-dev-${provisioningState.toLowerCase()}`,
+        image: 'cortex-workspace:1.0.7',
+        provisioningState,
+        tags: { createdAt: new Date(now - 20 * 60 * 1000).toISOString() },
+    }));
+    ACIBackend.prototype.remove = async (_containerId, containerName) => {
+        removed.push(containerName);
+    };
+
+    try {
+        await workspaceClientModule.__testables.reapIdleWorkspaces();
+
+        t.deepEqual(removed, ['workspace-dev-succeeded', 'workspace-dev-failed']);
     } finally {
         workspaceClientModule.__testables.resetActivityStateForTest();
         Date.now = originalNow;
@@ -1182,7 +1407,7 @@ test.serial('reapIdleWorkspaces skips active warm-pool inventory containers', as
     const poolName = 'workspace-dev-pool-abc123';
     const fakeRedis = createFakeRedis({
         hashes: {
-            'test-cortex-warmpool:containers': {
+            'test-cortex-warmpool:workspace-dev:containers': {
                 [poolName]: JSON.stringify({
                     status: 'READY',
                     createdAt: new Date(now - 10 * 60 * 1000).toISOString(),
@@ -1240,7 +1465,7 @@ test.serial('reapIdleWorkspaces ignores stale warm-pool registry for assigned co
     const fakeRedis = createFakeRedis({
         activityTimestamp: oldActivity,
         hashes: {
-            'test-cortex-warmpool:containers': {
+            'test-cortex-warmpool:workspace-dev:containers': {
                 [containerName]: JSON.stringify({
                     status: 'READY',
                     createdAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
@@ -1292,12 +1517,12 @@ test.serial('reapIdleWorkspaces ignores stale warm-pool registry for assigned co
         t.deepEqual(removed, [containerName]);
         t.true(fakeRedis.calls.some(call =>
             call.op === 'hdel' &&
-            call.key === 'test-cortex-warmpool:containers' &&
+            call.key === 'test-cortex-warmpool:workspace-dev:containers' &&
             call.field === containerName
         ));
         t.true(fakeRedis.calls.some(call =>
             call.op === 'srem' &&
-            call.key === 'test-cortex-warmpool:ready' &&
+            call.key === 'test-cortex-warmpool:workspace-dev:ready' &&
             call.member === containerName
         ));
     } finally {
@@ -1376,7 +1601,7 @@ test.serial('createGenericContainer does not invent ACI share names when first c
             attempts.push(args);
             if (attempts.length === 1) {
                 throw new Error(
-                    "The resource 'workspace-entity-456' already exists in location 'qatarcentral' in resource group 'Archipelago-ML-Experimentation'. A resource with the same name cannot be created in location 'eastus'. Please select a new resource name."
+                    "The resource 'workspace-entity-456' already exists in location 'qatarcentral' in resource group 'example-workspaces'. A resource with the same name cannot be created in location 'eastus'. Please select a new resource name."
                 );
             }
             return {
@@ -1886,6 +2111,9 @@ test.serial('workspaceUploadFile wakes stopped ACI workspace before streaming up
         throw new Error(`unexpected fetch: ${url}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-123', 128, { baseline: true });
+    stubRestartRecoveryRoutes(t, { initiallyReset: true });
+
     try {
         const result = await workspaceClientModule.workspaceUploadFile(
             'entity-123',
@@ -1904,6 +2132,7 @@ test.serial('workspaceUploadFile wakes stopped ACI workspace before streaming up
         t.false(fetchCalls.some(call => call.url === 'http://woken.test:3100/shell'));
         t.false(fetchCalls.some(call => call.url.startsWith('http://stopped.test:3100/upload')));
     } finally {
+        restorePublication();
         fs.rmSync(tempDir, { recursive: true, force: true });
         ACIBackend.prototype.start = originalStart;
         global.fetch = originalFetch;
@@ -2040,6 +2269,9 @@ test.serial('getWorkspaceBackgroundJobsStatus recovers bootstrap auth before che
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-background-jobs-auth-recovery', 128, { baseline: true });
+    stubRestartRecoveryRoutes(t, { initiallyReset: false });
+
     try {
         const details = await workspaceClientModule.__testables.getWorkspaceBackgroundJobsStatus(store.getEntity());
 
@@ -2058,6 +2290,7 @@ test.serial('getWorkspaceBackgroundJobsStatus recovers bootstrap auth before che
         t.is(calls[1].secret, 'bootstrap-secret');
         t.is(calls[2].secret, freshSecret);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         workspaceClientModule.__testables.resetActivityStateForTest();
         store.restore();
@@ -2149,6 +2382,9 @@ test.serial('getWorkspaceBackgroundJobsStatus refreshes ACI URL before bootstrap
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-background-jobs-url-refresh', 128, { baseline: true });
+    stubRestartRecoveryRoutes(t, { initiallyReset: false });
+
     try {
         const details = await workspaceClientModule.__testables.getWorkspaceBackgroundJobsStatus(store.getEntity());
 
@@ -2170,6 +2406,7 @@ test.serial('getWorkspaceBackgroundJobsStatus refreshes ACI URL before bootstrap
         );
         t.false(calls.some(call => call.url === 'http://old-ip.test:3100/reconfigure'));
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         ACIBackend.prototype.getContainerUrl = originalGetContainerUrl;
         workspaceClientModule.__testables.resetActivityStateForTest();
@@ -2491,7 +2728,7 @@ test.serial('reapIdleWorkspaces checkpoints maintenance-idle ACI workspace befor
     }
 });
 
-test.serial('reapIdleWorkspaces checkpoints maintenance-idle ACI inventory workspace before reap timeout', async (t) => {
+test.serial('reapIdleWorkspaces checkpoints a running background job found through ACI inventory', async (t) => {
     const now = 10_000_000;
     const idleTimeoutMs = 30 * 60 * 1000;
     const checkpointIdleMs = 5 * 60 * 1000;
@@ -2554,7 +2791,7 @@ test.serial('reapIdleWorkspaces checkpoints maintenance-idle ACI inventory works
             return {
                 ok: true,
                 async json() {
-                    return { jobs: [] };
+                    return { jobs: [{ processId: 'bg-inventory', status: 'running' }] };
                 },
             };
         }
@@ -2818,7 +3055,10 @@ test.serial('destroyWorkspace applies caller timeout to pre-destroy checkpoint',
         removeCalled = true;
     };
     global.fetch = async (_url, options = {}) => new Promise((resolve, reject) => {
+        // Real fetch keeps I/O alive; this mock must keep the abort timer observable.
+        const guard = setTimeout(() => reject(new Error('mock fetch did not receive abort')), 1000);
         options.signal?.addEventListener('abort', () => {
+            clearTimeout(guard);
             reject(new Error('aborted by test signal'));
         }, { once: true });
         setTimeout(() => reject(new Error('fetch did not abort')), 100);
@@ -3130,7 +3370,7 @@ test.serial('destroyWorkspace accepts checkpoint timestamps from 1.0.9 workspace
     }
 });
 
-test.serial('destroyWorkspace preserves existing checkpoint metadata without a fresh checkpoint', async (t) => {
+test.serial('destroyWorkspace preserves existing checkpoint metadata after failed provisioning', async (t) => {
     const entityId = 'entity-preserve-existing-checkpoint';
     const containerName = 'workspace-entity-preserve-existing-checkpoint';
     const checkpointBlobPath = 'workspace-checkpoints/test-cortex/entity-preserve-existing-checkpoint/workspace.tar.gz';
@@ -3146,7 +3386,7 @@ test.serial('destroyWorkspace preserves existing checkpoint metadata without a f
         id: entityId,
         workspace: {
             containerId: containerName,
-            status: 'provisioning',
+            status: 'error',
             shareName: 'legacy-share',
             checkpointBlobPath,
             checkpointPreviousBlobPath,
@@ -3285,10 +3525,12 @@ test.serial('destroyWorkspace preserves checkpoint encryption key returned on ch
     }
 });
 
-test.serial('reapIdleWorkspaces skips stop when live workspace reports running background jobs', async (t) => {
-    const now = 10_000_000;
+test.serial('reapIdleWorkspaces checkpoints but does not stop a workspace with running background jobs', async (t) => {
+    let now = 10_000_000;
     const idleTimeoutMs = 30 * 60 * 1000;
+    const checkpointIdleMs = 15 * 60 * 1000;
     const entityId = 'entity-456';
+    const checkpointBlobPath = 'workspace-checkpoints/test-cortex/entity-456/workspace.tar.gz';
     const staleActivity = now - idleTimeoutMs - 1;
     const fakeRedis = createFakeRedis({
         activityTimestamp: staleActivity,
@@ -3300,8 +3542,9 @@ test.serial('reapIdleWorkspaces skips stop when live workspace reports running b
         storageConnectionString: 'redis://test',
         workspaceBackend: 'aci',
         workspaceIdleTimeoutMs: idleTimeoutMs,
+        workspaceIdleCheckpointMs: checkpointIdleMs,
     });
-    const restoreEntityStore = stubEntityStore({
+    const store = stubMutableEntityStore({
         id: entityId,
         workspace: {
             url: 'http://workspace.test:3100',
@@ -3314,10 +3557,15 @@ test.serial('reapIdleWorkspaces skips stop when live workspace reports running b
     const originalFetch = global.fetch;
     const originalList = ACIBackend.prototype.listWorkspaceContainers;
     const originalStop = ACIBackend.prototype.stop;
+    const originalRemove = ACIBackend.prototype.remove;
     const originalNow = Date.now;
     const logCapture = stubLogger();
     let stopCalled = false;
     let jobsChecked = false;
+    let checkpointUploadCount = 0;
+    let jobsRunning = true;
+    let checkpointShouldFail = false;
+    let removeCalled = false;
 
     workspaceClientModule.__testables.resetActivityStateForTest();
     workspaceClientModule.__testables.setActivityRedisClientForTest(fakeRedis);
@@ -3325,19 +3573,50 @@ test.serial('reapIdleWorkspaces skips stop when live workspace reports running b
 
     Date.now = () => now;
     ACIBackend.prototype.listWorkspaceContainers = undefined;
+    workspaceClientModule.__testables.setWorkspaceCheckpointUploadForTest(async () => {
+        checkpointUploadCount += 1;
+        if (checkpointShouldFail) throw new Error('checkpoint upload failed');
+        return {
+            blobPath: checkpointBlobPath,
+            sizeBytes: 1024,
+            sizeMB: 0.01,
+            timestamp: new Date(now).toISOString(),
+        };
+    });
     global.fetch = async (url, options) => {
-        jobsChecked = true;
-        t.is(url, 'http://workspace.test:3100/shell/jobs');
         t.is(options.headers['x-workspace-secret'], 'secret-456');
+        if (url === 'http://workspace.test:3100/shell/jobs') {
+            jobsChecked = true;
+            return {
+                ok: true,
+                async json() {
+                    return {
+                        jobs: jobsRunning ? [{
+                            processId: 'bg-1',
+                            status: 'running',
+                            command: 'curl -H "Authorization: Bearer secret-token" https://example.test',
+                        }] : [],
+                    };
+                },
+            };
+        }
+        if (url === 'http://workspace.test:3100/health' || url === 'http://workspace.test:3100/status') {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { status: 'ok', version: '1.0.14' };
+                },
+            };
+        }
+        t.is(url, 'http://workspace.test:3100/backup');
         return {
             ok: true,
+            status: 200,
             async json() {
                 return {
-                    jobs: [{
-                        processId: 'bg-1',
-                        status: 'running',
-                        command: 'curl -H "Authorization: Bearer secret-token" https://example.test',
-                    }],
+                    path: '/persist/workspace.tar.gz',
+                    timestamp: new Date(now).toISOString(),
                 };
             },
         };
@@ -3346,22 +3625,28 @@ test.serial('reapIdleWorkspaces skips stop when live workspace reports running b
         stopCalled = true;
         return {};
     };
+    ACIBackend.prototype.remove = async () => {
+        removeCalled = true;
+    };
 
     try {
         await workspaceClientModule.__testables.reapIdleWorkspaces();
+        await workspaceClientModule.__testables.reapIdleWorkspaces();
 
         t.true(jobsChecked);
+        t.is(checkpointUploadCount, 1);
         t.false(stopCalled);
+        t.is(store.getEntity().workspace.checkpointBlobPath, checkpointBlobPath);
         t.is(workspaceClientModule.__testables.lastActivity.get(entityId), staleActivity);
-        const reaperLog = logCapture.calls
+        const reaperLogs = logCapture.calls
             .map(call => call.message)
-            .find(message => message.startsWith('[WorkspaceReaper]'));
-        t.truthy(reaperLog);
+            .filter(message => message.startsWith('[WorkspaceReaper]'));
+        t.is(reaperLogs.length, 2);
 
-        const decision = JSON.parse(reaperLog.slice('[WorkspaceReaper] '.length));
+        const decision = JSON.parse(reaperLogs[0].slice('[WorkspaceReaper] '.length));
         t.is(decision.entityId, entityId);
-        t.is(decision.action, 'skip');
-        t.is(decision.reason, 'running-background-jobs');
+        t.is(decision.action, 'checkpoint');
+        t.is(decision.reason, 'running-background-jobs-checkpointed');
         t.is(decision.localLastActivity, staleActivity);
         t.is(decision.redisLastActivity, staleActivity);
         t.is(decision.effectiveLastActivity, staleActivity);
@@ -3375,19 +3660,140 @@ test.serial('reapIdleWorkspaces skips stop when live workspace reports running b
         t.is(decision.jobsCheck.runningJobCount, 1);
         t.deepEqual(decision.jobsCheck.jobStatusCounts, { running: 1 });
         t.false(Object.hasOwn(decision.jobsCheck, 'jobs'));
-        t.false(reaperLog.includes('secret-token'));
-        t.false(reaperLog.includes('Authorization'));
+        t.false(reaperLogs[0].includes('secret-token'));
+        t.false(reaperLogs[0].includes('Authorization'));
+        const freshDecision = JSON.parse(reaperLogs[1].slice('[WorkspaceReaper] '.length));
+        t.is(freshDecision.action, 'skip');
+        t.is(freshDecision.reason, 'running-background-jobs-checkpoint-fresh');
+
+        now += checkpointIdleMs + 1;
+        await workspaceClientModule.__testables.reapIdleWorkspaces();
+        t.is(checkpointUploadCount, 2, 'running jobs receive another checkpoint after the interval');
+        t.false(removeCalled);
+
+        // A job can finish writing after its periodic checkpoint without new
+        // user activity. A final backup must succeed before its container goes.
+        jobsRunning = false;
+        checkpointShouldFail = true;
+        now += 1000;
+        await workspaceClientModule.__testables.reapIdleWorkspaces();
+        t.is(checkpointUploadCount, 3, 'completed jobs require a final checkpoint');
+        t.false(removeCalled, 'a failed final checkpoint must preserve the workspace');
+        t.is(store.getEntity().workspace.status, 'running');
+
+        checkpointShouldFail = false;
+        await workspaceClientModule.__testables.reapIdleWorkspaces();
+        t.is(checkpointUploadCount, 4);
+        t.true(removeCalled);
+        t.false(stopCalled);
+        t.is(store.getEntity().workspace.checkpointBlobPath, checkpointBlobPath);
     } finally {
         logCapture.restore();
         workspaceClientModule.__testables.resetActivityStateForTest();
         Date.now = originalNow;
         ACIBackend.prototype.listWorkspaceContainers = originalList;
         ACIBackend.prototype.stop = originalStop;
+        ACIBackend.prototype.remove = originalRemove;
         global.fetch = originalFetch;
-        restoreEntityStore();
+        store.restore();
         restoreConfig();
     }
 });
+
+for (const scenario of [
+    { name: 'failed runtime at an old address', inventory: true, state: 'Failed', ip: '192.0.2.15', reason: 'workspace-runtime-unavailable', fetchCount: 0 },
+    { name: 'runtime without an assigned address', inventory: true, state: null, ip: null, reason: 'workspace-runtime-unavailable', fetchCount: 0 },
+    { name: 'stopped runtime with stale running metadata', inventory: true, state: 'Stopped', ip: null, reason: 'workspace-runtime-unavailable', fetchCount: 0 },
+    { name: 'inventory HTTP failure', inventory: true, status: 500, reason: 'background-job-check-failed', fetchCount: 1 },
+    { name: 'inventory timeout', inventory: true, timeout: true, reason: 'background-job-check-failed', fetchCount: 1 },
+    { name: 'fallback HTTP failure', inventory: false, status: 500, reason: 'background-job-check-failed', fetchCount: 1 },
+    { name: 'fallback malformed jobs', inventory: false, status: 200, reason: 'background-job-check-failed', fetchCount: 1 },
+]) {
+    test.serial(`reaper preserves workspace and reports ${scenario.name}`, async (t) => {
+        const now = Date.now();
+        const entityId = 'entity-unavailable-runtime';
+        const containerName = 'workspace-unavailable-runtime';
+        const staleActivity = now - 2 * 60 * 60 * 1000;
+        const restoreConfig = stubConfig({
+            cortexId: 'test-cortex',
+            storageConnectionString: 'redis://test',
+            workspaceBackend: 'aci',
+            workspaceIdleTimeoutMs: 60 * 60 * 1000,
+        });
+        const entity = {
+            id: entityId,
+            workspace: {
+                status: 'running',
+                containerId: containerName,
+                url: 'http://192.0.2.15:3100',
+                secret: 'private-runtime-secret',
+                bootstrapSecret: 'private-bootstrap-secret',
+                checkpointBlobPath: 'retained/workspace.tar.gz',
+                checkpointedAt: new Date(staleActivity).toISOString(),
+                legacyShareName: 'retained-legacy-share',
+            },
+        };
+        const store = stubMutableEntityStore(entity);
+        const logCapture = stubLogger();
+        const originalFetch = global.fetch;
+        const originalList = ACIBackend.prototype.listWorkspaceContainers;
+        const originalRemove = ACIBackend.prototype.remove;
+        const originalStop = ACIBackend.prototype.stop;
+        const originalUpsert = getEntityStore().upsertEntity;
+        const requests = [];
+        let mutations = 0;
+
+        workspaceClientModule.__testables.resetActivityStateForTest();
+        workspaceClientModule.__testables.setActivityRedisClientForTest(createFakeRedis({
+            activityTimestamp: staleActivity,
+            activityIndex: { [entityId]: staleActivity },
+        }));
+        workspaceClientModule.__testables.lastActivity.set(entityId, staleActivity);
+        ACIBackend.prototype.listWorkspaceContainers = scenario.inventory ? async () => [{
+            name: containerName,
+            createdAt: new Date(staleActivity).toISOString(),
+            tags: { managedBy: 'cortex', workspaceContainerPrefix: 'workspace', entityId },
+            instanceViewState: scenario.state === undefined ? 'Running' : scenario.state,
+            provisioningState: 'Succeeded',
+            ip: scenario.ip === undefined ? '192.0.2.15' : scenario.ip,
+            fqdn: null,
+        }] : undefined;
+        ACIBackend.prototype.remove = ACIBackend.prototype.stop = async () => { mutations++; };
+        getEntityStore().upsertEntity = async () => { mutations++; };
+        global.fetch = async (url) => {
+            requests.push(String(url));
+            if (scenario.timeout) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+            return { ok: scenario.status === 200, status: scenario.status || 500, async json() { return {}; } };
+        };
+
+        try {
+            await workspaceClientModule.__testables.reapIdleWorkspaces();
+            const logs = logCapture.calls.map(call => call.message).filter(message => message.startsWith('[WorkspaceReaper]'));
+            t.is(logs.length, 1);
+            const decision = JSON.parse(logs[0].slice('[WorkspaceReaper] '.length));
+            t.is(requests.length, scenario.fetchCount);
+            t.is(mutations, 0);
+            t.is(decision.action, 'skip');
+            t.is(decision.reason, scenario.reason);
+            t.false(decision.jobsCheck.ok);
+            t.is(decision.jobsCheck.attempted, scenario.fetchCount > 0);
+            t.is(decision.jobsCheck.runningJobCount, null);
+            t.deepEqual(store.getEntity(), entity);
+            t.false(logs[0].includes('private-runtime-secret'));
+            t.false(logs[0].includes('private-bootstrap-secret'));
+        } finally {
+            global.fetch = originalFetch;
+            ACIBackend.prototype.listWorkspaceContainers = originalList;
+            ACIBackend.prototype.remove = originalRemove;
+            ACIBackend.prototype.stop = originalStop;
+            getEntityStore().upsertEntity = originalUpsert;
+            workspaceClientModule.__testables.resetActivityStateForTest();
+            logCapture.restore();
+            store.restore();
+            restoreConfig();
+        }
+    });
+}
 
 test.serial('reapIdleWorkspaces rechecks Redis activity after jobs check before stopping', async (t) => {
     const now = 10_000_000;
@@ -3748,6 +4154,8 @@ test.serial('checkpointWorkspace uploads checkpoint directly to Blob URL', async
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-checkpoint', 16, { baseline: false });
+
     try {
         const result = await workspaceClientModule.__testables.checkpointWorkspace('entity-checkpoint', {
             workspace: {
@@ -3777,6 +4185,7 @@ test.serial('checkpointWorkspace uploads checkpoint directly to Blob URL', async
             ['finish', 'checkpointUpload', true],
         ]);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
     }
 });
@@ -3847,6 +4256,8 @@ test.serial('checkpointWorkspace streams encrypted checkpoints on helper 1.0.10+
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-encrypted-streaming-checkpoint', 1234, { baseline: false });
+
     try {
         const result = await workspaceClientModule.__testables.checkpointWorkspace(
             'entity-encrypted-streaming-checkpoint',
@@ -3866,6 +4277,7 @@ test.serial('checkpointWorkspace streams encrypted checkpoints on helper 1.0.10+
             'http://workspace.test:3100/backup-upload-url',
         ]);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         store.restore();
         restoreConfig();
@@ -3923,6 +4335,8 @@ test.serial('checkpointWorkspace does not reconfigure after encrypted upload tim
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-encrypted-streaming-timeout', 128, { baseline: false });
+
     try {
         const result = await workspaceClientModule.__testables.checkpointWorkspace(
             'entity-encrypted-streaming-timeout',
@@ -3940,6 +4354,7 @@ test.serial('checkpointWorkspace does not reconfigure after encrypted upload tim
         t.is(calls[2].secret, 'rotated-secret');
         t.true(calls[2].hasDispatcher);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         store.restore();
         restoreConfig();
@@ -4011,6 +4426,8 @@ test.serial('checkpointWorkspace retries upload-url fetch failure for Blob-only 
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, entity.id, 16, { baseline: false });
+
     try {
         const result = await workspaceClientModule.__testables.checkpointWorkspace(entity.id, entity, {
             checkpointWriteSasUrl: 'https://storage.test/workspace.tar.gz?sas=write',
@@ -4027,6 +4444,7 @@ test.serial('checkpointWorkspace retries upload-url fetch failure for Blob-only 
             'http://workspace.test:3100/upload-url',
         ]);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         restoreEntityStore();
     }
@@ -4125,6 +4543,9 @@ test.serial('checkpointWorkspace recovers bootstrap auth after upload-url 401', 
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-checkpoint-upload-auth-recovery', 16, { baseline: true });
+    stubRestartRecoveryRoutes(t, { initiallyReset: false });
+
     try {
         const result = await workspaceClientModule.__testables.checkpointWorkspace(entityId, store.getEntity(), {
             checkpointWriteSasUrl: 'https://storage.test/workspace.tar.gz?sas=write',
@@ -4143,6 +4564,7 @@ test.serial('checkpointWorkspace recovers bootstrap auth after upload-url 401', 
             'http://workspace.test:3100/upload-url',
         ]);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         workspaceClientModule.__testables.resetActivityStateForTest();
         store.restore();
@@ -4242,6 +4664,9 @@ test.serial('checkpointWorkspace recovers auth with bootstrap secret before back
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-checkpoint-auth-recovery', 128, { baseline: true });
+    stubRestartRecoveryRoutes(t, { initiallyReset: false });
+
     try {
         const result = await workspaceClientModule.__testables.checkpointWorkspace(entityId, store.getEntity());
 
@@ -4261,6 +4686,7 @@ test.serial('checkpointWorkspace recovers auth with bootstrap secret before back
         t.is(calls[3].secret, freshSecret);
         t.is(calls[4].secret, freshSecret);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         workspaceClientModule.__testables.resetActivityStateForTest();
         store.restore();
@@ -4310,6 +4736,8 @@ test.serial('uploadWorkspaceCheckpoint marks streaming checkpoints at upload sta
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-streaming-checkpoint-start', 128, { baseline: false });
+
     try {
         const result = await workspaceClientModule.__testables.uploadWorkspaceCheckpoint(
             entityId,
@@ -4328,6 +4756,7 @@ test.serial('uploadWorkspaceCheckpoint marks streaming checkpoints at upload sta
         t.truthy(uploadBody.metadata.checkpointedAt);
         t.is(result.timestamp, uploadBody.metadata.checkpointedAt);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         workspaceClientModule.__testables.resetActivityStateForTest();
         store.restore();
@@ -4336,6 +4765,11 @@ test.serial('uploadWorkspaceCheckpoint marks streaming checkpoints at upload sta
 });
 
 test.serial('checkpointWorkspace copies legacy Azure Files checkpoint when workspace image lacks upload-url', async (t) => {
+    const restoreConfig = stubConfig({
+        workspaceAzureFilesStorageAccountName: 'teststorage',
+        workspaceAzureFilesStorageAccountKey: 'dGVzdA==',
+    });
+    t.teardown(restoreConfig);
     const originalFetch = global.fetch;
     const calls = [];
     let legacyCopyCall = null;
@@ -4396,6 +4830,8 @@ test.serial('checkpointWorkspace copies legacy Azure Files checkpoint when works
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-legacy', 32, { baseline: false });
+
     try {
         const result = await workspaceClientModule.__testables.checkpointWorkspace('entity-legacy', {
             workspace: {
@@ -4412,10 +4848,8 @@ test.serial('checkpointWorkspace copies legacy Azure Files checkpoint when works
         t.is(legacyCopyCall.entityId, 'entity-legacy');
         t.is(legacyCopyCall.archivePath, '/persist/workspace.tar.gz');
         t.is(legacyCopyCall.shareName, 'workspace-legacy-share');
-        t.is(
-            legacyCopyCall.blobPath,
-            workspaceClientModule.__testables.workspaceCheckpointBlobPath('entity-legacy'),
-        );
+        t.true(legacyCopyCall.blobPath.includes('/candidates/'));
+        t.not(legacyCopyCall.blobPath, workspaceClientModule.__testables.workspaceCheckpointBlobPath('entity-legacy'));
         t.deepEqual(calls, [
             'http://workspace.test:3100/health',
             'http://workspace.test:3100/status',
@@ -4423,12 +4857,18 @@ test.serial('checkpointWorkspace copies legacy Azure Files checkpoint when works
             'http://workspace.test:3100/upload-url',
         ]);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         workspaceClientModule.__testables.resetActivityStateForTest();
     }
 });
 
 test.serial('checkpointWorkspace copies legacy Azure Files checkpoint when upload-url fetch fails', async (t) => {
+    const restoreConfig = stubConfig({
+        workspaceAzureFilesStorageAccountName: 'teststorage',
+        workspaceAzureFilesStorageAccountKey: 'dGVzdA==',
+    });
+    t.teardown(restoreConfig);
     const originalFetch = global.fetch;
     const calls = [];
     let legacyCopyCall = null;
@@ -4482,6 +4922,8 @@ test.serial('checkpointWorkspace copies legacy Azure Files checkpoint when uploa
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-legacy-fetch-fail', 64, { baseline: false });
+
     try {
         const result = await workspaceClientModule.__testables.checkpointWorkspace('entity-legacy-fetch-fail', {
             workspace: {
@@ -4505,6 +4947,7 @@ test.serial('checkpointWorkspace copies legacy Azure Files checkpoint when uploa
             'http://workspace.test:3100/upload-url',
         ]);
     } finally {
+        restorePublication();
         global.fetch = originalFetch;
         workspaceClientModule.__testables.resetActivityStateForTest();
     }
@@ -4513,6 +4956,8 @@ test.serial('checkpointWorkspace copies legacy Azure Files checkpoint when uploa
 test.serial('checkpointLegacyShareAfterProvision copies legacy archive directly to Blob', async (t) => {
     const entityId = 'entity-legacy-after-provision';
     const restoreConfig = stubConfig({
+        workspaceAzureFilesStorageAccountName: 'teststorage',
+        workspaceAzureFilesStorageAccountKey: 'dGVzdA==',
         cortexId: 'test-cortex',
         storageConnectionString: '',
         workspaceBackend: 'aci',
@@ -5200,6 +5645,9 @@ test.serial('workspaceRequest recovers bootstrap auth after refreshed ACI URL re
         t.fail(`unexpected fetch url ${urlString}`);
     };
 
+    const restorePublication = stubCheckpointPublication(t, 'entity-request-url-refresh-auth-recovery', 128, { baseline: true });
+    stubRestartRecoveryRoutes(t, { initiallyReset: false });
+
     try {
         const result = await workspaceClientModule.workspaceRequest(entityId, '/health');
 
@@ -5221,8 +5669,257 @@ test.serial('workspaceRequest recovers bootstrap auth after refreshed ACI URL re
             ],
         );
     } finally {
+        restorePublication();
         workspaceClientModule.__testables.resetActivityStateForTest();
         ACIBackend.prototype.getContainerUrl = originalGetContainerUrl;
+        ACIBackend.prototype.remove = originalRemove;
+        ACIBackend.prototype.createAndStart = originalCreateAndStart;
+        global.fetch = originalFetch;
+        store.restore();
+        restoreConfig();
+    }
+});
+
+test.serial('workspaceRequest connection recovery preserves a fresh checkpoint when the recorded ACI container vanished', async (t) => {
+    const entityId = 'entity-connection-missing-container';
+    const oldContainerId = 'workspace-old-missing-container';
+    const legacyShareName = 'workspace-legacy-checkpoint';
+    const restoreConfig = stubConfig({
+        workspaceAzureFilesStorageAccountName: 'teststorage',
+        workspaceAzureFilesStorageAccountKey: 'dGVzdA==',
+        cortexId: 'test-cortex',
+        storageConnectionString: '',
+        workspaceBackend: 'aci',
+        workspaceContainerPrefix: 'workspace-dev',
+        workspaceImage: 'cortex-workspace',
+        workspaceImageVersion: '1.0.14',
+        workspaceCpus: '1',
+        workspaceMemory: '512m',
+        workspaceDiskSize: '10g',
+        warmPoolSize: 0,
+    });
+    const checkpointBlobPath = workspaceClientModule.__testables.workspaceCheckpointBlobPath(entityId);
+    const staleWorkspace = {
+        url: 'http://old-missing-workspace.test:3100',
+        secret: 'old-secret',
+        bootstrapSecret: 'old-bootstrap-secret',
+        containerId: oldContainerId,
+        status: 'running',
+        imageVersion: '1.0.14',
+    };
+    const store = stubMutableEntityStore({
+        id: entityId,
+        workspace: staleWorkspace,
+    });
+    const originalFetch = global.fetch;
+    const originalGetContainerUrl = ACIBackend.prototype.getContainerUrl;
+    const originalGetContainerInfo = ACIBackend.prototype.getContainerInfo;
+    const originalRemove = ACIBackend.prototype.remove;
+    const originalCreateAndStart = ACIBackend.prototype.createAndStart;
+    const createdContainers = [];
+    const fetchCalls = [];
+    let freshSecret = null;
+    let legacyUploadCall = null;
+
+    workspaceClientModule.__testables.setWorkspaceLegacyShareUploadForTest(async (call) => {
+        legacyUploadCall = call;
+        return { blobPath: call.blobPath, sizeBytes: 105_737_984 };
+    });
+
+    ACIBackend.prototype.getContainerUrl = async () => null;
+    ACIBackend.prototype.getContainerInfo = async function (containerId, containerName) {
+        t.is(containerId, oldContainerId);
+        t.is(containerName, oldContainerId);
+        return { exists: false, name: containerName, url: null };
+    };
+    ACIBackend.prototype.remove = async () => {
+        t.fail('a container already missing from ACI should not be removed again');
+    };
+    ACIBackend.prototype.createAndStart = async function (args) {
+        createdContainers.push(args);
+        return {
+            containerId: args.containerName,
+            url: 'http://new-workspace.test:3100',
+        };
+    };
+
+    global.fetch = async (url, options = {}) => {
+        const urlString = String(url);
+        fetchCalls.push(urlString);
+
+        if (urlString === 'http://old-missing-workspace.test:3100/health') {
+            // Another Cortex host has persisted the durable recovery metadata
+            // after this host cached the now-dead runtime record.
+            store.setEntity({
+                id: entityId,
+                workspace: {
+                    ...staleWorkspace,
+                    legacyShareName,
+                },
+            });
+            throw new TypeError('fetch failed');
+        }
+        if (urlString === 'http://new-workspace.test:3100/health' && !options.headers?.['x-workspace-secret']) {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { status: 'ok' };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/shell') {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { exitCode: 0 };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/restore') {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { message: 'restored', sizeBytes: 105_737_984 };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/reconfigure') {
+            freshSecret = JSON.parse(options.body).secret;
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { success: true };
+                },
+            };
+        }
+        if (urlString === 'http://new-workspace.test:3100/health' && options.headers?.['x-workspace-secret'] === freshSecret) {
+            return {
+                ok: true,
+                status: 200,
+                async json() {
+                    return { status: 'ok' };
+                },
+            };
+        }
+
+        t.fail(`unexpected fetch url ${urlString}`);
+    };
+
+    try {
+        const result = await workspaceClientModule.workspaceRequest(entityId, '/health');
+
+        t.true(result.success);
+        t.is(createdContainers.length, 1);
+        t.is(createdContainers[0].shareName, legacyShareName);
+        t.true(createdContainers[0].mountAzureFiles);
+        t.truthy(legacyUploadCall);
+        t.is(legacyUploadCall.shareName, legacyShareName);
+        t.true(fetchCalls.some(url => url === 'http://new-workspace.test:3100/restore'));
+        t.is(store.getEntity().workspace.legacyShareName, legacyShareName);
+        t.is(store.getEntity().workspace.checkpointBlobPath, checkpointBlobPath);
+    } finally {
+        workspaceClientModule.__testables.resetActivityStateForTest();
+        ACIBackend.prototype.getContainerUrl = originalGetContainerUrl;
+        ACIBackend.prototype.getContainerInfo = originalGetContainerInfo;
+        ACIBackend.prototype.remove = originalRemove;
+        ACIBackend.prototype.createAndStart = originalCreateAndStart;
+        global.fetch = originalFetch;
+        store.restore();
+        restoreConfig();
+    }
+});
+
+test.serial('workspaceRequest connection recovery retries a replacement that reuses the ACI name and URL', async (t) => {
+    const entityId = 'entity-connection-replaced-runtime';
+    const containerId = 'workspace-entity-connection-replaced-runtime';
+    const workspaceUrl = 'http://reused-workspace.test:3100';
+    const staleWorkspace = {
+        url: workspaceUrl,
+        secret: 'stale-secret',
+        bootstrapSecret: 'stale-bootstrap-secret',
+        containerId,
+        status: 'running',
+        imageVersion: '1.0.14',
+        provisionedAt: '2026-08-04T12:00:00.000Z',
+    };
+    const replacementWorkspace = {
+        ...staleWorkspace,
+        secret: 'replacement-secret',
+        bootstrapSecret: 'replacement-bootstrap-secret',
+        provisionedAt: '2026-08-04T12:01:00.000Z',
+    };
+    const restoreConfig = stubConfig({
+        cortexId: 'test-cortex',
+        storageConnectionString: '',
+        workspaceBackend: 'aci',
+        workspaceImageVersion: '1.0.14',
+    });
+    const store = stubMutableEntityStore({
+        id: entityId,
+        workspace: staleWorkspace,
+    });
+    const originalFetch = global.fetch;
+    const originalGetContainerUrl = ACIBackend.prototype.getContainerUrl;
+    const originalGetContainerInfo = ACIBackend.prototype.getContainerInfo;
+    const originalRemove = ACIBackend.prototype.remove;
+    const originalCreateAndStart = ACIBackend.prototype.createAndStart;
+    const fetchSecrets = [];
+
+    ACIBackend.prototype.getContainerUrl = async function (requestedContainerId, containerName) {
+        t.is(requestedContainerId, containerId);
+        t.is(containerName, containerId);
+        return workspaceUrl;
+    };
+    ACIBackend.prototype.getContainerInfo = async function (requestedContainerId, containerName) {
+        t.is(requestedContainerId, containerId);
+        t.is(containerName, containerId);
+        return { exists: true, name: containerName, url: workspaceUrl };
+    };
+    ACIBackend.prototype.remove = async () => {
+        t.fail('the healthy replacement runtime should not be removed');
+    };
+    ACIBackend.prototype.createAndStart = async () => {
+        t.fail('the healthy replacement runtime should not be provisioned over');
+    };
+
+    global.fetch = async (url, options = {}) => {
+        t.is(String(url), `${workspaceUrl}/health`);
+        const secret = options.headers?.['x-workspace-secret'];
+        fetchSecrets.push(secret);
+
+        if (secret === staleWorkspace.secret) {
+            store.setEntity({
+                id: entityId,
+                workspace: replacementWorkspace,
+            });
+            throw new TypeError('fetch failed');
+        }
+
+        t.is(secret, replacementWorkspace.secret);
+        return {
+            ok: true,
+            status: 200,
+            async json() {
+                return { status: 'ok' };
+            },
+        };
+    };
+
+    try {
+        const result = await workspaceClientModule.workspaceRequest(entityId, '/health');
+
+        t.true(result.success);
+        t.is(result.status, 'ok');
+        t.deepEqual(fetchSecrets, [staleWorkspace.secret, replacementWorkspace.secret]);
+        t.deepEqual(store.getEntity().workspace, replacementWorkspace);
+    } finally {
+        workspaceClientModule.__testables.resetActivityStateForTest();
+        ACIBackend.prototype.getContainerUrl = originalGetContainerUrl;
+        ACIBackend.prototype.getContainerInfo = originalGetContainerInfo;
         ACIBackend.prototype.remove = originalRemove;
         ACIBackend.prototype.createAndStart = originalCreateAndStart;
         global.fetch = originalFetch;
@@ -5234,6 +5931,11 @@ test.serial('workspaceRequest recovers bootstrap auth after refreshed ACI URL re
 test.serial('workspaceRequest stale image reprovision proceeds without background-job gate', async (t) => {
     const entityId = 'entity-stale-image-running-job';
     const restoreConfig = stubConfig({
+        workspaceAzureFilesStorageAccountName: 'teststorage',
+        workspaceAzureFilesStorageAccountKey: 'dGVzdA==',
+        azureStorageAccountName: '',
+        azureStorageAccountKey: '',
+        azureBlobContainerName: 'test-checkpoints',
         cortexId: 'test-cortex',
         storageConnectionString: '',
         workspaceBackend: 'aci',
@@ -5244,6 +5946,20 @@ test.serial('workspaceRequest stale image reprovision proceeds without backgroun
         workspaceDiskSize: '10g',
         warmPoolSize: 0,
     });
+    let checkpointUploaded = false;
+    // Model the uploaded checkpoint metadata without contacting Azure.
+    const { BlobServiceClient } = await import('@azure/storage-blob');
+    const originalGetContainerClient = BlobServiceClient.prototype.getContainerClient;
+    BlobServiceClient.prototype.getContainerClient = () => ({
+        getBlockBlobClient: () => ({
+            exists: async () => false,
+            getProperties: async () => {
+                if (!checkpointUploaded) throw Object.assign(new Error('not found'), { statusCode: 404 });
+                return { contentLength: 128, etag: 'uploaded-etag', metadata: workspaceClientModule.__testables.workspaceCheckpointBlobMetadata(entityId), lastModified: new Date('2026-06-26T12:00:00Z') };
+            },
+        }),
+    });
+    t.teardown(() => { BlobServiceClient.prototype.getContainerClient = originalGetContainerClient; });
     const store = stubMutableEntityStore({
         id: entityId,
         workspace: {
@@ -5263,12 +5979,12 @@ test.serial('workspaceRequest stale image reprovision proceeds without backgroun
     const fetchCalls = [];
     let freshSecret = null;
 
-    workspaceClientModule.__testables.setWorkspaceCheckpointUploadForTest(async () => ({
+    workspaceClientModule.__testables.setWorkspaceCheckpointUploadForTest(async () => { checkpointUploaded = true; return ({
         blobPath: 'workspace-checkpoints/test-cortex/entity-stale-image-running-job/workspace.tar.gz',
         sizeBytes: 128,
         sizeMB: 0.01,
         timestamp: '2026-06-26T12:00:00.000Z',
-    }));
+    }); });
 
     ACIBackend.prototype.remove = async function (containerId, containerName) {
         removedContainers.push({ containerId, containerName });
@@ -5395,6 +6111,8 @@ test.serial('workspaceRequest stale image self-heals when the recorded ACI conta
     const entityId = 'entity-stale-missing-container';
     const legacyShareName = 'workspace-pool-legacy-share';
     const restoreConfig = stubConfig({
+        workspaceAzureFilesStorageAccountName: 'teststorage',
+        workspaceAzureFilesStorageAccountKey: 'dGVzdA==',
         cortexId: 'test-cortex',
         storageConnectionString: '',
         workspaceBackend: 'aci',
@@ -5451,10 +6169,18 @@ test.serial('workspaceRequest stale image self-heals when the recorded ACI conta
         };
     };
 
+    const isOldMissingWorkspaceUrl = (urlString) => {
+        try {
+            return new URL(urlString).hostname === 'old-missing-workspace.test';
+        } catch {
+            return false;
+        }
+    };
+
     global.fetch = async (url, options = {}) => {
         const urlString = String(url);
         fetchCalls.push(urlString);
-        if (urlString.startsWith('http://old-missing-workspace.test')) {
+        if (isOldMissingWorkspaceUrl(urlString)) {
             t.fail(`stale missing workspace should not be contacted: ${urlString}`);
         }
 
@@ -5527,11 +6253,11 @@ test.serial('workspaceRequest stale image self-heals when the recorded ACI conta
         t.true(result.success);
         t.is(removedContainers.length, 0);
         t.is(createdContainers.length, 1);
-        t.is(createdContainers[0].containerName, `workspace-dev-${entityId}`);
+        t.true(createdContainers[0].containerName.startsWith(`workspace-dev-${entityId}-`));
         t.is(createdContainers[0].shareName, legacyShareName);
         t.true(createdContainers[0].mountAzureFiles);
-        t.false(fetchCalls.some(url => url.startsWith('http://old-missing-workspace.test')));
-        t.is(store.getEntity().workspace.containerId, `workspace-dev-${entityId}`);
+        t.false(fetchCalls.some(isOldMissingWorkspaceUrl));
+        t.is(store.getEntity().workspace.containerId, createdContainers[0].containerName);
         t.is(store.getEntity().workspace.imageVersion, '1.0.14');
     } finally {
         workspaceClientModule.__testables.resetActivityStateForTest();
@@ -5542,4 +6268,323 @@ test.serial('workspaceRequest stale image self-heals when the recorded ACI conta
         store.restore();
         restoreConfig();
     }
+});
+
+test.serial('late provisioning failure cannot overwrite a newer runtime or checkpoint and waiters receive failure', async t => {
+    const restoreConfig = stubConfig({ workspaceBackend: 'aci', storageConnectionString: '', warmPoolSize: 0,
+        azureStorageAccountName: '', azureStorageAccountKey: '', workspaceAzureFilesStorageAccountName: '',
+        workspaceAzureFilesStorageAccountKey: '', workspaceCpus: '1', workspaceMemory: '512m', workspaceDiskSize: '10g' });
+    const store = stubMutableEntityStore({ id: 'late-provision', name: 'Original', workspace: null });
+    const oldCreate = ACIBackend.prototype.createAndStart;
+    let rejectCreate, started;
+    const entered = new Promise(resolve => { started = resolve; });
+    ACIBackend.prototype.createAndStart = () => { started(); return new Promise((_resolve, reject) => { rejectCreate = reject; }); };
+    t.teardown(() => { ACIBackend.prototype.createAndStart = oldCreate; store.restore(); restoreConfig(); workspaceClientModule.__testables.resetActivityStateForTest(); });
+    const first = workspaceClientModule.__testables.provisionWorkspace('late-provision', store.getEntity());
+    await entered;
+    const waiter = workspaceClientModule.__testables.provisionWorkspace('late-provision', store.getEntity());
+    const newer = { id: 'late-provision', name: 'Renamed meanwhile', workspace: { status: 'running', containerId: 'new-container',
+        checkpointBlobPath: 'current', checkpointEncryption: { ivBase64: 'new-IV', tagBase64: 'new-tag' } } };
+    store.setEntity(newer);
+    rejectCreate(new Error('Azure creation timed out'));
+    const [result, waitingResult] = await Promise.all([first, waiter]);
+    t.false(result.success);
+    t.deepEqual(waitingResult, result);
+    t.deepEqual(store.getEntity(), newer);
+});
+
+test.serial('failed current provisioning preserves checkpoint changes made during the attempt', async t => {
+    const store = stubMutableEntityStore({ id: 'failed-current', name: 'Keep name', workspace: {
+        status: 'provisioning', provisioningAttemptId: 'current', checkpointEncryption: { tagBase64: 'new-tag' } } });
+    t.teardown(() => store.restore());
+    t.false(await workspaceClientModule.__testables.markProvisioningFailed('failed-current', 'obsolete'));
+    t.true(await workspaceClientModule.__testables.markProvisioningFailed('failed-current', 'current'));
+    t.is(store.getEntity().workspace.status, 'error');
+    t.is(store.getEntity().workspace.checkpointEncryption.tagBase64, 'new-tag');
+    t.is(store.getEntity().name, 'Keep name');
+});
+
+test.serial('provisioning lease renews only its owner and stops publishing after ownership loss', async t => {
+    const calls = [];
+    let result = 1;
+    const lease = workspaceClientModule.__testables.maintainWorkspaceProvisioningLock({
+        redis: { eval: async (...args) => { calls.push(args); return result; } }, key: 'provision-lock', token: 'owner-1',
+    });
+    t.teardown(() => lease.stop());
+    await lease.renew();
+    t.notThrows(() => lease.assertOwned());
+    t.deepEqual(calls[0].slice(1), [1, 'provision-lock', 'owner-1', 300000]);
+    result = 0;
+    await lease.renew();
+    t.throws(() => lease.assertOwned(), { message: 'Workspace provisioning lease was lost' });
+});
+
+test.serial('existing checkpoint path reconciles encryption metadata from the actual Blob', async t => {
+    const entityId = 'checkpoint-metadata-race';
+    const restoreConfig = stubConfig({ cortexId: 'test-cortex', workspaceAzureFilesStorageAccountName: 'test', workspaceAzureFilesStorageAccountKey: 'test-key', azureBlobContainerName: 'checkpoints' });
+    const newer = { algorithm: 'aes-256-gcm', keyId: 'same-key', ivBase64: 'new-IV', tagBase64: 'new-tag', compression: 'zstd' };
+    const props = { contentLength: 76, etag: 'new-etag', lastModified: new Date(), metadata: {
+        ...workspaceClientModule.__testables.workspaceCheckpointBlobMetadata(entityId),
+        ...workspaceClientModule.__testables.checkpointEncryptionMetadata(newer),
+    } };
+    workspaceClientModule.__testables.setWorkspaceCheckpointContainerClientForTest({ getBlockBlobClient: () => ({ getProperties: async () => props }) });
+    t.teardown(() => { restoreConfig(); workspaceClientModule.__testables.resetActivityStateForTest(); });
+    const stale = { id: entityId, workspace: { checkpointBlobPath: 'same-path', checkpointEncryptionKey: { keyId: 'same-key' },
+        checkpointEncryption: { ...newer, ivBase64: 'old-IV', tagBase64: 'old-tag' } } };
+    const recovered = await workspaceClientModule.__testables.recoverExistingWorkspaceCheckpoint(entityId, stale);
+    t.deepEqual(recovered.workspace.checkpointEncryption, newer);
+    t.is(recovered.workspace.checkpointBlobEtag, 'new-etag');
+    t.is(stale.workspace.checkpointEncryption.ivBase64, 'old-IV');
+    props.metadata.checkpointEncryptionKeyId = 'foreign-key';
+    await t.throwsAsync(() => workspaceClientModule.__testables.recoverExistingWorkspaceCheckpoint(entityId, stale), { message: 'Workspace checkpoint encryption key identity does not match Blob metadata' });
+});
+
+test.serial('restore is rejected if its Blob changes before the workspace is exposed', async t => {
+    const entityId = 'restore-etag-race';
+    const restoreConfig = stubConfig({ cortexId: 'test-cortex', workspaceAzureFilesStorageAccountName: 'test', workspaceAzureFilesStorageAccountKey: 'test-key', azureBlobContainerName: 'checkpoints' });
+    const originalFetch = global.fetch;
+    global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ message: 'restored' }) });
+    workspaceClientModule.__testables.setWorkspaceCheckpointContainerClientForTest({ getBlockBlobClient: () => ({ getProperties: async () => ({
+        etag: 'new-etag', metadata: workspaceClientModule.__testables.workspaceCheckpointBlobMetadata(entityId),
+    }) }) });
+    t.teardown(() => { global.fetch = originalFetch; restoreConfig(); workspaceClientModule.__testables.resetActivityStateForTest(); });
+    await t.throwsAsync(() => workspaceClientModule.__testables.restoreWorkspaceCheckpointToContainer(entityId,
+        { workspace: { checkpointBlobPath: 'checkpoint-path', checkpointBlobEtag: 'old-etag' } },
+        { url: 'http://workspace.test', bootstrapSecret: 'test' }, { checkpointSasUrl: 'https://checkpoint.test/archive' }),
+    { message: 'Workspace checkpoint changed during restore; retry with the current backup' });
+});
+
+test.serial('late provisioning success cannot publish over a newer workspace', async t => {
+    const restoreConfig = stubConfig({ workspaceBackend: 'aci', azureStorageAccountName: '', azureStorageAccountKey: '' });
+    const original = { status: 'provisioning', provisioningAttemptId: 'old', provisionedAt: new Date() };
+    const newer = { status: 'running', containerId: 'replacement', checkpointEncryption: { tagBase64: 'current-tag' } };
+    const store = stubMutableEntityStore({ id: 'late-success', name: 'Renamed', workspace: newer });
+    const oldFetch = global.fetch;
+    global.fetch = async () => ({ ok: true });
+    const removed = [];
+    t.teardown(() => { global.fetch = oldFetch; store.restore(); restoreConfig(); });
+    await t.throwsAsync(() => workspaceClientModule.__testables.reconfigureForEntity('late-success',
+        { id: 'late-success', name: 'Old name', workspace: original },
+        { containerName: 'old-container', url: 'http://old.test', bootstrapSecret: 'bootstrap' },
+        { backendName: 'aci', remove: async id => removed.push(id) }), { message: 'Workspace provisioning attempt was superseded' });
+    t.deepEqual(store.getEntity().workspace, newer);
+    t.is(store.getEntity().name, 'Renamed');
+    t.deepEqual(removed, ['old-container']);
+});
+
+test.serial('renewed provisioning lease prevents takeover after five minutes', async t => {
+    const restoreConfig = stubConfig({ workspaceBackend: 'aci' });
+    const workspace = { status: 'provisioning', provisioningAttemptId: 'active', provisionedAt: new Date(Date.now() - 600000) };
+    const store = stubMutableEntityStore({ id: 'slow-active', workspace });
+    workspaceClientModule.__testables.setActivityRedisClientForTest({ get: async () => 'active-owner' });
+    t.teardown(() => { store.restore(); restoreConfig(); workspaceClientModule.__testables.resetActivityStateForTest(); });
+    const result = await workspaceClientModule.workspaceRequest('slow-active', '/health', null, { waitForTransition: false });
+    t.false(result.success);
+    t.regex(result.error, /provisioning/);
+    t.deepEqual(store.getEntity().workspace, workspace);
+});
+
+test.serial('warm pool registries are isolated for slots sharing Cortex identity and Redis', async t => {
+    const fakeRedis = createFakeRedis({ hashes: {
+        'test-cortex-warmpool:workspace-prod:containers': { 'workspace-prod-pool-one': JSON.stringify({ status: 'READY' }) },
+        'test-cortex-warmpool:workspace-blue:containers': { 'workspace-blue-pool-two': JSON.stringify({ status: 'READY' }) },
+    } });
+    fakeRedis.hget = async (key, field) => (await fakeRedis.hgetall(key))[field] || null;
+    const restore = stubConfig({ cortexId: 'test-cortex', workspaceContainerPrefix: 'workspace-blue' });
+    try {
+        t.deepEqual([...await warmPoolModule.__testables.getWarmPoolActiveContainerNames(fakeRedis)], ['workspace-blue-pool-two']);
+        await warmPoolModule.__testables.releaseClaimedContainer('workspace-prod-pool-one', fakeRedis);
+        t.is((await fakeRedis.hgetall('test-cortex-warmpool:workspace-prod:containers'))['workspace-prod-pool-one'], JSON.stringify({ status: 'READY' }));
+    } finally { restore(); }
+    const restoreProd = stubConfig({ cortexId: 'test-cortex', workspaceContainerPrefix: 'workspace-prod' });
+    try { t.deepEqual([...await warmPoolModule.__testables.getWarmPoolActiveContainerNames(fakeRedis)], ['workspace-prod-pool-one']); }
+    finally { restoreProd(); }
+});
+
+test.serial('unique runtime names fit the Azure limit for long entity ids', async t => {
+    const restore = stubConfig({ workspaceBackend: 'aci', workspaceContainerPrefix: 'workspace-prod', workspaceCpus: '1', workspaceMemory: '512m', workspaceDiskSize: '10g' });
+    const fetchBefore = global.fetch;
+    global.fetch = async () => ({ ok: true });
+    const names = [];
+    try {
+        const backend = { backendName: 'aci', healthTimeoutMs: 100, createAndStart: async options => {
+            names.push(options.containerName); return { url: 'http://workspace.test', containerId: options.containerName };
+        } };
+        await workspaceClientModule.__testables.createGenericContainer('long-entity-'.repeat(8), backend, { uniqueRuntime: true });
+        await workspaceClientModule.__testables.createGenericContainer('long-entity-'.repeat(8), backend, { uniqueRuntime: true });
+        t.true(names.every(name => name.length <= 63 && /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name)));
+        t.not(names[0], names[1]);
+    } finally { global.fetch = fetchBefore; restore(); }
+});
+
+function inventoryCheckpointFixture(t) {
+    const api = workspaceClientModule.__testables;
+    const id = 'inventory-review-owner';
+    const before = { version: 1, fileCount: 100, fileBytes: 1000000, entryCount: 101, topLevelPaths: ['project'], structureHash: 'a'.repeat(64), fingerprint: 'b'.repeat(64) };
+    let live = { ...before };
+    const restoreConfig = stubConfig({ cortexId: 'test-cortex', storageConnectionString: '', redisEncryptionKey: 'b'.repeat(64), workspaceImageVersion: '1.0.15',
+        workspaceAzureFilesStorageAccountName: 'teststorage', workspaceAzureFilesStorageAccountKey: 'dGVzdA==', azureBlobContainerName: 'checkpoints' });
+    const currentPath = api.workspaceCheckpointBlobPath(id);
+    const store = stubMutableEntityStore({ id, workspace: { status: 'running', containerId: 'runtime-1', url: 'http://workspace.test:3100', secret: 'runtime-secret', imageVersion: '1.0.15',
+        checkpointBlobPath: currentPath, checkpointedAt: new Date().toISOString(), checkpointInventory: before } });
+    const blobs = new Map([[currentPath, { contentLength: 1000000, etag: 'baseline', metadata: { ...api.workspaceCheckpointBlobMetadata(id), checkpointedAt: new Date().toISOString(), checkpointInventory: encodeCheckpointInventory(before) } }]]);
+    let copies = 0, uploads = 0, candidatePath, resets = 0;
+    const missing = () => { throw Object.assign(new Error('missing'), { statusCode: 404 }); };
+    const condition = (props, expected) => { if (expected?.ifMatch && props?.etag !== expected.ifMatch) throw Object.assign(new Error('ETag mismatch'), { statusCode: 412 }); };
+    api.setWorkspaceCheckpointContainerClientForTest({ getBlockBlobClient: name => {
+        if (name.includes('/candidates/')) candidatePath = name;
+        return {
+        getProperties: async () => blobs.has(name) ? structuredClone(blobs.get(name)) : missing(),
+        setTags: async () => {},
+        createSnapshot: async options => { condition(blobs.get(name), options.conditions); return { snapshot: 'saved-baseline' }; },
+        syncUploadFromURL: async (url, options) => {
+            const sourceName = decodeURIComponent(new URL(url).pathname.split('/').slice(2).join('/'));
+            const source = blobs.get(sourceName);
+            condition(source, options.sourceConditions); condition(blobs.get(name), options.conditions);
+            const next = { ...source, etag: `copy-${++copies}` }; blobs.set(name, next); return { etag: next.etag };
+        },
+        deleteIfExists: async () => blobs.delete(name),
+    }; } });
+    const originalFetch = global.fetch;
+    global.fetch = async (url, options = {}) => {
+        const endpoint = new URL(url).pathname;
+        let body;
+        if (endpoint === '/health') body = { version: '1.0.15', checkpointInventory: 1 };
+        else if (endpoint === '/status') body = {};
+        else if (endpoint === '/shell/jobs') body = [];
+        else if (endpoint === '/checkpoint-inventory') body = live;
+        else if (endpoint === '/reset') {
+            t.true(uploads > 0 && copies > 0, 'reset must follow a published recovery checkpoint');
+            resets++;
+            live = { ...before, fileCount: 0, fileBytes: 0, entryCount: 0, topLevelPaths: [], structureHash: 'c'.repeat(64), fingerprint: 'd'.repeat(64) };
+            body = { message: 'reset' };
+        }
+        else if (endpoint === '/backup-upload-url') {
+            uploads++;
+            const request = JSON.parse(options.body);
+            const name = candidatePath;
+            const encryption = { algorithm: 'aes-256-gcm', keyId: request.encryption.keyId, ivBase64: Buffer.alloc(12, 1).toString('base64'), tagBase64: Buffer.alloc(16, 2).toString('base64'), compression: 'gzip' };
+            blobs.set(name, { contentLength: 1000000, etag: `candidate-${uploads}`, metadata: { ...request.metadata, ...api.checkpointEncryptionMetadata(encryption), checkpointInventory: encodeCheckpointInventory(live) } });
+            body = { encrypted: true, sizeBytes: 1000000, encryption };
+        } else throw new Error(`Unexpected test endpoint ${endpoint}`);
+        return { ok: true, status: 200, json: async () => body };
+    };
+    t.teardown(() => { global.fetch = originalFetch; api.resetActivityStateForTest(); store.restore(); restoreConfig(); });
+    return { id, before, store, blobs, currentPath, setLive: value => { live = value; }, get uploads() { return uploads; }, get copies() { return copies; },
+        get resets() { return resets; },
+        options: { checkpointWriteSasUrl: 'https://storage.test/checkpoints/upload' },
+        checkpoint: options => api.checkpointAndPersistWorkspace(id, store.getEntity(), { checkpointWriteSasUrl: 'https://storage.test/checkpoints/upload', ...options }) };
+}
+
+test.serial('unchanged inventories skip uploads but a periodic full checkpoint is mandatory', async t => {
+    const f = inventoryCheckpointFixture(t);
+    const skipped = await f.checkpoint();
+    t.true(skipped.success); t.is(skipped.reason, 'unchanged'); t.is(f.uploads, 0);
+    t.truthy(f.store.getEntity().workspace.checkpointCheckedAt);
+    f.store.getEntity().workspace.checkpointedAt = new Date(Date.now() - 7 * 3600000).toISOString();
+    const refreshed = await f.checkpoint();
+    t.true(refreshed.success); t.is(f.uploads, 1);
+});
+
+for (const alreadyChecked of [true, false]) {
+    for (const change of ['none', 'activity', 'files']) {
+        test.serial(`destroy after ${alreadyChecked ? 'an earlier' : 'a new'} unchanged check preserves safeguards: ${change}`, async t => {
+            const f = inventoryCheckpointFixture(t);
+            const api = workspaceClientModule.__testables;
+            const restoreConfig = stubConfig({ workspaceBackend: 'aci' });
+            const archiveTime = new Date(Date.now() - 60000).toISOString();
+            const activityTime = Date.now() - 30000;
+            f.store.getEntity().workspace.checkpointedAt = archiveTime;
+            f.blobs.get(f.currentPath).metadata.checkpointedAt = archiveTime;
+            api.lastActivity.set(f.id, activityTime);
+            if (alreadyChecked) t.is((await f.checkpoint()).reason, 'unchanged');
+
+            const originalRemove = ACIBackend.prototype.remove;
+            const inventoryFetch = global.fetch;
+            let inventoryReads = 0, removals = 0;
+            const verificationRead = alreadyChecked ? 1 : 2;
+            ACIBackend.prototype.remove = async () => { removals++; };
+            global.fetch = async (url, options) => {
+                if (new URL(url).pathname === '/checkpoint-inventory') {
+                    inventoryReads++;
+                    if (change === 'activity' && inventoryReads === verificationRead) {
+                        api.lastActivity.set(f.id, Date.now() + 1000);
+                    }
+                    if (change === 'files' && inventoryReads === verificationRead + 1) {
+                        f.setLive({ ...f.before, fingerprint: 'e'.repeat(64) });
+                    }
+                }
+                return inventoryFetch(url, options);
+            };
+            try {
+                const result = await workspaceClientModule.destroyWorkspace(f.id, f.store.getEntity(), { lastActivityAt: activityTime });
+                t.is(result.success, change === 'none', result.error);
+                t.is(removals, change === 'none' ? 1 : 0);
+                t.is(f.uploads, 0);
+                if (change === 'activity') t.is(result.error, 'Workspace checkpoint is stale');
+                if (change === 'files') t.regex(result.error, /Workspace changed after its checkpoint/);
+            } finally {
+                ACIBackend.prototype.remove = originalRemove;
+                global.fetch = inventoryFetch;
+                restoreConfig();
+            }
+        });
+    }
+}
+
+test.serial('pending reductions block reaping, ask the owner, reject stale content and accept one exact candidate', async t => {
+    const f = inventoryCheckpointFixture(t);
+    const reduced = { ...f.before, fileCount: 10, fileBytes: 10000, entryCount: 11, structureHash: 'c'.repeat(64), fingerprint: 'd'.repeat(64) };
+    f.setLive(reduced);
+    const pending = await f.checkpoint();
+    t.false(pending.success); t.is(pending.error, 'workspace_checkpoint_review_required');
+    t.is(f.copies, 0); t.is(f.uploads, 1);
+    const repeat = await f.checkpoint();
+    t.is(repeat.checkpointReview.id, pending.checkpointReview.id); t.is(f.uploads, 1);
+    const destroy = await workspaceClientModule.destroyWorkspace(f.id, f.store.getEntity());
+    t.false(destroy.success); t.is(destroy.error, 'workspace_checkpoint_review_required');
+    const status = await workspaceClientModule.manageWorkspaceCheckpoint(f.id, 'status');
+    t.is(status.checkpointReview.id, pending.checkpointReview.id);
+    t.false((await workspaceClientModule.manageWorkspaceCheckpoint(f.id, 'approve', 'wrong-id')).success);
+    f.setLive({ ...reduced, fingerprint: 'e'.repeat(64) });
+    t.false((await workspaceClientModule.manageWorkspaceCheckpoint(f.id, 'approve', pending.checkpointReview.id)).success);
+    t.is(f.copies, 0);
+    f.setLive(reduced);
+    const accepted = await workspaceClientModule.manageWorkspaceCheckpoint(f.id, 'approve', pending.checkpointReview.id);
+    t.true(accepted.success, accepted.error); t.is(f.uploads, 1); t.is(f.copies, 2);
+    t.falsy(f.store.getEntity().workspace.checkpointReview);
+    t.is(f.store.getEntity().workspace.checkpointInventory.fileCount, 10);
+    t.false((await workspaceClientModule.manageWorkspaceCheckpoint(f.id, 'approve', pending.checkpointReview.id)).success);
+});
+
+test.serial('a rejected reduction remains protected and colleagues cannot approve it', async t => {
+    const f = inventoryCheckpointFixture(t);
+    f.setLive({ ...f.before, fileCount: 0, fileBytes: 0, entryCount: 0, fingerprint: 'd'.repeat(64) });
+    const pending = await f.checkpoint();
+    f.store.getEntity().kind = 'colleague';
+    t.false((await workspaceClientModule.manageWorkspaceCheckpoint(f.id, 'approve', pending.checkpointReview.id)).success);
+    delete f.store.getEntity().kind;
+    t.true((await workspaceClientModule.manageWorkspaceCheckpoint(f.id, 'reject', pending.checkpointReview.id)).success);
+    const retry = await f.checkpoint();
+    t.false(retry.success); t.is(retry.checkpointReview.status, 'rejected'); t.is(f.uploads, 1); t.is(f.copies, 0);
+});
+
+test.serial('reset saves recovery first and asks about the resulting reduction without exposing runtime secrets', async t => {
+    const f = inventoryCheckpointFixture(t);
+    const result = await workspaceClientModule.resetWorkspaceContents(f.id, undefined, f.options);
+    t.true(result.resetCompleted, result.error);
+    t.false(result.success);
+    t.is(result.error, 'workspace_checkpoint_review_required');
+    t.is(f.resets, 1); t.is(f.uploads, 2); t.is(f.copies, 2);
+    t.is(f.blobs.get(f.currentPath).metadata.checkpointInventory, encodeCheckpointInventory(f.before));
+    t.false(JSON.stringify(result).includes('runtime-secret'));
+    t.false(JSON.stringify(result).includes('encryptedKey'));
+});
+
+test.serial('running jobs and a required final checkpoint cannot use an unchanged skip', async t => {
+    const f = inventoryCheckpointFixture(t);
+    t.true((await f.checkpoint({ backgroundJobsRunning: true })).success);
+    t.is(f.uploads, 1); t.true(f.store.getEntity().workspace.checkpointHasRunningJobs);
+    t.true((await f.checkpoint()).success);
+    t.is(f.uploads, 2); t.false(f.store.getEntity().workspace.checkpointHasRunningJobs);
 });

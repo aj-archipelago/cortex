@@ -48,7 +48,7 @@ test('extractFilesFromChatHistory should extract files from array content', t =>
             ]
         }
     ];
-    
+
     const files = extractFilesFromChatHistory(chatHistory);
     t.is(files.length, 2);
     t.is(files[0].url, 'https://example.com/image.jpg');
@@ -70,7 +70,7 @@ test('extractFilesFromChatHistory should extract files from string JSON content'
             })
         }
     ];
-    
+
     const files = extractFilesFromChatHistory(chatHistory);
     t.is(files.length, 1);
     t.is(files[0].url, 'https://example.com/image.jpg');
@@ -92,7 +92,7 @@ test('extractFilesFromChatHistory should extract files from array content with f
             ]
         }
     ];
-    
+
     const files = extractFilesFromChatHistory(chatHistory);
     t.is(files.length, 1);
     t.is(files[0].url, 'https://example.com/doc.pdf');
@@ -110,7 +110,7 @@ test('extractFilesFromChatHistory should handle messages without content', t => 
         { role: 'user' },
         { role: 'assistant', content: 'Hello' }
     ];
-    
+
     const files = extractFilesFromChatHistory(chatHistory);
     t.is(files.length, 0);
 });
@@ -122,7 +122,7 @@ test('extractFilesFromChatHistory should handle invalid JSON gracefully', t => {
             content: 'not valid json {'
         }
     ];
-    
+
     const files = extractFilesFromChatHistory(chatHistory);
     t.is(files.length, 0);
 });
@@ -167,7 +167,7 @@ test('findFileInCollection should accept /files and relative files paths', t => 
     t.is(findFileInCollection('files/global/def456_image.png', collection)?.hash, 'def456');
 });
 
-test('findFileInCollection should fall back to basename when folder is wrong', t => {
+test('findFileInCollection never replaces an explicit wrong path with a basename match', t => {
     const collection = [
         {
             id: 'file-old',
@@ -190,8 +190,25 @@ test('findFileInCollection should fall back to basename when folder is wrong', t
     ];
 
     const found = findFileInCollection('/workspace/files/chats/wrong/report.pdf', collection);
-    t.truthy(found);
-    t.is(found.hash, 'bbb222');
+    t.is(found, null);
+    t.is(findFileInCollection('report.pdf', collection)?.hash, 'bbb222');
+});
+
+test('explicit image references preserve directory, URL host, and path case', t => {
+    const file = {
+        blobPath: 'chats/old/Sheet1.jpg',
+        filename: 'Sheet1.jpg',
+        url: 'https://files.example/container/chats/old/Sheet1.jpg?sig=old',
+    };
+    for (const reference of [
+        '/workspace/review_jb/Sheet1.jpg',
+        'chats/new/Sheet1.jpg',
+        '/workspace/files/chats/old/sheet1.jpg',
+        'https://other.example/container/chats/old/Sheet1.jpg',
+    ]) t.is(findFileInCollection(reference, [file]), null);
+    t.is(findFileInCollection('/workspace/files/chats/old/Sheet1.jpg', [file]), file);
+    t.is(findFileInCollection('https://files.example/container/chats/old/Sheet1.jpg?sig=new', [file]), file);
+    t.is(findFileInCollection('sheet1.jpg', [file]), file);
 });
 
 test('getWorkspacePathForFile should prefer blob name with hash prefix', t => {
@@ -224,7 +241,7 @@ test('extractFilesFromChatHistory should handle mixed content types', t => {
             ]
         }
     ];
-    
+
     const files = extractFilesFromChatHistory(chatHistory);
     t.is(files.length, 1);
     t.is(files[0].url, 'https://example.com/image.jpg');
@@ -241,7 +258,7 @@ test('extractFilesFromChatHistory should extract files with hash', t => {
             }
         }
     ];
-    
+
     const files = extractFilesFromChatHistory(chatHistory);
     t.is(files.length, 1);
     t.is(files[0].hash, 'abc123def456');
@@ -257,7 +274,7 @@ test('extractFilesFromChatHistory should handle files without gcsUrl', t => {
             }
         }
     ];
-    
+
     const files = extractFilesFromChatHistory(chatHistory);
     t.is(files.length, 1);
     t.is(files[0].gcs, null);
@@ -270,7 +287,7 @@ test('extractFilesFromChatHistory should extract files without filename (filenam
         { filename: 'file3.jpg' },
         { url: 'https://example.com/file4.jpg' }
     ];
-    
+
     testCases.forEach((testCase, index) => {
         const chatHistory = [{
             role: 'user',
@@ -280,7 +297,7 @@ test('extractFilesFromChatHistory should extract files without filename (filenam
                 ...testCase
             }
         }];
-        
+
         const files = extractFilesFromChatHistory(chatHistory);
         // Files should be extracted but without filename (displayFilename is set by CFH on upload)
         t.is(files.length, 1, `Test case ${index} should extract file`);
@@ -347,7 +364,7 @@ test('ensureFilenameExtension should use MIME type extension when no filename', 
 test('determineMimeTypeFromUrl should prefer GCS URL', t => {
     const mimeType1 = determineMimeTypeFromUrl('https://example.com/file.pdf', 'gs://bucket/file.md');
     t.is(mimeType1, 'text/markdown');
-    
+
     const mimeType2 = determineMimeTypeFromUrl('https://example.com/file.pdf', null);
     t.is(mimeType2, 'application/pdf');
 });
@@ -445,16 +462,16 @@ test('isTextMimeType should identify text MIME types', t => {
 // Test converted files: displayFilename has different MIME type than URL
 test('determineMimeTypeFromUrl should use URL extension, not displayFilename', async t => {
     const { determineMimeTypeFromUrl } = await import('../../../lib/fileUtils.js');
-    
+
     // Simulate converted file: displayFilename is .docx but URL is .md
     const url = 'https://example.com/converted-file.md';
     const gcs = 'gs://bucket/converted-file.md';
     const displayFilename = 'original-document.docx';
-    
+
     // MIME type should be determined from URL (.md), not displayFilename (.docx)
     const mimeType = determineMimeTypeFromUrl(url, gcs, null);
     t.is(mimeType, 'text/markdown', 'Should use URL extension (.md) for MIME type');
-    
+
     // Even if displayFilename is provided, URL takes precedence
     const mimeType2 = determineMimeTypeFromUrl(url, gcs, displayFilename);
     t.is(mimeType2, 'text/markdown', 'Should still use URL extension even with displayFilename');
@@ -462,7 +479,7 @@ test('determineMimeTypeFromUrl should use URL extension, not displayFilename', a
 
 test('getActualContentMimeType should use URL, not displayFilename', async t => {
     const { getActualContentMimeType } = await import('../../../lib/fileUtils.js');
-    
+
     // Simulate converted file: displayFilename is .docx but URL is .md
     const file = {
         url: 'https://example.com/converted-file.md',
@@ -470,10 +487,10 @@ test('getActualContentMimeType should use URL, not displayFilename', async t => 
         displayFilename: 'original-document.docx',
         mimeType: null // Not set yet
     };
-    
+
     const mimeType = getActualContentMimeType(file);
     t.is(mimeType, 'text/markdown', 'Should determine MIME type from URL, not displayFilename');
-    
+
     // If mimeType is already set (from URL), use it
     const fileWithMimeType = {
         ...file,
@@ -485,7 +502,7 @@ test('getActualContentMimeType should use URL, not displayFilename', async t => 
 
 test('addFileToCollection should preserve original displayFilename for converted files', async t => {
     const { addFileToCollection } = await import('../../../lib/fileUtils.js');
-    
+
     // Simulate adding a file where URL points to converted content (.md)
     // but user wants to keep original filename (.docx)
     const contextId = `test-converted-${Date.now()}`;
@@ -502,13 +519,13 @@ test('addFileToCollection should preserve original displayFilename for converted
             null,
             null
         );
-        
+
         // displayFilename should be the original user-provided filename
         t.is(fileEntry.displayFilename, 'original-document.docx', 'displayFilename should preserve original filename');
-        
+
         // mimeType should be determined from URL (actual content)
         t.is(fileEntry.mimeType, 'text/markdown', 'mimeType should be from URL, not displayFilename');
-        
+
     } finally {
         // Cleanup
         const { getRedisClient } = await import('../../../lib/fileUtils.js');
@@ -524,7 +541,7 @@ test('addFileToCollection should preserve original displayFilename for converted
 
 test('syncAndStripFilesFromChatHistory should leave all files when no contextId', async t => {
     const { syncAndStripFilesFromChatHistory } = await import('../../../lib/fileUtils.js');
-    
+
     const chatHistory = [
         {
             role: 'user',
@@ -537,20 +554,20 @@ test('syncAndStripFilesFromChatHistory should leave all files when no contextId'
             ]
         }
     ];
-    
+
     // No contextId - should leave files in place
     const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, null);
-    
+
     t.is(processedHistory[0].content[0].type, 'image_url');
     t.is(processedHistory[0].content[0].image_url.url, 'https://example.com/image.jpg');
 });
 
 test('syncAndStripFilesFromChatHistory should leave files when collection is empty', async t => {
     const { syncAndStripFilesFromChatHistory } = await import('../../../lib/fileUtils.js');
-    
+
     // Use a unique contextId that won't have any files
     const contextId = `test-empty-${Date.now()}`;
-    
+
     const chatHistory = [
         {
             role: 'user',
@@ -563,29 +580,29 @@ test('syncAndStripFilesFromChatHistory should leave files when collection is emp
             ]
         }
     ];
-    
+
     // Empty collection - files should stay in place (not stripped)
     const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, createFileAccessPlan(contextId));
-    
+
     t.is(processedHistory[0].content[0].type, 'image_url');
     t.is(processedHistory[0].content[0].image_url.url, 'https://example.com/image.jpg');
 });
 
 test('syncAndStripFilesFromChatHistory should handle empty chat history', async t => {
     const { syncAndStripFilesFromChatHistory } = await import('../../../lib/fileUtils.js');
-    
+
     const { chatHistory: result1 } = await syncAndStripFilesFromChatHistory([], createFileAccessPlan('context'));
     t.deepEqual(result1, []);
-    
+
     const { chatHistory: result2 } = await syncAndStripFilesFromChatHistory(null, createFileAccessPlan('context'));
     t.deepEqual(result2, []);
 });
 
 test('syncAndStripFilesFromChatHistory should preserve non-file content', async t => {
     const { syncAndStripFilesFromChatHistory } = await import('../../../lib/fileUtils.js');
-    
+
     const contextId = `test-preserve-${Date.now()}`;
-    
+
     const chatHistory = [
         {
             role: 'user',
@@ -603,16 +620,16 @@ test('syncAndStripFilesFromChatHistory should preserve non-file content', async 
             content: 'I see an image'
         }
     ];
-    
+
     const { chatHistory: processedHistory } = await syncAndStripFilesFromChatHistory(chatHistory, createFileAccessPlan(contextId));
-    
+
     // Text content should be preserved
     t.is(processedHistory[0].content[0].type, 'text');
     t.is(processedHistory[0].content[0].text, 'Hello world');
-    
+
     // Image not in collection should be preserved
     t.is(processedHistory[0].content[1].type, 'image_url');
-    
+
     // Assistant message should be preserved
     t.is(processedHistory[1].role, 'assistant');
     t.is(processedHistory[1].content, 'I see an image');

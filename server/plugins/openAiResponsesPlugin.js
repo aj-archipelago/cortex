@@ -8,6 +8,8 @@ import logger from "../../lib/logger.js";
 import CortexResponse from "../../lib/cortexResponse.js";
 import { requestState } from "../requestState.js";
 import { addCitationsToResolver } from "../../lib/pathwayTools.js";
+import { inlineManagedImageInputs } from "../../lib/managedImageInput.js";
+import { sanitizeBase64 } from "../../lib/util.js";
 
 class OpenAIResponsesPlugin extends GrokResponsesPlugin {
   constructor(pathway, model) {
@@ -100,7 +102,7 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
     }
 
     const inputCount = Array.isArray(input) ? input.length : 1;
-    const content = this.getResponsesInputContent(input);
+    const content = this.getResponsesInputContent(sanitizeBase64(input));
     const { length, units } = this.getLength(content);
 
     logger.info(JSON.stringify({
@@ -135,15 +137,19 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
 
     prompt &&
       prompt.debugInfo &&
-      (prompt.debugInfo += `\n${JSON.stringify(data)}`);
+      (prompt.debugInfo += `\n${JSON.stringify(sanitizeBase64(data))}`);
   }
 
   convertToolToResponsesFormat(tool) {
     if (!tool || typeof tool !== "object") return tool;
-    if (tool.type !== "function" || !tool.function) return tool;
+    if (tool.type !== "function") return tool;
 
     const { function: fn, ...rest } = tool;
-    return { ...rest, ...fn };
+    const converted = fn ? { ...rest, ...fn } : { ...tool };
+    // Responses may normalize unspecified strict mode by making optional
+    // arguments required. Preserve the supplied schema's omission semantics
+    // (especially MCP tools); callers can still explicitly opt into strict mode.
+    return { ...converted, strict: converted.strict ?? false };
   }
 
   parseJsonLikeParameter(value, fallback = value) {
@@ -254,10 +260,10 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
         ? tools.functions
         : [tools.functions];
       functions.forEach((fn) => {
-        toolsArray.push({
+        toolsArray.push(this.convertToolToResponsesFormat({
           type: "function",
           ...fn,
-        });
+        }));
       });
     }
 
@@ -376,6 +382,15 @@ class OpenAIResponsesPlugin extends GrokResponsesPlugin {
           `Invalid responses_input_json parameter, falling back to messages conversion: ${error.message}`,
         );
       }
+    }
+
+    if (parameters._inlineManagedImages && requestParameters.messages) {
+      requestParameters.messages = await inlineManagedImageInputs(
+        requestParameters.messages,
+        parameters.chatHistory,
+        parameters.fileAccessPlan,
+        parameters._inlineManagedImages,
+      );
     }
 
     return requestParameters;

@@ -78,8 +78,15 @@ export function buildMetadataEntry(modelId, sourceConfig, { isModelGroup = false
         category,
     };
 
+    if (metadata.isDeprecated) entry.isDeprecated = true;
+    if (metadata.replacementModel) entry.replacementModel = metadata.replacementModel;
     if (metadata.isDefault) entry.isDefault = true;
     if (metadata.isAgentic) entry.isAgentic = true;
+    if (metadata.releaseStage) entry.releaseStage = metadata.releaseStage;
+    if (metadata.isAvailable === false) {
+        entry.isAvailable = false;
+        entry.unavailableReason = metadata.unavailableReason || "Model is not available";
+    }
     if (isModelGroup) entry.isModelGroup = true;
 
     // Copy safe fields from the config object.
@@ -112,19 +119,17 @@ export function buildMetadataEntry(modelId, sourceConfig, { isModelGroup = false
     if (metadata.supportedReasoningEfforts) entry.supportedReasoningEfforts = metadata.supportedReasoningEfforts;
     if (metadata.requiredEnv) {
         entry.requiredEnv = metadata.requiredEnv;
-        const configKey = metadata.requiredEnv === 'GCP_SERVICE_ACCOUNT_KEY'
-            ? 'gcpServiceAccountKey'
-            : metadata.requiredEnv === 'GEMINI_API_KEY'
-                ? 'geminiApiKey'
-                : null;
-        const hasConfigValue = configKey
-            ? Boolean(config.get(configKey))
-            : Boolean(process.env[metadata.requiredEnv]);
-        if (!hasConfigValue) {
+        const requirements = [metadata.requiredEnv].flat();
+        const missing = requirements.filter(env => {
+            const configKey = { GCP_SERVICE_ACCOUNT_KEY: "gcpServiceAccountKey", GEMINI_API_KEY: "geminiApiKey" }[env];
+            return !(configKey ? config.get(configKey) : process.env[env]);
+        });
+        if (missing.length && entry.isAvailable !== false) {
             entry.isAvailable = false;
-            entry.unavailableReason = `${metadata.requiredEnv} is not configured`;
+            entry.unavailableReason = `${missing.join(", ")} is not configured`;
         }
     }
+
     if (metadata.pricing) entry.pricing = metadata.pricing;
 
     const pricingAliases = metadata.pricing ? getPricingAliases(sourceConfig) : [];
@@ -163,6 +168,16 @@ export default {
                 models.push(entry);
             }
 
+            // Hide superseded choices only when their replacement is configured.
+            // Keep their metadata and execution IDs for history and existing jobs.
+            for (const entry of models) {
+                const replacementId = allModels[entry.modelId]?.metadata?.deprecatedWhenAvailable;
+                const replacement = models.find(model => model.modelId === replacementId);
+                if (replacement && replacement.isAvailable !== false) {
+                    entry.isDeprecated = true;
+                    entry.replacementModel = replacementId;
+                }
+            }
             return JSON.stringify({ models, redirects });
         } catch (error) {
             return JSON.stringify({ error: error.message });

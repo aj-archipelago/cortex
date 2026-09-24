@@ -16,21 +16,15 @@ function loadTestData(filename) {
     return testDataCache.get(filename);
   }
 
-  let content;
-  try {
-    const filePath = path.join(process.cwd(), 'tests', 'data', filename);
-    content = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    // Return a smaller fallback test string if file loading fails
-    content = 'a '.repeat(1000);
-  }
+  const filePath = path.join(process.cwd(), 'tests', 'data', filename);
+  const content = fs.readFileSync(filePath, 'utf8');
 
   testDataCache.set(filename, content);
   return content;
 }
 
-const largeContent = loadTestData('largeContent.txt');
-const mixedContent = loadTestData('mixedContent.txt');
+const largeContent = loadTestData('largecontent.txt');
+const mixedContent = loadTestData('mixedcontent.txt');
 
 // Test the token count estimation accuracy
 test('token count estimation accuracy', async (t) => {

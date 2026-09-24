@@ -34,7 +34,7 @@ export default {
                         items: {
                             type: "string"
                         },
-                        description: "Array of files to view. Prefer blobPath, workspacePath like /workspace/files/..., or URL from the file object. Hashes and filenames are supported as legacy fallbacks when no direct path/URL is available."
+                        description: "Array of files to view. Prefer an exact blobPath, /workspace/files/... path, or URL returned by FileCollection. Explicit paths never fall back to a different file with the same name. For images in other local workspace directories, first copy them into the current chat's /workspace/files/chats/<chatId>/ folder and pass that exact path. Hashes and bare filenames are legacy fallbacks."
                     },
                     userMessage: {
                         type: "string",
@@ -67,10 +67,17 @@ export default {
 
             // Process each file
             for (const file of files) {
+                const localPath = typeof file === 'string'
+                    ? file.trim().replace(/^file:\/\//i, '').replace(/\\/g, '/')
+                    : '';
+                if (/^\/workspace\//.test(localPath) && !localPath.startsWith('/workspace/files/')) {
+                    errors.push(`Local workspace image is not in the file collection: ${file}. Copy this exact file to the current chat's /workspace/files/chats/<chatId>/ folder, then pass its full path. No filename fallback was used.`);
+                    continue;
+                }
                 const foundFile = await findFileInFileAccessPlan(file, fileAccessPlan, { fileHandlerUrl });
-                
+
                 if (!foundFile) {
-                    errors.push(`File not found: ${file}`);
+                    errors.push(`File not found at the supplied reference: ${file}. Use FileCollection to find its exact path.`);
                     continue;
                 }
 
@@ -97,6 +104,9 @@ export default {
                     gcs: fileWithShortLivedUrl.gcs,
                     image_url: { url: fileWithShortLivedUrl.url },
                     hash: fileWithShortLivedUrl.hash,
+                    blobPath: foundFile.blobPath,
+                    _contextId: foundFile._contextId,
+                    mimeType: foundFile.mimeType || foundFile.contentType,
                     originalFilename: foundFile.filename || file
                 });
 
@@ -113,8 +123,8 @@ export default {
             // Return the file info in a format that can be extracted as toolImages
             // This will be picked up by pathwayTools.js and added to toolImages
             resolver.tool = JSON.stringify({ toolUsed: "ViewImages" });
-            
-            const message = imageUrls.length === 1 
+
+            const message = imageUrls.length === 1
                 ? `Image "${foundFilenames[0]}" is now available for viewing.`
                 : `${imageUrls.length} image(s) (${foundFilenames.join(', ')}) are now available for viewing.`;
 

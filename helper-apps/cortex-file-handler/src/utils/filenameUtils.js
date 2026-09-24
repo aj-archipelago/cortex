@@ -1,4 +1,14 @@
 import path from "path";
+import { randomUUID } from "node:crypto";
+
+// Chat attachments are immutable uploads, even when a camera reuses image.jpg.
+// Keep the original name in displayFilename; give each stored object its own path.
+export function generateChatUploadFilename(filename) {
+  const safeName = sanitizeFilename(filename) || "file";
+  const extension = path.extname(safeName);
+  const stem = safeName.slice(0, safeName.length - extension.length);
+  return `${stem}-${randomUUID()}${extension}`;
+}
 
 /**
  * Sanitize a filename by removing invalid characters and path traversal attempts

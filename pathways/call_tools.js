@@ -28,7 +28,7 @@ const TOOLS = [
         type: "function",
         function: {
             name: "Search",
-            description: "Use for current events, news, fact-checking, and information requiring citation. This tool allows you to search the internet, all Al Jazeera news articles and the latest news wires from multiple sources.",
+            description: "Use for current events, news, fact-checking, and information requiring citation. This tool allows you to search the internet, configured news archives and current news sources.",
             parameters: {
                 type: "object",
                 properties: {
@@ -199,16 +199,16 @@ const TOOLS = [
 export default {
     useInputChunking: false,
     useSingleTokenStream: false,
-    inputParameters: { 
+    inputParameters: {
         chatHistory: [{role: '', content: []}],
-        contextId: ``,   
+        contextId: ``,
         language: "English",
         aiName: "Jarvis",
         aiStyle: "OpenAI",
         model: 'oai-gpt41',
     },
     timeout: 600,
-  
+
     executePathway: async ({args, runAllPrompts, resolver}) => {
         let pathwayResolver = resolver;
 
@@ -221,7 +221,7 @@ export default {
         // set the style model if applicable
         const { aiStyle, AI_STYLE_ANTHROPIC, AI_STYLE_OPENAI } = args;
         const styleModel = aiStyle === "Anthropic" ? AI_STYLE_ANTHROPIC : AI_STYLE_OPENAI;
-        
+
         const promptMessages = [
             {"role": "system", "content": `{{renderTemplate AI_MEMORY}}\n{{renderTemplate AI_EXPERTISE}}\n{{renderTemplate AI_TOOLS}}\n{{renderTemplate AI_MEMORY_INSTRUCTIONS}}\n{{renderTemplate AI_COMMON_INSTRUCTIONS}}\n{{renderTemplate AI_MEMORY_DIRECTIVES}}\n{{renderTemplate AI_DATETIME}}`},
             "{{chatHistory}}",
@@ -257,14 +257,14 @@ export default {
 
                 // Check if the model made any tool calls
                 const toolCalls = response.tool_calls || [];
-                
+
                 if (toolCalls.length > 0) {
                     // Execute all tool calls in parallel
                     const toolResults = await Promise.all(toolCalls.map(async (toolCall) => {
                         try {
                             const toolArgs = JSON.parse(toolCall.function.arguments);
                             const toolFunction = toolCall.function.name.toLowerCase();
-                            
+
                             // Set the appropriate generator pathway based on the tool function
                             let generatorPathway;
                             switch (toolFunction) {
@@ -338,7 +338,7 @@ export default {
                             return { success: true, result: toolResult };
                         } catch (error) {
                             logger.error(`Error executing tool ${toolCall.function.name}: ${error.message}`);
-                            
+
                             // Add the error to the chat history
                             currentMessages.push({
                                 role: "tool",
@@ -374,4 +374,4 @@ export default {
             return args.stream ? null : chatResponse;
         }
     }
-}; 
+};

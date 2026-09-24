@@ -1,3 +1,4 @@
+import { CHECKPOINT_EXCLUDES, collectCheckpointInventory, encodeCheckpointInventory, assertCheckpointInventory } from './checkpoint_inventory.js';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,79 +27,7 @@ const CHECKPOINT_GZIP_LEVEL = Math.min(
 );
 const CHECKPOINT_COMPRESSION = (process.env.WORKSPACE_CHECKPOINT_COMPRESSION || 'auto').toLowerCase();
 const WORKSPACE_FILES_DIR = path.join(WORKSPACE_DIR, 'files');
-const CHECKPOINT_EXCLUDES = [
-    './files',
-    './.env',
-    './.env.*',
-    './node_modules',
-    './*/node_modules',
-    './*/*/node_modules',
-    './*/*/*/node_modules',
-    './.npm',
-    './*/.npm',
-    './*/*/.npm',
-    './.pnpm-store',
-    './*/.pnpm-store',
-    './*/*/.pnpm-store',
-    './.yarn/cache',
-    './*/.yarn/cache',
-    './*/*/.yarn/cache',
-    './.bun/install/cache',
-    './*/.bun/install/cache',
-    './*/*/.bun/install/cache',
-    './__pycache__',
-    './*/__pycache__',
-    './*/*/__pycache__',
-    './*/*/*/__pycache__',
-    './.pytest_cache',
-    './*/.pytest_cache',
-    './*/*/.pytest_cache',
-    './.mypy_cache',
-    './*/.mypy_cache',
-    './*/*/.mypy_cache',
-    './.ruff_cache',
-    './*/.ruff_cache',
-    './*/*/.ruff_cache',
-    './.tox',
-    './*/.tox',
-    './*/*/.tox',
-    './.venv',
-    './*/.venv',
-    './*/*/.venv',
-    './venv',
-    './*/venv',
-    './*/*/venv',
-    './.next',
-    './*/.next',
-    './*/*/.next',
-    './dist',
-    './*/dist',
-    './*/*/dist',
-    './build',
-    './*/build',
-    './*/*/build',
-    './out',
-    './*/out',
-    './*/*/out',
-    './.turbo',
-    './*/.turbo',
-    './*/*/.turbo',
-    './.vite',
-    './*/.vite',
-    './*/*/.vite',
-    './.parcel-cache',
-    './*/.parcel-cache',
-    './*/*/.parcel-cache',
-    './coverage',
-    './*/coverage',
-    './*/*/coverage',
-    './.expo',
-    './*/.expo',
-    './*/*/.expo',
-    './.metro',
-    './*/.metro',
-    './*/*/.metro',
-];
+
 let _curlUploadRunnerOverride = null;
 let _blockUploadRunnerOverride = null;
 const _commandAvailability = new Map();
@@ -216,6 +145,7 @@ export async function createBackup() {
     const tmpPath = buildCheckpointTmpPath(CHECKPOINT_PATH, process.pid, started);
 
     try {
+        const inventory = await collectCheckpointInventory(WORKSPACE_DIR);
         await fs.mkdir(path.dirname(CHECKPOINT_PATH), { recursive: true });
         await fs.rm(tmpPath, { force: true });
 
@@ -224,6 +154,8 @@ export async function createBackup() {
             encoding: 'utf8',
             timeout: CHECKPOINT_TIMEOUT_MS,
         });
+        const after = await collectCheckpointInventory(WORKSPACE_DIR);
+        if (inventory.fingerprint !== after.fingerprint) throw new Error('Workspace changed during backup; retry after writes settle');
 
         let previousPath = null;
         try {
@@ -244,6 +176,7 @@ export async function createBackup() {
             timestamp,
             durationMs: Date.now() - started,
             compression: compression.id,
+            inventory,
         };
     } catch (e) {
         try {
@@ -369,7 +302,7 @@ function buildCheckpointTmpPath(checkpointPath, pid = process.pid, started = Dat
 /**
  * Restore workspace from a tarball at the given path.
  */
-export async function restoreBackup(archivePath) {
+export async function restoreBackup(archivePath, expectedInventory) {
     try {
         const stat = await fs.stat(archivePath);
         if (!stat.isFile()) {
@@ -385,6 +318,7 @@ export async function restoreBackup(archivePath) {
         );
 
         const exposeResult = await exposeBlobFiles();
+        if (expectedInventory) assertCheckpointInventory(expectedInventory, await collectCheckpointInventory(WORKSPACE_DIR));
 
         return {
             message: 'Workspace restored from backup',
@@ -400,7 +334,7 @@ export async function restoreBackup(archivePath) {
     }
 }
 
-export async function restoreBackupFromUrl(archiveUrl, archivePath = CHECKPOINT_PATH) {
+export async function restoreBackupFromUrl(archiveUrl, archivePath = CHECKPOINT_PATH, expectedInventory) {
     try {
         if (!archiveUrl || typeof archiveUrl !== 'string') {
             return { error: 'archiveUrl is required' };
@@ -421,7 +355,7 @@ export async function restoreBackupFromUrl(archiveUrl, archivePath = CHECKPOINT_
 
         await pipeline(Readable.fromWeb(response.body), createWriteStream(tempPath));
         await fs.rename(tempPath, targetPath);
-        return await restoreBackup(targetPath);
+        return await restoreBackup(targetPath, expectedInventory);
     } catch (e) {
         try {
             const targetPath = archivePath || CHECKPOINT_PATH;
@@ -509,7 +443,7 @@ async function restoreEncryptedBackupFromUrl(archiveUrl, encryption, timeoutMs =
     }
 }
 
-export async function restoreBackupFromUrlEncrypted(archiveUrl, encryption) {
+export async function restoreBackupFromUrlEncrypted(archiveUrl, encryption, expectedInventory) {
     try {
         if (!archiveUrl || typeof archiveUrl !== 'string') {
             return { error: 'archiveUrl is required' };
@@ -517,7 +451,9 @@ export async function restoreBackupFromUrlEncrypted(archiveUrl, encryption) {
         if (!archiveUrl.startsWith('https://')) {
             return { error: 'archiveUrl must be an HTTPS URL' };
         }
-        return await restoreEncryptedBackupFromUrl(archiveUrl, encryption);
+        const result = await restoreEncryptedBackupFromUrl(archiveUrl, encryption);
+        if (!result.error && expectedInventory) assertCheckpointInventory(expectedInventory, await collectCheckpointInventory(WORKSPACE_DIR));
+        return result;
     } catch (e) {
         return { error: `Restore from encrypted URL failed: ${e.message}` };
     }
@@ -754,6 +690,7 @@ export async function uploadStreamingBackupToUrl(archiveUrl, metadata = {}, encr
             return { error: 'archiveUrl must be an HTTPS URL' };
         }
 
+        const inventory = await collectCheckpointInventory(WORKSPACE_DIR);
         const parsed = parseCheckpointEncryption(encryption);
         const cipher = crypto.createCipheriv(parsed.algorithm, parsed.key, parsed.iv);
         const uploader = createAzureBlockUploadWritable(archiveUrl);
@@ -784,6 +721,10 @@ export async function uploadStreamingBackupToUrl(archiveUrl, metadata = {}, encr
         }
 
         const tag = cipher.getAuthTag();
+        const after = await collectCheckpointInventory(WORKSPACE_DIR);
+        if (inventory.fingerprint !== after.fingerprint) {
+            return { error: 'Workspace changed during backup; retry after writes settle' };
+        }
         const uploadState = uploader.getUploadState();
         const encryptionMetadata = {
             checkpointEncryptionAlgorithm: parsed.algorithm,
@@ -795,6 +736,7 @@ export async function uploadStreamingBackupToUrl(archiveUrl, metadata = {}, encr
         await commitBlockList(archiveUrl, uploadState.blockIds, {
             ...metadata,
             ...encryptionMetadata,
+            checkpointInventory: encodeCheckpointInventory(inventory),
         });
 
         return {
@@ -804,6 +746,7 @@ export async function uploadStreamingBackupToUrl(archiveUrl, metadata = {}, encr
             durationMs: Date.now() - started,
             uploadMethod: 'azure-block-stream',
             compression: compression.id,
+            inventory,
             encryption: {
                 algorithm: parsed.algorithm,
                 keyId: parsed.keyId,

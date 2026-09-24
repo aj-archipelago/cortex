@@ -8,6 +8,8 @@ import { config } from '../../config.js';
 import axios from 'axios';
 import { extractValueFromTypeSpec } from '../typeDef.js';
 import latencyTrace from '../../lib/latencyTrace.js';
+import { getSignedUrlTiming, isSignedUrlFresh, IMAGE_URL_EXPIRY_MARGIN_MS } from '../../lib/signedUrlExpiry.js';
+import { executeSearchRequest } from '../../lib/searchCacheRuntime.js';
 
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_MAX_RETURN_TOKENS = 256;
@@ -47,6 +49,27 @@ class ModelPlugin {
             return this.allowedMIMETypes.includes(mimeType);
         }
 
+        const timing = getSignedUrlTiming(url);
+        if (timing && !isSignedUrlFresh(url)) return false;
+        this._imageValidationCache ||= new Map();
+        const cached = this._imageValidationCache.get(url);
+        if (cached && cached.until > Date.now()) return cached.result;
+        this._imageValidationCache.delete(url);
+
+        const result = this.checkImageUrl(url);
+        // Only cache a signed URL that was actually validated. A query-string
+        // expiry by itself proves neither MIME type nor accessibility.
+        if (timing) {
+            if (this._imageValidationCache.size >= 256) this._imageValidationCache.delete(this._imageValidationCache.keys().next().value);
+            this._imageValidationCache.set(url, {
+                until: Math.min(timing.expiresAt - IMAGE_URL_EXPIRY_MARGIN_MS, Date.now() + 300_000), result,
+            });
+            if (!await result) this._imageValidationCache.delete(url);
+        }
+        return result;
+    }
+
+    async checkImageUrl(url) {
         try {
             const headResponse = await axios.head(url, {
                 timeout: 30000,
@@ -60,7 +83,7 @@ class ModelPlugin {
             }
             return true;
         } catch (e) {
-            logger.error(`Failed to validate image URL: ${url}. ${e}`);
+            logger.warn(JSON.stringify({ event: 'image_url_validation_failed', status: e.response?.status, code: e.code }));
             return false;
         }
     }
@@ -118,7 +141,7 @@ class ModelPlugin {
             const newContent = [];
             let contentTokensUsed = 0;
             let truncationAdded = false;
-            
+
             for (let item of content) {
                 // Convert string items to text objects
                 if (typeof item === 'string') {
@@ -129,7 +152,7 @@ class ModelPlugin {
                 if (item.type === 'text') {
                     if (contentTokensUsed < maxTokens) {
                         const remainingTokens = maxTokens - contentTokensUsed;
-                        
+
                         if (this.safeGetEncodedLength(item.text) <= remainingTokens) {
                             // Text fits completely
                             newContent.push(item);
@@ -143,7 +166,7 @@ class ModelPlugin {
                             break;
                         }
                     }
-                } 
+                }
                 // Handle image items - prioritize them but account for their token usage
                 else if (item.type === 'image_url') {
                     const imageTokens = 100; // Estimated token count for images
@@ -157,13 +180,13 @@ class ModelPlugin {
                     newContent.push(item);
                 }
             }
-            
+
             // Add truncation marker if needed and not already added
             if (content.length > newContent.length && !truncationAdded) {
                 newContent.push({ type: 'text', text: truncationMarker });
                 contentTokensUsed += truncationMarkerTokenLength;
             }
-            
+
             return { content: newContent, tokensUsed: contentTokensUsed };
         };
 
@@ -174,15 +197,15 @@ class ModelPlugin {
                 availableTokens,
                 maxPerMessageTokens - message.roleTokens - messageOverhead
             );
-            
+
             const messageToAdd = { ...message };
             delete messageToAdd.tokenLength;
             delete messageToAdd.roleTokens;
             delete messageToAdd.contentTokens;
             // Keep originalIndex for sorting later
-            
+
             let contentTokensUsed = 0;
-            
+
             // Handle extreme constraints (zero or negative token availability)
             if (maxContentTokens <= 0) {
                 // For extreme constraints, just add truncation marker or empty content
@@ -193,31 +216,31 @@ class ModelPlugin {
                     messageToAdd.content = [{ type: 'text', text: truncationMarker }];
                     contentTokensUsed = truncationMarkerTokenLength;
                 }
-                
+
                 const totalTokensUsed = message.roleTokens + contentTokensUsed + messageOverhead;
                 return { message: messageToAdd, tokensUsed: totalTokensUsed };
             }
-            
+
             // Truncate text content
             if (typeof message.content === 'string') {
                 // Leave room for truncation marker if needed
                 const contentSpace = Math.max(0, maxContentTokens);
                 messageToAdd.content = truncateTextContent(message.content, contentSpace);
                 contentTokensUsed = this.safeGetEncodedLength(messageToAdd.content);
-            } 
+            }
             // Handle multimodal content
             else if (Array.isArray(message.content)) {
                 const result = truncateMultimodalContent(message.content, maxContentTokens);
                 messageToAdd.content = result.content;
                 contentTokensUsed = result.tokensUsed;
-                
+
                 // Skip message if no content after truncation
                 if (result.content.length === 0) {
                     messageToAdd.content = [{ type: 'text', text: truncationMarker }];
                     contentTokensUsed = truncationMarkerTokenLength;
                 }
             }
-            
+
             const totalTokensUsed = message.roleTokens + contentTokensUsed + messageOverhead;
             return { message: messageToAdd, tokensUsed: totalTokensUsed };
         };
@@ -229,7 +252,7 @@ class ModelPlugin {
         if (!targetTokenLength) {
             targetTokenLength = this.getModelMaxPromptTokens();
         }
-        
+
         // First check if all messages already fit within the target length
         const initialTokenCount = this.countMessagesTokens(messages);
         if (initialTokenCount <= targetTokenLength && maxMessageTokenLength === Infinity) {
@@ -240,7 +263,7 @@ class ModelPlugin {
         const safetyMarginPercent = targetTokenLength > 1000 ? 0.05 : 0.02; // 5% or 2% for small targets
         const safetyMarginMinimum = Math.min(20, Math.floor(targetTokenLength * 0.01)); // At most 1% for minimum
         const safetyMargin = Math.max(safetyMarginMinimum, Math.round(targetTokenLength * safetyMarginPercent));
-        
+
         // Adjust targetTokenLength to account for overheads and safety margin
         const effectiveTargetLength = Math.max(0, targetTokenLength - conversationOverhead - safetyMargin);
 
@@ -251,7 +274,7 @@ class ModelPlugin {
 
             // Count tokens for content
             const tokenLength = this.countMessagesTokens([message]);
-            
+
             return {
                 ...message,
                 roleTokens: roleTokens,
@@ -283,22 +306,22 @@ class ModelPlugin {
         for (const message of prioritizedMessages) {
             // Calculate how many tokens we have available
             const remainingTokens = effectiveTargetLength - usedTokens;
-            
+
             // If we have very few tokens left, skip this message
-            const minimumUsableTokens = 10; 
+            const minimumUsableTokens = 10;
             if (remainingTokens < minimumUsableTokens) break;
-            
+
             const { message: truncatedMessage, tokensUsed } = truncateMessageContent(
-                message, 
-                remainingTokens, 
+                message,
+                remainingTokens,
                 maxMessageTokenLength
             );
-            
+
             if (truncatedMessage) {
                 result.push(truncatedMessage);
                 usedTokens += tokensUsed;
             }
-            
+
             // If we're close to target token length, stop processing more messages
             const cutoffThreshold = Math.min(20, Math.floor(effectiveTargetLength * 0.01));
             if (effectiveTargetLength - usedTokens < cutoffThreshold) break;
@@ -309,31 +332,31 @@ class ModelPlugin {
             // Force at least one message (highest priority) to fit
             const highestPriorityMessage = prioritizedMessages[0];
             const availableForContent = effectiveTargetLength - highestPriorityMessage.roleTokens - messageOverhead;
-            
+
             if (availableForContent > truncationMarkerTokenLength) {
                 const { message: truncatedMessage } = truncateMessageContent(
                     highestPriorityMessage,
                     availableForContent,
                     Infinity // No per-message limit in this case
                 );
-                
+
                 if (truncatedMessage) {
                     result.push(truncatedMessage);
                 }
             }
         }
-        
+
         // Before returning, verify we're under the limit and fix if needed
         const finalTokenCount = this.countMessagesTokens(result);
         if (finalTokenCount > targetTokenLength && result.length > 0) {
             const lastResult = result[result.length - 1];
-            
+
             // Aggressively truncate the last message more
             if (typeof lastResult.content === 'string') {
                 const overage = finalTokenCount - targetTokenLength + safetyMargin/2;
                 const currentLength = this.safeGetEncodedLength(lastResult.content);
                 const newLength = Math.max(20, currentLength - overage);
-                
+
                 lastResult.content = getFirstNToken(lastResult.content, newLength - truncationMarkerTokenLength) + truncationMarker;
             }
             // For multimodal content, just remove all but the first text item
@@ -347,17 +370,17 @@ class ModelPlugin {
                 }
             }
         }
-        
+
         // Sort by original index to restore original order
         result.sort((a, b) => a.originalIndex - b.originalIndex);
-        
+
         // Remove originalIndex property from result objects
         return result.map(message => {
             const { originalIndex, ...messageWithoutIndex } = message;
             return messageWithoutIndex;
         });
     }
-    
+
     //convert a messages array to a simple chatML format
     messagesToChatML(messages, addAssistant = true) {
         let output = "";
@@ -374,9 +397,9 @@ class ModelPlugin {
         return output;
     }
 
-    // compile the Prompt    
+    // compile the Prompt
     getCompiledPrompt(text, parameters, prompt) {
-        
+
         const mergeParameters = (promptParameters, parameters) => {
             let result = { ...promptParameters };
             for (let key in parameters) {
@@ -388,7 +411,7 @@ class ModelPlugin {
         const combinedParameters = mergeParameters(this.promptParameters, parameters);
         const modelPrompt = this.getModelPrompt(prompt, parameters);
         let modelPromptText = '';
-        
+
         try {
             modelPromptText = modelPrompt.prompt ? HandleBars.compile(modelPrompt.prompt)({ ...combinedParameters, text }) : '';
         } catch (error) {
@@ -396,7 +419,7 @@ class ModelPlugin {
             logger.warn(`Handlebars compilation failed in getCompiledPrompt: ${error.message}. Using original text.`);
             modelPromptText = modelPrompt.prompt || '';
         }
-        
+
         const modelPromptMessages = this.getModelPromptMessages(modelPrompt, combinedParameters, text);
         const modelPromptMessagesML = this.messagesToChatML(modelPromptMessages);
 
@@ -413,11 +436,11 @@ class ModelPlugin {
 
     getModelMaxPromptTokens() {
         const hasMaxReturnTokens = this.promptParameters.maxReturnTokens !== undefined || this.model.maxReturnTokens !== undefined;
-        
+
         const maxPromptTokens = hasMaxReturnTokens
             ? this.getModelMaxTokenLength() - this.getModelMaxReturnTokens()
             : Math.floor(this.getModelMaxTokenLength() * this.getPromptTokenRatio());
-        
+
         return maxPromptTokens;
     }
 
@@ -442,7 +465,7 @@ class ModelPlugin {
         if (!modelPrompt.messages) {
             return null;
         }
-    
+
         // First run handlebars compile on the pathway messages
         const compiledMessages = modelPrompt.messages.map((message) => {
             if (message.content && typeof message.content === 'string') {
@@ -461,7 +484,7 @@ class ModelPlugin {
                 return message;
             }
         });
-    
+
         // Next add in any parameters that are referenced by name in the array
         const expandedMessages = compiledMessages.flatMap((message) => {
             if (typeof message === 'string') {
@@ -482,7 +505,7 @@ class ModelPlugin {
                 return [message];
             }
         });
-     
+
         // Clean up any null messages if they exist
         // Preserve null for assistant messages with tool_calls (per OpenAI spec)
         expandedMessages.forEach((message) => {
@@ -504,7 +527,7 @@ class ModelPlugin {
                 }
             });
         }
-        
+
         return expandedMessages;
     }
 
@@ -555,19 +578,19 @@ class ModelPlugin {
 
     logRequestData(data, responseData, prompt) {
         const modelInput = data.prompt || (data.messages && data.messages[0].content) || (data.length > 0 && data[0].Text) || null;
-    
+
         if (modelInput) {
             const { length, units } = this.getLength(modelInput);
             logger.info(`[request sent containing ${length} ${units}]`);
         }
-    
+
         const responseText = JSON.stringify(responseData);
         const { length, units } = this.getLength(responseText);
         logger.info(`[response received containing ${length} ${units}]`);
-    
+
         prompt && prompt.debugInfo && (prompt.debugInfo += `\n${JSON.stringify(data)}`);
     }
-    
+
     async executeRequest(cortexRequest) {
         const span = latencyTrace.start('modelPlugin.executeRequest', {
             requestId: cortexRequest?.requestId,
@@ -584,10 +607,15 @@ class ModelPlugin {
             this.pathwayName = pathway.name;
             this.pathwayPrompt = pathway.prompt;
 
-            cortexRequest.cache = config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
+            // Search has its own short-lived, provider-aware shared cache.
+            const useSearchCache = cortexRequest.searchCache && config.get('searchCacheEnabled');
+            cortexRequest.cache = useSearchCache ? false
+                : config.get('enableCache') && (pathway.enableCache || pathway.temperature == 0);
             this.logRequestStart();
 
-            const response = await executeRequest(cortexRequest);
+            const response = useSearchCache
+                ? await executeSearchRequest(cortexRequest, () => executeRequest(cortexRequest))
+                : await executeRequest(cortexRequest);
             latencyTrace.mark('modelPlugin.responseReady', {
                 requestId,
                 pathway: this.pathwayName,
@@ -596,14 +624,14 @@ class ModelPlugin {
                 responseKind: response?.data && typeof response.data.on === 'function' ? 'stream' : typeof response?.data,
                 requestDuration: response?.duration,
             });
-            
+
             // Add null check and default values for response
             if (!response) {
                 throw new Error('Request failed - no response received');
             }
 
             const { data: responseData, duration: requestDuration } = response;
-            
+
             // Validate response data
             if (!responseData) {
                 throw new Error('Request failed - no data in response');
@@ -616,7 +644,7 @@ class ModelPlugin {
                 newError.data = errorData;
                 throw newError;
             }
-        
+
             this.logAIRequestFinished(requestDuration || 0);
             const parsedData = this.parseResponse(responseData);
             this.logRequestData(data, parsedData, prompt);
@@ -633,7 +661,7 @@ class ModelPlugin {
                                  ?? error?.response?.data?.error?.message
                                  ?? error?.message
                                  ?? String(error);
-            
+
             const log = cortexRequest?.pathway?.suppressErrorLogging ? logger.debug.bind(logger) : logger.error.bind(logger);
 
             // Log the full error details for debugging
@@ -654,7 +682,17 @@ class ModelPlugin {
 
             latencyTrace.end(span, { error: errorMessage });
             // Throw a more informative error
-            throw new Error(`Execution failed for ${this.pathwayName}: ${errorMessage}`);
+            const failure = new Error(`Execution failed for ${this.pathwayName}: ${errorMessage}`);
+            if (cortexRequest.executionPolicy) {
+                // Preserve settlement evidence and status for the chunk owner.
+                Object.assign(failure, {
+                    status: error.status ?? error.response?.status,
+                    headers: error.headers ?? error.response?.headers,
+                    code: error.code,
+                    name: error.name || 'Error',
+                });
+            }
+            throw failure;
         }
     }
 

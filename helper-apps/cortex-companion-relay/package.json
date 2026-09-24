@@ -1,0 +1,9 @@
+{
+  "name": "cortex-companion-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ioredis": "5.3.2", "ws": "^8.18.3" }
+}

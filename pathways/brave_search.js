@@ -3,6 +3,8 @@
 
 export default {
     inputParameters: {
+        searchRefresh: false,
+        searchMaxAgeSeconds: 300,
         text: '',
         q: '',
         country: '',

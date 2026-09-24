@@ -1,0 +1,915 @@
+{
+  "openai/gpt-image-2.5-flare": {
+    "version": "e4564ecbbcb763a4d8d2a86866ec52505e7ef9ce9458bdf5618a171f70eb05fb",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "A text description of the desired image"
+        },
+        "quality": {
+          "default": "auto",
+          "x-order": 5,
+          "description": "An enumeration.",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "auto"
+          ],
+          "type": "string",
+          "title": "quality"
+        },
+        "user_id": {
+          "type": "string",
+          "title": "User Id",
+          "default": null,
+          "x-order": 10,
+          "nullable": true,
+          "description": "An optional unique identifier representing your end-user. This helps OpenAI monitor and detect abuse."
+        },
+        "background": {
+          "default": "auto",
+          "x-order": 6,
+          "description": "An enumeration.",
+          "enum": [
+            "auto",
+            "transparent",
+            "opaque"
+          ],
+          "type": "string",
+          "title": "background"
+        },
+        "moderation": {
+          "default": "auto",
+          "x-order": 9,
+          "description": "An enumeration.",
+          "enum": [
+            "auto",
+            "low"
+          ],
+          "type": "string",
+          "title": "moderation"
+        },
+        "aspect_ratio": {
+          "default": "1:1",
+          "x-order": 2,
+          "description": "An enumeration.",
+          "enum": [
+            "1:1",
+            "3:2",
+            "2:3",
+            "4:3",
+            "3:4",
+            "16:9",
+            "9:16",
+            "auto",
+            "1024x1024",
+            "1536x1024",
+            "1024x1536",
+            "1536x1152",
+            "1152x1536",
+            "2048x2048",
+            "2048x1152",
+            "1152x2048",
+            "3840x2160",
+            "2160x3840"
+          ],
+          "type": "string",
+          "title": "aspect_ratio"
+        },
+        "input_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": "Input Images",
+          "default": null,
+          "x-order": 3,
+          "nullable": true,
+          "description": "A list of images to use as input for the generation"
+        },
+        "output_format": {
+          "default": "webp",
+          "x-order": 8,
+          "description": "An enumeration.",
+          "enum": [
+            "png",
+            "jpeg",
+            "webp"
+          ],
+          "type": "string",
+          "title": "output_format"
+        },
+        "openai_api_key": {
+          "type": "string",
+          "title": "Openai Api Key",
+          "format": "password",
+          "default": null,
+          "x-order": 1,
+          "nullable": true,
+          "writeOnly": true,
+          "description": "Your OpenAI API key (optional - uses proxy if not provided)",
+          "x-cog-secret": true
+        },
+        "number_of_images": {
+          "type": "integer",
+          "title": "Number Of Images",
+          "default": 1,
+          "maximum": 10,
+          "minimum": 1,
+          "x-order": 4,
+          "description": "Number of images to generate (1-10)"
+        },
+        "output_compression": {
+          "type": "integer",
+          "title": "Output Compression",
+          "default": 90,
+          "maximum": 100,
+          "minimum": 0,
+          "x-order": 7,
+          "description": "Compression level (0-100%)"
+        }
+      }
+    },
+    "Output": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri"
+      },
+      "title": "Output"
+    }
+  },
+  "openai/gpt-image-2.5-sunburst": {
+    "version": "38d4d47f43725844b01145508a64ab818f882ac0325489cd13eb114183de2c36",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "A text description of the desired image"
+        },
+        "quality": {
+          "default": "auto",
+          "x-order": 5,
+          "description": "An enumeration.",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+            "auto"
+          ],
+          "type": "string",
+          "title": "quality"
+        },
+        "user_id": {
+          "type": "string",
+          "title": "User Id",
+          "default": null,
+          "x-order": 10,
+          "nullable": true,
+          "description": "An optional unique identifier representing your end-user. This helps OpenAI monitor and detect abuse."
+        },
+        "background": {
+          "default": "auto",
+          "x-order": 6,
+          "description": "An enumeration.",
+          "enum": [
+            "auto",
+            "transparent",
+            "opaque"
+          ],
+          "type": "string",
+          "title": "background"
+        },
+        "moderation": {
+          "default": "auto",
+          "x-order": 9,
+          "description": "An enumeration.",
+          "enum": [
+            "auto",
+            "low"
+          ],
+          "type": "string",
+          "title": "moderation"
+        },
+        "aspect_ratio": {
+          "default": "1:1",
+          "x-order": 2,
+          "description": "An enumeration.",
+          "enum": [
+            "1:1",
+            "3:2",
+            "2:3",
+            "4:3",
+            "3:4",
+            "16:9",
+            "9:16",
+            "auto",
+            "1024x1024",
+            "1536x1024",
+            "1024x1536",
+            "1536x1152",
+            "1152x1536",
+            "2048x2048",
+            "2048x1152",
+            "1152x2048",
+            "3840x2160",
+            "2160x3840"
+          ],
+          "type": "string",
+          "title": "aspect_ratio"
+        },
+        "input_images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": "Input Images",
+          "default": null,
+          "x-order": 3,
+          "nullable": true,
+          "description": "A list of images to use as input for the generation"
+        },
+        "output_format": {
+          "default": "webp",
+          "x-order": 8,
+          "description": "An enumeration.",
+          "enum": [
+            "png",
+            "jpeg",
+            "webp"
+          ],
+          "type": "string",
+          "title": "output_format"
+        },
+        "openai_api_key": {
+          "type": "string",
+          "title": "Openai Api Key",
+          "format": "password",
+          "default": null,
+          "x-order": 1,
+          "nullable": true,
+          "writeOnly": true,
+          "description": "Your OpenAI API key (optional - uses proxy if not provided)",
+          "x-cog-secret": true
+        },
+        "number_of_images": {
+          "type": "integer",
+          "title": "Number Of Images",
+          "default": 1,
+          "maximum": 10,
+          "minimum": 1,
+          "x-order": 4,
+          "description": "Number of images to generate (1-10)"
+        },
+        "output_compression": {
+          "type": "integer",
+          "title": "Output Compression",
+          "default": 90,
+          "maximum": 100,
+          "minimum": 0,
+          "x-order": 7,
+          "description": "Compression level (0-100%)"
+        }
+      }
+    },
+    "Output": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uri"
+      },
+      "title": "Output"
+    }
+  },
+  "alibaba/wan-3": {
+    "version": "78e877ac6841ba1fe938f4886243cdac82b2e40e4c29c2cfc977d671aeb0d15b",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "title": "Seed",
+          "default": null,
+          "x-order": 7,
+          "nullable": true,
+          "description": "Random seed for reproducible generation. Range: 0-2147483647"
+        },
+        "image": {
+          "type": "string",
+          "title": "Image",
+          "format": "uri",
+          "default": null,
+          "x-order": 1,
+          "nullable": true,
+          "description": "Optional first-frame image to animate into a video (jpg/png/bmp/webp, \u226410MB). When provided, the video is generated from this image guided by the prompt."
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "Text prompt for video generation"
+        },
+        "duration": {
+          "type": "integer",
+          "title": "Duration",
+          "default": 5,
+          "maximum": 30,
+          "minimum": 2,
+          "x-order": 5,
+          "description": "Duration of the generated video in seconds"
+        },
+        "resolution": {
+          "default": "1080p",
+          "x-order": 3,
+          "description": "An enumeration.",
+          "enum": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "type": "string",
+          "title": "resolution"
+        },
+        "aspect_ratio": {
+          "default": "adaptive",
+          "x-order": 4,
+          "description": "An enumeration.",
+          "enum": [
+            "adaptive",
+            "16:9",
+            "9:16",
+            "1:1",
+            "4:3",
+            "3:4"
+          ],
+          "type": "string",
+          "title": "aspect_ratio"
+        },
+        "negative_prompt": {
+          "type": "string",
+          "title": "Negative Prompt",
+          "default": "",
+          "x-order": 2,
+          "description": "Negative prompt \u2014 describes content that should not appear in the video"
+        },
+        "enable_prompt_expansion": {
+          "type": "boolean",
+          "title": "Enable Prompt Expansion",
+          "default": true,
+          "x-order": 6,
+          "description": "Automatically expand and optimize the prompt for better results. Improves quality for short prompts but increases latency."
+        }
+      }
+    },
+    "Output": {
+      "type": "string",
+      "title": "Output",
+      "format": "uri"
+    }
+  },
+  "prunaai/p-video-2-pro": {
+    "version": "67e456b3c49c476c88d50c32d2a76134854d4fdf087b287cd3bbef82f0cf214c",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "mode": {
+          "default": "speed",
+          "x-order": 1,
+          "description": "An enumeration.",
+          "enum": [
+            "quality",
+            "speed"
+          ],
+          "type": "string",
+          "title": "mode"
+        },
+        "seed": {
+          "type": "integer",
+          "title": "Seed",
+          "x-order": 8,
+          "nullable": true,
+          "description": "Random seed for reproducible generation."
+        },
+        "image": {
+          "type": "string",
+          "title": "Image",
+          "format": "uri",
+          "x-order": 3,
+          "nullable": true,
+          "description": "First-frame reference image."
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "Text prompt for video generation."
+        },
+        "duration": {
+          "type": "integer",
+          "title": "Duration",
+          "default": 5,
+          "maximum": 15,
+          "minimum": 5,
+          "x-order": 5,
+          "description": "Video duration in seconds."
+        },
+        "resolution": {
+          "default": "768p",
+          "x-order": 6,
+          "description": "An enumeration.",
+          "enum": [
+            "480p",
+            "768p"
+          ],
+          "type": "string",
+          "title": "resolution"
+        },
+        "aspect_ratio": {
+          "default": "16:9",
+          "x-order": 7,
+          "description": "An enumeration.",
+          "enum": [
+            "16:9",
+            "9:16",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3",
+            "1:1"
+          ],
+          "type": "string",
+          "title": "aspect_ratio"
+        },
+        "last_frame_image": {
+          "type": "string",
+          "title": "Last Frame Image",
+          "format": "uri",
+          "x-order": 4,
+          "nullable": true,
+          "description": "Last-frame reference image."
+        },
+        "prompt_upsampler": {
+          "default": "turbo",
+          "x-order": 2,
+          "description": "An enumeration.",
+          "enum": [
+            "off",
+            "turbo",
+            "max"
+          ],
+          "type": "string",
+          "title": "prompt_upsampler"
+        }
+      }
+    },
+    "Output": {
+      "type": "string",
+      "title": "Output",
+      "format": "uri"
+    }
+  },
+  "prunaai/p-video-2": {
+    "version": "9e76da92f366aaa97cb3fb26e3cfcffa0437a45e210b4d76dbdc38333d211861",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "fps": {
+          "default": 24,
+          "x-order": 7,
+          "description": "An enumeration.",
+          "enum": [
+            24,
+            48
+          ],
+          "type": "integer",
+          "title": "fps"
+        },
+        "seed": {
+          "type": "integer",
+          "title": "Seed",
+          "x-order": 12,
+          "nullable": true,
+          "description": "Random seed. Set for reproducible generation."
+        },
+        "audio": {
+          "type": "string",
+          "title": "Audio",
+          "format": "uri",
+          "x-order": 3,
+          "nullable": true,
+          "description": "Input audio to condition video generation. Supports flac, mp3, wav."
+        },
+        "draft": {
+          "type": "boolean",
+          "title": "Draft",
+          "default": false,
+          "x-order": 8,
+          "description": "Draft mode. Generates a lower-quality preview of the video."
+        },
+        "image": {
+          "type": "string",
+          "title": "Image",
+          "format": "uri",
+          "x-order": 1,
+          "nullable": true,
+          "description": "Input image to generate video from (image-to-video). Supports jpg, jpeg, png, webp."
+        },
+        "no_op": {
+          "type": "boolean",
+          "title": "No Op",
+          "default": false,
+          "x-order": 13,
+          "description": "Health check mode - returns status without inference."
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "Text prompt for video generation."
+        },
+        "duration": {
+          "type": "integer",
+          "title": "Duration",
+          "maximum": 20,
+          "minimum": 1,
+          "x-order": 4,
+          "nullable": true,
+          "description": "Duration of the video in seconds (1-20). Leave empty to let the model choose length from the prompt. Ignored when audio is provided."
+        },
+        "resolution": {
+          "default": "720p",
+          "x-order": 6,
+          "description": "An enumeration.",
+          "enum": [
+            "720p",
+            "1080p"
+          ],
+          "type": "string",
+          "title": "resolution"
+        },
+        "save_audio": {
+          "type": "boolean",
+          "title": "Save Audio",
+          "default": true,
+          "x-order": 11,
+          "description": "Save the video with audio."
+        },
+        "aspect_ratio": {
+          "default": "16:9",
+          "x-order": 5,
+          "description": "An enumeration.",
+          "enum": [
+            "16:9",
+            "9:16",
+            "4:3",
+            "3:4",
+            "3:2",
+            "2:3",
+            "1:1"
+          ],
+          "type": "string",
+          "title": "aspect_ratio"
+        },
+        "last_frame_image": {
+          "type": "string",
+          "title": "Last Frame Image",
+          "format": "uri",
+          "x-order": 2,
+          "nullable": true,
+          "description": "Reference image for the last frame of the video. Supports jpg, jpeg, png, webp."
+        },
+        "prompt_upsampling": {
+          "type": "boolean",
+          "title": "Prompt Upsampling",
+          "default": true,
+          "x-order": 9,
+          "description": "Use prompt upsampling to enhance the prompt."
+        },
+        "disable_safety_filter": {
+          "type": "boolean",
+          "title": "Disable Safety Filter",
+          "default": true,
+          "x-order": 10,
+          "description": "Disable safety filter for prompts (and input image). When disabled, prompts are not checked for unsafe content before generation."
+        }
+      }
+    },
+    "Output": {
+      "type": "string",
+      "title": "Output",
+      "format": "uri"
+    }
+  },
+  "black-forest-labs/flux-3": {
+    "version": "93515f53aad737958ca158c96e36e7f48f0197f9ba1f28fadbfb62437dcbb5ed",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "prompt"
+      ],
+      "properties": {
+        "draft": {
+          "type": "boolean",
+          "title": "Draft",
+          "default": false,
+          "x-order": 7,
+          "description": "Generate a fast, low-cost draft preview instead of a full-quality clip. Drafts are 720p."
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": "Images",
+          "default": [],
+          "x-order": 1,
+          "description": "Optional images to drive the video, placed on screen pixel for pixel. One image opens the clip (image-to-video). Two images start and end it. Three or more (up to 10) become a storyboard \u2014 the first starts it, the last ends it, and the rest fall evenly in between (needs a duration). Leave empty for text-to-video. Must be PNG, JPEG, or WebP."
+        },
+        "prompt": {
+          "type": "string",
+          "title": "Prompt",
+          "x-order": 0,
+          "description": "Text description of the video to generate. Plain language works \u2014 the prompt is interpreted and expanded before generation. Describe the scene, action, camera moves, and any audio you want."
+        },
+        "duration": {
+          "default": "auto",
+          "x-order": 5,
+          "description": "An enumeration.",
+          "enum": [
+            "auto",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20"
+          ],
+          "type": "string",
+          "title": "duration"
+        },
+        "resolution": {
+          "default": "720p",
+          "x-order": 4,
+          "description": "An enumeration.",
+          "enum": [
+            "720p",
+            "1080p"
+          ],
+          "type": "string",
+          "title": "resolution"
+        },
+        "start_video": {
+          "type": "string",
+          "title": "Start Video",
+          "format": "uri",
+          "default": null,
+          "x-order": 2,
+          "nullable": true,
+          "description": "A video to continue from its final frames. Use this to extend a shot or chain generations into a longer sequence. Must be an mp4, at most 50MB and 15 seconds. Can't be combined with images."
+        },
+        "aspect_ratio": {
+          "default": "auto",
+          "x-order": 3,
+          "description": "An enumeration.",
+          "enum": [
+            "auto",
+            "21:9",
+            "2:1",
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16"
+          ],
+          "type": "string",
+          "title": "aspect_ratio"
+        },
+        "generate_audio": {
+          "type": "boolean",
+          "title": "Generate Audio",
+          "default": true,
+          "x-order": 6,
+          "description": "Generate synchronized audio (ambient sound, speech, effects). Set to false for a silent clip."
+        },
+        "safety_tolerance": {
+          "type": "integer",
+          "title": "Safety Tolerance",
+          "default": 2,
+          "maximum": 4,
+          "minimum": 0,
+          "x-order": 8,
+          "description": "Moderation tolerance for input and output, 0 (strictest) to 4 (most permissive). Requests with image or video inputs are limited to 2."
+        }
+      }
+    },
+    "Output": {
+      "type": "string",
+      "title": "Output",
+      "format": "uri"
+    }
+  },
+  "elevenlabs/scribe-v2": {
+    "version": "5cd433d181bb49b09d24d61c770861b169253acf02e58865a39200c81e727676",
+    "Input": {
+      "type": "object",
+      "title": "Input",
+      "required": [
+        "audio"
+      ],
+      "properties": {
+        "seed": {
+          "type": "integer",
+          "title": "Seed",
+          "default": -1,
+          "maximum": 2147483647,
+          "minimum": -1,
+          "x-order": 9,
+          "description": "Random seed for reproducible outputs. Set to -1 to use a non-deterministic seed."
+        },
+        "audio": {
+          "type": "string",
+          "title": "Audio",
+          "format": "uri",
+          "x-order": 0,
+          "description": "Audio or video file to transcribe. Supports MP3, WAV, M4A, FLAC, OGG, OPUS, WebM, AAC, MP4, MOV, MKV, AVI, and more. Max 3 GB, up to 10 hours."
+        },
+        "diarize": {
+          "type": "boolean",
+          "title": "Diarize",
+          "default": false,
+          "x-order": 2,
+          "description": "Identify and label different speakers in the audio. When enabled, each word in the output includes a 'speaker_id'. Supports up to 32 speakers."
+        },
+        "keyterms": {
+          "type": "string",
+          "title": "Keyterms",
+          "default": "",
+          "x-order": 7,
+          "description": "Comma-separated list of words or phrases to bias transcription towards. Useful for product names, technical terms, or proper nouns. Up to 1000 terms, max 50 characters each."
+        },
+        "no_verbatim": {
+          "type": "boolean",
+          "title": "No Verbatim",
+          "default": false,
+          "x-order": 6,
+          "description": "Remove filler words ('um', 'uh'), false starts, and disfluencies from the transcript. Produces a cleaner, more readable output."
+        },
+        "temperature": {
+          "type": "number",
+          "title": "Temperature",
+          "default": -1,
+          "maximum": 2,
+          "minimum": -1,
+          "x-order": 8,
+          "description": "Sampling temperature. Higher values produce more diverse, less deterministic output. Set to -1 to use the model default (usually 0)."
+        },
+        "num_speakers": {
+          "type": "integer",
+          "title": "Num Speakers",
+          "default": 0,
+          "maximum": 32,
+          "minimum": 0,
+          "x-order": 3,
+          "description": "Maximum number of speakers expected in the audio. Helps the model with diarization. Set to 0 to let the model decide. Only used when 'diarize' is true."
+        },
+        "language_code": {
+          "type": "string",
+          "title": "Language Code",
+          "default": "auto",
+          "x-order": 1,
+          "description": "Language of the audio as an ISO-639-1 (e.g. 'en') or ISO-639-3 (e.g. 'eng') code. Set to 'auto' to detect the language automatically. Setting a specific language can improve accuracy for noisy or unusual audio."
+        },
+        "tag_audio_events": {
+          "type": "boolean",
+          "title": "Tag Audio Events",
+          "default": true,
+          "x-order": 5,
+          "description": "Tag non-speech sounds in the transcription, like (laughter), (footsteps), or (applause)."
+        },
+        "timestamps_granularity": {
+          "default": "word",
+          "x-order": 4,
+          "description": "An enumeration.",
+          "enum": [
+            "none",
+            "word",
+            "character"
+          ],
+          "type": "string",
+          "title": "timestamps_granularity"
+        }
+      }
+    },
+    "Output": {
+      "type": "object",
+      "title": "Output",
+      "required": [
+        "text",
+        "language_code",
+        "language_probability"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "title": "Text"
+        },
+        "words": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "end": {
+                "type": "number",
+                "title": "End",
+                "nullable": true
+              },
+              "text": {
+                "type": "string",
+                "title": "Text"
+              },
+              "type": {
+                "type": "string",
+                "title": "Type"
+              },
+              "start": {
+                "type": "number",
+                "title": "Start",
+                "nullable": true
+              },
+              "speaker_id": {
+                "type": "string",
+                "title": "Speaker Id",
+                "nullable": true
+              }
+            }
+          },
+          "title": "Words",
+          "nullable": true
+        },
+        "language_code": {
+          "type": "string",
+          "title": "Language Code"
+        },
+        "duration_seconds": {
+          "type": "number",
+          "title": "Duration Seconds",
+          "nullable": true
+        },
+        "language_probability": {
+          "type": "number",
+          "title": "Language Probability"
+        }
+      }
+    }
+  }
+}

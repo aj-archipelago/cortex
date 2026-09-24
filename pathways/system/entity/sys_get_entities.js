@@ -8,11 +8,14 @@ export default {
     inputParameters: {
         userId: '',
         fresh: '',
+        entityId: '',
+        query: '',
+        offset: 0,
     },
     model: 'oai-gpt41-mini',
     executePathway: async ({ args }) => {
         try {
-            const options = {};
+            const options = { entityId: args.entityId, query: args.query, offset: args.offset };
             if (args.userId) {
                 options.userId = args.userId;
             }

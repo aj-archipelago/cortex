@@ -30,7 +30,7 @@ test('checkHashExists should return long-lived URL for storage', async t => {
 
     const axiosGetStub = t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
 
-    const result = await checkHashExists(hash, fileHandlerUrl);
+    const result = await checkHashExists(hash, fileHandlerUrl, null, 'test-context');
 
     t.truthy(result);
     t.is(result.url, mockResponse.data.url, 'Should return long-lived URL for storage');
@@ -59,7 +59,7 @@ test('checkHashExists should fallback to regular URL when shortLivedUrl not avai
 
     t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
 
-    const result = await checkHashExists(hash, fileHandlerUrl);
+    const result = await checkHashExists(hash, fileHandlerUrl, null, 'test-context');
 
     t.truthy(result);
     t.is(result.url, mockResponse.data.url, 'Should fallback to regular URL');
@@ -86,7 +86,7 @@ test('checkHashExists should prefer converted URL for storage', async t => {
 
     t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
 
-    const result = await checkHashExists(hash, fileHandlerUrl);
+    const result = await checkHashExists(hash, fileHandlerUrl, null, 'test-context');
 
     t.truthy(result);
     // Should prefer converted.url (long-lived) for storage, then fallback to original url
@@ -105,7 +105,7 @@ test('checkHashExists should return null when file not found', async t => {
 
     t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
 
-    const result = await checkHashExists(hash, fileHandlerUrl);
+    const result = await checkHashExists(hash, fileHandlerUrl, null, 'test-context');
 
     t.is(result, null, 'Should return null when file not found');
 });
@@ -122,7 +122,7 @@ test('checkHashExists should handle errors gracefully', async t => {
 
     t.context.sandbox.replace(axios, 'get', sinon.stub().rejects(new Error('Network error')));
 
-    const result = await checkHashExists(hash, fileHandlerUrl);
+    const result = await checkHashExists(hash, fileHandlerUrl, null, 'test-context');
 
     t.is(result, null, 'Should return null on error');
 });
@@ -149,14 +149,14 @@ test('ensureShortLivedUrl should resolve file to short-lived URL when hash avail
 
     const axiosGetStub = t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
 
-    const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl);
+    const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl, 'test-context');
 
     t.truthy(result);
     t.is(result.url, shortLivedUrl, 'Should use short-lived URL');
     t.is(result.gcs, fileObject.gcs, 'Should preserve GCS URL');
     t.is(result.hash, fileObject.hash, 'Should preserve hash');
     t.is(result.filename, fileObject.filename, 'Should preserve filename');
-    
+
     // Verify axios was called with shortLivedMinutes parameter
     t.true(axiosGetStub.calledOnce);
     const callArgs = axiosGetStub.getCall(0).args;
@@ -171,7 +171,7 @@ test('ensureShortLivedUrl should return original object when no hash', async t =
     };
     const fileHandlerUrl = 'https://file-handler.example.com';
 
-    const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl);
+    const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl, 'test-context');
 
     t.deepEqual(result, fileObject, 'Should return original object when no hash');
 });
@@ -198,7 +198,7 @@ test('ensureShortLivedUrl should fallback to original object on error', async t 
 
     t.context.sandbox.replace(axios, 'get', sinon.stub().rejects(new Error('Network error')));
 
-    const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl);
+    const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl, 'test-context');
 
     t.deepEqual(result, fileObject, 'Should fallback to original object on error');
 });
@@ -231,7 +231,7 @@ test('ensureShortLivedUrl should prefer converted.shortLivedUrl and update GCS U
 
     t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
 
-    const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl);
+    const result = await ensureShortLivedUrl(fileObject, fileHandlerUrl, 'test-context');
 
     t.truthy(result);
     t.is(result.url, convertedShortLivedUrl, 'Should prefer converted.shortLivedUrl for LLM processing');
@@ -258,7 +258,7 @@ test('ensureShortLivedUrl should respect shortLivedMinutes parameter', async t =
 
     const axiosGetStub = t.context.sandbox.replace(axios, 'get', sinon.stub().resolves(mockResponse));
 
-    await ensureShortLivedUrl(fileObject, fileHandlerUrl, null, shortLivedMinutes);
+    await ensureShortLivedUrl(fileObject, fileHandlerUrl, 'test-context', shortLivedMinutes);
 
     // Verify axios was called with correct shortLivedMinutes
     const callArgs = axiosGetStub.getCall(0).args;

@@ -1,3 +1,6 @@
+import { assertGrantedStorageUrl } from '../../security/grantRequest.js';
+import { limitGrantExpiry } from '../../security/storageGrant.js';
+import { encodeDisplayMetadata, decodeDisplayMetadata } from "../../utils/blobDisplayMetadata.js";
 import {
   BlobServiceClient,
   StorageSharedKeyCredential,
@@ -166,7 +169,9 @@ export class AzureStorageProvider extends StorageProvider {
       blobName: blobName,
       permissions: options.permissions || "r",
       startsOn: new Date(),
-      expiresOn: expirationTime,
+      // Persisted upload URLs retain their existing lifetime for chat/media UX.
+      // Short-lived access URLs cannot exceed the request grant.
+      expiresOn: options.minutes ? limitGrantExpiry(expirationTime) : expirationTime,
     };
 
     return generateBlobSASQueryParameters(
@@ -211,7 +216,7 @@ export class AzureStorageProvider extends StorageProvider {
     // Determine content-type from filename
     const sourceFilename = filename || filePath;
     let contentType = mime.lookup(sourceFilename);
-    
+
     // For text MIME types, ensure charset=utf-8 is included if not already present
     if (contentType && this.isTextMimeType(contentType)) {
       if (!contentType.includes('charset=')) {
@@ -228,6 +233,7 @@ export class AzureStorageProvider extends StorageProvider {
 
     // Upload the file to Azure Blob Storage using the stream
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    assertGrantedStorageUrl(blockBlobClient.url, "upload");
     const uploadOptions = {
       blobHTTPHeaders: {
         ...(contentType ? { blobContentType: contentType } : {}),
@@ -243,7 +249,7 @@ export class AzureStorageProvider extends StorageProvider {
 
     const url = `${blockBlobClient.url}?${sasToken}`;
     const shortLivedUrl = `${blockBlobClient.url}?${shortLivedSasToken}`;
-    
+
     // Validate that the URL contains a blob name (not just container)
     // Azure blob URLs should be: https://account.blob.core.windows.net/container/blobname
     // Container-only URLs end with /container/ or /container
@@ -261,7 +267,7 @@ export class AzureStorageProvider extends StorageProvider {
     };
   }
 
-  async uploadStream(context, encodedFilename, stream, providedContentType = null, folderPath = null) {
+  async uploadStream(context, encodedFilename, stream, providedContentType = null, folderPath = null, displayFilename = encodedFilename) {
     const { containerClient } = await this.getBlobClient();
     let contentType = providedContentType || mime.lookup(encodedFilename);
 
@@ -301,8 +307,9 @@ export class AzureStorageProvider extends StorageProvider {
     // Set ContentEncoding to utf-8 for text files to help browsers interpret encoding correctly
     // Azure preserves ContentEncoding header even though it strips charset from ContentType
     const contentEncoding = (contentType && this.isTextMimeType(contentType)) ? 'utf-8' : undefined;
-    
+
     const options = {
+      metadata: encodeDisplayMetadata(displayFilename),
       blobHTTPHeaders: {
         ...(contentType ? { blobContentType: contentType } : {}),
         ...(contentEncoding ? { blobContentEncoding: contentEncoding } : {}),
@@ -320,6 +327,7 @@ export class AzureStorageProvider extends StorageProvider {
     }
 
     try {
+      assertGrantedStorageUrl(blockBlobClient.url, "upload");
       await blockBlobClient.uploadStream(stream, undefined, undefined, options);
     } catch (error) {
       const code = error?.code || error?.details?.errorCode;
@@ -345,20 +353,20 @@ export class AzureStorageProvider extends StorageProvider {
         options,
       );
     }
-    
+
     const sasToken = this.generateSASToken(activeContainerClient, blobName);
     const shortLivedSasToken = this.generateShortLivedSASToken(activeContainerClient, blobName, 5);
-    
+
     const url = `${blockBlobClient.url}?${sasToken}`;
     const shortLivedUrl = `${blockBlobClient.url}?${shortLivedSasToken}`;
-    
+
     // Validate that the URL contains a blob name (not just container)
     const urlObj = new URL(url);
     const pathParts = urlObj.pathname.split('/').filter(p => p.length > 0);
     if (pathParts.length <= 1) {
       throw new Error(`Generated invalid Azure URL (container-only) from uploadStream: ${url}, blobName: ${blobName}`);
     }
-    
+
     return { url, shortLivedUrl, blobName };
   }
 
@@ -372,7 +380,7 @@ export class AzureStorageProvider extends StorageProvider {
     const { containerClient } = await this.getBlobClient();
 
     const result = [];
-    const blobs = containerClient.listBlobsFlat();
+    const blobs = containerClient.listBlobsFlat({ prefix: requestId });
 
     for await (const blob of blobs) {
       if (blob.name.startsWith(requestId)) {
@@ -520,7 +528,7 @@ export class AzureStorageProvider extends StorageProvider {
     const results = [];
 
     try {
-      for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+      for await (const blob of containerClient.listBlobsFlat({ prefix, includeMetadata: true })) {
         // Extract just the filename from the full blob path and decode
         // (blob names are URL-encoded by uploadStream via encodeURIComponent)
         const rawFilename = blob.name.split('/').pop();
@@ -536,6 +544,7 @@ export class AzureStorageProvider extends StorageProvider {
         const sasToken = this.generateShortLivedSASToken(containerClient, blob.name, 60);
 
         results.push({
+          ...decodeDisplayMetadata(blob.metadata),
           name: blob.name, // Full blob path
           filename: hashMatch ? filename.replace(/^[a-f0-9]+_/i, '') : filename, // Original filename without hash prefix
           hash: hashMatch ? hashMatch[1] : null,
@@ -570,11 +579,13 @@ export class AzureStorageProvider extends StorageProvider {
     let truncated = false;
 
     try {
-      for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+      for await (const blob of containerClient.listBlobsFlat({ prefix, includeMetadata: true })) {
         results.push([
           blob.name,
           blob.properties.contentLength ?? null,
           blob.properties.lastModified?.toISOString?.() || blob.properties.lastModified || null,
+          { ...decodeDisplayMetadata(blob.metadata), contentType: blob.properties.contentType || null,
+            storageUrl: containerClient.getBlockBlobClient(blob.name).url },
         ]);
 
         if (results.length >= scanLimit) {
@@ -618,13 +629,21 @@ export class AzureStorageProvider extends StorageProvider {
 
     const oldBlobClient = containerClient.getBlockBlobClient(oldBlobName);
     const newBlobClient = containerClient.getBlockBlobClient(newBlobName);
+    assertGrantedStorageUrl(oldBlobClient.url, "rename");
+    assertGrantedStorageUrl(newBlobClient.url, "rename");
 
     // Generate a short SAS token so the copy source is accessible
     const sourceSas = this.generateShortLivedSASToken(oldBlobName, 10);
     const sourceUrl = `${oldBlobClient.url}?${sourceSas}`;
 
     // Copy old blob to new name
-    const copyPoller = await newBlobClient.beginCopyFromURL(sourceUrl);
+    const properties = await oldBlobClient.getProperties();
+    const sameBasename = path.posix.basename(oldBlobName) === path.posix.basename(newBlobName);
+    const metadata = sameBasename ? properties.metadata : {
+      ...properties.metadata,
+      ...encodeDisplayMetadata(path.posix.basename(newBlobName)),
+    };
+    const copyPoller = await newBlobClient.beginCopyFromURL(sourceUrl, { metadata });
     await copyPoller.pollUntilDone();
 
     // Delete the old blob — if this fails the old blob is orphaned but

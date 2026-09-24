@@ -4,6 +4,7 @@
 import pubsub from '../pubsub.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../../lib/logger.js';
+import { markWeeklyCostUpstreamRejected } from './weeklyCostMiddleware.js';
 import { processRestRequest } from './processRestRequest.js';
 import {
     startSSEStream,
@@ -545,6 +546,7 @@ const getClaudeModelName = (model, endpoint) => {
  */
 const handleClaudePassthrough = async (req, res, pathwayModelName) => {
     const requestId = uuidv4();
+    req.cortexUsageRequestId = requestId;
     const model = modelEndpoints[pathwayModelName];
     const endpoint = selectEndpoint(model);
 
@@ -613,6 +615,7 @@ const handleClaudePassthrough = async (req, res, pathwayModelName) => {
     try {
         // Rate limit via endpoint limiter
         const response = await endpoint.limiter.schedule(buildLimiterScheduleOptions(requestId), async () => {
+            req.weeklyCostUpstreamStarted = true;
             return axios({
                 method: 'POST',
                 url,
@@ -666,6 +669,7 @@ const handleClaudePassthrough = async (req, res, pathwayModelName) => {
                         if (
                             eventType === 'message_stop' ||
                             eventType === 'response.completed' ||
+                            eventType === 'response.incomplete' ||
                             eventType === 'response.done' ||
                             eventType === 'response.failed' ||
                             eventType === 'response.cancelled'
@@ -706,6 +710,7 @@ const handleClaudePassthrough = async (req, res, pathwayModelName) => {
         });
 
     } catch (error) {
+        markWeeklyCostUpstreamRejected(req, error);
         const status = error.response?.status || 500;
         // Safely extract error data - avoid circular references from axios response objects
         let errorData;
@@ -771,6 +776,7 @@ function registerAnthropicMessagesRoute(app, pathways, openAIChatModels, openAIC
             model: modelName,
         };
 
+        req.weeklyCostUpstreamStarted = true;
         const pathwayResponse = await processRestRequest(server, { body: requestBody }, pathway, pathwayName);
         const { resultText, resultData } = extractResponseData(pathwayResponse);
         const { messageContent, toolCalls, finishReason, usage } = parseToolCalls(resultData, resultText);
